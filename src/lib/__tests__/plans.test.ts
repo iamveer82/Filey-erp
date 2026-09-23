@@ -41,7 +41,7 @@ describe("planCardFor", () => {
   // returned undefined would crash the billing panel of the very customers who
   // paid the most.
   it("still answers for plans that are no longer sold", () => {
-    for (const legacy of ["pro", "business", "enterprise"]) {
+    for (const legacy of ["pro", "business"]) {
       expect(planCardFor(legacy).id).toBe("lite");
     }
   });
@@ -54,13 +54,15 @@ describe("planCardFor", () => {
 
   it("maps the Cloud plan to its own card", () => {
     expect(planCardFor("cloud").id).toBe("cloud");
+    expect(planCardFor("enterprise").id).toBe("enterprise");
   });
 
-  it("sells three plans: Free, Cloud monthly, and Freedom as a one-time licence", () => {
-    expect(PLANS.map((p) => p.id)).toEqual(["free", "cloud", "lite"]);
+  it("sells Free, Cloud monthly, Freedom as a one-time licence, and Enterprise contact-sales", () => {
+    expect(PLANS.map((p) => p.id)).toEqual(["free", "cloud", "lite", "enterprise"]);
     expect(PLANS.find((p) => p.id === "cloud")?.kind).toBe("subscription");
     expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
+    expect(PLANS.find((p) => p.id === "enterprise")?.kind).toBe("contact");
   });
 
   // These are the prices charged by the live Dodo products. A card that says

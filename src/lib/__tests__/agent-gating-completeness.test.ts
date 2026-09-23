@@ -51,6 +51,7 @@ const READ_ONLY: Record<string, string> = {
   get_attendance_today: "list",
   remember: "local memory note (deliberately ungated, see ai-agent.md §4)",
   recall: "local memory search",
+  search_conversations: "read-only search of this account's local chat history",
   generate_image: "produces content but changes no business state",
   list_connected_apps: "list",
   list_skills: "list",

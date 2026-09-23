@@ -82,11 +82,14 @@ export function getBridgeConfig(): BridgeConfig {
 export function setBridgeConfig(c: Partial<BridgeConfig>): BridgeConfig {
   const account = accountScope();
   if (!account) throw new Error("Sign in to Filey before changing WhatsApp preferences.");
+  const owner = c.ownerNumber?.trim();
+  if (owner && (!/^\+?[\d ()-]+$/.test(owner) || !/^\d{7,15}$/.test(owner.replace(/\D/g, ""))))
+    throw new Error("Enter your full phone number, including the country code.");
   const suffix = `:${encodeURIComponent(account)}`;
   if (c.autoStart !== undefined)
     localStorage.setItem(AUTO_KEY + suffix, c.autoStart ? "1" : "0");
   if (c.ownerNumber !== undefined)
-    localStorage.setItem(OWNER_KEY + suffix, c.ownerNumber.trim());
+    localStorage.setItem(OWNER_KEY + suffix, (owner ?? "").replace(/\D/g, ""));
   return getBridgeConfig();
 }
 
@@ -110,7 +113,7 @@ export async function startBridge(): Promise<BridgeState> {
   if (account !== accountScope()) throw new Error("Workspace changed before connecting WhatsApp.");
   const previous = localStorage.getItem(ACCOUNT_KEY);
   if (previous && previous !== account) boundAccount();
-  const state = await invoke<BridgeState>("wa_bridge_start");
+  const state = await invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
   if (account !== accountScope()) {
     await stopBridge();
     throw new Error(
@@ -129,7 +132,7 @@ export async function resetBridge(): Promise<BridgeState> {
   if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
   await requireModuleAccess("integrations");
   if (account !== accountScope()) throw new Error("Workspace changed before pairing WhatsApp.");
-  const state = await invoke<BridgeState>("wa_bridge_reset");
+  const state = await invoke<BridgeState>("wa_bridge_reset", { ownerNumber: getBridgeConfig().ownerNumber });
   if (account !== accountScope()) {
     await stopBridge();
     throw new Error(
@@ -158,6 +161,8 @@ export interface WaMessage {
   from: string;
   text: string;
   fromName?: string;
+  chatJid?: string;
+  attachment?: { name: string; mimetype: string; b64: string };
 }
 
 export function onWaMessage(cb: (m: WaMessage) => void): () => void {
@@ -173,6 +178,7 @@ export interface WaVoice {
   from: string;
   text: string; // unused for voice (kept for shape parity)
   fromName?: string;
+  chatJid?: string;
   b64: string;
   mimetype?: string;
 }
@@ -193,12 +199,12 @@ export async function replyWa(id: string, text: string): Promise<void> {
 }
 
 /** Send a proactive message to a specific JID (owner notifications). */
-export async function sendWa(to: string, text: string): Promise<void> {
+export async function sendWa(to: string, text: string): Promise<string> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
   const account = boundAccount();
   await requireModuleAccess("integrations");
   if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
-  await invoke("wa_bridge_send", { to, text });
+  return await invoke<string>("wa_bridge_send", { to, text });
 }
 
 /** Send a file (PDF, photo, document) to a JID. The desktop sidecar reads it
@@ -252,7 +258,9 @@ export async function autoStartBridge(): Promise<void> {
       if (!account || !getBridgeConfig().autoStart || account !== accountScope()) return;
       // Auto-start resumes a binding; it never claims an unbound pairing.
       boundAccount();
-      await invoke<BridgeState>("wa_bridge_start");
+      await requireModuleAccess("integrations");
+      if (account !== accountScope()) return;
+      await invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
       if (account !== accountScope()) await stopBridge();
     })
     .catch((e) => log.warn("whatsapp", "bridge auto-start failed", e));

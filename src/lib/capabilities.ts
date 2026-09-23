@@ -26,8 +26,14 @@ export const CAPABILITIES: Capability[] = [
     id: "computer",
     name: "Computer use",
     description:
-      "Open isolated browser windows and use Windows apps with computer access available automatically while Filey AI is open",
+      "Use the built-in browser and Windows apps during Filey AI tasks",
     tools: ["computer_use", "workspace_browser"],
+  },
+  {
+    id: "agent_computers",
+    name: "Agent computers (optional)",
+    description: "Give each conversation its own browser workspace for bot tasks. Off by default; requires Computer use and the Windows app. No Docker or separate operating system.",
+    tools: ["agent_computer"],
   },
   {
     id: "service",
@@ -44,6 +50,7 @@ export const CAPABILITIES: Capability[] = [
       "create_invoice_draft",
       "revise_invoice",
       "send_invoice",
+      "export_invoice_pdf",
       "mark_invoice_paid",
       "set_recurring",
       "create_order",
@@ -188,7 +195,7 @@ export const CAPABILITIES: Capability[] = [
 import { readAgentStorage, writeAgentStorage } from "./agentStorage";
 const KEY = "filey.agent.capabilities";
 
-/** id → enabled. Absent = enabled (default on). */
+/** id → enabled. Agent computers require an explicit workspace opt-in. */
 type CapState = Record<string, boolean>;
 
 function load(): CapState {
@@ -220,7 +227,7 @@ function load(): CapState {
 }
 
 export function isCapabilityEnabled(id: string): boolean {
-  return load()[id] !== false; // default on
+  return load()[id] ?? (id !== "agent_computers");
 }
 
 export function setCapabilityEnabled(id: string, enabled: boolean): void {
@@ -232,6 +239,7 @@ export function setCapabilityEnabled(id: string, enabled: boolean): void {
 /** Is this tool permitted? Ungrouped tools (reads, nav, memory, skills) always
  *  allowed; grouped tools follow their capability toggle. */
 export function isToolAllowed(toolName: string): boolean {
+  if (toolName === "agent_computer" && !isCapabilityEnabled("computer")) return false;
   const cap = CAPABILITIES.find((c) => c.tools.includes(toolName));
   return cap ? isCapabilityEnabled(cap.id) : true;
 }

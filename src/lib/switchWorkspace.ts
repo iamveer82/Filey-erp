@@ -1,4 +1,4 @@
-import { getDataMode, setDataMode, type DataMode } from "./dataMode";
+import { assertWorkspaceCurrent, getDataMode, setDataMode, type DataMode } from "./dataMode";
 import { supabase } from "./supabase";
 import { hasLocalData } from "./license";
 import { adoptLocalProfile, getLocalProfile, type Profile } from "./auth";
@@ -8,7 +8,7 @@ import {
   rememberLocalIdentity,
   setLocalSignedIn,
 } from "./localAuth";
-import { getSyncStatus, isMigrating, setMigrating, setAutoSyncEnabled } from "./sync";
+import { getSyncStatus, isMigrating, setMigrating } from "./sync";
 import { migrateCloudToLocal } from "./migrate";
 
 /** Change storage only after the destination is usable. Never ends an auth session. */
@@ -16,7 +16,9 @@ export async function switchWorkspace(
   target: DataMode,
   copyCloud = false
 ): Promise<void> {
-  if (target === getDataMode()) return;
+  assertWorkspaceCurrent();
+  const source = getDataMode();
+  if (target === source) return;
   if (isMigrating() || getSyncStatus().state === "syncing")
     throw new Error("Wait for the current data transfer to finish before switching.");
   if (!supabase) throw new Error("Cloud is not configured in this build.");
@@ -30,6 +32,7 @@ export async function switchWorkspace(
         "Connect your cloud account below before switching. Your current workspace is still open."
       );
     assertLocalAccount(user.id);
+    let localProfile: Profile | null = null;
     if (target === "cloud") {
       const verified = await supabase.auth.getUser();
       if (verified.error) throw verified.error;
@@ -60,11 +63,21 @@ export async function switchWorkspace(
             `Copy incomplete: ${failed.map((r) => r.table).join(", ")}. Storage was not switched.`
           );
       }
+      localProfile = profile as Profile | null;
+    }
+    // Network checks and a first-device copy can outlive the originating session.
+    // Do not claim/sign in the device using an account that has since signed out.
+    const current = await supabase.auth.getSession();
+    if (current.error) throw current.error;
+    assertWorkspaceCurrent();
+    if (current.data.session?.user.id !== user.id || getDataMode() !== source)
+      throw new Error("Your workspace or account changed. Retry the switch from the current workspace.");
+    assertLocalAccount(user.id, localProfile?.org_id);
+    if (target === "local") {
       claimLocalWorkspace(user.id);
       rememberLocalIdentity(user.email, user.id);
-      if (profile) adoptLocalProfile(profile as Profile);
+      if (localProfile) adoptLocalProfile(localProfile);
       setLocalSignedIn(true);
-      setAutoSyncEnabled(false);
     }
     setDataMode(target);
   } finally {

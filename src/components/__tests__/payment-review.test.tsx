@@ -3,6 +3,22 @@ import { afterEach, expect, it, vi } from "vitest";
 import PaymentReview from "../PaymentReview";
 
 afterEach(cleanup);
+it("checks verified payment when returning from desktop checkout, never before opening it", async () => {
+  const onPay = vi.fn().mockResolvedValue("browser");
+  const onVerify = vi.fn().mockResolvedValue(true);
+  render(<PaymentReview title="Add AI credits" lines={[]} total="$5.50 USD" terms="One-time top-up." onPay={onPay} onVerify={onVerify} onBack={vi.fn()} />);
+  fireEvent.focus(window);
+  expect(onVerify).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+  await screen.findByText(/Your secure payment page is open/);
+  fireEvent.focus(window);
+  fireEvent(document, new Event("visibilitychange"));
+  await screen.findByText(/Payment confirmed\./);
+  expect(onVerify).toHaveBeenCalledOnce();
+  expect(onPay).toHaveBeenCalledOnce();
+  fireEvent.focus(window);
+  expect(onVerify).toHaveBeenCalledOnce();
+});
 it("reviews the fee before payment, prevents duplicate handoffs, and only confirms verified payment", async () => {
   let finish!: (value: "browser") => void;
   const onPay = vi.fn(

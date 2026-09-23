@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { TOOLS, LEGACY_OPS } from "../aiTools";
+import { describe, expect, it, vi } from "vitest";
+import { TOOLS, LEGACY_OPS, runTool, setTurnFile, endTurn } from "../aiTools";
 import { PDF_TOOLS } from "../../components/PdfToolbox";
+import { setCacheOrg } from "../api";
+import { setDataMode } from "../dataMode";
+import { deliverFile } from "../agentFiles";
+
+vi.mock("../agentFiles", () => ({ deliverFile: vi.fn(), outputDir: vi.fn() }));
 
 // The agent reaches the document toolbox by id, off the same registry the Tools
 // page renders. That only holds while the ids do — a renamed tool would turn
@@ -13,6 +18,20 @@ const tool = (name: string) => {
 };
 
 describe("the agent's view of the document toolbox", () => {
+  it("does not save a finished tool output into a changed workspace", async () => {
+    setDataMode("local");
+    setCacheOrg("file-tool-original", "fixture-user");
+    setTurnFile("file-tool-scope", new File(["fixture"], "source.pdf"));
+    const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementationOnce(async () => {
+      setCacheOrg("file-tool-other", "fixture-user");
+      return [{ name: "compressed.pdf", bytes: new Uint8Array([1]) }];
+    });
+    try {
+      await expect(runTool("run_file_tool", { tool_id: "compress", save_to_app: true }, () => true, true, "file-tool-scope")).rejects.toMatchObject({ name: "AbortError" });
+      expect(deliverFile).not.toHaveBeenCalled();
+      expect(endTurn("file-tool-scope")).toEqual([]);
+    } finally { transform.mockRestore(); endTurn("file-tool-scope"); setCacheOrg(null); }
+  });
   it("offers every tool the Tools page has", async () => {
     const res = (await tool("list_file_tools").run({})) as {
       count: number;

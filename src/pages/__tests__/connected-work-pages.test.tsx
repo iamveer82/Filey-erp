@@ -32,7 +32,7 @@ it("keeps the browser in a collapsible panel without opening a popup", () => {
   const open = vi.spyOn(window, "open");
   render(<BrowserPanel />);
   expect(screen.getByLabelText("Website address")).toBeDisabled();
-  expect(screen.getByText(/available in the Windows desktop app/)).toBeInTheDocument();
+  expect(screen.getByText(/Interactive browsing runs in Filey's Windows desktop app/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Collapse browser" }));
   expect(browser.getBrowserPanelState().open).toBe(false);
   expect(open).not.toHaveBeenCalled();

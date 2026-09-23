@@ -3,7 +3,7 @@ import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 import { requireModuleAccess } from "./moduleAccess";
 
 export interface ComputerUseState { enabled: boolean; expiresAt: number | null; busy: boolean }
-type Grant = { sessionToken: string; expiresAt: number | null; scope: string; windowId?: string };
+type Grant = { sessionToken: string; expiresAt: number | null; scope: string; windowId?: string; browserTab?: string };
 let grant: Grant | null = null;
 let current: ComputerUseState = { enabled: false, expiresAt: null, busy: false };
 let generation = 0;
@@ -25,7 +25,7 @@ function publish(state: ComputerUseState) { current = state; for (const listener
 
 /** Available by default in the signed-in chat. Actions still pass their approval checks.
  * The token is kept in this module, outside prompts, tool results and storage. */
-export async function enableComputerUse(durationSeconds: number | null = null, windowId?: string): Promise<number> {
+export async function enableComputerUse(durationSeconds: number | null = null, windowId?: string, browserTab?: string): Promise<number> {
   if (!computerUseSupported()) throw new Error("Computer control requires the Windows desktop app.");
   const scope = agentStorageScope();
   if (!scope) throw new Error("Sign in before enabling computer access.");
@@ -33,7 +33,8 @@ export async function enableComputerUse(durationSeconds: number | null = null, w
     throw new Error("Choose a computer session between 60 and 900 seconds.");
   if (windowId !== undefined && !/^[1-9]\d{0,19}$/.test(windowId))
     throw new Error("Choose a Filey browser window for this task.");
-  if (durationSeconds === null && grant?.expiresAt === null && grant.scope === scope && grant.windowId === windowId)
+  if (browserTab && (!windowId || !/^filey-browser-[a-f0-9-]{36}$/.test(browserTab))) throw new Error("Choose a valid browser tab.");
+  if (durationSeconds === null && grant?.expiresAt === null && grant.scope === scope && grant.windowId === windowId && grant.browserTab === browserTab)
     return generation;
   if (starting) throw new Error("Computer access is already starting.");
   const stopping = disableComputerUse();
@@ -44,14 +45,14 @@ export async function enableComputerUse(durationSeconds: number | null = null, w
     await stopping;
     await requireModuleAccess("browser", true);
     if (version !== generation || scope !== agentStorageScope()) throw new Error("Workspace changed before computer access started.");
-    const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}) });
+    const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}), ...(browserTab ? { browserTab } : {}) });
     if (!result || typeof result.sessionToken !== "string" || (result.expiresAt !== null && !Number.isFinite(result.expiresAt)))
       throw new Error("The native computer permission response was invalid.");
     if (version !== generation || scope !== agentStorageScope()) {
       await invoke("computer_stop", { sessionToken: result.sessionToken });
       throw new Error("Computer permission was canceled or the workspace changed.");
     }
-    grant = { ...result, scope, windowId };
+    grant = { ...result, scope, windowId, browserTab };
     publish({ enabled: true, expiresAt: result.expiresAt, busy: false });
     if (result.expiresAt !== null)
       expiryTimer = setTimeout(() => { void disableComputerUse().catch(() => {}); }, Math.max(0, result.expiresAt - Date.now()));

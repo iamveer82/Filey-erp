@@ -107,11 +107,18 @@ create table if not exists public.payment_receipts (
   for_description text,
   show_stamp boolean not null default false,
   show_signature boolean not null default false,
+  stamp jsonb,
+  signature jsonb,
   shared boolean not null default false,
   share_token uuid not null default gen_random_uuid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Stamp/signature overlays: the editor holds StampSig positions per document;
+-- without these columns the save path silently dropped them (see PaymentReceipt).
+alter table public.payment_receipts add column if not exists stamp jsonb;
+alter table public.payment_receipts add column if not exists signature jsonb;
 
 -- Indexes for lookups
 create index if not exists idx_quotations_share_token on public.quotations(share_token);

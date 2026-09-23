@@ -3,6 +3,7 @@ import { supabase } from "../supabase";
 import { billingRequest, paymentUrl, openBilling, BILLING_UNAVAILABLE } from "../billingService";
 import { startFreedomCheckout, collectPurchases } from "../license";
 import { startCheckout, refundAction } from "../subscription";
+import { buyAiCredits } from "../aiCredits";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
@@ -148,4 +149,19 @@ it("opens the system browser on desktop and navigates the same tab on mobile web
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   expect(await openBilling(url)).toBe("redirected");
   expect(assign).toHaveBeenCalledExactlyOnceWith(url);
+});
+
+it("takes a desktop AI credit purchase to the provider page without changing local data mode", async () => {
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  vi.mocked(openUrl).mockClear();
+  localStorage.setItem("filey_data_mode", "local");
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+  const url = "https://checkout.dodopayments.com/credit-fixture";
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({ data: { url }, error: null });
+  expect(await buyAiCredits("pdt_credit_fixture")).toBe("browser");
+  expect(supabase!.functions.invoke).toHaveBeenCalledExactlyOnceWith("dodo", {
+    body: { action: "checkout_ai_credits", pack_id: "pdt_credit_fixture" },
+  });
+  expect(openUrl).toHaveBeenCalledExactlyOnceWith(url);
+  expect(localStorage.getItem("filey_data_mode")).toBe("local");
 });

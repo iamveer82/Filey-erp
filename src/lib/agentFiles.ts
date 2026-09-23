@@ -7,7 +7,7 @@
 // Settings when one is set, the desktop otherwise — and the agent reports the
 // path back in the chat.
 
-import { hasTauri, getExportDir, writeDocFile, saveBytes } from "./localPaths";
+import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
 
 export interface DeliveredFile {
   name: string;
@@ -45,13 +45,14 @@ export async function deliverFile(f: {
     const target = await outputDir();
     if (target) {
       try {
-        return { name: f.name, path: await writeDocFile(target.dir, f.name, bytes) };
+        // Keep each output stable while an owner reviews a pending send.
+        const dir = `${target.dir}/Filey AI/${crypto.randomUUID()}`;
+        return { name: f.name, path: await writeDocFile(dir, f.name, bytes) };
       } catch {
-        /* fall through to the dialog rather than losing the file */
+        // Remote tasks must not wait for a save dialog on an unattended PC.
       }
     }
-    const path = await saveBytes(f.name, bytes);
-    return { name: f.name, path: path ?? undefined };
+    return { name: f.name };
   }
   const url = URL.createObjectURL(new Blob([bytes as BlobPart]));
   const a = document.createElement("a");

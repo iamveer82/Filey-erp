@@ -65,6 +65,17 @@ async function collect(stream: AsyncGenerator<AgentEvent, string, void>) {
   }
 }
 
+it("shares the request allowance with delegates instead of multiplying it per child", async () => {
+  setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "k" });
+  stubResponses([
+    oa("", [{ id: "delegate", type: "function", function: { name: "spawn_subtask", arguments: JSON.stringify({ goal: "Look up my preferences" }) } }]),
+    oa("", [{ id: "read", type: "function", function: { name: "recall", arguments: "{}" } }]),
+  ]);
+  const result = await collect(aiAgentStream([{ role: "user", text: "Review my preferences" }], { maxRounds: 2 }));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "exhausted" });
+});
+
 describe("agent harness", () => {
   it("streams text, the tool call, its result, then done", async () => {
     setAiConfig({

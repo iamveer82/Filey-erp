@@ -1,9 +1,14 @@
 vi.mock("../moduleAccess", () => ({ requireModuleAccess: vi.fn(async () => {}) }));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { closeDesktopBrowserTabs, desktopBrowserCommand, getBrowserPanelState, setBrowserPanelOpen, layoutDesktopBrowser, registerBrowserViewportSync } from "../desktopBrowser";
+import { closeDesktopBrowserTabs, desktopBrowserCommand, getBrowserPanelState, setBrowserPanelOpen, layoutDesktopBrowser, registerBrowserViewportSync, selectAgentBrowser, pauseAgentBrowser } from "../desktopBrowser";
+import { agentComputerCommand, stopAgentComputer } from "../agentComputer";
+import { disableComputerUse } from "../computerUse";
+import { requireModuleAccess } from "../moduleAccess";
 
 const identity = vi.hoisted(() => ({ scope: "local:org:user:one" as string | null, account: "org:user:one" as string | null }));
+const features = vi.hoisted(() => ({ computers: true }));
+vi.mock("../capabilities", () => ({ isToolAllowed: () => features.computers }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: () => identity.scope, AGENT_STORAGE_EVENT: "filey:agent-storage" }));
 vi.mock("../api", () => ({ getCacheScope: () => identity.account }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -44,16 +49,79 @@ it("reports a viewport failure to the caller instead of claiming the browser ope
 
 beforeEach(() => {
   vi.clearAllMocks();
+  features.computers = true;
   identity.scope = "local:org:user:one";
   identity.account = "org:user:one";
   Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
   vi.spyOn(navigator, "platform", "get").mockReturnValue("Win32");
   vi.mocked(invoke).mockResolvedValue({ tabs: [] });
 });
+
+it("blocks optional agent computers before opt-in and closes their workspace when turned off", async () => {
+  features.computers = false;
+  await expect(agentComputerCommand({ action: "open", url: "https://example.com/" }, "optional-agent")).rejects.toThrow("Agent computers are off");
+  await expect(selectAgentBrowser("optional-agent")).rejects.toThrow("Agent computers are off");
+  expect(invoke).not.toHaveBeenCalled();
+  features.computers = true;
+  await agentComputerCommand({ action: "list" }, "optional-agent");
+  expect(getBrowserPanelState().agentId).toBe("optional-agent");
+  features.computers = false;
+  window.dispatchEvent(new Event("filey:agent-storage"));
+  await vi.waitFor(() => expect(getBrowserPanelState().agentId).toBeNull());
+  expect(nativeCalls().some(args => args.request?.action === "close_all")).toBe(true);
+  await expect(agentComputerCommand({ action: "screenshot" }, "optional-agent")).rejects.toThrow("Agent computers are off");
+});
 afterEach(async () => {
+  await disableComputerUse();
   await closeDesktopBrowserTabs();
+  await selectAgentBrowser(null);
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   vi.restoreAllMocks();
+});
+
+it("keeps conversation profiles stable and prevents queued navigation after takeover", async () => {
+  await desktopBrowserCommand({ action: "list" }, undefined, "chat-a");
+  const first = lastCall().profile;
+  await desktopBrowserCommand({ action: "list" }, undefined, "chat-b");
+  expect(lastCall().profile).not.toBe(first);
+  await desktopBrowserCommand({ action: "list" }, undefined, "chat-a");
+  expect(lastCall().profile).toBe(first);
+  let release!: () => void;
+  vi.mocked(requireModuleAccess).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  const pending = desktopBrowserCommand({ action: "open", url: "https://example.com" }, undefined, "chat-a");
+  const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  await pauseAgentBrowser(true);
+  release();
+  await rejected;
+  expect(nativeCalls().some(call => call.request?.action === "open")).toBe(false);
+});
+
+it("binds agent input to its conversation, tab and native grant, and revokes on stop", async () => {
+  const tab = { id: "filey-browser-00000000-0000-0000-0000-000000000000", title: "Example", url: "https://example.com/", loading: false, window_id: "123", canGoBack: false, canGoForward: false };
+  vi.mocked(invoke).mockImplementation(async (command, raw) => {
+    const args = raw as { request?: { action: string } };
+    if (command === "desktop_browser_command") return { tabs: args.request?.action === "close_all" ? [] : [tab], tab };
+    if (command === "computer_start") return { sessionToken: "private-token", expiresAt: null };
+    if (args.request?.action === "screenshot") return { snapshot_id: "fresh", image: { mediaType: "image/png", dataBase64: "iVBORw0KGgo-test" } };
+    return { ok: true };
+  });
+  const controller = new AbortController();
+  await agentComputerCommand({ action: "open", url: tab.url }, "chat-a", controller.signal);
+  await expect(agentComputerCommand({ action: "click", x: 1, y: 1, snapshot_id: "fresh" }, "chat-a")).rejects.toThrow("fresh screenshot");
+  await expect(agentComputerCommand({ action: "screenshot" }, "chat-b")).rejects.toThrow("workspace first");
+  await agentComputerCommand({ action: "screenshot" }, "chat-a", controller.signal);
+  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: null, windowId: "123", browserTab: tab.id });
+  await agentComputerCommand({ action: "click", x: 1, y: 1, snapshot_id: "fresh" }, "chat-a", controller.signal);
+  expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-token", request: { action: "click", x: 1, y: 1, snapshot_id: "fresh", button: "left", double_click: false } });
+  await pauseAgentBrowser(true);
+  await expect(agentComputerCommand({ action: "type", text: "stale", snapshot_id: "fresh" }, "chat-a")).rejects.toThrow("user has control");
+  await pauseAgentBrowser(false);
+  await expect(agentComputerCommand({ action: "type", text: "stale", snapshot_id: "fresh" }, "chat-a")).rejects.toThrow("fresh screenshot");
+  controller.abort();
+  await vi.waitFor(() => expect(getBrowserPanelState().tabs).toHaveLength(0));
+  expect(invoke).toHaveBeenCalledWith("computer_stop", { sessionToken: "private-token" });
+  await stopAgentComputer("chat-a");
 });
 
 it("allows explicit web navigation and strips arbitrary script and profile arguments", async () => {

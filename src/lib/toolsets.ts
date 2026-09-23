@@ -37,11 +37,11 @@ export const CORE_TOOLS = [
   "revise_invoice",
   "create_quote",
   "create_customer",
-  "create_product",
   "list_templates",
   // memory and procedure
   "remember",
   "recall",
+  "search_conversations",
   "list_skills",
   "use_skill",
   // reach for more
@@ -64,6 +64,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "Send invoices, mark them paid, recurring billing, orders, receipts, templates",
     tools: [
       "send_invoice",
+      "export_invoice_pdf",
       "email_invoice",
       "mark_invoice_paid",
       "set_recurring",
@@ -89,8 +90,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: ["find_links", "link_records"],
   },
   inventory: {
-    about: "Stock levels and adjustments",
-    tools: ["adjust_stock"],
+    about: "Create products, stock levels and adjustments",
+    tools: ["create_product", "adjust_stock"],
   },
   logistics: {
     about:
@@ -192,8 +193,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   computer: {
     about:
-      "Observe and operate Windows desktop apps during a user-enabled temporary session",
-    tools: ["computer_use"],
+      "Use a private agent browser workspace, or observe and operate Windows desktop apps",
+    tools: ["computer_use", "agent_computer"],
   },
   social: {
     about: "Post and schedule to connected social accounts",

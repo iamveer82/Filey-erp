@@ -235,10 +235,13 @@ export default function PaymentReceipt() {
     try {
       const d = await receipts.get(id);
       const stampSig = await loadCompanyStampSig();
+      // Prefer the document's own saved overlays; fall back to company defaults.
+      const savedStamp = (d.stamp as Form["stamp"] | null | undefined) ?? undefined;
+      const savedSignature = (d.signature as Form["signature"] | null | undefined) ?? undefined;
       setForm({
         ...d,
-        stamp: stampSig.stamp,
-        signature: stampSig.signature,
+        stamp: savedStamp?.data ? savedStamp : stampSig.stamp,
+        signature: savedSignature?.data ? savedSignature : stampSig.signature,
         show_stamp: d.show_stamp || false,
         show_signature: d.show_signature || false,
       });
@@ -267,8 +270,14 @@ export default function PaymentReceipt() {
     }
     setSaving(true);
     try {
-      const { stamp, signature, ...payload } = form!;
-      const id = await receipts.save(payload as any);
+      // Stamp/signature are real columns on payment_receipts — keep positions
+      // (StampSig x/y + data) so a reloaded receipt restores the overlays.
+      const payload = {
+        ...form!,
+        stamp: form!.stamp ?? null,
+        signature: form!.signature ?? null,
+      } as ReceiptDoc;
+      const id = await receipts.save(payload);
       await refreshList();
       toast.success(`Receipt ${form!.number} saved.`);
       if (!form!.id) setForm((f) => f && { ...f, id });
@@ -505,9 +514,10 @@ export default function PaymentReceipt() {
     try {
       const d = await receipts.get(id);
       const numbers = docs.map((x) => x.number);
+      const { stamp, signature, ...rest } = d;
       setForm({
         ...blankForm(company || ({} as any), numbers, docFmts),
-        ...d,
+        ...rest,
         id: undefined,
         number: pickDocNumber("payment_receipt", numbers, docFmts),
         status: "draft",
@@ -517,6 +527,8 @@ export default function PaymentReceipt() {
         due_date: today(),
         show_stamp: d.show_stamp || false,
         show_signature: d.show_signature || false,
+        stamp: stamp as Form["stamp"],
+        signature: signature as Form["signature"],
       });
       setView("edit");
       window.scrollTo({ top: 0, behavior: "smooth" });

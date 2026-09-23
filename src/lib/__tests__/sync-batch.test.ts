@@ -4,6 +4,23 @@ import { journalCommit, journalMark, journalSnapshot, localClient, replaceColl }
 
 beforeEach(() => localStorage.clear());
 
+it.each([false, true])("stops an upload when its account changes between requests (legacy server: %s)", async legacy => {
+  let user = "owner";
+  const rows = Array.from({ length: 51 }, (_, id) => ({ id: id + 1, name: "Private", sync_revision: 1 }));
+  await replaceColl("products", rows);
+  await journalMark("products", { all: true });
+  const rpc = vi.fn(async (name: string, args: any) => {
+    if (legacy && name === "sync_records") return { error: { code: "PGRST202" } };
+    user = "other-account";
+    return { data: legacy ? { ok: true, revision: 2 } : args.p_records.map(({ row }: any) => ({ id: row.id, ok: true, revision: 2 })), error: null };
+  });
+  const client = { rpc, auth: { getSession: async () => ({ data: { session: { user: { id: user }, expires_at: Date.now() / 1000 + 3600 } } }) } } as any;
+  await expect(pushCollection(client, "products", rows, undefined, "owner")).rejects.toThrow("account changed");
+  expect(rpc).toHaveBeenCalledTimes(legacy ? 2 : 1);
+  expect((await journalSnapshot()).tables.products.all).toBe(true);
+  expect((await localClient.from("products").select().eq("id", 1).single()).data.sync_revision).toBe(1);
+});
+
 it("uploads 120 rows in three batches and preserves edits made during a request", async () => {
   const rows = Array.from({ length: 120 }, (_, i) => ({ id: i + 1, name: "Local", sync_revision: 1 }));
   await replaceColl("products", rows);

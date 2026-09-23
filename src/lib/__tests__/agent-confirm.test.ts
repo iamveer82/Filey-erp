@@ -17,6 +17,8 @@ describe("runTool confirm override", () => {
   it("shows intended computer and browser input for approval while masking it in logs", () => {
     for (const [name, field] of [
       ["computer_use", "text"],
+      ["agent_computer", "text"],
+      ["agent_computer", "url"],
       ["browser", "value"],
     ]) {
       const args = {
@@ -76,8 +78,9 @@ describe("isOwnerNumber", () => {
     expect(isOwnerNumber(ME, null, "971501234567")).toBe(true);
   });
 
-  it("matches the company WhatsApp number from the profile", () => {
-    expect(isOwnerNumber(null, "+971 50 765 4321", "971507654321")).toBe(true);
+  it("does not grant agent control from a company contact field or unresolved LID", () => {
+    expect(isOwnerNumber(null, "+971 50 765 4321", "971507654321")).toBe(false);
+    expect(isOwnerNumber(ME, null, "971501234567@lid")).toBe(false);
   });
 
   it("rejects a number that is merely a substring of the owner's", () => {

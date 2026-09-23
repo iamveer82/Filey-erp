@@ -984,9 +984,13 @@ function WhatsAppBridgeProvider() {
     return () => { current = false; unlisten(); };
   }, [desktop]);
 
-  // Refresh the activity trail whenever the bridge speaks or the card mounts.
+  // Replies don't change connection status: refresh when the conversation is
+  // saved as well, so a live connection never shows a stale activity trail.
   useEffect(() => {
-    setActivity(waLogList({ limit: 4 }).reverse());
+    const refresh = () => setActivity(waLogList({ limit: 4 }).reverse());
+    refresh();
+    window.addEventListener(AGENT_STORAGE_EVENT, refresh);
+    return () => window.removeEventListener(AGENT_STORAGE_EVENT, refresh);
   }, [st.state]);
 
   // The browser build has no WhatsApp bridge to drive — the card still shows
@@ -1087,9 +1091,19 @@ function WhatsAppBridgeProvider() {
         </p>
       )}
 
-      {/* Delivery trail — whether messages are arriving and whether the agent
-          answered, from the bridge's own log. An in with no out after it is
-          the owner-number gate, not a dead bridge. */}
+      {connected && (
+        <p className="mt-2 text-[12px] text-muted-foreground">
+          {cfg.ownerNumber
+            ? "From your owner number, send a message to the paired number."
+            : "On your phone, open your own WhatsApp chat (Message yourself) and send a task."}
+          {" "}Keep Filey open and signed in. Send /status to check readiness, or ask
+          “Send me invoice INV-001 as a PDF.” You can attach a PDF or image up to 12 MB
+          and ask Filey to work on it. /stop cancels a task. Sending to another person
+          requires your approval in this chat.
+        </p>
+      )}
+
+      {/* Local delivery trail: incoming requests and confirmed replies. */}
       {!locked && activity.length > 0 && (
         <div className="mt-3">
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
@@ -1184,7 +1198,16 @@ function WhatsAppBridgeProvider() {
           inputMode="tel"
           disabled={locked || busy}
           defaultValue={cfg.ownerNumber}
-          onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
+          onBlur={(e) => {
+            const ownerNumber = e.target.value.trim();
+            if (ownerNumber === cfg.ownerNumber) return;
+            void run(async () => {
+              const next = setBridgeConfig({ ownerNumber });
+              e.target.value = next.ownerNumber;
+              setCfg(next);
+              if (connected || pairing || st.state === "reconnecting") await startBridge();
+            });
+          }}
         />
         <span className="mt-1 block text-[11.5px] text-muted-foreground">
           The agent answers you and nobody else. Empty is right when you paired your own

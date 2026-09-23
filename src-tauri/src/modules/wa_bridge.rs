@@ -24,7 +24,7 @@ use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Webview};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -46,6 +46,9 @@ pub struct BridgeState {
 
 struct Supervisor {
     pid: u32,
+    // Held for this process's session lifetime; another Filey window must not
+    // kill this bridge or write to the same Signal credential directory.
+    session_lock: Option<std::fs::File>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     state: BridgeState,
@@ -65,7 +68,7 @@ fn set_state(app: &AppHandle, pid: u32, mutate: impl FnOnce(&mut BridgeState)) {
         let snapshot = sup.state.clone();
         drop(guard);
         // Best-effort: a missing window is not a reason to lose the session.
-        let _ = app.emit("wa-bridge", snapshot);
+        let _ = app.emit_to(tauri::EventTarget::webview("main"), "wa-bridge", snapshot);
     }
 }
 
@@ -115,64 +118,56 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .ok_or_else(|| "WhatsApp bridge binary is not installed with this build".to_string())
 }
 
-/// Kill any sidecar left over from a previous run of the app.
-///
-/// Windows does not reap orphans: a crash, a force-quit, or a dev-mode rebuild
-/// kills the app and leaves the bridge running with a live WhatsApp socket.
-/// The next launch then spawns a second one, and two bridges sharing one auth
-/// folder both write signal state — which shreds the session and leaves the
-/// phone showing "Waiting for this message" until you re-pair. wa_bridge_stop
-/// only reaches a child THIS process spawned, so it cannot help here; sweeping
-/// by name before spawning is what survives a hard kill.
-fn kill_stale_sidecars() {
-    #[cfg(windows)]
-    {
-        let mut cmd = Command::new("taskkill");
-        cmd.args(["/F", "/IM", "filey-wa-bridge.exe"]);
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        let _ = cmd.output(); // nothing to kill is the normal case
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = Command::new("pkill")
-            .args(["-f", "filey-wa-bridge"])
-            .output();
-    }
+fn lock_session(dir: &std::path::Path) -> Result<std::fs::File, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // Outside the pairing directory so Re-pair cannot delete a held lock.
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true)
+        .truncate(false).open(dir.join("wa-bridge.lock")).map_err(|e| e.to_string())?;
+    file.try_lock().map_err(|e| match e {
+        std::fs::TryLockError::WouldBlock => "WhatsApp is already running in another Filey window. Close that window before connecting here.".to_string(),
+        std::fs::TryLockError::Error(error) => format!("Could not protect the WhatsApp session: {error}"),
+    })?;
+    Ok(file)
 }
 
 /// Start (or restart) the bridge. No webhook — messages route to the app's own
 /// agent over stdin/stdout.
 ///
 /// Async because getting here is not free: stopping the old bridge waits on a
-/// child process and `kill_stale_sidecars` shells out to taskkill. On the main
+/// child process. On the main
 /// thread that is a window that stops painting, and a sidecar that refuses to
 /// die is a window that never comes back.
 #[tauri::command]
-pub async fn wa_bridge_start(app: AppHandle) -> Result<BridgeState, String> {
+pub async fn wa_bridge_start(window: Webview, app: AppHandle, owner_number: Option<String>) -> Result<BridgeState, String> {
+    super::computer_use::check_window(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lifecycle = LIFECYCLE.lock().unwrap();
-        wa_bridge_start_blocking(app)
+        wa_bridge_start_blocking(app, owner_number, false)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
+fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset: bool) -> Result<BridgeState, String> {
     wa_bridge_stop_blocking();
-    kill_stale_sidecars();
 
     let bin = sidecar_path(&app)?;
     // Session state must outlive updates, so it goes in the per-user app data
     // dir — never beside the binary, which reinstalls replace.
-    let state_dir = app
+    let app_dir = app
         .path()
         .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("wa-bridge");
+        .map_err(|e| e.to_string())?;
+    let session_lock = lock_session(&app_dir)?;
+    let state_dir = app_dir.join("wa-bridge");
+    if reset && state_dir.exists() {
+        std::fs::remove_dir_all(&state_dir).map_err(|e| format!("Could not clear WhatsApp pairing: {e}"))?;
+    }
     std::fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
 
     let mut cmd = Command::new(&bin);
     cmd.env("FILEY_BRIDGE_STATE", &state_dir)
+        .env("FILEY_BRIDGE_OWNER", owner_number.unwrap_or_default())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -191,6 +186,7 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
         let mut guard = BRIDGE.lock().unwrap();
         *guard = Some(Supervisor {
             pid,
+            session_lock: Some(session_lock),
             child: Some(child),
             stdin,
             state: BridgeState {
@@ -207,9 +203,9 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
     // freezes the sidecar even though the UI still says it is connected.
     if let Some(stderr) = stderr {
         std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                eprintln!("[wa-bridge] {line}");
-            }
+            // Third-party diagnostics may contain Signal session keys. Drain
+            // the pipe, but expose only the bridge's structured status errors.
+            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
         });
     }
 
@@ -218,13 +214,8 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 let Some(payload) = line.strip_prefix("FILEY ") else {
-                    // Not protocol — the sidecar's own logs ("← Name: text",
-                    // send failures, the ASCII QR). These used to be dropped on
-                    // the floor, which meant a bridge that received a message
-                    // and answered nobody left no trace anywhere. Forward them.
-                    if !line.trim().is_empty() {
-                        println!("[wa-bridge] {line}");
-                    }
+                    // Never persist library diagnostics, raw messages or QR
+                    // material in desktop logs. Status travels via FILEY JSON.
                     continue;
                 };
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else {
@@ -290,7 +281,7 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
                             .as_ref()
                             .is_some_and(|sup| sup.pid == pid)
                         {
-                            let _ = app2.emit("wa-message", v.clone());
+                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), "wa-message", v.clone());
                         }
                     }
                     Some("voice_note") => {
@@ -302,7 +293,7 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
                             .as_ref()
                             .is_some_and(|sup| sup.pid == pid)
                         {
-                            let _ = app2.emit("wa-voice", v.clone());
+                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), "wa-voice", v.clone());
                         }
                     }
                     _ => {}
@@ -326,7 +317,7 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
         });
     }
 
-    Ok(wa_bridge_state())
+    Ok(bridge_snapshot())
 }
 
 /// Send the local agent's reply back to the sidecar (and thus to WhatsApp).
@@ -336,14 +327,16 @@ fn wa_bridge_start_blocking(app: AppHandle) -> Result<BridgeState, String> {
 /// reply that was written nowhere. Failing loudly is what lets the UI say
 /// "the bridge dropped" instead of "the agent is broken".
 #[tauri::command]
-pub async fn wa_bridge_reply(id: String, text: String) -> Result<String, String> {
+pub async fn wa_bridge_reply(window: Webview, id: String, text: String) -> Result<String, String> {
+    super::computer_use::check_window(&window)?;
     send_command(serde_json::json!({ "type": "reply", "id": id, "text": text })).await
 }
 
 /// Send a proactive WhatsApp message to a specific JID (owner notifications —
 /// daily summary, low-stock and overdue alerts).
 #[tauri::command]
-pub async fn wa_bridge_send(to: String, text: String) -> Result<String, String> {
+pub async fn wa_bridge_send(window: Webview, to: String, text: String) -> Result<String, String> {
+    super::computer_use::check_window(&window)?;
     send_command(serde_json::json!({ "type": "send", "to": to, "text": text })).await
 }
 
@@ -352,12 +345,14 @@ pub async fn wa_bridge_send(to: String, text: String) -> Result<String, String> 
 /// images — so a merged PDF or a payslip lands straight in the owner's chat.
 #[tauri::command]
 pub async fn wa_bridge_send_file(
+    window: Webview,
     to: String,
     path: String,
     filename: String,
     mimetype: String,
     caption: String,
 ) -> Result<String, String> {
+    super::computer_use::check_window(&window)?;
     // The path is the contract: it must exist NOW, before the sidecar races to
     // read it. A missing file is an error here rather than a silent no-send.
     if !std::path::Path::new(&path).exists() {
@@ -404,11 +399,12 @@ async fn send_command(mut payload: serde_json::Value) -> Result<String, String> 
 /// Async for the same reason as start: `child.wait()` has no timeout, so a
 /// sidecar that ignores the kill would otherwise hang the window for good.
 #[tauri::command]
-pub async fn wa_bridge_stop(app: AppHandle) -> Result<(), String> {
+pub async fn wa_bridge_stop(window: Webview, app: AppHandle) -> Result<(), String> {
+    super::computer_use::check_window(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lifecycle = LIFECYCLE.lock().unwrap();
         wa_bridge_stop_blocking();
-        let _ = app.emit("wa-bridge", wa_bridge_state());
+        let _ = app.emit_to(tauri::EventTarget::webview("main"), "wa-bridge", bridge_snapshot());
     })
     .await
     .map_err(|e| e.to_string())
@@ -417,11 +413,25 @@ pub async fn wa_bridge_stop(app: AppHandle) -> Result<(), String> {
 fn wa_bridge_stop_blocking() {
     let mut guard = BRIDGE.lock().unwrap();
     if let Some(sup) = guard.as_mut() {
+        // EOF lets the bridge flush rolling Signal credentials before exit.
+        // Force-killing every disconnect could leave a partially saved session.
+        sup.stdin.take();
         if let Some(child) = sup.child.as_mut() {
-            let _ = child.kill();
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    _ if std::time::Instant::now() >= deadline => {
+                        let _ = child.kill();
+                        break;
+                    }
+                    _ => std::thread::sleep(Duration::from_millis(25)),
+                }
+            }
             let _ = child.wait();
         }
         sup.child = None;
+        sup.session_lock = None;
         sup.stdin = None;
         for (_, sender) in sup.deliveries.drain() {
             let _ = sender.send(Err("WhatsApp bridge stopped before confirming delivery. Check the conversation before retrying.".into()));
@@ -444,26 +454,23 @@ fn wa_bridge_stop_blocking() {
 /// on the phone too. This is the only way out, and it needs to be a button
 /// rather than "go delete a folder in AppData".
 #[tauri::command]
-pub async fn wa_bridge_reset(app: AppHandle) -> Result<BridgeState, String> {
+pub async fn wa_bridge_reset(window: Webview, app: AppHandle, owner_number: Option<String>) -> Result<BridgeState, String> {
+    super::computer_use::check_window(&window)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lifecycle = LIFECYCLE.lock().unwrap();
-        wa_bridge_stop_blocking();
-        let dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| e.to_string())?
-            .join("wa-bridge");
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(|e| format!("could not clear session: {e}"))?;
-        }
-        wa_bridge_start_blocking(app)
+        wa_bridge_start_blocking(app, owner_number, true)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn wa_bridge_state() -> BridgeState {
+pub fn wa_bridge_state(window: Webview) -> Result<BridgeState, String> {
+    super::computer_use::check_window(&window)?;
+    Ok(bridge_snapshot())
+}
+
+fn bridge_snapshot() -> BridgeState {
     BRIDGE
         .lock()
         .unwrap()
@@ -473,4 +480,18 @@ pub fn wa_bridge_state() -> BridgeState {
             state: "stopped".into(),
             ..BridgeState::default()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pairing_has_one_writer_and_unlocks_without_deleting_credentials() {
+        let dir = std::env::temp_dir().join(format!("filey-wa-lock-{}", uuid::Uuid::new_v4()));
+        let first = super::lock_session(&dir).unwrap();
+        assert!(super::lock_session(&dir).unwrap_err().contains("another Filey window"));
+        drop(first);
+        let resumed = super::lock_session(&dir).unwrap();
+        drop(resumed);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

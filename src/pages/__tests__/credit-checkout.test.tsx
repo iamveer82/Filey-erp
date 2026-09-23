@@ -28,6 +28,17 @@ it("reviews configured credits and fee before making exactly one checkout reques
   fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
   await screen.findByText(/Your secure payment page is open/);
   expect(buyAiCredits).toHaveBeenCalledExactlyOnceWith("pdt_test");
+  vi.mocked(getCreditStatus).mockResolvedValue({
+    ...status,
+    account: { ...status.account, balance_micros: 5000000, available_micros: 5000000 },
+    history: [{ id: 1, kind: "topup", amount_micros: 5000000, description: "Verified payment", created_at: "2026-09-23T00:00:00Z" }],
+  });
+  fireEvent.focus(window);
+  await screen.findByText(/Payment confirmed\./);
+  fireEvent.click(screen.getByRole("button", { name: "Back to Filey" }));
+  await screen.findByRole("heading", { name: "AI wallet" });
+  expect(screen.getByText("$5.00")).toBeTruthy();
+  expect(buyAiCredits).toHaveBeenCalledOnce();
 });
 it("explains unavailable top-ups and never enables checkout through a crafted URL", async () => {
   window.history.replaceState(null, "", "/#/settings?section=credits&pack=pdt_test");

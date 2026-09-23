@@ -32,6 +32,7 @@ pub struct BrowserTab {
 struct Entry {
     profile: String,
     tab: BrowserTab,
+    bounds: Option<BrowserBounds>,
 }
 static TABS: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
 fn tabs() -> &'static Mutex<HashMap<String, Entry>> {
@@ -253,6 +254,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
             Entry {
                 profile: profile.into(),
                 tab,
+                bounds: None,
             },
         );
     }
@@ -453,6 +455,21 @@ pub(super) fn computer_windows(app: &AppHandle) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Absolute screen pixels of the visible tab, never the surrounding Filey UI.
+pub(super) fn computer_region(app: &AppHandle, id: &str, focus: bool) -> Result<Value, String> {
+    let (bounds, window_id) = {
+        let entries = tabs().lock().map_err(|_| "Browser state unavailable.")?;
+        let entry = entries.get(id).ok_or("The agent browser tab was closed.")?;
+        (entry.bounds.ok_or("Open the browser panel and close any dialogs before continuing." )?, entry.tab.window_id.clone())
+    };
+    let parent = app.get_window("main").ok_or("Filey window unavailable.")?;
+    let origin = parent.inner_position().map_err(|e| e.to_string())?;
+    let scale = parent.scale_factor().map_err(|e| e.to_string())?;
+    if focus { app.get_webview(id).ok_or("Browser tab unavailable.")?.set_focus().map_err(|e|e.to_string())?; }
+    Ok(json!({"tab_id":id,"window_id":window_id,"x":origin.x + (bounds.x * scale).round() as i32,
+        "y":origin.y + (bounds.y * scale).round() as i32, "width":(bounds.width * scale).round() as i32,"height":(bounds.height * scale).round() as i32}))
+}
+
 #[tauri::command]
 pub async fn desktop_browser_layout(
     window: Webview,
@@ -475,6 +492,7 @@ pub async fn desktop_browser_layout(
             .collect();
         // Hide first, including when a caller supplies an invalid rectangle.
         for id in &ids {
+            if let Ok(mut entries) = tabs().lock() { if let Some(entry) = entries.get_mut(id) { entry.bounds = None; } }
             if let Some(view) = app.get_webview(id) {
                 view.hide().map_err(|e| e.to_string())?;
             }
@@ -501,7 +519,9 @@ pub async fn desktop_browser_layout(
             size: LogicalSize::new(bounds.width, bounds.height).into(),
         })
         .map_err(|e| e.to_string())?;
-        view.show().map_err(|e| e.to_string())
+        view.show().map_err(|e| e.to_string())?;
+        if let Ok(mut entries) = tabs().lock() { if let Some(entry) = entries.get_mut(&id) { entry.bounds = Some(bounds); } }
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?

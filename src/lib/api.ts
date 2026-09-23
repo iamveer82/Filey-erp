@@ -691,9 +691,14 @@ export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
   if (flushing || !isConfigured || !onLine()) return;
   flushing = true;
+  const identity = cacheIdentity;
   try {
     const list = await pendingCloudWrites();
     for (const entry of list) {
+      // The previous network request may have completed after a storage switch.
+      // Never replay a queued cloud save through the local client or a new account.
+      assertWorkspaceCurrent();
+      if (isLocalMode() || identity !== cacheIdentity) break;
       let op: OutboxOp & { _workspace?: string };
       try {
         op = JSON.parse(entry.op);
@@ -816,18 +821,29 @@ function offlineError(): never {
   );
 }
 
+function workspaceGuard(): () => void {
+  const identity = cacheIdentity, local = isLocalMode();
+  return () => {
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || local !== isLocalMode())
+      throw new Error("Your workspace changed. Reopen this section before saving.");
+  };
+}
+
 /** Cloud saves require connectivity; local saves commit directly to the device. */
 async function write<T>(
   _op: OutboxOp,
   run: () => Promise<T>,
   _offlineResult: T
 ): Promise<T> {
+  const checkWorkspace = workspaceGuard();
   assertWorkspaceCurrent();
   if (!isLocalMode()) {
     if (!isConfigured) throw new Error("Cloud storage is not configured.");
     if (!onLine()) return offlineError();
     await flushOutbox();
   }
+  checkWorkspace();
   const result = await run();
   // A read started during the save may have cached the previous rows.
   markWrite([_op.t]);
@@ -849,12 +865,14 @@ async function writeMany<T>(
   run: () => Promise<T>,
   _offlineResult: T
 ): Promise<T> {
+  const checkWorkspace = workspaceGuard();
   assertWorkspaceCurrent();
   if (!isLocalMode()) {
     if (!isConfigured) throw new Error("Cloud storage is not configured.");
     if (!onLine()) return offlineError();
     await flushOutbox();
   }
+  checkWorkspace();
   const result = await run();
   const tables = [...new Set(_ops.map(op => op.t))];
   markWrite(tables);
@@ -864,6 +882,7 @@ async function writeMany<T>(
 
 /** Multi-step / read-modify-write op — requires a live connection. */
 async function online<T>(run: () => Promise<T>, mutates = true): Promise<T> {
+  const checkWorkspace = workspaceGuard();
   // Most callers mutate. Read-only callers opt out so live reloads cannot
   // trigger another reload indefinitely.
   if (mutates) markWrite();
@@ -873,6 +892,7 @@ async function online<T>(run: () => Promise<T>, mutates = true): Promise<T> {
     if (!onLine()) offlineError();
     await flushOutbox();
   }
+  checkWorkspace();
   const result = await run();
   // Invalidate snapshots that were fetched while this operation was saving.
   if (mutates) { markWrite(); notifyDataChanged(); }
@@ -5601,6 +5621,8 @@ export interface ReceiptDoc {
   show_stamp?: boolean;
   show_logo?: boolean;
   show_signature?: boolean;
+  stamp?: Record<string, unknown> | null;
+  signature?: Record<string, unknown> | null;
   shared?: boolean;
   share_token?: string;
   created_at: string;

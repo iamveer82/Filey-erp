@@ -578,7 +578,7 @@ export default function DataModePanel() {
               {destination === "cloud"
                 ? "You will see the records currently saved in your cloud account. Unsynced device changes stay on this device; use Cloud sync below first if you want to transfer them."
                 : localExists
-                  ? "Resume your saved device records. They may differ from your cloud records. Automatic cloud sync will be off."
+                  ? "Resume your saved device records. They may differ from your cloud records. Your automatic cloud sync preference is kept."
                   : "This device has no saved business records yet. Start an empty local workspace or choose to copy your cloud records below."}{" "}
               The app reloads after checking the destination. Finish any unsaved work in
               other tabs first.

@@ -24,6 +24,7 @@ struct Session {
     snapshot: Option<Snapshot>,
     root_window: Option<String>,
     dialog_owner: Option<String>,
+    browser_tab: Option<String>,
 }
 #[derive(Default)]
 struct State {
@@ -71,6 +72,7 @@ pub fn computer_start(
     window: Webview,
     duration_seconds: Option<u64>,
     window_id: Option<String>,
+    browser_tab: Option<String>,
 ) -> Result<Value, String> {
     check_window(&window)?;
     if !cfg!(windows) {
@@ -78,6 +80,10 @@ pub fn computer_start(
     }
     if duration_seconds.is_some_and(|seconds| !(60..=900).contains(&seconds)) {
         return Err("Computer access must last between 60 and 900 seconds.".into());
+    }
+    if let Some(ref tab) = browser_tab {
+        let region = super::desktop_browser::computer_region(window.app_handle(), tab, false)?;
+        if region["window_id"].as_str() != window_id.as_deref() { return Err("Choose the matching visible browser tab.".into()); }
     }
     if let Some(ref id) = window_id {
         #[cfg(windows)]
@@ -116,6 +122,7 @@ pub fn computer_start(
         snapshot: None,
         root_window: window_id,
         dialog_owner,
+        browser_tab,
     });
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -284,6 +291,9 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
         "key" => {
             let (key, control) = virtual_key(text(request, "key", 20)?)
                 .ok_or("Unsupported key. System and shell-launch shortcuts are not available.")?;
+            if active.browser_tab.is_some() && (112..=123).contains(&key) {
+                return Err("Function keys are unavailable in the browser workspace.".into());
+            }
             prepared["virtual_key"] = json!(key);
             prepared["control"] = json!(control);
         }
@@ -326,7 +336,18 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
         if current.job.is_some() {
             return Err("A computer action is already running. Wait or stop it first.".into());
         }
-        let mut prepared = prepare(&request, session(&mut current, &token)?)?;
+        let active = session(&mut current, &token)?;
+        let region = if let Some(ref tab) = active.browser_tab {
+            let region = super::desktop_browser::computer_region(&app, tab, request["action"] != "list_windows")?;
+            if !matches!(request["action"].as_str(), Some("list_windows" | "screenshot"))
+                && active.snapshot.as_ref().is_none_or(|shot| shot.data["browser_region"] != region) {
+                active.snapshot = None;
+                return Err("The browser moved or changed. Take a fresh screenshot.".into());
+            }
+            Some(region)
+        } else { None };
+        let mut prepared = prepare(&request, active)?;
+        if let Some(region) = region { prepared["browser_region"] = region; prepared["strict_browser"] = json!(true); }
         if prepared["action"] == "list_windows" {
             prepared["browser_windows"] = json!(super::desktop_browser::computer_windows(&app));
         }
@@ -486,7 +507,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             .filter(|w| {
                 active.root_window.as_ref().is_none_or(|root| {
                     w["window_id"].as_str() == Some(root.as_str())
-                        || w["root_owner_id"].as_str()
+                        || active.browser_tab.is_none() && w["root_owner_id"].as_str()
                             == active.dialog_owner.as_deref().or(Some(root.as_str()))
                             && w["window_class"].as_str() == Some("#32770")
                 })
@@ -499,6 +520,13 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             })
             .collect();
     } else if action == "screenshot" {
+        if let Some(ref tab) = active.browser_tab {
+            let region = super::desktop_browser::computer_region(&app, tab, false)?;
+            if result["browser_region"] != region {
+                active.snapshot = None;
+                return Err("The browser moved during capture. Take a fresh screenshot.".into());
+            }
+        }
         let id = uuid::Uuid::new_v4().to_string();
         result["snapshot_id"] = json!(id);
         result["coordinate_system"] =
@@ -506,7 +534,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
         active.snapshot = Some(Snapshot {
             id,
             captured: Instant::now(),
-            data: json!({"window_id": result["window_id"], "process_id": result["process_id"], "bounds": result["bounds"], "capture_bounds": result["capture_bounds"], "width": result["width"], "height": result["height"]}),
+            data: json!({"window_id": result["window_id"], "process_id": result["process_id"], "bounds": result["bounds"], "capture_bounds": result["capture_bounds"], "width": result["width"], "height": result["height"], "browser_region":result["browser_region"]}),
         });
         result
             .as_object_mut()
@@ -527,6 +555,7 @@ mod tests {
             windows: HashMap::from([("123".into(), 456)]),
             root_window: None,
             dialog_owner: None,
+            browser_tab: None,
             snapshot: Some(Snapshot {
                 id: "fresh".into(),
                 captured: Instant::now(),
@@ -547,6 +576,12 @@ mod tests {
     }
     #[test]
     fn validates_targets_and_consumes_snapshots_without_executing_any_input() {
+        let mut browser = active();
+        browser.browser_tab = Some("tab".into());
+        assert!(prepare(&json!({"action":"key","snapshot_id":"fresh","key":"F12"}), &mut browser).is_err());
+        let click = prepare(&json!({"action":"click","snapshot_id":"fresh","x":20,"y":10}), &mut browser).unwrap();
+        assert_eq!(click["screen_x"], -60);
+        assert_eq!(click["screen_y"], 40);
         let mut bound = active();
         bound.root_window = Some("123".into());
         assert_eq!(

@@ -97,7 +97,7 @@ if ($request.action -eq 'list_windows') {
     $rootOwner = [FileyDesktop]::GetAncestor($handle, 3).ToInt64().ToString()
     $windowClass = [FileyDesktop]::ClassName($handle)
     $dialogOwner = if ($request.dialog_owner_id) { $request.dialog_owner_id } else { $request.root_window_id }
-    if ([FileyDesktop]::IsWindowVisible($handle) -and (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or ($rootOwner -eq $dialogOwner -and $windowClass -eq '#32770'))) {
+    if ([FileyDesktop]::IsWindowVisible($handle) -and (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or (-not $request.strict_browser -and $rootOwner -eq $dialogOwner -and $windowClass -eq '#32770'))) {
       @{ window_id = $_.ToString(); title = [FileyDesktop]::Title($handle); process_id = $processId; minimized = [FileyDesktop]::IsIconic($handle); root_owner_id = $rootOwner; window_class = $windowClass }
     }
   })
@@ -136,6 +136,12 @@ if ($request.action -eq 'screenshot') {
   $captureY = [Math]::Max($rect.Top, $desktop.Top)
   $captureWidth = [Math]::Min($rect.Right, $desktop.Right) - $captureX
   $captureHeight = [Math]::Min($rect.Bottom, $desktop.Bottom) - $captureY
+  if ($request.browser_region) {
+    $region = $request.browser_region
+    if ($region.x -lt $captureX -or $region.y -lt $captureY -or ($region.x + $region.width) -gt ($captureX + $captureWidth) -or ($region.y + $region.height) -gt ($captureY + $captureHeight)) { throw 'Keep the entire browser panel visible before taking a screenshot.' }
+    $captureX = [int]$region.x; $captureY = [int]$region.y
+    $captureWidth = [int]$region.width; $captureHeight = [int]$region.height
+  }
   if ($captureWidth -le 0 -or $captureHeight -le 0) { throw 'Move the window onto the display before capturing it.' }
   $bitmap = [Drawing.Bitmap]::new($captureWidth, $captureHeight)
   $graphics = [Drawing.Graphics]::FromImage($bitmap)
@@ -154,7 +160,7 @@ if ($request.action -eq 'screenshot') {
     if ($stream.Length -gt 4194304) { throw 'Screenshot is too large. Resize the window and try again.' }
     @{ window_id=$request.window_id; process_id=$processId; title=[FileyDesktop]::Title($window); width=$imageWidth; height=$imageHeight;
       bounds=@{ x=$rect.Left; y=$rect.Top; width=$width; height=$height };
-      capture_bounds=@{ x=$captureX; y=$captureY; width=$captureWidth; height=$captureHeight };
+      capture_bounds=@{ x=$captureX; y=$captureY; width=$captureWidth; height=$captureHeight }; browser_region=$request.browser_region;
       image=@{ dataBase64=[Convert]::ToBase64String($stream.ToArray()); mediaType='image/png' } } | ConvertTo-Json -Depth 5 -Compress
   } finally {
     $graphics.Dispose(); $bitmap.Dispose(); $stream.Dispose()

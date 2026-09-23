@@ -77,20 +77,29 @@ export const PLANS: PlanCard[] = [
       "Filey on the web at app.gofiley.com",
     ],
   },
+  {
+    id: "enterprise",
+    kind: "contact",
+    name: "Enterprise",
+    price: "Custom",
+    blurb: "Volume licensing, onboarding and support for larger teams.",
+    features: [
+      "Custom device and seat counts",
+      "Priority onboarding",
+      "Deployment planning and support",
+      "Talk to us about your deployment",
+    ],
+  },
 ];
 
-/* Pro and Enterprise were withdrawn from sale: two plans, one of them free and
- * one bought outright. The Plan type below still carries "pro" / "business" /
- * "enterprise" on purpose — those values exist on real organizations rows, and
- * narrowing the type would make the app fail to read its own database. Anyone
- * already on one keeps every entitlement they had; resolveTier() in license.ts
- * is untouched, so nothing they can do today stops working. */
+/* Legacy Pro and Business values remain readable for existing organizations.
+ * Display-card mapping does not change their resolveTier() entitlements. */
 
 /** Map an org's stored plan value onto its display card. A plan that is no
  *  longer sold has no card of its own, so it shows as Freedom — the closest
  *  thing still on the menu, and never a downgrade in what it implies. */
 export function planCardFor(orgPlan: string | null | undefined): PlanCard {
-  if (orgPlan === "pro" || orgPlan === "business" || orgPlan === "enterprise")
+  if (orgPlan === "pro" || orgPlan === "business")
     return PLANS.find((p) => p.id === "lite")!;
   return PLANS.find((p) => p.id === orgPlan) ?? PLANS[0];
 }

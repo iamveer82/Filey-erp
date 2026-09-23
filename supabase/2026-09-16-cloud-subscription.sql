@@ -1,4 +1,4 @@
--- The $1/month Cloud plan: remember which Dodo subscription pays for an org.
+-- The $5/month Cloud plan: remember which Dodo subscription pays for an org.
 --
 -- `dodo_subscription_id` is how a renewal, a failed card or a cancellation
 -- finds the right organisation months later — the checkout metadata names the

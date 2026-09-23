@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, Globe, PanelRightClose, Plus, RefreshCw, Square, X } from "lucide-react";
-import { desktopBrowserCommand, desktopBrowserSupported, getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, newBrowserPanelTab, registerBrowserViewportSync, layoutDesktopBrowser, type DesktopBrowserRequest } from "../lib/desktopBrowser";
+import { ArrowLeft, ArrowRight, ArrowUp, Globe, PanelRightClose, Plus, RefreshCw, Square, X, Hand, Play } from "lucide-react";
+import { desktopBrowserCommand, desktopBrowserSupported, getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, newBrowserPanelTab, registerBrowserViewportSync, layoutDesktopBrowser, pauseAgentBrowser, closeDesktopBrowserTabs, type DesktopBrowserRequest } from "../lib/desktopBrowser";
+import { disableComputerUse } from "../lib/computerUse";
 
 const SITES = [{ name: "WhatsApp", url: "https://web.whatsapp.com/" }, { name: "Instagram", url: "https://www.instagram.com/" }, { name: "LinkedIn", url: "https://www.linkedin.com/" }];
 
@@ -80,11 +81,25 @@ export default function BrowserPanel() {
     const raw = address.trim();
     if (raw) void act({ action: selected ? "navigate" : "open", tab_id: selected?.id, url: raw.includes("://") ? raw : `https://${raw}` });
   };
+  const takeOver = async () => {
+    setError("");
+    try { await pauseAgentBrowser(!state.paused); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+  const stopWork = async () => {
+    window.dispatchEvent(new Event("filey:stop-agent-browser"));
+    try { await disableComputerUse(); await closeDesktopBrowserTabs(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
   return <aside id="filey-browser-panel" aria-label="Built-in browser" hidden={!state.open}
     className={state.open ? "absolute inset-0 z-30 flex min-h-0 flex-col border-l border-border bg-background xl:relative xl:inset-auto xl:z-auto xl:w-[44%] xl:min-w-[380px] xl:max-w-[760px] xl:shrink-0" : "hidden"}>
     <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
-      <Globe size={16} className="shrink-0 text-muted-foreground" /><span className="text-[13px] font-medium">Browser</span>
-      <span className="ml-auto text-xs text-muted-foreground">{state.tabs.length ? `${state.tabs.length} / 8 tabs` : "In your workspace"}</span>
+      <Globe size={16} className="shrink-0 text-muted-foreground" /><span className="text-[13px] font-medium">{state.agentId ? "Agent browser" : "Browser"}</span>
+      <span className="ml-auto text-xs text-muted-foreground">{state.paused ? "Your control" : state.tabs.length ? `${state.tabs.length} tabs` : ""}</span>
+      {supported && state.tabs.length > 0 && <>
+        <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void takeOver()} aria-label={state.paused ? "Resume agent" : "Take over browser"} title={state.paused ? "Resume agent" : "Take over browser"}>{state.paused ? <Play size={15} /> : <Hand size={15} />}</button>
+        <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void stopWork()} aria-label="Stop browser work" title="Stop browser work"><Square size={13} /></button>
+      </>}
       <button type="button" className="btn-ghost w-9 !px-0" onClick={() => setBrowserPanelOpen(false)} aria-label="Collapse browser" title="Collapse browser"><PanelRightClose size={16} /></button>
     </div>
     {state.tabs.length > 0 && <div role="tablist" aria-label="Browser tabs" className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1.5">
@@ -107,8 +122,8 @@ export default function BrowserPanel() {
     <div ref={host} className="relative min-h-0 flex-1 bg-card">
       {!selected && <div className="flex h-full flex-col items-center justify-center px-6 pb-12 text-center">
         <Globe size={28} strokeWidth={1.25} className="mb-5 text-muted-foreground" />
-        <h2 className="text-lg font-medium">Your browser, beside your work.</h2>
-        <p className="mt-2 max-w-xs text-[13px] leading-relaxed text-muted-foreground">{supported ? "Open a website above, or start with an everyday app. Your tabs stay here when you collapse the panel." : "Browsing inside Filey is available in the Windows desktop app. This web preview shows the panel layout."}</p>
+        <h2 className="text-lg font-medium">A workspace for the web.</h2>
+        <p className="mt-2 max-w-xs text-[13px] leading-relaxed text-muted-foreground">{supported ? state.agentId ? "This conversation has its own browser profile. Open a site, or ask Filey to work here. No extra installation needed." : "Open a website above, or start with an everyday app. Your tabs stay here when you collapse the panel." : "Interactive browsing runs in Filey's Windows desktop app. You can still use Filey's business tools and web research here."}</p>
         {supported && <div className="mt-6 flex flex-wrap justify-center gap-2">{SITES.map(site => <button type="button" key={site.name} disabled={busy} onClick={() => void act({ action: "open", url: site.url })} className="btn-ghost text-xs">{site.name}</button>)}</div>}
       </div>}
     </div>

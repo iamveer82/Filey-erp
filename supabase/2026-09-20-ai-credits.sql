@@ -32,11 +32,15 @@ create table if not exists public.ai_credit_requests (
   input_tokens bigint,
   output_tokens bigint,
   markup_bps integer not null,
+  expires_at timestamptz not null default now() + interval '10 minutes',
   created_at timestamptz not null default now(),
   finished_at timestamptz
 );
 create index if not exists ai_credit_requests_user_date on public.ai_credit_requests(user_id, created_at desc);
 create index if not exists ai_credit_requests_run on public.ai_credit_requests(user_id, run_id);
+-- Safe to re-run after 2026-09-21-ai-video.sql (which also adds expires_at).
+alter table public.ai_credit_requests add column if not exists expires_at timestamptz not null default now() + interval '10 minutes';
+create index if not exists ai_credit_requests_expiry on public.ai_credit_requests(user_id, expires_at) where state = 'reserved';
 create index if not exists ai_credit_orders_user on public.ai_credit_orders(user_id);
 create table if not exists public.ai_credit_ledger (
   id bigint generated always as identity primary key,
@@ -80,10 +84,13 @@ begin
   select * into strict a from ai_credit_accounts where user_id = p_user for update;
 
   -- An interrupted edge worker must not lock funds forever. No uncertain usage
-  -- is charged to the customer; Filey absorbs it. Provider timeout is < 3 min.
+  -- is charged to the customer; Filey absorbs it. Chat holds last 10 minutes;
+  -- accepted asynchronous video jobs extend their hold to 24 hours via expires_at.
+  -- Uses expires_at (same as 2026-09-21-ai-video.sql) so re-running either file
+  -- keeps one expiry rule and never reverts video holds to created_at.
   with expired as (
     update ai_credit_requests set state='released', finished_at=now()
-    where user_id=p_user and state='reserved' and created_at < now()-interval '10 minutes'
+    where user_id=p_user and state='reserved' and expires_at < now()
     returning reserved_micros
   ) select coalesce(sum(reserved_micros),0) into released from expired;
   a.reserved_micros := a.reserved_micros - released;
@@ -109,8 +116,8 @@ begin
       from ai_credit_requests where user_id=p_user and run_id=task_id;
     if spent+a.reserved_micros+amount > a.daily_limit_micros then raise exception 'Daily AI spending limit reached. Adjust it in AI Credits.'; end if;
     if run_spent+amount > a.task_limit_micros then raise exception 'Task spending limit reached. Adjust it in AI Credits or reduce the task.'; end if;
-    insert into ai_credit_requests(id,user_id,run_id,model,state,reserved_micros,markup_bps)
-      values(request_id,p_user,task_id,p_args->>'model','reserved',amount,(p_args->>'markup_bps')::integer);
+    insert into ai_credit_requests(id,user_id,run_id,model,state,reserved_micros,markup_bps,expires_at)
+      values(request_id,p_user,task_id,p_args->>'model','reserved',amount,(p_args->>'markup_bps')::integer, now() + interval '10 minutes');
     a.reserved_micros := a.reserved_micros+amount;
   elsif p_action in ('settle','release') then
     select * into strict r from ai_credit_requests where id=(p_args->>'request_id')::uuid and user_id=p_user for update;
