@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, LockKeyhole } from "lucide-react";
 import { FileySpinner } from "./FileySpinner";
 import { BILLING_UNAVAILABLE } from "../lib/billingService";
@@ -63,7 +63,8 @@ export default function PaymentReview({
   }, [opened, onPay, onVerify]);
   // Desktop checkout lives in the system browser. Verify when the user comes
   // back, without polling Supabase or treating a redirect as proof of payment.
-  useEffect(() => {
+  // Attach before painting the return screen so an immediate focus is not lost.
+  useLayoutEffect(() => {
     if (!opened || paid) return;
     const returned = () => {
       if (document.visibilityState !== "hidden") void submit();
