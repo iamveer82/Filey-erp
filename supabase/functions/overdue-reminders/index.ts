@@ -60,13 +60,13 @@ Deno.serve(async (req) => {
   if (!org) return Response.json({ error: "owner org not found" }, { status: 400 });
 
   // Issued (non-draft, unpaid) invoices past their due date, with an email.
+  // Cancelled/void invoices must never be chased.
   const { data, error } = await supa
     .from("invoice_docs")
     .select("id, number, customer_name, customer_email, due_date, currency, share_token, status")
     .eq("org_id", org)
     .lt("due_date", today)
-    .neq("status", "paid")
-    .neq("status", "draft");
+    .not("status", "in", "(paid,draft,cancelled,void,voided,deleted)");
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   let sent = 0;

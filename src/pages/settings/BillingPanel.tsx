@@ -27,6 +27,32 @@ import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout"
 import { isLocalMode } from "../../lib/dataMode";
 import PaymentReview from "../../components/PaymentReview";
 import SubscriptionRefunds from "../../components/SubscriptionRefunds";
+import { Modal, Field } from "../../components/ui";
+import { invokeFn } from "../../lib/supabase";
+
+/** Contact-sales lead → lead-contact edge function (website or app source). */
+async function submitLead(input: {
+  name: string;
+  phone: string;
+  email?: string;
+  message?: string;
+}): Promise<void> {
+  const { supabase } = await import("../../lib/supabase");
+  if (!supabase) throw new Error("Connect your Filey account to contact sales.");
+  const { data, error } = await invokeFn(supabase, "lead-contact", {
+    body: {
+      name: input.name,
+      phone: input.phone,
+      email: input.email || "",
+      message: input.message || "",
+      source: "app",
+      purpose: "enterprise",
+    },
+  });
+  if (error) throw new Error("We couldn't send your request. Please try again shortly.");
+  const body = data as { error?: string } | null;
+  if (body?.error) throw new Error(body.error);
+}
 
 export default function BillingPanel() {
   const { toast } = useUI();
@@ -41,6 +67,12 @@ export default function BillingPanel() {
   const [ownershipLoading, setOwnershipLoading] = useState(true);
   const [invoicesUsed, setInvoicesUsed] = useState<number | null>(null);
   const [capped, setCapped] = useState(true);
+  const [contactOpen, setContactOpen] = useState<PlanCard | null>(null);
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactBusy, setContactBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -391,6 +423,14 @@ export default function BillingPanel() {
                         ? "Cancel Pro in the billing portal to return to Basic"
                         : "Everything in Basic is part of your plan"}
                     </p>
+                  ) : p.kind === "contact" ? (
+                    <button
+                      className="btn-ghost w-full"
+                      onClick={() => setContactOpen(p)}
+                      disabled={busy !== null}
+                    >
+                      Contact sales
+                    </button>
                   ) : (
                     <button
                       className={cn(
@@ -406,11 +446,9 @@ export default function BillingPanel() {
                     >
                       {busy === p.id
                         ? "Redirecting…"
-                        : p.kind === "contact"
-                          ? "Contact sales"
-                          : p.kind === "license"
-                            ? `Get ${p.name} - ${p.price}`
-                            : `Get ${p.name}`}
+                        : p.kind === "license"
+                          ? `Get ${p.name} - ${p.price}`
+                          : `Get ${p.name}`}
                     </button>
                   )}
                 </div>
@@ -419,6 +457,99 @@ export default function BillingPanel() {
           </div>
         </SettingsSection>
       </SettingsPanel>
+
+      <Modal
+        open={!!contactOpen}
+        onClose={() => setContactOpen(null)}
+        title={`Talk to sales — Filey ${contactOpen?.name ?? ""}`}
+        size="md"
+      >
+        <form
+          className="space-y-4"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!contactOpen) return;
+            if (!contactName.trim() || contactPhone.replace(/\D/g, "").length < 6) {
+              toast.error("Please give a name and a valid phone number.");
+              return;
+            }
+            setContactBusy(true);
+            try {
+              await submitLead({
+                name: contactName.trim(),
+                phone: contactPhone.trim(),
+                email: contactEmail.trim(),
+                message:
+                  contactMessage.trim() ||
+                  `Interested in Filey ${contactOpen.name} (${contactOpen.price}).`,
+              });
+              toast.success("Request sent — we'll be in touch shortly.");
+              setContactOpen(null);
+              setContactName("");
+              setContactPhone("");
+              setContactEmail("");
+              setContactMessage("");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : String(err));
+            } finally {
+              setContactBusy(false);
+            }
+          }}
+        >
+          <p className="text-sm text-muted-foreground">
+            Leave your details and we'll reach out about Filey {contactOpen?.name}.
+          </p>
+          <Field label="Name">
+            <input
+              className="input"
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              required
+              autoComplete="name"
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              className="input"
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+              required
+              inputMode="tel"
+              autoComplete="tel"
+            />
+          </Field>
+          <Field label="Email (optional)">
+            <input
+              className="input"
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </Field>
+          <Field label="Message (optional)">
+            <textarea
+              className="textarea"
+              rows={3}
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+            />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setContactOpen(null)}
+              disabled={contactBusy}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={contactBusy}>
+              {contactBusy ? "Sending…" : "Send request"}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </>
   );
 }

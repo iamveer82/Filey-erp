@@ -90,6 +90,11 @@ try {
   const creditMigration=sql('supabase/2026-09-20-ai-credits.sql')+'\n'+sql('supabase/2026-09-21-ai-credit-topup-fee.sql');
   console.log(run('psql',creditArgs,"create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('test.uid',true),'')::uuid $$; grant usage on schema public,auth to authenticated,service_role;\n"
     +creditMigration+'\n'+creditMigration+'\n'+sql('scripts/fixtures/ai-credit-assertions.sql')).trim());
+  // Existing pre-video installs have the wallet table, but no expires_at.
+  // Dropping the new column in this disposable DB reproduces that upgrade.
+  run('psql', creditArgs, 'alter table ai_credit_requests drop column expires_at cascade;\n' + creditMigration);
+  assert.equal(run('psql', [...creditArgs, '-tAc', "select count(*) from information_schema.columns where table_name='ai_credit_requests' and column_name='expires_at'"]).trim(), '1');
+  console.log('PASS: older wallet schema upgrades before the expiry index is created.');
   const creditRaces=await Promise.allSettled(Array.from({length:8},(_,i)=>promisify(execFile)(exe('psql'),[...creditArgs,'-tAc',
     `set role service_role; select filey_ai_wallet('reserve','30000000-0000-4000-8000-000000000003','{"request_id":"70000000-0000-4000-8000-${String(i+1).padStart(12,'0')}","run_id":"80000000-0000-4000-8000-${String(i+1).padStart(12,'0')}","model":"fixture/model","amount_micros":1000000,"markup_bps":2000}');`],{encoding:'utf8',windowsHide:true})));
   assert.equal(creditRaces.filter(r=>r.status==='fulfilled').length,5);

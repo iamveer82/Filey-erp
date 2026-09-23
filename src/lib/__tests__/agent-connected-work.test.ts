@@ -1,16 +1,16 @@
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { billing, crm, setCacheOrg, type InvoiceDoc, type InvoiceDocSummary } from "../api";
-import { approvalArgs, runTool, TOOLS } from "../aiTools";
+import { approvalArgs, runTool, TOOLS, endTurn } from "../aiTools";
 import { offeredTools } from "../agentHarness";
 import { setAgentMode } from "../agentMode";
 import { setCapabilityEnabled } from "../capabilities";
 import { setDataMode } from "../dataMode";
 import { reactToPdfBytes } from "../reactPdf";
 import { deliverFile } from "../agentFiles";
-import { desktopBrowserCommand } from "../desktopBrowser";
+import { desktopBrowserCommand, getBrowserPanelState } from "../desktopBrowser";
 import { runComputerUse } from "../computerUse";
-import { bridgeState, sendWaFile } from "../waBridge";
+import { bridgeState, sendWaFile, sendWa } from "../waBridge";
 import { waLogAdd } from "../waLog";
 import { log } from "../log";
 import * as zernio from "../zernio";
@@ -22,9 +22,9 @@ vi.mock("../../components/InvoiceExportSheet", () => ({ default: () => null }));
 vi.mock("../../components/StampSignatureSettings", () => ({ loadCompanyStampSig: async () => ({}), EMPTY_STAMP_SIG: {} }));
 vi.mock("../../components/BankDetails", () => ({ loadBankInfo: async () => ({}), EMPTY_BANK: {} }));
 vi.mock("../agentFiles", () => ({ deliverFile: vi.fn() }));
-vi.mock("../desktopBrowser", () => ({ desktopBrowserSupported: () => true, desktopBrowserCommand: vi.fn() }));
+vi.mock("../desktopBrowser", () => ({ desktopBrowserSupported: () => true, desktopBrowserCommand: vi.fn(), getBrowserPanelState: vi.fn(() => ({ paused: false })) }));
 vi.mock("../computerUse", () => ({ runComputerUse: vi.fn(async () => ({ windows: [] })) }));
-vi.mock("../waBridge", () => ({ hasDesktop: true, bridgeState: vi.fn(), sendWaFile: vi.fn() }));
+vi.mock("../waBridge", () => ({ hasDesktop: true, bridgeState: vi.fn(), sendWaFile: vi.fn(), sendWa: vi.fn() }));
 vi.mock("../waLog", () => ({ waLogAdd: vi.fn() }));
 vi.mock("../workServices", () => ({
   WORK_SERVICES: [{ id: "local-test", access: "local" }],
@@ -78,8 +78,21 @@ beforeEach(() => {
   } });
   vi.mocked(bridgeState).mockReset().mockResolvedValue({ state: "connected" });
   vi.mocked(sendWaFile).mockReset().mockResolvedValue("provider-id");
+  vi.mocked(sendWa).mockReset().mockResolvedValue("provider-id");
   vi.spyOn(zernio, "listAccounts").mockResolvedValue([{ id: "social-1", platform: "instagram" }]);
   vi.spyOn(zernio, "createPost").mockResolvedValue({ id: "post-1", status: "published" });
+});
+it("requires provider acceptance and prevents text delivery after a workspace switch", async () => {
+  vi.mocked(sendWa).mockRejectedValueOnce(new Error("Timeout: check the chat before retrying"));
+  expect(await call("send_whatsapp", { to: "971500000001", text: "Fixture" })).toMatchObject({ retry_safe: false });
+  expect(waLogAdd).not.toHaveBeenCalled();
+  vi.mocked(sendWa).mockClear();
+  vi.mocked(bridgeState).mockImplementationOnce(async () => {
+    setCacheOrg("changed-workspace", "changed-user");
+    return { state: "connected" };
+  });
+  await expect(call("send_whatsapp", { to: "971500000001", text: "Fixture" })).rejects.toMatchObject({ name: "AbortError" });
+  expect(sendWa).not.toHaveBeenCalled();
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -90,6 +103,16 @@ afterEach(() => {
 });
 
 describe("invoice WhatsApp tools", () => {
+  it("exports an invoice PDF into only its own turn without sending or changing the invoice", async () => {
+    const result = await runTool("export_invoice_pdf", { invoice_number: "INV-12" }, () => true, true, "owner-pdf-turn");
+    expect(result).toMatchObject({ ok: true, file: "INV-12.pdf" });
+    expect(vi.mocked(deliverFile).mock.calls[0][0].name).toBe("INV-12.pdf");
+    expect(Array.from(vi.mocked(deliverFile).mock.calls[0][0].bytes)).toEqual(Array.from(PDF));
+    expect(endTurn("different-turn")).toEqual([]);
+    expect(endTurn("owner-pdf-turn")).toEqual([{ name: "INV-12.pdf", path: "C:/Exports/INV-12.pdf" }]);
+    expect(billing.setStatus).not.toHaveBeenCalled();
+    expect(sendWaFile).not.toHaveBeenCalled();
+  });
   it.each(["971abc12345", "++971501234567", "0501234567", "+0001234567"])("rejects malformed recipient %s before PDF export or sending", async (to) => {
     expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12", to })).toMatchObject({ error: expect.stringMatching(/international phone number/) });
     expect(reactToPdfBytes).not.toHaveBeenCalled();
@@ -185,6 +208,15 @@ describe("invoice WhatsApp tools", () => {
 });
 
 describe("connected work discovery and permissions", () => {
+  it("does not reacquire computer access after takeover while approval is open", async () => {
+    const session = vi.fn(async () => 42);
+    const approve = () => {
+      vi.mocked(getBrowserPanelState).mockReturnValueOnce({ paused: true } as ReturnType<typeof getBrowserPanelState>);
+      return true;
+    };
+    await expect(runTool("computer_use", { action: "list_windows" }, approve, true, "turn", undefined, session)).rejects.toMatchObject({ name: "AbortError" });
+    expect(session).not.toHaveBeenCalled();
+  });
   it("starts in-app computer access only after owner, capability, mode and approval checks", async () => {
     const session = vi.fn(async () => 42);
     const args = { action: "list_windows" };

@@ -55,11 +55,11 @@ serve(async (req) => {
     );
     const allowed = await rateLimit(adminClient, user.id, "run_tool", 15, 3600);
     if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
-    await logAction(adminClient, user.id, "run_tool", { jobId: jobId ?? "" });
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}) as { jobId?: string });
     jobId = body?.jobId ?? null;
     if (!jobId) return json({ error: "jobId is required" }, 400);
+    await logAction(adminClient, user.id, "run_tool", { jobId });
 
     // RLS ensures the job belongs to the caller.
     const { data: job, error: jErr } = await client

@@ -142,7 +142,13 @@ export async function pushCollection(
   table: string,
   rows: Record<string, any>[],
   onFailure?: (failure: SyncFailure) => void,
+  expectedUserId?: string,
 ): Promise<(string | number)[]> {
+  const checkSession = async () => {
+    assertWorkspaceCurrent();
+    if (expectedUserId && (await freshSession(supa))?.user.id !== expectedUserId)
+      throw new Error("Your cloud account changed during upload. Remaining changes are still on this device.");
+  };
   const failed: (string | number)[] = [];
   const ready = rows.filter(row => {
     if (["invoice_doc_items", "invoice_payments"].includes(table) && row.invoice_id == null) {
@@ -160,7 +166,7 @@ export async function pushCollection(
       if (batch.length && characters + size > 500_000) break;
       batch.push(ready[offset++]); characters += size;
     }
-    assertWorkspaceCurrent();
+    await checkSession();
     const requests = batch.map(({ sync_revision, ...row }) => ({ row, expected: sync_revision ?? null }));
     let results: any[] = [];
     if (batch.length > 1 && !batchUnavailable.has(supa)) {
@@ -174,10 +180,14 @@ export async function pushCollection(
     if (!results.length) {
       // Compatibility with servers that have not installed the batch migration.
       // Never retry a network failure: the server may have committed the batch.
-      for (const request of requests) results.push(await supa.rpc("sync_record", {
-        p_table: table, p_row: request.row, p_expected: request.expected,
-      }));
+      for (const request of requests) {
+        await checkSession();
+        results.push(await supa.rpc("sync_record", {
+          p_table: table, p_row: request.row, p_expected: request.expected,
+        }));
+      }
     }
+    await checkSession();
     const revisions = new Map<string | number, number>();
     const conflicts: Record<string, any>[] = [];
     for (let i = 0; i < batch.length; i++) {
@@ -490,7 +500,7 @@ export async function syncNow(
         if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? false) : false;
         return c;
       });
-      const failed = await pushCollection(supa, t, cleaned, report);
+      const failed = await pushCollection(supa, t, cleaned, report, uid);
       if (failed.length) failedByTable[t] = [...new Set([...(failedByTable[t] ?? []), ...failed])];
       if (rows.length) pushedAny = true;
     }

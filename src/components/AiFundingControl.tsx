@@ -29,7 +29,7 @@ export function useAiFunding() {
   return choice;
 }
 
-export default function AiFundingControl({ disabled = false }: { disabled?: boolean }) {
+export default function AiFundingControl({ disabled = false, compact = false }: { disabled?: boolean; compact?: boolean }) {
   const choice = useAiFunding();
   const [open, setOpen] = useState(false),
     [data, setData] = useState<CreditStatus | null>(null),
@@ -86,6 +86,7 @@ export default function AiFundingControl({ disabled = false }: { disabled?: bool
           className="composer-control"
           disabled={disabled}
           aria-label="AI payment method"
+          title={choice.funding === "free" ? "Free AI" : choice.funding === "credits" ? "Filey Credits" : "My API key"}
         >
           {choice.funding === "free" ? (
             <Sparkles size={14} />
@@ -94,14 +95,14 @@ export default function AiFundingControl({ disabled = false }: { disabled?: bool
           ) : (
             <KeyRound size={14} />
           )}
-          <span>
+          <span className={compact ? "sr-only" : undefined}>
             {choice.funding === "free"
               ? "Free AI"
               : choice.funding === "credits"
                 ? "Filey Credits"
                 : "My API key"}
           </span>
-          <ChevronDown size={12} />
+          {!compact && <ChevronDown size={12} />}
         </button>
       </PopoverTrigger>
       <PopoverContent

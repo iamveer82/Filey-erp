@@ -62,7 +62,10 @@ it("opens named history and memory dialogs and closes them with Escape", async (
     </MemoryRouter>
   );
   for (const name of ["Chat history", "Agent memory"]) {
-    fireEvent.click(screen.getByRole("button", { name }));
+    if (name === "Agent memory") {
+      fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Memory" }));
+    } else fireEvent.click(screen.getByRole("button", { name }));
     const dialog = screen.getByRole("dialog", { name });
     expect(
       within(dialog).getByRole("button", { name: "Close dialog" })
@@ -110,6 +113,12 @@ it("preserves access on opening and reflects an explicit approval-mode change in
     dialog.getByRole("switch", { name: "Customers & CRM disabled" })
   ).not.toBeChecked();
   expect(isCapabilityEnabled("crm")).toBe(false);
+  const optionalComputers = dialog.getByRole("switch", { name: "Agent computers (optional) disabled" });
+  expect(optionalComputers).not.toBeChecked();
+  fireEvent.click(optionalComputers);
+  expect(isCapabilityEnabled("agent_computers")).toBe(true);
+  fireEvent.click(dialog.getByRole("switch", { name: "Agent computers (optional) enabled" }));
+  expect(isCapabilityEnabled("agent_computers")).toBe(false);
   expect(gateFor("mark_invoice_paid", true)).toBe("ask");
   fireEvent.click(dialog.getByRole("radio", { name: "Manual" }));
   fireEvent.click(dialog.getByRole("button", { name: "Done" }));
@@ -134,10 +143,9 @@ it("keeps the chat minimal and sends only the user's composed message", async ()
       <AgentChat />
     </MemoryRouter>
   );
-  expect(screen.getByRole("link", { name: "AI settings" })).toHaveAttribute(
-    "href",
-    "/settings?section=ai"
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
+  expect(screen.getByRole("menuitem", { name: "AI settings" })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   expect(screen.queryByRole("button", { name: "Find unpaid invoices" })).not.toBeInTheDocument();
   expect(screen.queryByText("Open AI settings")).not.toBeInTheDocument();
   expect(screen.queryByText("Choose a model")).not.toBeInTheDocument();
@@ -163,7 +171,7 @@ it("keeps the chat minimal and sends only the user's composed message", async ()
   expect(enable).not.toHaveBeenCalled();
 });
 
-it("starts desktop computer access on chat open and keeps it available across completed turns", async () => {
+it("starts desktop computer access automatically for an approved task without an enable switch", async () => {
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   vi.spyOn(computer, "computerUseSupported").mockReturnValue(true);
   const enable = vi.spyOn(computer, "enableComputerUse").mockResolvedValue(42);
@@ -178,11 +186,14 @@ it("starts desktop computer access on chat open and keeps it available across co
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
   expect(screen.queryByRole("button", { name: "Enable for 5 minutes" })).not.toBeInTheDocument();
-  await waitFor(() => expect(enable).toHaveBeenCalledOnce());
+  await act(async () => {});
+  expect(enable).not.toHaveBeenCalled();
+  disable.mockClear(); // Selecting a conversation revokes the previous browser grant.
   expect(screen.queryByText("Computer access")).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Open my browser" } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Computer task complete.");
+  expect(enable).toHaveBeenCalledOnce();
   expect(enable.mock.calls.every(args => args.length === 0)).toBe(true);
   expect(disable).not.toHaveBeenCalled();
   await expect(session()).rejects.toMatchObject({ name: "AbortError" });

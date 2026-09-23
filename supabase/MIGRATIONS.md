@@ -1,5 +1,19 @@
 # Supabase migrations — apply order & convention
 
+## 23 September 2026 batch (voyrjqgaypiylwskkwpr)
+
+Applied with `supabase db query --linked -f <file>` (this CLI has no `db execute`):
+
+- `2026-09-23-receipt-stamp-signature.sql` — `payment_receipts.stamp` / `signature`
+- `2026-09-20-ai-credits.sql` — hosted AI wallet ledger (+ `expires_at`, re-run safe)
+- `2026-09-21-ai-credit-topup-fee.sql` — `ai_credit_orders.service_fee_cents`
+- `2026-09-21-ai-video.sql` — video wallet columns/end-state wallet shape
+- `tool-jobs.sql` — `tool_jobs` queue for the run-tool worker
+
+Verified in `information_schema`: `payment_receipts.stamp`, `payment_receipts.signature`, `ai_credit_orders.service_fee_cents`, `tool_jobs.status`.
+
+Edge secrets for this batch: `DODO_PAYMENTS_API_KEY`, `DODO_PAYMENTS_ENVIRONMENT=live_mode`, `DODO_AI_CREDIT_PACKS` (live one-time products). Functions already deployed: `dodo`, `ai-credits`, `lead-contact`, `run-tool`, `overdue-reminders`, `agent-jobs`. Still required before enabling paid AI chat: `FILEY_AI_OPENROUTER_KEY` (or HF pair). Product IDs are listed in [`docs/ai-credits.md`](../docs/ai-credits.md).
+
 ## September 22 sync batches
 
 Apply `2026-09-22-batched-sync.sql` after `2026-09-12-sync-conflict-protection.sql`
@@ -65,7 +79,7 @@ Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>
 6. `verify-rls.sql` — structural checks. Also run `npm run test:rls:local` against a disposable PostgreSQL cluster to verify denied writes/deletes and stale-write rejection; policy presence alone does not prove isolation.
 7. `2026-09-13-expense-entry.sql` — itemized expense details and receipt references, atomic expense/ledger save and deletion, and submission retry protection. Apply before shipping the purchase-entry page. Existing business rows are not rewritten.
 8. `2026-09-15-dodo-payments.sql` — `licenses.dodo_payment_id` plus the partial unique index the Dodo webhook uses for idempotency. Apply before deploying the `dodo` function, or a retried webhook can grant a second licence. See [Dodo Payments](../docs/dodo-payments.md).
-9. `2026-09-16-cloud-subscription.sql` — `organizations.dodo_customer_id` / `dodo_subscription_id` for the $1/month Cloud plan, with a unique index on the subscription and UPDATE revoked from app users (same rule as `billing-columns-lockdown.sql`). No plan values change: every "is this paid?" check already reads `plan <> 'free'` with a live status.
+9. `2026-09-16-cloud-subscription.sql` — `organizations.dodo_customer_id` / `dodo_subscription_id` for the $5/month Cloud plan, with a unique index on the subscription and UPDATE revoked from app users (same rule as `billing-columns-lockdown.sql`). No plan values change: every "is this paid?" check already reads `plan <> 'free'` with a live status.
 10. `2026-09-16-cloud-access.sql` — makes cloud the paid tier: `filey_cloud_access()` plus restrictive INSERT/UPDATE/DELETE policies on every business table, `organizations.cloud_grandfathered` (backfilled true for every org that exists when it runs), and the invoice cap exempting grandfathered orgs. SELECT is deliberately never gated, and the whole gate is inert until `platform_config.licensing_enforced = 'true'`. Apply last, after every other migration. See [Dodo Payments](../docs/dodo-payments.md).
 11. `2026-09-18-pending-entitlements.sql` — lets someone buy on the website before they have an account: the webhook parks the purchase against their email in `pending_entitlements` (RLS on, zero policies, service-role only) and `filey_claim_entitlements()` turns it into a licence or a paid plan at first sign-in, using the caller's own Supabase-verified email. Also adds `filey_users_by_email`, a two-column view of auth.users granted to service_role alone.
 12. `2026-09-19-ultra-cloud-access.sql` — Ultra includes Filey on the web: `filey_org_owner_licensed(org)` and a third door in `filey_cloud_access()` and `enforce_free_invoice_cap()` — a workspace whose OWNER holds an active licence may save to the cloud, uncapped. The cap's error text now names Basic, Pro and Ultra. **Applied 2026-09-19** through the management API and verified by reading all three function bodies back. Rollback: re-run `2026-09-16-cloud-access.sql`.

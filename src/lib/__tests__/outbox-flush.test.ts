@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // A table whose name starts with "doomed" always fails with a unique-violation;
 // "flaky" fails with a network error; everything else succeeds.
 const attempted: string[] = [];
+const state = vi.hoisted(() => ({ afterWrite: () => {} }));
 vi.mock("../supabase", () => {
   const result = (t: string) =>
     t.startsWith("doomed")
@@ -22,6 +23,7 @@ vi.mock("../supabase", () => {
       from(t: string) {
         const done = () => {
           attempted.push(t);
+          state.afterWrite();
           return Promise.resolve(result(t));
         };
         return {
@@ -34,7 +36,7 @@ vi.mock("../supabase", () => {
   };
 });
 
-const { flushOutbox, outboxOpIsDoomed } = await import("../api");
+const { flushOutbox, outboxOpIsDoomed, setCacheOrg, erp } = await import("../api");
 
 const queue = (ops: { k: string; t: string; id?: number; row?: unknown }[]) =>
   localStorage.setItem(
@@ -52,6 +54,8 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("filey_data_mode", "cloud");
   attempted.length = 0;
+  state.afterWrite = () => {};
+  setCacheOrg(null);
 });
 
 describe("outboxOpIsDoomed", () => {
@@ -69,6 +73,26 @@ describe("outboxOpIsDoomed", () => {
 });
 
 describe("flushOutbox", () => {
+  it.each(["mode", "account"])("stops replay when the %s changes during the previous request", async kind => {
+    queue([
+      { k: "insert", t: "products", row: { name: "First" } },
+      { k: "update", t: "orders", id: 3, row: { status: "paid" } },
+    ]);
+    state.afterWrite = () => {
+      if (kind === "mode") localStorage.setItem("filey_data_mode", "local");
+      else setCacheOrg("another-org", "another-user");
+    };
+    await flushOutbox();
+    expect(attempted).toEqual(["products"]);
+    expect(remaining()).toHaveLength(1);
+  });
+
+  it("does not send a new save to a different store after awaiting queued cloud writes", async () => {
+    queue([{ k: "insert", t: "products", row: { name: "Queued" } }]);
+    state.afterWrite = () => localStorage.setItem("filey_data_mode", "local");
+    await expect(erp.updateProduct(1, { name: "New cloud edit" })).rejects.toThrow("workspace changed");
+    expect(attempted).toEqual(["products"]);
+  });
   it("preserves unattributed or other-account changes without replaying them", async () => {
     localStorage.setItem(
       "outbox",

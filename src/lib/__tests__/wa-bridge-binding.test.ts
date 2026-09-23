@@ -89,18 +89,27 @@ it("does not claim a pairing when the native connection fails", async () => {
   expect(localStorage.getItem("filey.wa_bridge.account")).toBeNull();
 });
 
+it("validates and normalizes the owner number before changing access", async () => {
+  const bridge = await import("../waBridge");
+  expect(bridge.setBridgeConfig({ ownerNumber: "+971 50 000 0002" }).ownerNumber).toBe("971500000002");
+  expect(() => bridge.setBridgeConfig({ ownerNumber: "customer-971500000003" })).toThrow("full phone number");
+  expect(bridge.getBridgeConfig().ownerNumber).toBe("971500000002");
+  await bridge.startBridge();
+  expect(rpc).toHaveBeenCalledWith("wa_bridge_start", { ownerNumber: "971500000002" });
+});
+
 it("resumes a bound account only after authentication and stops on sign-out", async () => {
   localStorage.setItem("filey.wa_bridge.account", "org:user:one");
   session.account = null;
   const bridge = await import("../waBridge");
   await bridge.autoStartBridge();
-  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_start");
+  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_start", expect.anything());
   session.account = "org:user:one";
   await bridge.autoStartBridge();
-  expect(rpc).toHaveBeenCalledWith("wa_bridge_start");
+  expect(rpc).toHaveBeenCalledWith("wa_bridge_start", { ownerNumber: "" });
   rpc.mockClear();
   session.account = null;
   await bridge.autoStartBridge();
   expect(rpc).toHaveBeenCalledWith("wa_bridge_stop");
-  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_start");
+  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_start", expect.anything());
 });

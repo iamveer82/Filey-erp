@@ -16,6 +16,8 @@ export interface WaLogEntry {
   from: string;
   name?: string;
   text: string;
+  /** A user-requested /new starts fresh context without deleting the log. */
+  sessionStart?: boolean;
   document?: { key: string; filename: string; channel: "whatsapp" | "sms"; outcome: "draft" | "handed_off" | "accepted" | "observed_sent" | "unknown" };
 }
 

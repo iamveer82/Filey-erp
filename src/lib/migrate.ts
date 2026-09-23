@@ -181,7 +181,7 @@ export async function migrateLocalToCloud(
     const report = (failure: SyncFailure) => failures.push(failure);
     const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report) : { rows, failed: [] };
     const prepared = prepareSyncRows(uploaded.rows, uid, t, report);
-    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report)];
+    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report, uid)];
     // This upload does not execute queued deletions; automatic sync owns them.
     await journalCommit(pending.v, [t], { [t]: [...failed, ...(pending.tables[t]?.deleted ?? [])] });
     out.push({

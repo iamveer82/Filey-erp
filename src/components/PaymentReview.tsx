@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowUpRight, LockKeyhole } from "lucide-react";
 import { FileySpinner } from "./FileySpinner";
 import { BILLING_UNAVAILABLE } from "../lib/billingService";
@@ -22,6 +22,7 @@ export default function PaymentReview({
   onVerify: () => Promise<boolean>;
 }) {
   const lock = useRef(false);
+  const confirmed = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(false);
@@ -31,8 +32,8 @@ export default function PaymentReview({
   useEffect(() => {
     heading.current?.focus();
   }, []);
-  async function submit() {
-    if (lock.current) return;
+  const submit = useCallback(async () => {
+    if (lock.current || confirmed.current) return;
     lock.current = true;
     setBusy(true);
     setError("");
@@ -40,6 +41,7 @@ export default function PaymentReview({
     try {
       if (opened) {
         const verified = await onVerify();
+        confirmed.current = verified;
         setPaid(verified);
         setNotice(
           verified
@@ -58,7 +60,21 @@ export default function PaymentReview({
       lock.current = false;
       setBusy(false);
     }
-  }
+  }, [opened, onPay, onVerify]);
+  // Desktop checkout lives in the system browser. Verify when the user comes
+  // back, without polling Supabase or treating a redirect as proof of payment.
+  useEffect(() => {
+    if (!opened || paid) return;
+    const returned = () => {
+      if (document.visibilityState !== "hidden") void submit();
+    };
+    window.addEventListener("focus", returned);
+    document.addEventListener("visibilitychange", returned);
+    return () => {
+      window.removeEventListener("focus", returned);
+      document.removeEventListener("visibilitychange", returned);
+    };
+  }, [opened, paid, submit]);
   return (
     <section aria-label="Payment" className="mx-auto w-full max-w-xl space-y-6">
       <button

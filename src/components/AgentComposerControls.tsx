@@ -57,8 +57,8 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} className="composer-control min-w-0 max-w-full" aria-label={`Reasoning effort: ${EFFORT_LABELS[selected]}`} title={`${model} · ${EFFORT_LABELS[selected]} effort`}>
         <Zap key={selected} size={14} className="effort-change shrink-0" fill={selected === "auto" ? "none" : "currentColor"} />
-        <span className="max-w-[132px] truncate text-foreground">{model}</span>
-        <span className="shrink-0 text-muted-foreground">{EFFORT_LABELS[selected]}</span>
+        <span className="max-w-[112px] truncate text-foreground sm:max-w-[160px]">{model}</span>
+        <span className="hidden shrink-0 text-muted-foreground sm:inline">{EFFORT_LABELS[selected]}</span>
         <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
       </button>
     </PopoverTrigger>

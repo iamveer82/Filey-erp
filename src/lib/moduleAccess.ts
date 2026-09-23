@@ -47,7 +47,7 @@ const toolModules: Record<string,string> = {
   list_my_files:"files",use_saved_file:"files",run_file_tool:"tools",list_file_tools:"tools",read_attached_document:"tools",
 };
 const domains: Record<string,string> = { sales:"invoicing",inventory:"inventory",accounting:"accounting",crm:"crm",people:"people",logistics:"delivery-challans",messaging:"integrations",social:"marketing",reminders:"follow-ups" };
-const ADMIN_TOOLS = new Set(["run_shell","computer_use","browser","workspace_browser","http_fetch"]);
+const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browser","workspace_browser","http_fetch"]);
 /** Tools that belong to no business module: orientation, the agent's own
  *  memory and skills, public web/reference reads, and per-account secrets
  *  (credentialStore scopes those to the signed-in workspace already). Listed
@@ -55,7 +55,7 @@ const ADMIN_TOOLS = new Set(["run_shell","computer_use","browser","workspace_bro
  *  module-access-coverage.test.ts fails the build instead of the user. */
 const MODULE_FREE = new Set([
   "get_stats","current_time","open_page",
-  "remember","recall",
+  "remember","recall","search_conversations",
   "list_skills","use_skill","learn_skill","import_skill",
   "list_toolsets","use_toolset",
   "generate_image","work_service",

@@ -39,7 +39,7 @@ do $$ declare u uuid; n integer; a jsonb; rejected boolean; begin
   assert (select sum(amount_micros) from ai_credit_ledger where user_id=u)=-60000,'Ledger must equal balance';
   u:='30000000-0000-4000-8000-000000000002';
   perform filey_ai_wallet('reserve',u,'{"request_id":"50000000-0000-4000-8000-000000000003","run_id":"60000000-0000-4000-8000-000000000003","amount_micros":500000,"model":"fixture/model","markup_bps":2000}');
-  update ai_credit_requests set created_at=now()-interval '11 minutes' where user_id=u;
+  update ai_credit_requests set expires_at=now()-interval '1 minute' where user_id=u;
   a:=filey_ai_wallet('status',u);
   assert (a->>'reserved_micros')::bigint=0,'Crashed workers must release stale holds';
   perform filey_ai_wallet('settle',u,'{"request_id":"50000000-0000-4000-8000-000000000003","charged_micros":60000}');

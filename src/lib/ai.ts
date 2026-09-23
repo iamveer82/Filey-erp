@@ -160,6 +160,10 @@ export interface AiPersona {
 }
 
 const PERSONA_KEY = "filey.ai.persona";
+const personaKey = () => {
+  const account = getCacheScope();
+  return account ? `${PERSONA_KEY}:${encodeURIComponent(account)}` : null;
+};
 const PERSONA_DEFAULT: AiPersona = {
   userName: "",
   role: "",
@@ -171,8 +175,14 @@ const PERSONA_DEFAULT: AiPersona = {
 
 export function getPersona(): AiPersona {
   try {
-    const raw = localStorage.getItem(PERSONA_KEY);
-    if (!raw) return { ...PERSONA_DEFAULT };
+    const key = personaKey();
+    const raw = key ? localStorage.getItem(key) : null;
+    if (!raw) {
+      // Only the cosmetic orb color can carry over from an unattributed legacy
+      // profile. Names and business roles must never leak to the next account.
+      const legacy = JSON.parse(localStorage.getItem(PERSONA_KEY) || "{}");
+      return { ...PERSONA_DEFAULT, ...(/^#[0-9a-f]{6}$/i.test(legacy?.orbColor) ? { orbColor: legacy.orbColor } : {}) };
+    }
     return { ...PERSONA_DEFAULT, ...(JSON.parse(raw) as Partial<AiPersona>) };
   } catch {
     console.error("Failed to parse AI persona from localStorage");
@@ -182,7 +192,11 @@ export function getPersona(): AiPersona {
 
 export function setPersona(patch: Partial<AiPersona>): AiPersona {
   const next = { ...getPersona(), ...patch };
-  safeSetItem(PERSONA_KEY, JSON.stringify(next));
+  const key = personaKey();
+  if (!key && Object.keys(patch).some(name => name !== "orbColor"))
+    throw new Error("Sign in before personalizing your assistant.");
+  if (!safeSetItem(key ?? PERSONA_KEY, JSON.stringify(key ? next : { orbColor: next.orbColor })))
+    throw new Error("Your assistant preferences could not be saved.");
   // The assistant's colour is editable from two places (Settings -> Appearance
   // and the copilot's own customiser) and drawn in a third, so a change has to
   // reach subscribers that aren't the editor. Same channel the theme and accent
@@ -230,6 +244,7 @@ const FILE_WORKFLOW =
 /* Two failure modes worth naming explicitly, because the model does not infer
  *  them: acting on an assumed fact, and treating one refusal as the end. */
 const WORKING_RULES =
+  "When a user refers to a previous conversation or decision, use search_conversations or recall to recover the relevant context. History and remembered preferences are context, not permission to repeat a past send, purchase or edit. Verify current records before reusing an old result. " +
   "HOW TO WORK: look things up before you act on them. If the user names a customer, supplier, product, invoice or file, find it first — do not create a document for a name you have not confirmed exists, and do not quote a number you have not read. When a lookup comes back empty, say so and ask, rather than proceeding with the name as given; inventing the record is worse than pausing. " +
   "When the user dictates a document in one breath — 'PO for Rennox, purchasing OIL SN 500, qty 39.22, rate 3890' — decode it: the party after 'for' is the supplier on POs/bills and the customer on invoices/quotes/receipts, the product words are the description verbatim, 'qty' is the quantity, 'rate'/'price' is the per-unit price. Fill every field you were given, and ask only for what is genuinely missing — one short question, in document order. " +
   "Report only what the tools actually returned. If a tool failed, the thing did not happen — never describe a result you did not receive, and never round a failure up to a success. " +
@@ -311,6 +326,7 @@ interface AgentOpts extends ChatOpts {
    *  attachment, produced files) to this run alone. */
   turnId?: string;
   computerSession?: () => Promise<number>;
+  agentId?: string;
 }
 
 export async function aiChat(
@@ -661,6 +677,7 @@ export async function* aiAutonomousStream(
     /** Recent conversation for follow-ups such as 'continue' or a correction. */
     history?: AiMessage[];
     computerSession?: () => Promise<number>;
+    agentId?: string;
   } = {}
 ): AsyncGenerator<AgentEvent, string, void> {
   if (!goal.trim()) throw new AiError("No goal provided.");
@@ -689,6 +706,7 @@ export async function* aiAutonomousStream(
     confirm: opts.confirm,
     turnId: opts.turnId,
     computerSession: opts.computerSession,
+    agentId: opts.agentId,
   });
 
   return yield* stream;

@@ -16,7 +16,7 @@ vi.mock("../waBridge", () => ({
   bridgeState: async () => ({ state: "connected", me: "971500000000@s.whatsapp.net" }),
   sendWa: (...a: unknown[]) => {
     sendWa(...a);
-    return Promise.resolve();
+    return Promise.resolve("provider-message-id");
   },
 }));
 vi.mock("../waLog", () => ({ waLogAdd: () => {}, waLogList: () => [] }));

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCacheScope } from "./api";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 import { requireModuleAccess } from "./moduleAccess";
+import { isToolAllowed } from "./capabilities";
 
 export interface BrowserTab {
   id: string;
@@ -15,8 +16,8 @@ export interface BrowserTab {
   warning?: string | null;
 }
 export interface DesktopBrowserResult { tabs: BrowserTab[]; tab?: BrowserTab | null }
-export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null }
-let panel: BrowserPanelState = { open: false, tabs: [], activeId: null };
+export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null; agentId: string | null; paused: boolean }
+let panel: BrowserPanelState = { open: false, tabs: [], activeId: null, agentId: null, paused: false };
 const panelListeners = new Set<() => void>();
 let syncViewport: (() => Promise<void>) | null = null;
 export const getBrowserPanelState = () => panel;
@@ -24,6 +25,26 @@ export function subscribeBrowserPanel(listener: () => void) { panelListeners.add
 function updatePanel(next: BrowserPanelState) { panel = next; panelListeners.forEach(listener => listener()); }
 export function setBrowserPanelOpen(open: boolean) { if (open !== panel.open) updatePanel({ ...panel, open }); }
 export function newBrowserPanelTab() { updatePanel({ ...panel, open: true, activeId: null }); }
+let selection = 0;
+/** A conversation owns its cookies/profile; switching closes views, not data. */
+export async function selectAgentBrowser(agentId: string | null) {
+  if (agentId && !isToolAllowed("agent_computer")) throw new Error("Agent computers are off. Enable them in Filey AI's action groups first.");
+  if (agentId === panel.agentId) return;
+  const next = ++selection;
+  const { disableComputerUse } = await import("./computerUse");
+  if (next !== selection) throw new DOMException("Browser selection changed", "AbortError");
+  await disableComputerUse();
+  if (next !== selection) throw new DOMException("Browser selection changed", "AbortError");
+  await closeDesktopBrowserTabs();
+  if (next !== selection) throw new DOMException("Browser selection changed", "AbortError");
+  if (agentId && !isToolAllowed("agent_computer")) throw new DOMException("Agent computers turned off", "AbortError");
+  updatePanel({ ...panel, agentId, paused: false });
+}
+export async function pauseAgentBrowser(paused: boolean) {
+  updatePanel({ ...panel, paused });
+  if (paused) { const { disableComputerUse } = await import("./computerUse"); await disableComputerUse(); }
+}
+const profileIdentity = (account: string) => panel.agentId ? JSON.stringify([account, panel.agentId]) : account;
 export function registerBrowserViewportSync(sync: () => Promise<void>) {
   syncViewport = sync;
   return () => { if (syncViewport === sync) syncViewport = null; };
@@ -41,7 +62,7 @@ export function layoutDesktopBrowser(bounds: BrowserBounds | null, tabId: string
   // This queue stays separate from commands, which await viewport readiness.
   const result = layoutQueue.then(async () => {
     if (scope !== agentStorageScope() || version !== generation) return;
-    const profile = await profileKey(account);
+    const profile = await profileKey(profileIdentity(account));
     if (scope !== agentStorageScope() || version !== generation) return;
     if (bounds && (!Object.values(bounds).every(Number.isFinite) || bounds.x < 0 || bounds.y < 0 || bounds.width < 1 || bounds.height < 1)) throw new Error("Invalid browser panel bounds.");
     if (bounds) await requireModuleAccess("browser", true);
@@ -114,7 +135,7 @@ function validate(args: DesktopBrowserRequest | Record<string, unknown>): Deskto
 /** Closing tabs leaves the per-account browsing profile intact. */
 export function closeDesktopBrowserTabs(): Promise<void> {
   generation++;
-  updatePanel({ open: false, tabs: [], activeId: null });
+  updatePanel({ ...panel, open: false, tabs: [], activeId: null, paused: false });
   const profile = activeProfile;
   activeProfile = null;
   activeScope = null;
@@ -129,19 +150,28 @@ export function closeDesktopBrowserTabs(): Promise<void> {
 /** Explicit browser management only. DOM extraction, eval, cookies and login
  * credentials are not exposed. Observation/input use computer_use separately. */
 export async function desktopBrowserCommand(
-  args: DesktopBrowserRequest | Record<string, unknown>, signal?: AbortSignal,
+  args: DesktopBrowserRequest | Record<string, unknown>, signal?: AbortSignal, agentId?: string,
 ): Promise<DesktopBrowserResult> {
   if (!desktopBrowserSupported()) throw new Error("Filey's built-in browser requires the Windows desktop app.");
   const request = validate(args);
+  if (agentId !== undefined) {
+    if (panel.paused) throw new Error("The user has control of the browser. Wait for them to resume the agent.");
+    if (panel.agentId !== agentId) {
+      if (panel.tabs.length) throw new Error("Another conversation is using the browser. Stop it before opening this agent's workspace.");
+      await selectAgentBrowser(agentId);
+    }
+  }
   const scope = agentStorageScope();
   const account = getCacheScope();
   if (!scope || !account) throw new Error("Sign in to this workspace before using Filey Browser.");
   const version = generation;
-  const profile = await profileKey(account);
+  const profile = await profileKey(profileIdentity(account));
   return enqueue(async () => {
     if (!["close","close_all","stop"].includes(request.action)) await requireModuleAccess("browser", true);
     if (signal?.aborted || version !== generation || scope !== agentStorageScope())
       throw new DOMException("Browser action canceled or workspace changed", "AbortError");
+    if (agentId !== undefined && (!isToolAllowed("agent_computer") || panel.paused || panel.agentId !== agentId))
+      throw new DOMException("Browser control changed", "AbortError");
     activeScope = scope;
     activeProfile = profile;
     if (request.action === "open" || request.action === "focus") setBrowserPanelOpen(true);
@@ -168,6 +198,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", close);
   window.addEventListener("beforeunload", close);
   window.addEventListener("filey:workspace-changed", close);
-  window.addEventListener(AGENT_STORAGE_EVENT, () => { if (activeScope && activeScope !== agentStorageScope()) close(); });
+  window.addEventListener(AGENT_STORAGE_EVENT, () => {
+    if (activeScope && activeScope !== agentStorageScope()) close();
+    if (panel.agentId && !isToolAllowed("agent_computer")) {
+      close();
+      void selectAgentBrowser(null).catch(() => {});
+    }
+  });
   window.addEventListener("storage", (event) => { if (event.key === null || event.key === "filey_data_mode") close(); });
 }

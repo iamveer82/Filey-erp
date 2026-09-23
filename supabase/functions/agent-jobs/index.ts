@@ -86,8 +86,14 @@ async function runDigest(supa: Client, org: string): Promise<string> {
       supa.from("accounts").select("name,account_type,balance").eq("org_id", org),
       supa.from("invoice_docs").select("number,customer_name")
         .eq("org_id", org).eq("status", "sent").eq("due_date", t),
+      // Overdue: due date passed and still collectible — both the soft
+      // "sent past due" rows and the explicit status='overdue' rows.
       supa.from("invoice_docs").select("number,customer_name,due_date")
-        .eq("org_id", org).eq("status", "sent").lt("due_date", t).limit(10),
+        .eq("org_id", org)
+        .or("status.eq.sent,status.eq.overdue")
+        .lt("due_date", t)
+        .not("status", "in", "(paid,draft,cancelled,void,voided,deleted)")
+        .limit(10),
       supa.from("products").select("name,quantity,reorder_level").eq("org_id", org),
     ]);
 

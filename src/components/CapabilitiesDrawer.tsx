@@ -33,7 +33,7 @@ export default function CapabilitiesDrawer({
   if (!open) return null;
 
   const toggle = (id: string) => {
-    const v = !(state[id] ?? true);
+    const v = !(state[id] ?? isCapabilityEnabled(id));
     try {
       setCapabilityEnabled(id, v);
       setState((p) => ({ ...p, [id]: v }));
@@ -72,12 +72,12 @@ export default function CapabilitiesDrawer({
       <section className="mt-6" aria-labelledby="agent-action-groups">
         <div className="mb-2 flex items-baseline justify-between gap-3">
           <h3 id="agent-action-groups" className="text-sm font-semibold text-foreground">Action groups</h3>
-          <span className="text-xs tabular-nums text-muted-foreground">{CAPABILITIES.filter((c) => state[c.id] ?? true).length} of {CAPABILITIES.length} enabled</span>
+          <span className="text-xs tabular-nums text-muted-foreground">{CAPABILITIES.filter((c) => state[c.id] ?? isCapabilityEnabled(c.id)).length} of {CAPABILITIES.length} enabled</span>
         </div>
         <p className="mb-3 text-xs leading-relaxed text-muted-foreground">Turning a group off blocks its tools. Enabling one gives permission; external services still need a working connection.</p>
         <div className="divide-y divide-border">
           {CAPABILITIES.map((c) => {
-            const on = state[c.id] ?? true;
+            const on = state[c.id] ?? isCapabilityEnabled(c.id);
             return (
               <div
                 key={c.id}

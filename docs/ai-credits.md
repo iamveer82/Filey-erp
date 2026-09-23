@@ -50,10 +50,11 @@ $0.50 top-up fee still applies once per purchase; it is not charged again per vi
    catalogue filters unavailable models and unsupported pricing/capabilities.
 4. Apply `supabase/2026-09-21-ai-credit-topup-fee.sql` before deploying the checkout handler. Create one-time Dodo products for $5, $10 and $25 AI credit top-ups, priced at **$5.50, $10.50 and $25.50** respectively in
    USD, with no discounts, recurring billing or pay-what-you-want. Set the
-   **DODO_AI_CREDIT_PACKS** secret to a JSON array of their real IDs and spendable credit cents (excluding the fee):
-   `[{"id":"pdt_REPLACE","cents":500}]`. This illustrative ID is not a product.
+   **DODO_AI_CREDIT_PACKS** secret to a JSON array of their real IDs and spendable credit cents (excluding the fee).
+   Live-mode products created 23 September 2026 (`tax_category=digital_products`, one-time USD):
+   `[{"id":"pdt_0NoCgOcjCqEbRyyC1W1yO","cents":500},{"id":"pdt_0NoCgOfqbIZwZFb6JS6SG","cents":1000},{"id":"pdt_0NoCgOj1k3x6AI5oJqiqc","cents":2500}]`.
    Checkout verifies that the provider's product price equals credit + 50 cents before creating an order. Use a product name/description that clearly shows both credit and fee.
-   Dodo handles checkout tax; tax is not credited as spendable AI balance.
+   Dodo handles checkout tax; tax is not credited as spendable AI balance. Hosts are only `https://live.dodopayments.com` and `https://test.dodopayments.com` — never `api.dodopayments.com`.
 5. Set **FILEY_APP_URL** to the hosted app origin (default
    `https://app.gofiley.com`). Keep existing Dodo API/webhook/environment secrets.
 6. Deploy `ai-credits` and the updated `dodo` with `--no-verify-jwt`. Both handlers

@@ -27,13 +27,18 @@ import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import { sendConfirmed } from "./delivery.mjs";
+import { ownerIdentity } from "./identity.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   downloadMediaMessage,
+  normalizeMessageContent,
 } from "@whiskeysockets/baileys";
-import qrcode from "qrcode-terminal";
 import QR from "qrcode";
+
+// Pairing keys are private to this OS user on platforms with POSIX permissions.
+process.umask(0o077);
+const ownerNumber = process.env.FILEY_BRIDGE_OWNER || "";
 
 /** One JSON object per line on stdout. The desktop app parses these to show
  *  the QR/state and to route messages to the local agent. Keep it one-line —
@@ -42,12 +47,13 @@ const emit = (obj) => console.log("FILEY " + JSON.stringify(obj));
 
 /** Plain text out of the many shapes a WhatsApp message can arrive in. */
 function textOf(m) {
-  const c = m.message ?? {};
+  const c = normalizeMessageContent(m.message) ?? {};
   return (
     c.conversation ??
     c.extendedTextMessage?.text ??
     c.imageMessage?.caption ??
     c.videoMessage?.caption ??
+    c.documentMessage?.caption ??
     ""
   ).trim();
 }
@@ -73,6 +79,8 @@ const HEADER = `*${underline("Filey Agent")}*`;
  *  proactive owner notifications. */
 let activeSock = null;
 let connected = false;
+let closing = false;
+let qrGeneration = 0;
 
 /** Message ids this bridge sent itself. In self-chat every outgoing message
  *  comes straight back through messages.upsert as fromMe on our own JID, so
@@ -80,15 +88,19 @@ let connected = false;
  *  ponytail: bounded Set, oldest evicted — ids only need to survive the round
  *  trip (milliseconds). */
 const sentIds = new Set();
+const sentMessages = new Map();
 // Bounded replay window across reconnects; provider re-delivery must not repeat a tool.
 const receivedIds = new Set();
-function remember(id) {
+function remember(id, message) {
   if (!id) return;
   sentIds.add(id);
-  if (sentIds.size > 200) sentIds.delete(sentIds.values().next().value);
+  if (message) sentMessages.set(id, message);
+  if (sentIds.size > 200) {
+    const oldest = sentIds.values().next().value;
+    sentIds.delete(oldest);
+    sentMessages.delete(oldest);
+  }
 }
-
-const digitsOf = (s) => (s ?? "").split("@")[0].split(":")[0].replace(/\D/g, "");
 
 /** Send on the live socket, remembering the id so our own message doesn't come
  *  back through messages.upsert as a new question. Never throws. */
@@ -124,9 +136,12 @@ async function deliver(command) {
 function startStdinLoop() {
   const rl = readline.createInterface({ input: process.stdin, terminal: false });
   // Parent exit closes stdin. Do not leave a socket without the owner gate.
-  rl.on("close", () => {
+  rl.on("close", async () => {
+    closing = true;
     connected = false;
+    qrGeneration++;
     try { activeSock?.end?.(undefined); } catch { /* already closed */ }
+    await credentialWrites;
     process.exit(0);
   });
   rl.on("line", (line) => {
@@ -175,7 +190,7 @@ function startStdinLoop() {
 
 /** Send a message to the local agent and wait for its reply. Never throws.
  *  The entry survives its own timeout so a slow answer is still delivered. */
-function askAgent(jid, from, text, fromName) {
+function askAgent(jid, from, text, fromName, attachment) {
   const id = crypto.randomUUID();
   return new Promise((resolve) => {
     const entry = { resolve, jid, timedOut: false };
@@ -193,8 +208,24 @@ function askAgent(jid, from, text, fromName) {
       });
     }, REPLY_TIMEOUT_MS);
     pending.set(id, entry);
-    emit({ type: "message", id, from, text, fromName });
+    emit({ type: "message", id, from, text, fromName, chatJid: jid, ...(attachment ? { attachment } : {}) });
   });
+}
+
+async function downloadLimited(message, limit) {
+  const stream = await downloadMediaMessage(message, "stream", {});
+  const timer = setTimeout(() => stream.destroy(new Error("Attachment download timed out")), 30_000);
+  timer.unref?.();
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const chunk of stream) {
+      size += chunk.length;
+      if (size > limit) throw new Error("Attachment exceeds its size limit");
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks, size);
+  } finally { clearTimeout(timer); stream.destroy?.(); }
 }
 
 /** Reconnect ONCE per drop, on a fresh socket, with the dead one fully torn
@@ -208,8 +239,10 @@ function askAgent(jid, from, text, fromName) {
  *  same incoming message was handled by several sockets at once. */
 let reconnecting = false;
 let backoffStep = 0;
+let credentialWrites = Promise.resolve();
 
 function reconnect(dead) {
+  if (closing) return;
   try {
     // Stop it answering and stop it re-entering here — but NOT `creds.update`.
     // Baileys flushes credential updates (prekey counters, identity state) as
@@ -221,7 +254,6 @@ function reconnect(dead) {
     dead?.ev?.removeAllListeners?.("messages.upsert");
     dead?.ev?.removeAllListeners?.("connection.update");
     dead?.end?.(undefined);
-    setTimeout(() => dead?.ev?.removeAllListeners?.("creds.update"), 2_000).unref?.();
   } catch {
     // already gone
   }
@@ -230,7 +262,10 @@ function reconnect(dead) {
   if (reconnecting) return;
   reconnecting = true;
   const wait = Math.min(30_000, 2_000 * 2 ** backoffStep++);
-  setTimeout(() => {
+  setTimeout(async () => {
+    await credentialWrites;
+    if (closing) return;
+    dead?.ev?.removeAllListeners?.("creds.update");
     reconnecting = false;
     start().catch((e) => {
       emit({
@@ -239,11 +274,13 @@ function reconnect(dead) {
         error: "WhatsApp could not reconnect. Restart the bridge in Integrations.",
       });
       console.error("reconnect failed:", e?.message);
+      reconnect(activeSock);
     });
   }, wait);
 }
 
 async function start() {
+  if (closing) return;
   // The session folder IS the login, so it must survive app updates and live
   // somewhere writable. The desktop app passes its per-user data dir; a human
   // running this from the repo gets ./auth next to the script.
@@ -263,22 +300,49 @@ async function start() {
     }
   }
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const sock = makeWASocket({ auth: state, printQRInTerminal: false });
+  if (closing) return;
+  // Signal keys and credentials belong to the same session. A reconnect must
+  // wait for both, not just creds.json, before opening the replacement socket.
+  const writeKeys = state.keys.set;
+  const persist = (write) => {
+    const result = credentialWrites.then(write);
+    credentialWrites = result.catch(() => {
+      closing = true;
+      connected = false;
+      emit({ type: "status", state: "error", error: "WhatsApp could not save its pairing. Check free disk space, then reconnect." });
+      activeSock?.end?.(undefined);
+    });
+    return result;
+  };
+  state.keys.set = (data) => persist(() => writeKeys(data));
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    // WhatsApp asks for the original payload when a receiving device could
+    // not decrypt it. Without this callback it stays "Waiting for message".
+    getMessage: async (key) => sentMessages.get(key.id),
+  });
   activeSock = sock;
   connected = false;
 
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", () => {
+    void persist(saveCreds).catch(() => {});
+  });
 
   sock.ev.on("connection.update", (u) => {
+    if (closing || sock !== activeSock) return;
     const { connection, lastDisconnect, qr } = u;
     if (qr) {
-      console.log("\nScan this in WhatsApp → Settings → Linked devices:\n");
-      qrcode.generate(qr, { small: true });
+      const generation = ++qrGeneration;
+      // QR contents grant account access. Show them only in the pairing UI.
       QR.toDataURL(qr, { margin: 1, width: 320 })
-        .then((dataUrl) => emit({ type: "qr", dataUrl }))
+        .then((dataUrl) => { if (!closing && generation === qrGeneration && activeSock === sock && !connected) emit({ type: "qr", dataUrl }); })
         .catch((e) => console.error("qr encode failed:", e.message));
     }
     if (connection === "open") {
+      qrGeneration++;
       connected = true;
       backoffStep = 0;
       console.log(
@@ -298,6 +362,12 @@ async function start() {
         );
         emit({ type: "status", state: "logged_out" });
         process.exit(1);
+        return;
+      }
+      if ([DisconnectReason.badSession, DisconnectReason.multideviceMismatch, DisconnectReason.forbidden, DisconnectReason.connectionReplaced].filter(Boolean).includes(code)) {
+        emit({ type: "status", state: "error", error: "WhatsApp rejected this session. Close other Filey instances, then reconnect or re-pair in Integrations." });
+        process.exit(1);
+        return;
       }
       console.warn("Connection dropped — reconnecting…");
       emit({ type: "status", state: "reconnecting" });
@@ -307,28 +377,45 @@ async function start() {
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
-    const meDigits = digitsOf(sock.user?.id);
     for (const m of messages) {
+      if (closing || sock !== activeSock || !connected) return;
       if (m.key.remoteJid?.endsWith("@g.us")) continue; // ignore group chats
       if (sentIds.has(m.key.id)) continue; // our own reply echoing back
 
-      const jid = m.key.remoteJid;
-      if (!jid || (!jid.endsWith("@s.whatsapp.net") && !jid.endsWith("@lid"))) continue;
-      // fromMe is only for the agent in self-chat (your own Saved Messages
-      // thread). Any other fromMe message is the owner typing to a real
-      // contact — answering there would butt into their conversation.
-      const selfChat = !!meDigits && digitsOf(jid) === meDigits;
-      if (m.key.fromMe && !selfChat) continue;
+      const identity = ownerIdentity(m.key, sock.user, ownerNumber);
+      // Reject strangers before downloading audio, queuing a turn or sending
+      // the bridge's automatic acknowledgement/timeout messages.
+      if (!identity) continue;
+      const { jid, phone } = identity;
 
       const receivedId = `${jid}:${m.key.id}`;
       if (!m.key.id || receivedIds.has(receivedId)) continue;
       receivedIds.add(receivedId);
       if (receivedIds.size > 1000) receivedIds.delete(receivedIds.values().next().value);
 
-      const phone = (jid ?? "").split("@")[0];
       const name = m.pushName ?? phone;
 
       const text = textOf(m);
+      const content = normalizeMessageContent(m.message) ?? {};
+      const document = content.documentMessage || content.imageMessage;
+      if (document) {
+        // Only authenticated owner media is downloaded. Bound the stream even
+        // when provider metadata is absent or incorrect.
+        if (Number(document.fileLength) > 12 * 1024 * 1024) {
+          await sendTo(jid, `${HEADER}\n\nSend a PDF or image smaller than 12 MB.`);
+          continue;
+        }
+        try {
+          const bytes = await downloadLimited(m, 12 * 1024 * 1024);
+          if (closing || !connected || sock !== activeSock) continue;
+          // eslint-disable-next-line no-control-regex -- Strip control bytes from an untrusted filename.
+          const filename = String(document.fileName || (content.imageMessage ? "photo.jpg" : "document.pdf")).split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, "").slice(0, 160);
+          void askAgent(jid, phone, text || "Tell me what is in this attachment.", name, {
+            name: filename || "attachment", mimetype: document.mimetype || "application/octet-stream", b64: bytes.toString("base64"),
+          }).then(deliver);
+        } catch { await sendTo(jid, `${HEADER}\n\nI couldn't download that file. Send it again as a document under 12 MB.`); }
+        continue;
+      }
       if (!text) {
         // Voice notes are speech, not silence: hand the audio to the app for
         // transcription. The note registers a pending entry exactly like a
@@ -336,12 +423,13 @@ async function start() {
         // id, and without that entry the reply was written to nobody and the
         // owner sat staring at a read bubble that never answered. Capped: a
         // 40-minute voice memo is not a prompt.
-        const audio = m.message?.audioMessage || m.message?.pttMessage || null;
+        const audio = normalizeMessageContent(m.message)?.audioMessage;
         if (audio) {
+          if (Number(audio.fileLength) > 8 * 1024 * 1024 || Number(audio.seconds) > 300) continue;
           try {
-            const buf = await downloadMediaMessage(m, "buffer", {});
+            const buf = await downloadLimited(m, 8 * 1024 * 1024);
+            if (closing || !connected || sock !== activeSock) continue;
             if (buf && buf.length <= 8 * 1024 * 1024) {
-              console.log(`← ${name}: [voice note ${buf.length}B]`);
               const id = crypto.randomUUID();
               void new Promise((resolve) => {
                 const entry = { resolve, jid, timedOut: false };
@@ -363,6 +451,7 @@ async function start() {
                   id,
                   from: phone,
                   fromName: name,
+                  chatJid: jid,
                   b64: buf.toString("base64"),
                   mimetype: audio.mimetype || "audio/ogg; codecs=opus",
                 });
@@ -379,13 +468,12 @@ async function start() {
         continue;
       }
 
-      console.log(`← ${name}: ${text}`);
-
-      const reply = await askAgent(jid, phone, text, name);
+      // Don't hold the provider event loop while a model works. The desktop
+      // serializes turns; the bridge still receives disconnects and new inputs.
+      void askAgent(jid, phone, text, name).then(deliver);
       // Sent on the CURRENT socket, not the one this message arrived on: a
       // reconnect during a long agent run would otherwise send on a dead
       // session, which the phone shows as "Waiting for this message".
-      await deliver(reply);
     }
   });
 }

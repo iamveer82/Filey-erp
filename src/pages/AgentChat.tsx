@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Mic,
   Plus,
@@ -23,6 +23,7 @@ import {
   Settings2,
   PanelRight,
   Film,
+  MoreHorizontal,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
 import ThinkingDots from "../components/ThinkingDots";
@@ -33,8 +34,8 @@ import { AgentAccessControl, AgentEffortControl } from "../components/AgentCompo
 import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
 import { getActiveAiConfig } from "../lib/ai";
 import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
-import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen } from "../lib/desktopBrowser";
-import { enableComputerUse, disableComputerUse, computerUseSupported } from "../lib/computerUse";
+import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, selectAgentBrowser } from "../lib/desktopBrowser";
+import { enableComputerUse, disableComputerUse } from "../lib/computerUse";
 import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, writeAgentStorage } from "../lib/agentStorage";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
@@ -48,6 +49,7 @@ import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { skillsIndex } from "../lib/agentSkills";
 import { buildAiContext } from "../lib/aiContext";
 import { getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
+import { isToolAllowed } from "../lib/capabilities";
 import {
   aiAgentStream,
   aiAutonomousStream,
@@ -124,6 +126,7 @@ export default function AgentChat() {
 
 function AgentWorkspace({ scope }: { scope: string | null }) {
   const location = useLocation();
+  const navigate = useNavigate();
   // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
   const [chat, setChat] = useState<Chat>(resolveOpeningChat);
   const [input, setInput] = useState<string>(() =>
@@ -149,6 +152,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const [videosOpen, setVideosOpen] = useState(() => new URLSearchParams(location.search).get("video") === "1");
   const [webOn, setWebOn] = useState(getReachConfig().enabled);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -239,18 +244,25 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const topRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const computerStartup = useRef<Promise<number> | null>(null);
 
   useEffect(() => {
-    if (!scope || !computerUseSupported()) return;
-    const pending = enableComputerUse();
-    computerStartup.current = pending;
-    // Setup failures are reported if a task actually needs computer control.
-    void pending.catch(() => {}).finally(() => {
-      if (computerStartup.current === pending) computerStartup.current = null;
-    });
-    return () => { void disableComputerUse().catch(() => {}); computerStartup.current = null; };
-  }, [scope]);
+    if (!scope) return;
+    const selectBrowser = () => {
+      void selectAgentBrowser(isToolAllowed("agent_computer") ? chat.id : null).catch(error => {
+        if (error?.name !== "AbortError") setErr("Could not switch the browser workspace. Close its tabs and try again.");
+      });
+    };
+    selectBrowser();
+    window.addEventListener(AGENT_STORAGE_EVENT, selectBrowser);
+    return () => window.removeEventListener(AGENT_STORAGE_EVENT, selectBrowser);
+  }, [chat.id, scope]);
+
+  useEffect(() => {
+    const stopBrowser = () => { abortRef.current?.abort(); pendingRef.current?.resolve(false); pendingRef.current = null; setPendingConfirm(null); };
+    window.addEventListener("filey:stop-agent-browser", stopBrowser);
+    return () => window.removeEventListener("filey:stop-agent-browser", stopBrowser);
+  }, []);
+
 
   // Attach a file + build an image preview (revoking the previous one).
   /** Attach one or more files. Several at once is the point: "merge these"
@@ -466,10 +478,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       ctl.signal.throwIfAborted();
       if (!scope || scope !== agentStorageScope())
         throw new DOMException("Workspace changed. Computer access stopped.", "AbortError");
-      // Reuse the chat's default grant. The task still passes owner, capability
-      // and approval gates; Stop cannot silently re-enable this task's grant.
-      if (computerStartup.current) await computerStartup.current;
-      ctl.signal.throwIfAborted();
+      // Start automatically after approval; opening chat needs no native grant.
       computerSessionId ??= await enableComputerUse();
       if (ctl.signal.aborted) {
         await disableComputerUse(computerSessionId);
@@ -501,7 +510,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
       const selectedEffort = aiEffortLevels(getActiveAiConfig()).includes(effort) ? effort : "auto";
-      const options = { isOwner: !!scope, signal: ctl.signal, turnId, maxTokens: 4096, effort: selectedEffort, computerSession };
+      const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort, computerSession };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
         : aiAgentStream(messages, options);
@@ -601,7 +610,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           }));
       }
     } finally {
-      ctl.abort();
+      ctl.abort(new DOMException("Task completed", "AbortError"));
       endTurn(turnId); // no-op when already drained above — never leaks
       abortRef.current = null;
       streamedRef.current = "";
@@ -680,61 +689,50 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         )}
 
-        <header className="sticky top-0 z-30 mb-3 bg-page pb-3 pt-1">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-[5rem] flex-1">
-              <h1 className="text-lg font-semibold leading-tight text-foreground">
-                Filey AI
+        <header className="sticky top-0 z-30 mb-5 border-b border-border/60 bg-page pb-3 pt-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-sm font-medium leading-tight text-foreground" title={chat.title || "Filey AI"}>
+                {empty ? "Filey AI" : chat.title || "Conversation"}
               </h1>
-              {!empty && (
-                <p
-                  className="mt-1 truncate text-[13px] text-muted-foreground"
-                  title={chat.title || "New conversation"}
-                >
-                  {chat.title || "New conversation"}
-                </p>
-              )}
             </div>
-            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-              <button type="button" onClick={() => setVideosOpen(v => !v)} className="btn-ghost w-10 !px-0" aria-label="Images and videos" title="Images and videos" aria-expanded={videosOpen} aria-controls="filey-media-panel"><Film size={16} /></button>
+            <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
               <button
                 type="button"
                 onClick={openHistory}
                 aria-label="Chat history"
                 title="Chat history"
-                className="btn-ghost w-10 !px-0"
+                className="btn-ghost !h-9 w-9 !px-0"
               >
                 <History size={15} />
               </button>
-              <button
-                type="button"
-                onClick={openMemory}
-                aria-label="Agent memory"
-                title="Agent memory"
-                className="btn-ghost w-10 !px-0"
-              >
-                <Brain size={15} />
-              </button>
               <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
-                className="btn-ghost w-10 !px-0" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
+                className="btn-ghost !h-9 w-9 !px-0" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
                 <PanelRight size={16} />
               </button>
-              <Link to="/settings?section=ai" className="btn-ghost w-10 !px-0" aria-label="AI settings" title="AI settings">
-                <Settings2 size={15} />
-              </Link>
+              <div ref={moreRef}>
+                <button type="button" onClick={() => setMoreOpen(v => !v)} className="btn-ghost !h-9 w-9 !px-0" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={18} /></button>
+                <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
+                  <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
+                  <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
+                  <MenuSep />
+                  <MenuItemRow icon={<Settings2 size={15} />} label="AI settings" onClick={() => { setMoreOpen(false); navigate("/settings?section=ai"); }} />
+                </MenuPopover>
+              </div>
               <button
                 type="button"
                 onClick={startNew}
                 disabled={busy}
                 aria-label="New chat"
-                className="btn-primary w-10 !px-0 sm:w-auto sm:!px-3"
+                title="New chat"
+                className="btn-ghost !h-9 w-9 !px-0"
               >
                 <Plus size={15} />
-                <span className="hidden sm:inline">New chat</span>
               </button>
             </div>
           </div>
         </header>
+
 
         {videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
           setChat(current => ({ ...current, turns: [...current.turns,
@@ -760,7 +758,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 <BloubBot size={48} state="idle" label="Filey AI" ambient />
               </div>
               <h2 className="text-2xl font-medium leading-tight text-foreground tracking-tight">
-                How can I help?
+                What shall we work on?
               </h2>
             </div>
           ) : (
@@ -795,7 +793,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         >
           <div className={COLUMN}>
             {/* A stable composer keeps Stop readable while a reply is running. */}
-            <div className="rounded-3xl border border-border bg-card p-3 transition-colors focus-within:border-muted-foreground/60">
+            <div className="rounded-[24px] border border-border/70 bg-card p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.025)] transition-colors focus-within:border-muted-foreground/40 sm:p-3">
               {/* Attachment chips — one tile per file, remove always visible
                   (hover-only removal hides the affordance on touch). Several
                   files at once is the merge flow: the order shown is the order
@@ -852,11 +850,11 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 ref={textareaRef}
                 aria-label="Message Filey AI"
                 aria-describedby="filey-message-hint"
-                data-ph={auto ? "Describe a task to delegate…" : "Message Filey AI…"}
+                data-ph={auto ? "Describe a task to delegate…" : "Ask Filey to do something…"}
                 rows={1}
                 value={input}
                 disabled={busy}
-                placeholder={auto ? "Describe a task to delegate…" : "Message Filey AI…"}
+                placeholder={auto ? "Describe a task to delegate…" : "Ask Filey to do something…"}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -1020,7 +1018,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   Autonomous
                 </button>}
                 <div className="ml-auto flex max-w-full flex-wrap items-center gap-1">
-                <AiFundingControl disabled={busy} />
+                <AiFundingControl disabled={busy} compact />
                 <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />
                 {/* Mic — dictation straight into the composer. Browser engine
                     (Chromium WebView2), free, no key. Hidden where the browser
