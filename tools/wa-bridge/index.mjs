@@ -23,11 +23,11 @@
  * that folder IS the login. Anyone holding it can message as you, so keep it
  * off shared drives and out of git.
  */
-import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import { sendConfirmed } from "./delivery.mjs";
 import { ownerIdentity, phoneNumber } from "./identity.mjs";
+import { bridgeLaunch } from "./launch.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -38,7 +38,7 @@ import QR from "qrcode";
 
 // Pairing keys are private to this OS user on platforms with POSIX permissions.
 process.umask(0o077);
-const ownerNumber = process.env.FILEY_BRIDGE_OWNER || "";
+const { stateDir, ownerNumber } = bridgeLaunch();
 // Self-chat arrives as append too. Only accept live entries from this process
 // lifetime; synchronized history must never execute old business requests.
 const startedAtSeconds = Math.floor(Date.now() / 1000);
@@ -245,6 +245,15 @@ async function downloadLimited(message, limit) {
 let reconnecting = false;
 let backoffStep = 0;
 let credentialWrites = Promise.resolve();
+let startupStage = "pairing";
+
+/** Safe support details only: provider exceptions may contain pairing material. */
+function startupFailure(error) {
+  const codes = ["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EISDIR", "ENOMEM", "ENOSPC", "EMFILE", "ENFILE", "EBUSY", "ERR_INVALID_ARG_TYPE", "ERR_INVALID_ARG_VALUE", "ERR_INVALID_URL", "ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ERR_DLOPEN_FAILED", "ERR_WORKER_INIT_FAILED"];
+  const names = ["TypeError", "RangeError", "ReferenceError", "SyntaxError", "Error"];
+  const detail = codes.includes(error?.code) ? error.code : names.includes(error?.name) ? error.name : "Error";
+  return { type: "status", state: "error", error: `WhatsApp bridge could not start (${startupStage}: ${detail}). Close Filey and reconnect.` };
+}
 
 function reconnect(dead) {
   if (closing) return;
@@ -273,12 +282,7 @@ function reconnect(dead) {
     dead?.ev?.removeAllListeners?.("creds.update");
     reconnecting = false;
     start().catch((e) => {
-      emit({
-        type: "status",
-        state: "error",
-        error: "WhatsApp could not reconnect. Restart the bridge in Integrations.",
-      });
-      console.error("reconnect failed:", e?.message);
+      emit(startupFailure(e));
       reconnect(activeSock);
     });
   }, wait);
@@ -289,7 +293,7 @@ async function start() {
   // The session folder IS the login, so it must survive app updates and live
   // somewhere writable. The desktop app passes its per-user data dir; a human
   // running this from the repo gets ./auth next to the script.
-  const authDir = process.env.FILEY_BRIDGE_STATE || path.join(process.cwd(), "auth");
+  const authDir = stateDir;
   // Never two sockets on one auth folder. Both would write signal state and the
   // phone would stop being able to decrypt us; one live socket is the whole
   // invariant this file has to hold.
@@ -304,6 +308,7 @@ async function start() {
       // already gone
     }
   }
+  startupStage = "pairing";
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   if (closing) return;
   // Signal keys and credentials belong to the same session. A reconnect must
@@ -320,6 +325,7 @@ async function start() {
     return result;
   };
   state.keys.set = (data) => persist(() => writeKeys(data));
+  startupStage = "socket";
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
@@ -331,6 +337,7 @@ async function start() {
   });
   activeSock = sock;
   connected = false;
+  startupStage = "listeners";
 
   sock.ev.on("creds.update", () => {
     void persist(saveCreds).catch(() => {});
@@ -501,11 +508,6 @@ async function start() {
 
 startStdinLoop();
 start().catch((e) => {
-  emit({
-    type: "status",
-    state: "error",
-    error: "WhatsApp bridge could not start. Review the desktop logs and reconnect.",
-  });
-  console.error("bridge failed to start:", e);
+  emit(startupFailure(e));
   process.exit(1);
 });

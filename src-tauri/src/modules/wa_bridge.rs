@@ -170,8 +170,12 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
     std::fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
 
     let mut cmd = Command::new(&bin);
-    cmd.env("FILEY_BRIDGE_STATE", &state_dir)
-        .env("FILEY_BRIDGE_OWNER", owner_number.unwrap_or_default())
+    // GUI launchers can leave the compiled runtime without its environment.
+    // Pass non-secret connection settings explicitly; never fall back to the
+    // launcher's working directory for pairing files.
+    cmd.arg("--state-dir").arg(&state_dir)
+        .arg("--owner-number").arg(owner_number.unwrap_or_default())
+        .current_dir(&state_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

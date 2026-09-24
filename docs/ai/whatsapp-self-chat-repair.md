@@ -18,4 +18,10 @@ Duplicate phone-JID/LID deliveries now share the authenticated owner's dedupe ke
 
 Integration settings distinguish pairing from agent readiness, explain self-chat, explicitly save owner-number changes, and hide recent message content until expanded. Pairing stays on the computer; no claim is made that Baileys' auth files are encrypted at rest.
 
-No public release is published by this repair. **Ship the frontend and native application together:** this hardening adds required `sessionId` arguments to outgoing native commands and `bridgeSession` on inbound events. A sidecar-only swap does not deliver these protections. Production rollout still requires the normal signed release workflow.
+**Ship the frontend and native application together:** this hardening adds required `sessionId` arguments to outgoing native commands and `bridgeSession` on inbound events. A sidecar-only swap does not deliver these protections. Production rollout uses the normal signed release workflow.
+
+## Desktop startup verification
+
+The actual desktop preview exposed another failure: the compiled runtime received no launcher environment and fell back to an unwritable `auth` directory. The native supervisor now passes the absolute session directory and owner setting as explicit arguments and sets the working directory to the session folder. No credentials are passed on the command line. The parser preserves an explicitly empty owner and rejects relative session paths.
+
+On 24 September 2026, the clean compiled bridge generated a QR with an empty environment, and the rebuilt desktop app reconnected the existing saved pairing successfully. Diagnostic binary variants were removed; production startup errors expose only an allowlisted stage/code, never raw exceptions. Live phone-initiated replies and PDF receipt remain separate verification steps.
