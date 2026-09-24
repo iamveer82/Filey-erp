@@ -28,6 +28,7 @@ import readline from "node:readline";
 import { sendConfirmed } from "./delivery.mjs";
 import { ownerIdentity, phoneNumber } from "./identity.mjs";
 import { bridgeLaunch } from "./launch.mjs";
+import { whatsappClock } from "./clock.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -41,7 +42,8 @@ process.umask(0o077);
 const { stateDir, ownerNumber } = bridgeLaunch();
 // Self-chat arrives as append too. Only accept live entries from this process
 // lifetime; synchronized history must never execute old business requests.
-const startedAtSeconds = Math.floor(Date.now() / 1000);
+const clockReady = whatsappClock();
+let messageClock;
 
 /** One JSON object per line on stdout. The desktop app parses these to show
  *  the QR/state and to route messages to the local agent. Keep it one-line —
@@ -71,7 +73,7 @@ const pending = new Map(); // id -> { resolve, timer, ackTimer, jid, timedOut }
  *  and the answer that arrived afterwards was thrown away. */
 const REPLY_TIMEOUT_MS = 240_000;
 /** Silence reads as "it's broken", so say something while the agent works. */
-const ACK_AFTER_MS = 20_000;
+const ACK_AFTER_MS = 2_000;
 /** The app's replies open with this line (waFormat in src/lib/waAgent.ts); the
  *  bridge's own messages wear it too so everything from Filey looks the same.
  *  Bold + underlined: WhatsApp has no underline markup, so each letter carries
@@ -95,6 +97,37 @@ const sentIds = new Set();
 const sentMessages = new Map();
 // Bounded replay window across reconnects; provider re-delivery must not repeat a tool.
 const receivedIds = new Set();
+const typing = new Map();
+
+// Several pending turns in the same chat share one heartbeat. Presence is
+// best-effort and never blocks receipt, delivery, or the owner security gate.
+function beginTyping(jid) {
+  let activity = typing.get(jid);
+  if (!activity) {
+    activity = { count: 0, sending: false };
+    const pulse = () => {
+      if (!connected || !activeSock?.sendPresenceUpdate || activity.sending) return;
+      activity.sending = true;
+      void Promise.resolve().then(() => activeSock?.sendPresenceUpdate("composing", jid))
+        .catch(() => {}).finally(() => { activity.sending = false; });
+    };
+    activity.timer = setInterval(pulse, 8_000);
+    activity.timer.unref?.();
+    typing.set(jid, activity);
+    pulse();
+  }
+  activity.count++;
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    if (--activity.count > 0) return;
+    clearInterval(activity.timer);
+    typing.delete(jid);
+    if (connected && activeSock?.sendPresenceUpdate)
+      void Promise.resolve().then(() => activeSock?.sendPresenceUpdate("paused", jid)).catch(() => {});
+  };
+}
 function remember(id, message) {
   if (!id) return;
   sentIds.add(id);
@@ -164,6 +197,7 @@ function startStdinLoop() {
         pending.delete(v.id);
         clearTimeout(r.timer);
         clearTimeout(r.ackTimer);
+        r.stopTyping();
         // A late answer is still the answer: deliver it as its own message
         // instead of dropping it because a timer fired first.
         const reply = { ...v, to: r.jid, text: v.text ?? "" };
@@ -195,15 +229,16 @@ function startStdinLoop() {
 
 /** Send a message to the local agent and wait for its reply. Never throws.
  *  The entry survives its own timeout so a slow answer is still delivered. */
-function askAgent(jid, from, text, fromName, attachment) {
+function askAgent(jid, event) {
   const id = crypto.randomUUID();
   return new Promise((resolve) => {
-    const entry = { resolve, jid, timedOut: false };
+    const entry = { resolve, jid, timedOut: false, stopTyping: beginTyping(jid) };
     entry.ackTimer = setTimeout(() => {
-      if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
+      if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nGot your request — I'll send the result here. Keep Filey open while I work.`);
     }, ACK_AFTER_MS);
     entry.timer = setTimeout(() => {
       entry.timedOut = true;
+      entry.stopTyping();
       // Stop holding this chat's turn, but keep the entry around a while: if
       // the app answers late, the reply handler sends it as its own message.
       setTimeout(() => pending.delete(id), 120_000).unref?.();
@@ -213,7 +248,7 @@ function askAgent(jid, from, text, fromName, attachment) {
       });
     }, REPLY_TIMEOUT_MS);
     pending.set(id, entry);
-    emit({ type: "message", id, from, text, fromName, chatJid: jid, ...(attachment ? { attachment } : {}) });
+    emit({ ...event, id, chatJid: jid });
   });
 }
 
@@ -289,6 +324,8 @@ function reconnect(dead) {
 }
 
 async function start() {
+  if (closing) return;
+  messageClock = await clockReady;
   if (closing) return;
   // The session folder IS the login, so it must survive app updates and live
   // somewhere writable. The desktop app passes its per-user data dir; a human
@@ -406,8 +443,8 @@ async function start() {
       if (type === "append") {
         const timestamp = Number(m.messageTimestamp);
         if (!m.key.fromMe || phone !== phoneNumber(sock.user?.id) ||
-            !Number.isFinite(timestamp) || timestamp < startedAtSeconds ||
-            timestamp > Math.floor(Date.now() / 1000) + 60) continue;
+            !Number.isFinite(timestamp) || timestamp < messageClock.startedAtSeconds ||
+            timestamp > messageClock.nowSeconds() + 60) continue;
       }
 
       const text = textOf(m);
@@ -438,9 +475,9 @@ async function start() {
           if (closing || !connected || sock !== activeSock) continue;
           // eslint-disable-next-line no-control-regex -- Strip control bytes from an untrusted filename.
           const filename = String(document.fileName || (content.imageMessage ? "photo.jpg" : "document.pdf")).split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, "").slice(0, 160);
-          void askAgent(jid, phone, text || "Tell me what is in this attachment.", name, {
+          void askAgent(jid, { type: "message", from: phone, text: text || "Tell me what is in this attachment.", fromName: name, attachment: {
             name: filename || "attachment", mimetype: document.mimetype || "application/octet-stream", b64: bytes.toString("base64"),
-          }).then(deliver);
+          } }).then(deliver);
         } catch { await sendTo(jid, `${HEADER}\n\nI couldn't download that file. Send it again as a document under 12 MB.`); }
         continue;
       }
@@ -458,34 +495,13 @@ async function start() {
             const buf = await downloadLimited(m, 8 * 1024 * 1024);
             if (closing || !connected || sock !== activeSock) continue;
             if (buf && buf.length <= 8 * 1024 * 1024) {
-              const id = crypto.randomUUID();
-              void new Promise((resolve) => {
-                const entry = { resolve, jid, timedOut: false };
-                entry.ackTimer = setTimeout(() => {
-                  if (pending.has(id))
-                    void sendTo(jid, `${HEADER}\n\nOn it — working on that now…`);
-                }, ACK_AFTER_MS);
-                entry.timer = setTimeout(() => {
-                  entry.timedOut = true;
-                  setTimeout(() => pending.delete(id), 120_000).unref?.();
-                  resolve({
-                    to: jid,
-                    text: `${HEADER}\n\nThe app didn't answer in time — make sure Filey is open and the WhatsApp bridge is connected.`,
-                  });
-                }, REPLY_TIMEOUT_MS);
-                pending.set(id, entry);
-                emit({
+              void askAgent(jid, {
                   type: "voice_note",
-                  id,
                   from: phone,
                   fromName: name,
-                  chatJid: jid,
                   b64: buf.toString("base64"),
                   mimetype: audio.mimetype || "audio/ogg; codecs=opus",
-                });
-              }).then((reply) => {
-                void deliver(reply);
-              });
+              }).then(deliver);
             } else {
               console.error("voice note too large, skipped");
             }
@@ -498,7 +514,7 @@ async function start() {
 
       // Don't hold the provider event loop while a model works. The desktop
       // serializes turns; the bridge still receives disconnects and new inputs.
-      void askAgent(jid, phone, text, name).then(deliver);
+      void askAgent(jid, { type: "message", from: phone, text, fromName: name }).then(deliver);
       // Sent on the CURRENT socket, not the one this message arrived on: a
       // reconnect during a long agent run would otherwise send on a dead
       // session, which the phone shows as "Waiting for this message".

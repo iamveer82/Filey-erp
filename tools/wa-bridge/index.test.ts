@@ -7,6 +7,8 @@ const transport = vi.hoisted(() => ({
   close: (_line: string) => {},
   end: vi.fn(),
   send: vi.fn(),
+  presence: vi.fn(),
+  clockOffset: 0,
   download: vi.fn(),
   readFile: vi.fn(),
   stat: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock("@whiskeysockets/baileys", () => ({
     return ({
     user: { id: "971500000001:1@s.whatsapp.net", lid: "900000000001:1@lid" },
     sendMessage: transport.send,
+    sendPresenceUpdate: transport.presence,
     ev: {
       on: (name: string, callback: (event: any) => any) => {
         transport.handlers[name] = callback;
@@ -50,6 +53,10 @@ vi.mock("@whiskeysockets/baileys", () => ({
 }));
 vi.mock("qrcode", () => ({ default: { toDataURL: transport.qr } }));
 vi.mock("./launch.mjs", () => ({ bridgeLaunch: () => ({ stateDir: "fixture-auth", ownerNumber: "" }) }));
+vi.mock("./clock.mjs", () => ({ whatsappClock: async () => ({
+  startedAtSeconds: Math.floor(Date.now() / 1000) + transport.clockOffset,
+  nowSeconds: () => Math.floor(Date.now() / 1000) + transport.clockOffset,
+}) }));
 
 let output: ReturnType<typeof vi.spyOn>;
 beforeEach(async () => {
@@ -58,6 +65,8 @@ beforeEach(async () => {
   vi.useFakeTimers();
   transport.handlers = {};
   transport.sockets = [];
+  transport.clockOffset = 0;
+  transport.presence.mockResolvedValue(undefined);
   transport.saveCreds.mockResolvedValue(undefined);
   transport.writeKeys.mockResolvedValue(undefined);
   transport.authLoad.mockImplementation(async () => ({ state: { keys: { set: transport.writeKeys } }, saveCreds: transport.saveCreds }));
@@ -119,6 +128,52 @@ it("accepts fresh self-chat append messages once and delivers the owner's reply"
   expect(transport.send).toHaveBeenCalledWith("900000000001@lid", { text: "Filey is connected" }, expect.any(Object));
 });
 
+it.each([-10800, 10800])("accepts new self-chat tasks with %s seconds of device clock skew while rejecting history", async offset => {
+  vi.resetModules();
+  transport.clockOffset = offset;
+  await import("./index.mjs");
+  await vi.waitFor(() => expect(transport.sockets).toHaveLength(2));
+  transport.handlers["connection.update"]({ connection: "open" });
+  const serverNow = Math.floor(Date.now() / 1000) + offset;
+  const message = { key: { id: "fresh-task", fromMe: true, remoteJid: "971500000001@s.whatsapp.net" }, messageTimestamp: serverNow, message: { conversation: "Export my invoice PDF" } };
+  await transport.handlers["messages.upsert"]({ type: "append", messages: [
+    { ...message, key: { ...message.key, id: "old-task" }, messageTimestamp: serverNow - 60 },
+    { ...message, key: { ...message.key, id: "future-task" }, messageTimestamp: serverNow + 3600 },
+    message,
+  ] });
+  expect(emitted("message")).toHaveLength(1);
+  expect(emitted("message")[0].text).toBe("Export my invoice PDF");
+});
+
+it("starts typing promptly, acknowledges after two seconds, and stops after the final reply", async () => {
+  const jid = "971500000001@s.whatsapp.net";
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "task", remoteJid: jid }, message: { conversation: "Export my invoice" } }] });
+  await vi.waitFor(() => expect(transport.presence).toHaveBeenCalledWith("composing", jid));
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(transport.send).toHaveBeenCalledWith(jid, { text: expect.stringContaining("Got your request") }, expect.any(Object));
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(transport.presence.mock.calls.filter(([state]) => state === "composing")).toHaveLength(2);
+  command({ type: "reply", id: emitted("message")[0].id, text: "Your PDF is ready", requestId: "done" });
+  await vi.waitFor(() => expect(transport.presence).toHaveBeenLastCalledWith("paused", jid));
+  const count = transport.presence.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(transport.presence).toHaveBeenCalledTimes(count);
+  expect(emitted("delivery")).toContainEqual(expect.objectContaining({ requestId: "done", ok: true }));
+});
+
+it("shares typing across queued messages and releases it on timeout", async () => {
+  const jid = "971500000001@s.whatsapp.net";
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: ["one", "two"].map(id => ({ key: { id, remoteJid: jid }, message: { conversation: "A task" } })) });
+  command({ type: "reply", id: emitted("message")[0].id, text: "First done" });
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(transport.presence).not.toHaveBeenCalledWith("paused", jid);
+  await vi.advanceTimersByTimeAsync(240_000);
+  expect(transport.presence).toHaveBeenLastCalledWith("paused", jid);
+  const count = transport.presence.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(16_000);
+  expect(transport.presence).toHaveBeenCalledTimes(count);
+});
+
 it("ignores malformed protocol data without losing the next valid owner request", async () => {
   for (const value of [null, [], "unexpected", 1]) expect(() => command(value)).not.toThrow();
   for (const event of [null, {}, { type: "notify", messages: null }])
@@ -147,6 +202,7 @@ it("does not execute synchronized history, missing dates, strangers or Filey's o
   ] });
   expect(emitted("message")).toHaveLength(0);
   expect(transport.send).not.toHaveBeenCalled();
+  expect(transport.presence).not.toHaveBeenCalled();
 });
 
 it("forwards owner documents with captions and refuses stranger downloads", async () => {

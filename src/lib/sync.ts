@@ -386,7 +386,8 @@ export async function pullFileBlobs(supa: SupabaseClient, rows: Record<string, a
  *  Refreshing 60s early also covers the case where the token is alive when the
  *  push starts and dead by the time a long push reaches its last table. */
 async function freshSession(supa: SupabaseClient) {
-  const { data } = await supa.auth.getSession();
+  const { data, error: sessionError } = await supa.auth.getSession();
+  if (sessionError) return null;
   const s = data.session;
   if (!s) return null;
   const expiresAt = (s.expires_at ?? 0) * 1000;
@@ -405,7 +406,7 @@ async function freshSession(supa: SupabaseClient) {
       log.warn("sync", "session refresh failed", error.message);
       return null;
     }
-    return r.session ?? s;
+    return r.session ?? null;
   } catch (e) {
     log.warn("sync", "session refresh threw", e instanceof Error ? e.message : String(e));
     return null;
@@ -868,12 +869,6 @@ export async function markAllForSync(): Promise<void> {
 
 // ---- cloud session helpers (local mode signs into the shim, not the cloud;
 // the real client needs its own sign-in for sync to have someone to push as) --
-
-export async function cloudSessionEmail(): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
-  return data.session?.user?.email ?? null;
-}
 
 const SEEDED_KEY = "filey_cloud_seeded";
 

@@ -2,7 +2,8 @@ import { FileySpinner } from "../../components/FileySpinner";
 import { useEffect, useState } from "react";
 import { Cloud, HardDrive, Check, Download, Upload, FolderOpen } from "lucide-react";
 import { getDataMode, type DataMode } from "../../lib/dataMode";
-import { cloudConfigured } from "../../lib/supabase";
+import { cloudConfigured, supabase } from "../../lib/supabase";
+import { CLOUD_RECONNECT_MESSAGE } from "../../lib/cloudSession";
 import { switchWorkspace } from "../../lib/switchWorkspace";
 import { useAuth } from "../../lib/auth";
 import {
@@ -12,7 +13,6 @@ import {
   syncNow,
   syncCycle,
   markAllForSync,
-  cloudSessionEmail,
   cloudSignIn,
   cloudSignUp,
   cloudSignOut,
@@ -64,15 +64,20 @@ function CloudSyncCard() {
   /** Sign-in failed in the way that usually means "no cloud account yet". */
   const [offerSignup, setOfferSignup] = useState(false);
   useEffect(() => {
-    cloudSessionEmail()
-      .then(setConnected)
-      .catch(() => {});
+    // Includes the initial session and renewal failure/sign-out, so an expired
+    // connection offers sign-in immediately instead of a stale Connected label.
+    const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
+      setConnected(session?.user.email ?? null);
+    });
     const onStatus = () => {
       setSync(getSyncStatus());
       setEnabled(autoSyncEnabled());
     };
     window.addEventListener("filey:sync-status", onStatus);
-    return () => window.removeEventListener("filey:sync-status", onStatus);
+    return () => {
+      subscription?.data.subscription.unsubscribe();
+      window.removeEventListener("filey:sync-status", onStatus);
+    };
   }, []);
 
   const connect = async () => {
@@ -147,7 +152,9 @@ function CloudSyncCard() {
     sync.state === "syncing"
       ? "Syncing…"
       : sync.state === "error"
-        ? sync.failures?.length && sync.failures.every(failure => failure.kind === "conflict")
+        ? sync.error?.includes(CLOUD_RECONNECT_MESSAGE)
+          ? CLOUD_RECONNECT_MESSAGE
+          : sync.failures?.length && sync.failures.every(failure => failure.kind === "conflict")
           ? "Choose which changes to keep below."
           : "Sync couldn't finish. Your saved data is safe. Check your connection and try again; if this continues, contact Filey support."
         : sync.at

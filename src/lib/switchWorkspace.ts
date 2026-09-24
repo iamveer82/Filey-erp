@@ -1,5 +1,6 @@
 import { assertWorkspaceCurrent, getDataMode, setDataMode, type DataMode } from "./dataMode";
 import { supabase } from "./supabase";
+import { verifyCloudSession } from "./cloudSession";
 import { hasLocalData } from "./license";
 import { adoptLocalProfile, getLocalProfile, type Profile } from "./auth";
 import {
@@ -34,12 +35,7 @@ export async function switchWorkspace(
     assertLocalAccount(user.id);
     let localProfile: Profile | null = null;
     if (target === "cloud") {
-      const verified = await supabase.auth.getUser();
-      if (verified.error) throw verified.error;
-      if (verified.data.user?.id !== user.id)
-        throw new Error(
-          "Your cloud session changed. Reconnect the workspace account before switching."
-        );
+      await verifyCloudSession(supabase, data.session!);
     } else {
       const { data: profile, error: profileError } = await supabase
         .from("profiles")

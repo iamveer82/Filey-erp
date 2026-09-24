@@ -80,6 +80,13 @@ const send = (id: string, text: string) =>
 const answered = (id: string) =>
   vi.waitFor(() => expect(mocks.reply).toHaveBeenCalledWith(id, expect.any(String), expect.any(String)));
 
+it("answers a simple greeting without waiting for a model or scanning business records", async () => {
+  send("greeting", "Hyy");
+  await answered("greeting");
+  expect(mocks.reply).toHaveBeenCalledWith("greeting", expect.stringContaining("Send me a task"), "session-one");
+  expect(mocks.agent).not.toHaveBeenCalled();
+});
+
 it("cancels active and queued work when the WhatsApp connection closes", async () => {
   let signal: AbortSignal | undefined;
   mocks.agent.mockImplementationOnce((_messages, opts) => {
@@ -208,7 +215,7 @@ it("requires a signed-in workspace and isolates history when the account changes
   await answered("signed-out");
   expect(mocks.agent).toHaveBeenCalledTimes(1);
   state.scope = "local:other-org:user:other";
-  send("other", "hello");
+  send("other", "Show my overdue invoices");
   await answered("other");
   expect(JSON.stringify(mocks.agent.mock.calls[1][0])).not.toContain(
     "private first account context"
