@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { localClient } from "./localdb";
 import { localWorkspaceOwner, isLocalSignedIn } from "./localAuth";
+import { sessionFetch } from "./cloudSession";
 
 // Filey's hosted cloud — baked in so every packaged build is cloud-ready out
 // of the box (accounts, team sharing, auto-sync all point here). Env vars
@@ -27,6 +28,7 @@ export const isConfigured = isLocalMode() || cloudConfigured;
 
 export const supabase: SupabaseClient | null = cloudConfigured
   ? createClient(url!, anonKey!, {
+      global: { fetch: sessionFetch(url, () => supabase) },
       auth: {
         persistSession: true,
         autoRefreshToken: true,

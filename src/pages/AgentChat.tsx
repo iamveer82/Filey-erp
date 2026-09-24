@@ -13,7 +13,7 @@ import {
   ShieldAlert,
   ArrowUp,
   FileText,
-  PanelLeft,
+  History,
   PanelLeftClose,
   Search,
   CalendarClock,
@@ -23,7 +23,6 @@ import {
   Check,
   Square,
   Settings2,
-  PanelRight,
   Film,
   MoreHorizontal,
 } from "lucide-react";
@@ -728,7 +727,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         <header className="sticky top-0 z-30 mb-5 border-b border-border/60 bg-page pb-3 pt-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 hover:!bg-hover"><PanelLeft size={17} /></button>
+              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 hover:!bg-hover"><History size={17} /></button>
               <h1 className="truncate text-sm font-medium leading-tight text-foreground" title={chat.title || "Filey AI"}>
                 {empty ? "Filey AI" : chat.title || "Conversation"}
               </h1>
@@ -739,7 +738,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               </Link>
               <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
                 className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
-                <PanelRight size={16} />
+                <Globe size={17} />
               </button>
               <div ref={moreRef}>
                 <button type="button" onClick={() => setMoreOpen(v => !v)} className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={18} /></button>

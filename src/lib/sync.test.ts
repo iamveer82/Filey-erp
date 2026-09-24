@@ -600,6 +600,16 @@ describe('expired session', () => {
     expect(refreshes.length).toBe(0);
   });
 
+  it('preserves pending records when renewal returns no session', async () => {
+    await localClient.from('products').insert({ name: 'Keep on this device' });
+    const { client, calls } = fakeCloud({ expiresInSecs: -1 });
+    client.auth.refreshSession = async () => ({ data: { session: null }, error: null });
+    expect(await syncNow(client, { manual: true })).toBe(false);
+    expect(calls).toEqual([]);
+    expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
+    expect(getSyncStatus().error).toMatch(/sign in/i);
+  });
+
   // A first seed is every table at once and takes far longer than the 60s of
   // headroom the opening check buys. The token used to be read once, so when it
   // died partway the rest of the run failed as "JWT expired" — a message that

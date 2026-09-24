@@ -437,6 +437,12 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
   waLogAdd({ dir: "in", from: m.from, name: m.fromName, text: m.text }, scope);
   log.info("whatsapp", "Owner request received");
 
+  // A greeting needs neither a business-data scan nor a paid model round trip.
+  if (!opts.voice && !m.attachment && /^(?:hi|hey|hello|hyy)(?: filey)?[!. ]*$/i.test(m.text.trim())) {
+    await answer("Hi. Send me a task or question and I'll help you here.");
+    return;
+  }
+
   if (!aiReady()) {
     await answer(
       "Filey AI isn't configured yet — add an AI key in Settings → AI Assistant first."
