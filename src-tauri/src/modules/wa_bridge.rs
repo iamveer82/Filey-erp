@@ -42,6 +42,9 @@ pub struct BridgeState {
     pub error: Option<String>,
     /// The paired JID once connected (the owner's own chat in self-chat mode).
     pub me: Option<String>,
+    /// Runtime generation: queued work cannot send through a replacement pairing.
+    #[serde(rename = "sessionId")]
+    pub session_id: Option<String>,
 }
 
 struct Supervisor {
@@ -106,6 +109,7 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         candidates.push(dir.join("binaries").join(plain));
     }
     // Repo checkout: build.ps1 compiles the sidecar into src-tauri/binaries.
+    #[cfg(debug_assertions)]
     candidates.push(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("binaries")
@@ -194,6 +198,7 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                 qr: None,
                 error: None,
                 me: None,
+                session_id: Some(uuid::Uuid::new_v4().to_string()),
             },
             deliveries: HashMap::new(),
         });
@@ -273,27 +278,15 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                             }
                         }
                     }
-                    Some("message") => {
-                        // Route to the local agent in the frontend.
-                        if BRIDGE
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .is_some_and(|sup| sup.pid == pid)
-                        {
-                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), "wa-message", v.clone());
-                        }
-                    }
-                    Some("voice_note") => {
-                        // A voice note the owner sent — the app transcribes it
-                        // (Whisper via the configured provider) and answers.
-                        if BRIDGE
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .is_some_and(|sup| sup.pid == pid)
-                        {
-                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), "wa-voice", v.clone());
+                    Some(kind @ ("message" | "voice_note")) => {
+                        let session_id = BRIDGE.lock().unwrap().as_ref()
+                            .filter(|sup| sup.pid == pid && sup.state.state == "connected")
+                            .and_then(|sup| sup.state.session_id.clone());
+                        if let Some(session_id) = session_id {
+                            let event = if kind == "message" { "wa-message" } else { "wa-voice" };
+                            let mut message = v.clone();
+                            message["bridgeSession"] = session_id.into();
+                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), event, message);
                         }
                     }
                     _ => {}
@@ -306,6 +299,7 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                 }
                 s.qr = None;
                 s.me = None;
+                s.session_id = None;
             });
             let mut guard = BRIDGE.lock().unwrap();
             if let Some(sup) = guard.as_mut().filter(|sup| sup.pid == pid) {
@@ -327,17 +321,17 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
 /// reply that was written nowhere. Failing loudly is what lets the UI say
 /// "the bridge dropped" instead of "the agent is broken".
 #[tauri::command]
-pub async fn wa_bridge_reply(window: Webview, id: String, text: String) -> Result<String, String> {
+pub async fn wa_bridge_reply(window: Webview, id: String, text: String, session_id: String) -> Result<String, String> {
     super::computer_use::check_window(&window)?;
-    send_command(serde_json::json!({ "type": "reply", "id": id, "text": text })).await
+    send_command(serde_json::json!({ "type": "reply", "id": id, "text": text }), session_id).await
 }
 
 /// Send a proactive WhatsApp message to a specific JID (owner notifications —
 /// daily summary, low-stock and overdue alerts).
 #[tauri::command]
-pub async fn wa_bridge_send(window: Webview, to: String, text: String) -> Result<String, String> {
+pub async fn wa_bridge_send(window: Webview, to: String, text: String, session_id: String) -> Result<String, String> {
     super::computer_use::check_window(&window)?;
-    send_command(serde_json::json!({ "type": "send", "to": to, "text": text })).await
+    send_command(serde_json::json!({ "type": "send", "to": to, "text": text }), session_id).await
 }
 
 /// Send a FILE (PDF, photo, document) to a JID. The sidecar reads the file off
@@ -351,6 +345,7 @@ pub async fn wa_bridge_send_file(
     filename: String,
     mimetype: String,
     caption: String,
+    session_id: String,
 ) -> Result<String, String> {
     super::computer_use::check_window(&window)?;
     // The path is the contract: it must exist NOW, before the sidecar races to
@@ -365,12 +360,22 @@ pub async fn wa_bridge_send_file(
         "filename": filename,
         "mimetype": mimetype,
         "caption": caption,
-    }))
+    }), session_id)
     .await
 }
 
 /// Wait for provider acceptance, not just a successful write into the pipe.
-async fn send_command(mut payload: serde_json::Value) -> Result<String, String> {
+fn require_session(state: &BridgeState, session_id: &str) -> Result<(), String> {
+    if state.state != "connected" {
+        return Err("WhatsApp is disconnected. Reconnect before sending.".into());
+    }
+    if session_id.is_empty() || state.session_id.as_deref() != Some(session_id) {
+        return Err("WhatsApp reconnected while this task was running. Send a fresh request before continuing.".into());
+    }
+    Ok(())
+}
+
+async fn send_command(mut payload: serde_json::Value, session_id: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
         payload["requestId"] = serde_json::Value::String(id.clone());
@@ -378,9 +383,7 @@ async fn send_command(mut payload: serde_json::Value) -> Result<String, String> 
         {
             let mut guard = BRIDGE.lock().unwrap();
             let sup = guard.as_mut().ok_or("WhatsApp bridge is not running")?;
-            if sup.state.state != "connected" {
-                return Err("WhatsApp is disconnected. Reconnect before sending.".into());
-            }
+            require_session(&sup.state, &session_id)?;
             let stdin = sup.stdin.as_mut().ok_or("WhatsApp bridge is not running")?;
             let line = format!("FILEY {payload}\n");
             stdin.write_all(line.as_bytes()).and_then(|_| stdin.flush())
@@ -411,8 +414,14 @@ pub async fn wa_bridge_stop(window: Webview, app: AppHandle) -> Result<(), Strin
 }
 
 fn wa_bridge_stop_blocking() {
-    let mut guard = BRIDGE.lock().unwrap();
-    if let Some(sup) = guard.as_mut() {
+    // Detach first: the reader must remain free to drain stdout while the
+    // sidecar flushes credentials. Holding BRIDGE during wait could deadlock
+    // its final status write and force-kill a healthy pairing save.
+    let stopped = BRIDGE.lock().unwrap().take();
+    if let Some(mut sup) = stopped {
+        for (_, sender) in sup.deliveries.drain() {
+            let _ = sender.send(Err("WhatsApp bridge stopped before confirming delivery. Check the conversation before retrying.".into()));
+        }
         // EOF lets the bridge flush rolling Signal credentials before exit.
         // Force-killing every disconnect could leave a partially saved session.
         sup.stdin.take();
@@ -430,18 +439,8 @@ fn wa_bridge_stop_blocking() {
             }
             let _ = child.wait();
         }
-        sup.child = None;
-        sup.session_lock = None;
-        sup.stdin = None;
-        for (_, sender) in sup.deliveries.drain() {
-            let _ = sender.send(Err("WhatsApp bridge stopped before confirming delivery. Check the conversation before retrying.".into()));
-        }
-        sup.state = BridgeState {
-            state: "stopped".into(),
-            qr: None,
-            error: None,
-            me: None,
-        };
+        // Keep the session lock until the child has exited.
+        drop(sup.session_lock);
     }
 }
 
@@ -484,6 +483,19 @@ fn bridge_snapshot() -> BridgeState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn outgoing_work_is_bound_to_its_connected_session() {
+        let mut state = super::BridgeState {
+            state: "connected".into(), session_id: Some("current-session".into()),
+            ..super::BridgeState::default()
+        };
+        assert!(super::require_session(&state, "current-session").is_ok());
+        assert!(super::require_session(&state, "old-session").is_err());
+        assert!(super::require_session(&state, "").is_err());
+        state.state = "reconnecting".into();
+        assert!(super::require_session(&state, "current-session").is_err());
+    }
+
     #[test]
     fn pairing_has_one_writer_and_unlocks_without_deleting_credentials() {
         let dir = std::env::temp_dir().join(format!("filey-wa-lock-{}", uuid::Uuid::new_v4()));

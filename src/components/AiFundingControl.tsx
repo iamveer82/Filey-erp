@@ -157,6 +157,7 @@ export default function AiFundingControl({ disabled = false, compact = false }: 
                     {model.id === "openrouter/free"
                       ? "Auto · available free model"
                       : model.name}
+                    {model.vision ? " · Vision" : ""}
                   </option>
                 ))}
             </select>
@@ -202,6 +203,9 @@ export default function AiFundingControl({ disabled = false, compact = false }: 
                     {model.name}
                   </span>
                   <span className="block text-xs text-muted-foreground">
+                    {model.vision ? "Vision · can read images and browser screenshots" : "Text only"}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
                     {creditMoney(model.input * 1e12 * (1 + data.markup_bps / 10000))} in ·{" "}
                     {creditMoney(model.output * 1e12 * (1 + data.markup_bps / 10000))} out
                     / 1M tokens
@@ -222,7 +226,7 @@ export default function AiFundingControl({ disabled = false, compact = false }: 
           to="/settings?section=credits"
           onClick={() => setOpen(false)}
         >
-          Open AI wallet
+          <Wallet size={16} /> Add money / AI wallet
         </Link>
       </PopoverContent>
     </Popover>

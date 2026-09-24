@@ -27,7 +27,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import { sendConfirmed } from "./delivery.mjs";
-import { ownerIdentity } from "./identity.mjs";
+import { ownerIdentity, phoneNumber } from "./identity.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -39,6 +39,9 @@ import QR from "qrcode";
 // Pairing keys are private to this OS user on platforms with POSIX permissions.
 process.umask(0o077);
 const ownerNumber = process.env.FILEY_BRIDGE_OWNER || "";
+// Self-chat arrives as append too. Only accept live entries from this process
+// lifetime; synchronized history must never execute old business requests.
+const startedAtSeconds = Math.floor(Date.now() / 1000);
 
 /** One JSON object per line on stdout. The desktop app parses these to show
  *  the QR/state and to route messages to the local agent. Keep it one-line —
@@ -48,14 +51,15 @@ const emit = (obj) => console.log("FILEY " + JSON.stringify(obj));
 /** Plain text out of the many shapes a WhatsApp message can arrive in. */
 function textOf(m) {
   const c = normalizeMessageContent(m.message) ?? {};
-  return (
+  const text = (
     c.conversation ??
     c.extendedTextMessage?.text ??
     c.imageMessage?.caption ??
     c.videoMessage?.caption ??
     c.documentMessage?.caption ??
     ""
-  ).trim();
+  );
+  return typeof text === "string" ? text.trim() : "";
 }
 
 /** Replies arrive on stdin as `FILEY {"type":"reply","id":...,"text":...}`.
@@ -153,6 +157,7 @@ function startStdinLoop() {
     } catch {
       return;
     }
+    if (!v || typeof v !== "object" || Array.isArray(v)) return;
     if (v.type === "reply") {
       const r = pending.get(v.id);
       if (r) {
@@ -375,11 +380,14 @@ async function start() {
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+  sock.ev.on("messages.upsert", async (event) => {
+    if (!event || !Array.isArray(event.messages)) return;
+    const { messages, type } = event;
+    if (type !== "notify" && type !== "append") return;
     for (const m of messages) {
       if (closing || sock !== activeSock || !connected) return;
-      if (m.key.remoteJid?.endsWith("@g.us")) continue; // ignore group chats
+      if (!m?.key || typeof m.key.remoteJid !== "string" || typeof m.key.id !== "string" || !m.key.id) continue;
+      if (m.key.remoteJid.endsWith("@g.us")) continue; // ignore group chats
       if (sentIds.has(m.key.id)) continue; // our own reply echoing back
 
       const identity = ownerIdentity(m.key, sock.user, ownerNumber);
@@ -388,14 +396,27 @@ async function start() {
       if (!identity) continue;
       const { jid, phone } = identity;
 
-      const receivedId = `${jid}:${m.key.id}`;
-      if (!m.key.id || receivedIds.has(receivedId)) continue;
+      if (type === "append") {
+        const timestamp = Number(m.messageTimestamp);
+        if (!m.key.fromMe || phone !== phoneNumber(sock.user?.id) ||
+            !Number.isFinite(timestamp) || timestamp < startedAtSeconds ||
+            timestamp > Math.floor(Date.now() / 1000) + 60) continue;
+      }
+
+      const text = textOf(m);
+      // IDs protect current sends; the marker also protects restored self-chat
+      // answers whose IDs are no longer in the bounded in-memory set.
+      if (m.key.fromMe && text.startsWith(HEADER)) continue;
+
+      // WhatsApp may re-deliver a message using its phone JID and its LID.
+      // Both are the same authenticated owner and must execute only once.
+      const receivedId = `${phone}:${m.key.id}`;
+      if (receivedIds.has(receivedId)) continue;
       receivedIds.add(receivedId);
       if (receivedIds.size > 1000) receivedIds.delete(receivedIds.values().next().value);
 
       const name = m.pushName ?? phone;
 
-      const text = textOf(m);
       const content = normalizeMessageContent(m.message) ?? {};
       const document = content.documentMessage || content.imageMessage;
       if (document) {

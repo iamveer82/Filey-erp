@@ -2,6 +2,7 @@ import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { addSkill, loadSkills } from "../agentSkills";
 import { seedDefaultSkills } from "../defaultSkills";
+import { writeAgentStorage } from "../agentStorage";
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
@@ -25,6 +26,16 @@ describe("addSkill", () => {
 });
 
 describe("seedDefaultSkills", () => {
+  it("adds computer workflows to existing installs without replacing customized or disabled skills", () => {
+    writeAgentStorage("filey.agent.skills.seeded.v2", "1");
+    addSkill({ name: "quote-to-invoice", description: "custom", instructions: "My workflow", enabled: false });
+    seedDefaultSkills();
+    expect(loadSkills().find(s => s.name === "quote-to-invoice")).toMatchObject({ instructions: "My workflow", enabled: false });
+    expect(loadSkills().find(s => s.name === "computer-use")?.instructions).toContain("snapshot_id");
+    const saved = loadSkills();
+    seedDefaultSkills();
+    expect(loadSkills()).toEqual(saved);
+  });
   it("seeds once, and a second call changes nothing", () => {
     seedDefaultSkills();
     const after = loadSkills().length;

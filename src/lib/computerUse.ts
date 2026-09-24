@@ -87,10 +87,10 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
     if (typeof args.window_id !== "string" || !/^\d{1,20}$/.test(args.window_id)) throw new Error("Choose a window_id from list_windows.");
     return { action, window_id: args.window_id };
   }
-  if (!["click", "type", "key", "scroll"].includes(String(action))) throw new Error("Unsupported computer action.");
+  if (!["click", "hover", "drag", "type", "key", "scroll"].includes(String(action))) throw new Error("Unsupported computer action.");
   if (typeof args.snapshot_id !== "string" || !/^[a-zA-Z0-9-]{1,64}$/.test(args.snapshot_id)) throw new Error("Take a screenshot before acting.");
   const request: Record<string, unknown> = { action, snapshot_id: args.snapshot_id };
-  if (action === "click" || action === "scroll") {
+  if (["click", "hover", "drag", "scroll"].includes(String(action))) {
     if (![args.x, args.y].every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0 && n < 1600))
       throw new Error("Coordinates must be integer screenshot pixels.");
     request.x = args.x; request.y = args.y;
@@ -99,6 +99,10 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
     if (args.button !== undefined && args.button !== "left" && args.button !== "right") throw new Error("Choose left or right click.");
     if (args.double_click !== undefined && typeof args.double_click !== "boolean") throw new Error("double_click must be boolean.");
     request.button = args.button ?? "left"; request.double_click = args.double_click ?? false;
+  } else if (action === "drag") {
+    if (![args.to_x, args.to_y].every((n) => typeof n === "number" && Number.isInteger(n) && n >= 0 && n < 1600))
+      throw new Error("Drag destination must be integer screenshot pixels.");
+    request.to_x = args.to_x; request.to_y = args.to_y;
   } else if (action === "type") {
     if (typeof args.text !== "string" || !args.text || [...args.text].length > 2000
       || [...args.text].some((char) => (char.charCodeAt(0) < 32 && char !== "\n" && char !== "\t") || char.charCodeAt(0) === 127))
@@ -112,6 +116,9 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
     if (typeof args.delta !== "number" || !Number.isInteger(args.delta) || args.delta === 0 || Math.abs(args.delta) > 10)
       throw new Error("Scroll delta must be an integer from -10 to 10, excluding zero.");
     request.delta = args.delta;
+    if (args.axis !== undefined && args.axis !== "vertical" && args.axis !== "horizontal")
+      throw new Error("Choose vertical or horizontal scrolling.");
+    request.axis = args.axis ?? "vertical";
   }
   return request;
 }

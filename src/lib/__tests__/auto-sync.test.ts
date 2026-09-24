@@ -60,11 +60,16 @@ it("coalesces saves, preserves pending full checks, and stops polling on cleanup
   await vi.advanceTimersByTimeAsync(1000);
   expect(PUSH_TABLES.every(t => cloud.reads.includes(t))).toBe(true);
   cloud.reads.length = 0;
+  window.dispatchEvent(new Event("focus"));
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(PUSH_TABLES.every(t => cloud.reads.includes(t))).toBe(true);
+  cloud.reads.length = 0;
   vi.spyOn(document, "hidden", "get").mockReturnValue(true);
   await vi.advanceTimersByTimeAsync(300_000);
   expect(cloud.reads).toEqual([]);
   stop();
   window.dispatchEvent(new Event("online"));
+  window.dispatchEvent(new Event("focus"));
   await vi.advanceTimersByTimeAsync(300_000);
   expect(cloud.reads).toEqual([]);
 });

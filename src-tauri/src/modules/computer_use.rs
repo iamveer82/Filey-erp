@@ -236,14 +236,14 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
         active.snapshot = None;
         return Ok(json!({"action": action, "window_id": window, "process_id": process}));
     }
-    if !matches!(action, "click" | "type" | "key" | "scroll") {
+    if !matches!(action, "click" | "hover" | "drag" | "type" | "key" | "scroll") {
         return Err("Unsupported computer action.".into());
     }
     let id = text(request, "snapshot_id", 64)?;
     let snapshot = active.snapshot.as_ref().filter(|s| s.id == id && s.captured.elapsed() < SNAPSHOT_LIFETIME)
         .ok_or("Take a fresh screenshot before acting. Each screenshot can authorize one input action.")?;
     let mut prepared = json!({"action": action, "window_id": snapshot.data["window_id"], "bounds": snapshot.data["bounds"], "process_id": snapshot.data["process_id"]});
-    if action == "click" || action == "scroll" {
+    if matches!(action, "click" | "hover" | "drag" | "scroll") {
         let width = snapshot.data["width"]
             .as_i64()
             .ok_or("Invalid screenshot width.")?;
@@ -261,6 +261,12 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
             bounds["y"].as_i64().ok_or("Invalid window bounds.")?
                 + y * bounds["height"].as_i64().ok_or("Invalid window height.")? / height
         );
+        if action == "drag" {
+            let to_x = point(request, "to_x", width)?;
+            let to_y = point(request, "to_y", height)?;
+            prepared["screen_to_x"] = json!(bounds["x"].as_i64().unwrap() + to_x * bounds["width"].as_i64().unwrap() / width);
+            prepared["screen_to_y"] = json!(bounds["y"].as_i64().unwrap() + to_y * bounds["height"].as_i64().unwrap() / height);
+        }
     }
     match action {
         "click" => {
@@ -303,7 +309,13 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
                 .filter(|n| *n != 0 && (-10..=10).contains(n))
                 .ok_or("delta must be an integer between -10 and 10, excluding zero.")?;
             prepared["delta"] = json!(delta);
+            let axis = request.get("axis").and_then(Value::as_str).unwrap_or("vertical");
+            if request.get("axis").is_some_and(|v| !v.is_string()) || !matches!(axis, "vertical" | "horizontal") {
+                return Err("axis must be vertical or horizontal.".into());
+            }
+            prepared["axis"] = json!(axis);
         }
+        "hover" | "drag" => {},
         _ => unreachable!(),
     }
     // Consume before execution: a retry cannot replay an input that succeeded
@@ -573,6 +585,22 @@ mod tests {
         assert!(session(&mut current, "session").unwrap().expires.is_none());
         revoke(&mut current);
         assert!(session(&mut current, "session").is_err());
+    }
+    #[test]
+    fn pointer_actions_stay_inside_the_snapshot_and_cannot_be_replayed() {
+        let mut current = active();
+        assert!(prepare(&json!({"action":"drag","snapshot_id":"fresh","x":10,"y":20,"to_x":800,"to_y":30}), &mut current).is_err());
+        let drag = prepare(&json!({"action":"drag","snapshot_id":"fresh","x":10,"y":20,"to_x":300,"to_y":150}), &mut current).unwrap();
+        assert_eq!(drag["screen_x"], -80);
+        assert_eq!(drag["screen_to_x"], 500);
+        assert_eq!(drag["screen_to_y"], 320);
+        assert!(current.snapshot.is_none());
+        assert!(prepare(&json!({"action":"hover","snapshot_id":"fresh","x":1,"y":1}), &mut current).is_err());
+        let hover = prepare(&json!({"action":"hover","snapshot_id":"fresh","x":5,"y":5}), &mut active()).unwrap();
+        assert_eq!(hover["screen_y"], 30);
+        let scroll = prepare(&json!({"action":"scroll","snapshot_id":"fresh","x":5,"y":5,"delta":2,"axis":"horizontal"}), &mut active()).unwrap();
+        assert_eq!(scroll["axis"], "horizontal");
+        assert!(prepare(&json!({"action":"scroll","snapshot_id":"fresh","x":5,"y":5,"delta":2,"axis":"diagonal"}), &mut active()).is_err());
     }
     #[test]
     fn validates_targets_and_consumes_snapshots_without_executing_any_input() {

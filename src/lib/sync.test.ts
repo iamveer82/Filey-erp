@@ -4,7 +4,7 @@
 // collections.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
-import { syncNow, pullNow, syncCycle, cleanRowForPush, getSyncStatus, pushCollection, isMigrating, inRealOrg } from "./sync";
+import { syncNow, pullNow, syncCycle, resolveSyncConflicts, listSyncConflicts, cleanRowForPush, getSyncStatus, pushCollection, isMigrating, inRealOrg } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 
@@ -167,7 +167,7 @@ function fakeCloud(opts?: {
               calls.push({ table, op: "select-in", ids });
               const want = new Set(ids.map(String));
               return Promise.resolve({
-                data: rows.filter((r) => want.has(String(r.id)) && !opts?.deletedBeforeBody?.[table]?.includes(r.id)).map(project),
+                data: rows.filter((r) => want.has(String(r[_col])) && !opts?.deletedBeforeBody?.[table]?.includes(r.id)).map(project),
                 error: null,
               });
             },
@@ -652,3 +652,132 @@ describe("auto-sync opt-in upgrade", () => {
     expect(autoSyncEnabled()).toBe(false);
   });
 });
+
+for (const keepLocal of [true, false]) {
+  it(`merges all conflicts using the ${keepLocal ? "device" : "cloud"} preference and downloads later cloud edits`, async () => {
+    localStorage.setItem("filey_cloud_seeded", "1");
+    await localClient.from("products").insert([
+      { id: 1, name: "Device version", sync_revision: 1 },
+      { id: 2, name: "Device only" },
+    ]);
+    await localClient.from("sync_conflicts").insert({ id: "products:1", table: "products", recordId: 1 });
+    const remote = [
+      { id: 1, name: "Cloud version", sync_revision: 2 },
+      { id: 3, name: "Cloud only", sync_revision: 1 },
+    ];
+    const { client } = fakeCloud({ pull: { products: remote } });
+    const rpc = client.rpc.bind(client);
+    client.rpc = async (name: string, args: any) => {
+      if (name !== "sync_record") return rpc(name, args);
+      const index = remote.findIndex(row => row.id === args.p_row.id);
+      const revision = index < 0 ? null : remote[index].sync_revision;
+      if (revision !== args.p_expected) return { data: { ok: false, conflict: true }, error: null };
+      const next = { ...args.p_row, sync_revision: (revision ?? 0) + 1 };
+      if (index < 0) remote.push(next); else remote[index] = next;
+      return { data: { ok: true, revision: next.sync_revision }, error: null };
+    };
+    expect(await resolveSyncConflicts(keepLocal, client)).toBe(true);
+    expect(await listSyncConflicts()).toEqual([]);
+    expect((await journalSnapshot()).tables).toEqual({});
+    const rows = (await localClient.from("products").select()).data!;
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 1, name: keepLocal ? "Device version" : "Cloud version" }),
+      expect.objectContaining({ id: 2, name: "Device only" }),
+      expect.objectContaining({ id: 3, name: "Cloud only" }),
+    ]));
+    expect(rows).toHaveLength(3);
+    remote[0] = { ...remote[0], name: "Later cloud edit", sync_revision: remote[0].sync_revision + 1 };
+    expect(await syncCycle(client)).toBe(true);
+    expect((await localClient.from("products").select().eq("id", 1).single()).data.name).toBe("Later cloud edit");
+  });
+}
+
+it("preserves every device record if a cloud choice cannot read one of the overlapping records", async () => {
+  await localClient.from("products").insert([{ id: 1, name: "One" }, { id: 2, name: "Two" }]);
+  await localClient.from("sync_conflicts").insert([1, 2].map(recordId => ({ id: `products:${recordId}`, table: "products", recordId })));
+  const { client, calls } = fakeCloud({ pull: { products: [{ id: 1, name: "Cloud", sync_revision: 2 }] } });
+  const before = await journalSnapshot();
+  await expect(resolveSyncConflicts(false, client)).rejects.toThrow(/aren't available/);
+  expect((await localClient.from("products").select()).data!.map((row: { name: string }) => row.name)).toEqual(["One", "Two"]);
+  expect(await journalSnapshot()).toEqual(before);
+  expect(await listSyncConflicts()).toHaveLength(2);
+  expect(calls.some(call => call.op === "upsert")).toBe(false);
+  expect(isMigrating()).toBe(false);
+});
+
+it("never forces a device preference over a newer cloud revision", async () => {
+  localStorage.setItem("filey_cloud_seeded", "1");
+  await localClient.from("products").insert({ id: 1, name: "Device", sync_revision: 1 });
+  await localClient.from("sync_conflicts").insert({ id: "products:1", table: "products", recordId: 1 });
+  const { client } = fakeCloud({ pull: { products: [{ id: 1, name: "Cloud", sync_revision: 2 }] } });
+  const rpc = client.rpc.bind(client);
+  client.rpc = vi.fn((name, args) => name === "sync_record"
+    ? Promise.resolve({ data: { ok: false, conflict: true }, error: null }) : rpc(name, args));
+  expect(await resolveSyncConflicts(true, client)).toBe(false);
+  expect(client.rpc).toHaveBeenCalledWith("sync_record", expect.objectContaining({ p_expected: 2 }));
+  expect((await localClient.from("products").select().single()).data.name).toBe("Device");
+  expect(await listSyncConflicts()).toHaveLength(1);
+  expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
+});
+
+it("stops a bulk choice if the device is edited while fetching cloud versions", async () => {
+  await localClient.from("products").insert({ id: 1, name: "Original" });
+  await localClient.from("sync_conflicts").insert({ id: "products:1", table: "products", recordId: 1 });
+  const { client } = fakeCloud();
+  const from = client.from.bind(client);
+  client.from = (table: string) => table !== "products" ? from(table) : {
+    select: () => ({ in: async () => {
+      await localClient.from("products").update({ name: "New edit" }).eq("id", 1);
+      return { data: [{ id: 1, name: "Cloud", sync_revision: 2 }], error: null };
+    } }),
+  };
+  await expect(resolveSyncConflicts(false, client)).rejects.toThrow(/Data changed/);
+  expect((await localClient.from("products").select().single()).data.name).toBe("New edit");
+  expect(await listSyncConflicts()).toHaveLength(1);
+});
+
+for (const keepLocal of [true, false]) {
+  it(`keeps company details and image bytes when merging different device/cloud IDs (device preference: ${keepLocal})`, async () => {
+    localStorage.setItem("filey_cloud_seeded", "1");
+    const deviceImage = "data:image/png;base64,ZGV2aWNl";
+    const cloudImage = "data:image/png;base64,Y2xvdWQ=";
+    await localClient.from("company_profile").insert({ id: 100, name: "Device company", logo: deviceImage });
+    await localClient.from("app_settings").insert([
+      { id: 101, key: "company_stamp", value: JSON.stringify({ data: deviceImage }) },
+      { id: 102, key: "company_signature", value: JSON.stringify({ data: deviceImage }) },
+    ]);
+    await localClient.from("sync_conflicts").insert([
+      { id: "company_profile:100", table: "company_profile", recordId: 100 },
+      ...[101, 102].map(recordId => ({ id: `app_settings:${recordId}`, table: "app_settings", recordId })),
+    ]);
+    const stored: Record<string, Record<string, any>[]> = {
+      company_profile: [{ id: 5, name: "Cloud company", logo: cloudImage, sync_revision: 3 }],
+      app_settings: [
+        { id: 6, key: "company_stamp", value: JSON.stringify({ data: cloudImage }), sync_revision: 3 },
+        { id: 7, key: "company_signature", value: JSON.stringify({ data: cloudImage }), sync_revision: 3 },
+      ],
+    };
+    const { client } = fakeCloud({ pull: stored });
+    const rpc = client.rpc.bind(client);
+    client.rpc = async (name: string, args: any) => {
+      if (name !== "sync_record") return rpc(name, args);
+      const rows = stored[args.p_table];
+      const index = rows.findIndex(row => row.id === args.p_row.id);
+      if (index < 0 || args.p_expected !== rows[index].sync_revision)
+        return { data: { ok: false, conflict: true }, error: null };
+      rows[index] = { ...args.p_row, sync_revision: args.p_expected + 1 };
+      return { data: { ok: true, revision: args.p_expected + 1 }, error: null };
+    };
+    expect(await resolveSyncConflicts(keepLocal, client)).toBe(true);
+    expect(await listSyncConflicts()).toEqual([]);
+    expect((await journalSnapshot()).tables).toEqual({});
+    const image = keepLocal ? deviceImage : cloudImage;
+    expect(stored.company_profile[0]).toMatchObject({ id: 5, logo: image, name: keepLocal ? "Device company" : "Cloud company" });
+    for (const key of ["company_stamp", "company_signature"]) {
+      expect(JSON.parse(stored.app_settings.find(row => row.key === key)!.value).data).toBe(image);
+      const saved = (await localClient.from("app_settings").select().eq("key", key).single()).data;
+      expect(saved).toEqual(stored.app_settings.find(row => row.key === key));
+    }
+    expect((await localClient.from("company_profile").select()).data).toEqual(stored.company_profile);
+  });
+}

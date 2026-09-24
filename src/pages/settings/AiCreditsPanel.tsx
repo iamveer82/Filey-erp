@@ -268,6 +268,8 @@ export default function AiCreditsPanel() {
                 key; no payment will be taken.
               </p>
             )}
+            <h3 className="text-sm font-semibold">Add money</h3>
+            <p className="text-[13px] text-muted-foreground">Choose an amount, review the total, then continue to secure payment.</p>
             <div className="flex flex-wrap gap-2">
               {data.packs.map((pack) => (
                 <button

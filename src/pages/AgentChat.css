@@ -1,0 +1,28 @@
+.filey-agent-workspace {
+  container: filey-agent / inline-size;
+}
+
+.filey-chat-history {
+  width: 14rem;
+  max-height: calc(var(--filey-viewport-height, 100dvh) - 10rem);
+  min-height: 20rem;
+}
+
+@container filey-agent (max-width: 719px) {
+  .filey-chat-history {
+    width: 100%;
+    min-height: calc(var(--filey-viewport-height, 100dvh) - 10rem);
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .filey-chat-with-history {
+    display: none;
+  }
+}
+
+@container filey-agent (max-width: 480px) {
+  .filey-chat-credit-label {
+    display: none;
+  }
+}

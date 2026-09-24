@@ -72,3 +72,15 @@ test("an expired signed URL saved over the path heals back to the path", async (
   const loaded = await loadCompanyStampSig();
   expect(loaded.signature?.data).toBe("uid/company/2/sign.png");
 });
+
+test("saving an older signature stores its durable cloud path instead of an expiring link", async () => {
+  const { saveCompanyStampSig } = await import("../../components/StampSignatureSettings");
+  const { SIGN_DEFAULT } = await import("../../components/StampSignature");
+  const { tools } = await import("../api");
+  await saveCompanyStampSig({ signature: { ...SIGN_DEFAULT,
+    data: "https://proj.supabase.co/storage/v1/object/sign/files/uid/company/sign.png?token=expired",
+  } });
+  const row = (await tools.settings()).find(r => r.key === "company_signature");
+  expect(JSON.parse(row!.value).data).toBe("uid/company/sign.png");
+  expect(row!.value).not.toContain("token=");
+});

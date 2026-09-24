@@ -7,7 +7,7 @@ import { compressForModel, headroomReset } from "../headroom";
 vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn() }));
 vi.mock("../capabilities", () => ({ isToolAllowed: () => true }));
 vi.mock("../agentMode", () => ({ gateFor: () => "run" }));
-vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:test" }));
+vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
 
 const config: AiConfig = {
   provider: "openai",
@@ -54,6 +54,65 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config) {
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it("keeps every fresh batch result intact, then offers retrieval after observation", async () => {
+    headroomReset();
+    vi.mocked(runTool)
+      .mockResolvedValueOnce({ body: "a".repeat(600), tail: "FIRST_TAIL" })
+      .mockResolvedValueOnce({ body: "b".repeat(600), tail: "SECOND_TAIL" });
+    const result = await run([
+      turn([call("get_stats"), call("list_customers")]),
+      turn([call("recall")]),
+      turn([], "Verified"),
+    ]);
+    expect(JSON.stringify(result.requests[1])).toContain("FIRST_TAIL");
+    expect(JSON.stringify(result.requests[1])).toContain("SECOND_TAIL");
+    expect(JSON.stringify(result.requests[2])).not.toContain("FIRST_TAIL");
+    expect(JSON.stringify(result.requests[2])).toContain("Earlier observation");
+    expect(JSON.stringify(result.requests[2].body.tools)).toContain("headroom_retrieve");
+  });
+
+  it("continues unfinished plans after a premature text answer and stops after bounded checks", async () => {
+    const result = await run([
+      turn([call("update_plan", { steps: [{ step: "Verify stock", status: "in_progress" }] })]),
+      turn([], "Done"), turn([], "Done"), turn([], "Done"),
+    ]);
+    expect(result.requests).toHaveLength(4);
+    expect(JSON.stringify(result.requests[2])).toContain("Execution check");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it("validates internal tool arguments before changing a plan", async () => {
+    const result = await run([
+      turn([call("update_plan", { steps: "incorrect" })]), turn([], "Correct the plan"),
+    ]);
+    expect(result.events.some(e => e.type === "plan")).toBe(false);
+    expect(JSON.stringify(result.requests[1])).toContain("must be array");
+  });
+
+  it("honors Stop while suspended at a recorded call, before dispatch", async () => {
+    const controller = new AbortController();
+    const stream = runAgentStream([{ role: "user", text: "Create invoice" }], { signal: controller.signal }, {
+      cfg: config,
+      fetchFn: async () => new Response(JSON.stringify(turn([call("create_invoice_draft")]))),
+    });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_call" });
+    controller.abort();
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(runTool).not.toHaveBeenCalled();
+  });
+
+  it("contains unexpected tool failures without repeating an uncertain write", async () => {
+    vi.mocked(runTool).mockRejectedValueOnce(new Error("Lost connection after writing"));
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_id: "1" }, "a")]),
+      turn([call("create_invoice_draft", { customer_id: "1" }, "b")]),
+      turn([], "The result needs verification"),
+    ]);
+    expect(runTool).toHaveBeenCalledTimes(1);
+    expect(result.events.find(e => e.type === "tool_result")).toMatchObject({ result: { retry_safe: false } });
+    expect(JSON.stringify(result.requests[2])).toContain("not repeating");
+  });
+
   it("does not execute malformed tool arguments", async () => {
     const result = await run([
       turn([call("create_invoice_draft", "{broken")]),

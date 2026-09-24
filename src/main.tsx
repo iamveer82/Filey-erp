@@ -22,6 +22,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
 import { seedDefaultSkills } from "./lib/defaultSkills";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "./lib/agentStorage";
 import { quarantineLegacyCredentials } from "./lib/credentialStore";
 
 applyTheme();
@@ -43,6 +44,15 @@ if ("__TAURI_INTERNALS__" in window) {
 }
 // Seed the default business-skill pack once, so the agent starts capable.
 seedDefaultSkills();
+let skillsScope = agentStorageScope();
+const seedWorkspaceSkills = () => {
+  const scope = agentStorageScope();
+  if (scope === skillsScope) return;
+  skillsScope = scope;
+  seedDefaultSkills();
+};
+window.addEventListener(AGENT_STORAGE_EVENT, seedWorkspaceSkills);
+import.meta.hot?.dispose(() => window.removeEventListener(AGENT_STORAGE_EVENT, seedWorkspaceSkills));
 void quarantineLegacyCredentials().catch(() => console.warn("Legacy credential migration is pending; open AI settings to retry."));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

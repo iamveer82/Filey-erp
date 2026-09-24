@@ -1,6 +1,7 @@
 // Membership denial is exercised by module-access tests; these fixtures isolate native pairing ownership.
 vi.mock("../moduleAccess", () => ({requireModuleAccess: vi.fn(async () => {})}));
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { requireModuleAccess } from "../moduleAccess";
 
 const session = vi.hoisted(() => ({
   account: "org:user:one" as string | null,
@@ -23,7 +24,7 @@ beforeEach(() => {
   session.account = "org:user:one";
   session.mode = "local";
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
-  rpc.mockResolvedValue({ state: "connected", me: "971500000001@s.whatsapp.net" });
+  rpc.mockResolvedValue({ state: "connected", me: "971500000001@s.whatsapp.net", sessionId: "session-one" });
 });
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
@@ -53,6 +54,7 @@ it("binds explicit Connect and retains it across modes but blocks another accoun
   expect(rpc).toHaveBeenCalledWith("wa_bridge_send", {
     to: "971500000001",
     text: "hello",
+    sessionId: "session-one",
   });
   session.account = "different-org:user:two";
   expect(bridge.getBridgeConfig().ownerNumber).toBe("");
@@ -112,4 +114,46 @@ it("resumes a bound account only after authentication and stops on sign-out", as
   await bridge.autoStartBridge();
   expect(rpc).toHaveBeenCalledWith("wa_bridge_stop");
   expect(rpc).not.toHaveBeenCalledWith("wa_bridge_start", expect.anything());
+});
+
+it("binds every reply and attachment to the incoming bridge generation", async () => {
+  const bridge = await import("../waBridge");
+  await bridge.startBridge();
+  await bridge.replyWa("request-one", "Ready", "session-one");
+  expect(rpc).toHaveBeenCalledWith("wa_bridge_reply", { id: "request-one", text: "Ready", sessionId: "session-one" });
+  await bridge.sendWaFile("971500000001", { path: "C:/Exports/report.pdf", filename: "report.pdf" }, "session-one");
+  expect(rpc).toHaveBeenCalledWith("wa_bridge_send_file", expect.objectContaining({ sessionId: "session-one" }));
+  rpc.mockClear();
+  await expect(bridge.sendWaFile("971500000001", { path: "C:/Exports/report.pdf", filename: "report.pdf" }, "expired-session")).rejects.toThrow("restarted");
+  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_send_file", expect.anything());
+  await expect(bridge.replyWa("old-request", "Private data", "")).rejects.toThrow("expired");
+});
+
+it("captures the send session before permissions resolve instead of using a re-paired phone", async () => {
+  const bridge = await import("../waBridge");
+  await bridge.startBridge();
+  let permit!: () => void;
+  vi.mocked(requireModuleAccess).mockImplementationOnce(() => new Promise(resolve => { permit = resolve; }));
+  const sending = bridge.sendWa("971500000001", "Hello");
+  await vi.waitFor(() => expect(permit).toBeTypeOf("function"));
+  rpc.mockResolvedValue({ state: "connected", me: "971500000002@s.whatsapp.net", sessionId: "session-two" });
+  permit();
+  await sending;
+  // The native layer compares this captured ID atomically before writing.
+  expect(rpc).toHaveBeenCalledWith("wa_bridge_send", { to: "971500000001", text: "Hello", sessionId: "session-one" });
+});
+
+it("preserves the pairing across storage modes but cancels an in-flight send during a switch", async () => {
+  const bridge = await import("../waBridge");
+  await bridge.startBridge();
+  let permit!: () => void;
+  vi.mocked(requireModuleAccess).mockImplementationOnce(() => new Promise(resolve => { permit = resolve; }));
+  const sending = bridge.sendWa("971500000001", "Old workspace output");
+  const rejected = expect(sending).rejects.toThrow("Workspace changed");
+  await vi.waitFor(() => expect(permit).toBeTypeOf("function"));
+  session.mode = "cloud";
+  permit();
+  await rejected;
+  expect(rpc).not.toHaveBeenCalledWith("wa_bridge_send", expect.anything());
+  expect(localStorage.getItem("filey.wa_bridge.account")).toBe(session.account);
 });

@@ -8,6 +8,7 @@
 // allowed. Nothing leaves without approval.
 import { aiAgent, aiReady, buildSystemPrompt, getPersona, type AiMessage } from "./ai";
 import { log } from "./log";
+import { serviceError } from "./serviceError";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import {
@@ -20,9 +21,11 @@ import {
   replyWa,
   sendWaFile,
   type WaMessage,
+  type WaVoice,
 } from "./waBridge";
 import { waLogAdd } from "./waLog";
 import { whatsappContext } from "./agentSessions";
+import { clearAgentProgress } from "./agentRunState";
 import { stopAgentComputer } from "./agentComputer";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 import { approvalArgs, setTurnFiles, endTurn, type FileOutput } from "./aiTools";
@@ -180,10 +183,11 @@ export function isOwnerNumber(
   return [me, ownerNumber].some((c) => !!num(c) && num(c) === f);
 }
 
-async function isOwnerSender(from: string): Promise<boolean> {
+async function isOwnerSender(from: string, session: string): Promise<boolean> {
   try {
-    if (!agentStorageScope()) return false;
-    const me = (await bridgeState()).me;
+    if (!session || !agentStorageScope()) return false;
+    const { state, me, sessionId } = await bridgeState();
+    if (state !== "connected" || sessionId !== session) return false;
     const { ownerNumber } = getBridgeConfig();
     return isOwnerNumber(me, null, from, ownerNumber);
   } catch {
@@ -206,8 +210,11 @@ export function startWaAgent(): void {
     history.clear();
     pendingApproval.clear();
   });
+  let lastBridgeSession: string | null | undefined;
   onBridgeState((state) => {
-    if (state.state === "connected") return;
+    const replaced = !!lastBridgeSession && state.sessionId !== lastBridgeSession;
+    lastBridgeSession = state.sessionId;
+    if (state.state === "connected" && !replaced) return;
     generation++;
     activeRun?.abort();
     pendingApproval.clear();
@@ -228,12 +235,12 @@ export function startWaAgent(): void {
 }
 
 /** Clear non-owner requests before they can wait behind a long owner run. */
-async function enqueueOwner(m: Pick<WaMessage, "id" | "from"> & { text?: string }, run: (deadline: number, signal: AbortSignal) => Promise<void>) {
+async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> & { text?: string }, run: (deadline: number, signal: AbortSignal) => Promise<void>) {
   const scope = agentStorageScope();
   const epoch = generation;
   const deadline = Date.now() + RUN_TIMEOUT_MS;
-  if (!scope || !(await isOwnerSender(m.from)) || scope !== agentStorageScope()) {
-    await replyWa(m.id, "").catch(() => {});
+  if (!scope || !(await isOwnerSender(m.from, m.bridgeSession)) || scope !== agentStorageScope() || epoch !== generation) {
+    await replyWa(m.id, "", m.bridgeSession).catch(() => {});
     return;
   }
   const command = m.text?.trim().toLowerCase();
@@ -243,33 +250,39 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from"> & { text?: string 
       generation++;
       activeRun?.abort();
       pendingApproval.clear();
+      const stopEpoch = generation;
       try { await stopAgentComputer(`whatsapp:${m.from}`); }
       catch { stopWarning = "\nThe browser could not confirm it stopped. Open Filey and close the browser panel's tabs."; }
+      if (scope !== agentStorageScope() || stopEpoch !== generation) {
+        await replyWa(m.id, "", m.bridgeSession).catch(() => {});
+        return;
+      }
     }
     if (command === "/new") {
       history.delete(`${scope}:${m.from}`);
+      if (scope) clearAgentProgress(`whatsapp:${m.from}`, scope);
       waLogAdd({ dir: "in", from: m.from, text: "/new", sessionStart: true }, scope);
     }
     const text = command === "/new" ? "New conversation started. Your saved preferences and skills are kept."
       : command === "/stop" ? "WhatsApp tasks stopped and pending approvals cleared. An action already submitted may have completed; check before repeating it."
       : command === "/status" ? `Filey is connected. AI ${aiReady() ? "is ready" : "needs setup in Settings"}. ${queued} request(s) active or queued.`
       : "Send a task, question or voice note. /status checks readiness, /stop cancels WhatsApp tasks, /new starts fresh context. Reply YES only to an exact action proposal you want to approve.";
-    if (scope === agentStorageScope()) await replyWa(m.id, waFormat(text + stopWarning)).catch(() => {});
+    if (scope === agentStorageScope()) await replyWa(m.id, waFormat(text + stopWarning), m.bridgeSession).catch(() => {});
     return;
   }
   if (queued >= 3) {
-    await replyWa(m.id, waFormat("I'm finishing your earlier requests. Please wait for my reply before sending another task.")).catch(() => {});
+    await replyWa(m.id, waFormat("I'm finishing your earlier requests. Please wait for my reply before sending another task."), m.bridgeSession).catch(() => {});
     return;
   }
   queued++;
   queue = queue
     .then(async () => {
       if (scope !== agentStorageScope() || epoch !== generation) {
-        await replyWa(m.id, "");
+        await replyWa(m.id, "", m.bridgeSession);
         return;
       }
       if (Date.now() >= deadline - 5000) {
-        await replyWa(m.id, waFormat("This request expired while waiting. I haven't started it. Send it again if you still need it."));
+        await replyWa(m.id, waFormat("This request expired while waiting. I haven't started it. Send it again if you still need it."), m.bridgeSession);
         return;
       }
       const controller = new AbortController();
@@ -283,18 +296,11 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from"> & { text?: string 
 
 /** Transcribe one voice note and answer it. Falls back to a clear, honest
  *  line when no speech provider is configured — never silence. */
-async function handleVoice(v: {
-  id: string;
-  from: string;
-  fromName?: string;
-  b64: string;
-  mimetype?: string;
-  chatJid?: string;
-}, deadline: number, signal: AbortSignal): Promise<void> {
+async function handleVoice(v: WaVoice, deadline: number, signal: AbortSignal): Promise<void> {
   const scope = agentStorageScope();
   const epoch = generation;
-  if (!scope || !(await isOwnerSender(v.from)) || scope !== agentStorageScope()) {
-    await replyWa(v.id, "");
+  if (!scope || !(await isOwnerSender(v.from, v.bridgeSession)) || scope !== agentStorageScope() || epoch !== generation || signal.aborted) {
+    await replyWa(v.id, "", v.bridgeSession);
     return;
   }
   waLogAdd({
@@ -302,16 +308,21 @@ async function handleVoice(v: {
     from: v.from,
     name: v.fromName,
     text: "[voice note]",
-  });
+  }, scope);
   let transcript = "";
   try {
     const { transcribeAudio, sttAvailable } = await import("./voice");
+    if (signal.aborted || scope !== agentStorageScope() || epoch !== generation) {
+      await replyWa(v.id, "", v.bridgeSession);
+      return;
+    }
     if (!sttAvailable()) {
       await replyWa(
         v.id,
         waFormat(
           "I can't listen yet — voice needs an OpenAI or Groq key in Settings → AI Assistant. Type it out and I'm on it."
-        )
+        ),
+        v.bridgeSession
       );
       return;
     }
@@ -321,12 +332,12 @@ async function handleVoice(v: {
       filename: "note.ogg",
     }), Math.max(1, deadline - Date.now()), "", () => {}, signal);
     if (scope !== agentStorageScope() || epoch !== generation) {
-      await replyWa(v.id, "");
+      await replyWa(v.id, "", v.bridgeSession);
       return;
     }
   } catch (e) {
     if (signal.aborted || scope !== agentStorageScope() || epoch !== generation) {
-      await replyWa(v.id, "").catch(() => {});
+      await replyWa(v.id, "", v.bridgeSession).catch(() => {});
       return;
     }
     log.warn("whatsapp", "voice transcription failed", e);
@@ -334,19 +345,20 @@ async function handleVoice(v: {
       v.id,
       waFormat(
         "That voice note didn't come through clearly on my side. Send it as text and I'm on it."
-      )
+      ),
+      v.bridgeSession
     );
     return;
   }
   if (!transcript) {
-    await replyWa(v.id, waFormat("That one came through silent — say it again?"));
+    await replyWa(v.id, waFormat("That one came through silent — say it again?"), v.bridgeSession);
     return;
   }
   log.info("whatsapp", "Owner voice note transcribed");
   // The spoken words are treated exactly like typed ones; `voice` flags the
   // reply path to also send a spoken version back.
   await handle(
-    { id: v.id, from: v.from, text: transcript, fromName: v.fromName, chatJid: v.chatJid },
+    { id: v.id, bridgeSession: v.bridgeSession, from: v.from, text: transcript, fromName: v.fromName, chatJid: v.chatJid },
     { voice: true, deadline, signal }
   );
 }
@@ -358,22 +370,16 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
   const scope = agentStorageScope();
   const epoch = generation;
   const deadline = opts.deadline ?? Date.now() + RUN_TIMEOUT_MS;
-  const priorContext = history.get(`${scope}:${m.from}`) ?? whatsappContext(m.from);
-  // Everything the bridge sees goes in the log, owner or customer: it is the
-  // only record of the WhatsApp thread the in-app agent can read back (see
-  // list_whatsapp_messages). WhatsApp itself offers no history to fetch.
-  waLogAdd({ dir: "in", from: m.from, name: m.fromName, text: m.text });
-  log.info("whatsapp", "Owner request received");
   const answer = async (text: string) => {
-    if (scope !== agentStorageScope() || epoch !== generation) {
-      await replyWa(m.id, "").catch(() => {});
+    if (scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted) {
+      await replyWa(m.id, "", m.bridgeSession).catch(() => {});
       return false;
     }
     // Empty stays empty: that is the deliberate silence for a non-owner, and it
     // is what releases the sidecar's pending promise.
     const out = waFormat(text);
     try {
-      await replyWa(m.id, out);
+      await replyWa(m.id, out, m.bridgeSession);
       if (out && scope === agentStorageScope())
         waLogAdd(
           { dir: "out", from: m.from, name: m.fromName, text: out },
@@ -404,7 +410,7 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
   // no-confirm tool set before it can be turned on.
   // The empty reply matters: it releases the sidecar's pending promise, which
   // would otherwise time out and send the customer a "didn't answer" line.
-  if (!scope || !(await isOwnerSender(m.from))) {
+  if (!scope || !(await isOwnerSender(m.from, m.bridgeSession))) {
     // Silent to the sender, but never silent to the log: a wrong owner match is
     // indistinguishable from a broken bridge from the outside, and that cost a
     // long evening once.
@@ -421,6 +427,15 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
     await answer("");
     return;
   }
+  // Owner lookup is async: an account switch or /stop during it must not
+  // start work or write the old request into a different workspace's log.
+  if (scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted) {
+    await replyWa(m.id, "", m.bridgeSession).catch(() => {});
+    return;
+  }
+  const priorContext = history.get(`${scope}:${m.from}`) ?? whatsappContext(m.from);
+  waLogAdd({ dir: "in", from: m.from, name: m.fromName, text: m.text }, scope);
+  log.info("whatsapp", "Owner request received");
 
   if (!aiReady()) {
     await answer(
@@ -537,7 +552,7 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
       window.removeEventListener(AGENT_STORAGE_EVENT, onScopeChange);
     }
     if (scope !== agentStorageScope() || epoch !== generation) {
-      await replyWa(m.id, "");
+      await replyWa(m.id, "", m.bridgeSession);
       return;
     }
     if (reply === null) {
@@ -564,7 +579,7 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
       if (file.whatsappRecipients?.includes(recipient)) continue;
       if (Date.now() >= deadline - 10_000) { deliveries.push(`${file.name}: not sent; this task reached its time limit.`); continue; }
       try {
-        const accepted = await sendWaFile(recipient, { path: file.path, filename: file.name });
+        const accepted = await sendWaFile(recipient, { path: file.path, filename: file.name }, m.bridgeSession);
         if (!accepted) throw new Error("No message ID was returned");
         (file.whatsappRecipients ??= []).push(recipient);
         deliveries.push(`${file.name}: accepted by WhatsApp.`);
@@ -585,12 +600,12 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
 
     // Spoken reply for spoken input: TTS → mp3 on disk → audio message.
     // Best-effort — the text answer above already stands on its own.
-    if (opts.voice && scope === agentStorageScope() && epoch === generation) {
+    if (opts.voice && scope === agentStorageScope() && epoch === generation && !opts.signal?.aborted && Date.now() < deadline) {
       try {
         const { ttsAvailable, textToSpeech } = await import("./voice");
         if (ttsAvailable()) {
-          const mp3 = await textToSpeech(text);
-          if (scope !== agentStorageScope() || epoch !== generation) return;
+          const mp3 = await withTimeout<Uint8Array | null>(textToSpeech(text), Math.max(1, deadline - Date.now()), null, () => {}, opts.signal);
+          if (!mp3 || scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted || Date.now() >= deadline) return;
           const { outputDir } = await import("./agentFiles");
           const target = await outputDir();
           if (target) {
@@ -606,7 +621,7 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
               filename: "filey-reply.mp3",
               mimetype: "audio/mpeg",
               caption: undefined,
-            });
+            }, m.bridgeSession);
             waLogAdd(
               {
                 dir: "out",
@@ -624,11 +639,12 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
     }
   } catch (e) {
     if (scope !== agentStorageScope() || epoch !== generation) {
-      await replyWa(m.id, "").catch(() => {});
+      await replyWa(m.id, "", m.bridgeSession).catch(() => {});
       return;
     }
-    // The reason matters over WhatsApp — there is no console to check.
-    const why = e instanceof Error ? e.message : String(e);
-    await answer(`Sorry — that failed on my side: ${why.slice(0, 300)}`);
+    // Provider failures can echo credentials, SQL or response bodies. Only
+    // return the existing user-facing translation over the messaging channel.
+    const failure = await serviceError(e, "This task could not finish. Open Filey to check its status before retrying an action.");
+    await answer(failure.message);
   } finally { endTurn(turnId); }
 }

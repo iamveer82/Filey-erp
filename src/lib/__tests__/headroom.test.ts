@@ -4,11 +4,20 @@ import {
   headroomRetrieve,
   headroomReset,
   headroomStats,
+  retainToolOutput,
 } from "../headroom";
 
 beforeEach(() => {
   localStorage.clear();
   headroomReset();
+});
+
+it("retrieves the exact earlier observation after shortening it", () => {
+  const original = JSON.stringify({ rows: "x".repeat(900), invoice_id: "important-tail-id" });
+  const archived = retainToolOutput(original);
+  expect(archived.text.length).toBeLessThan(400);
+  expect(archived.text).not.toContain("important-tail-id");
+  expect(headroomRetrieve(archived.ccrId!)).toMatchObject({ content: original });
 });
 
 const bigRows = Array.from({ length: 60 }, (_, i) => ({
