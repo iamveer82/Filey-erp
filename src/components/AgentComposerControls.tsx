@@ -51,7 +51,7 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
   const levels = aiEffortLevels(config);
   const selected = levels.includes(value) ? value : "auto";
   const index = levels.indexOf(selected);
-  const model = config.model.trim() || "Select model in settings";
+  const model = config.model.trim() || (config.billing ? "Choose a model" : "Select model in settings");
   const percent = levels.length > 1 ? index / (levels.length - 1) * 100 : 0;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>

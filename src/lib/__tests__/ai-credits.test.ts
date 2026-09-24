@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { aiChat, getAiConfig, setAiConfig } from "../ai";
+import { aiAgent, aiChat, aiReady, getActiveAiConfig, getAiConfig, setAiConfig } from "../ai";
 import { setCacheOrg } from "../api";
 import { supabase } from "../supabase";
 import {
   createCreditFetch,
   creditChoice,
+  creditPaper,
   getCreditStatus,
   setCreditChoice,
 } from "../aiCredits";
@@ -18,6 +19,13 @@ const account = {
   blocked: false,
 };
 const reply = { choices: [{ message: { role: "assistant", content: "done" } }] };
+it("displays USD micros as Paper without losing the smallest usage charge", () => {
+  expect(creditPaper(1_000_000)).toBe("1 Paper");
+  expect(creditPaper(12_510_000)).toBe("12.51 Paper");
+  expect(creditPaper(1, true)).toBe("0.000001 Paper");
+  expect(creditPaper(-100_000, true)).toBe("-0.1 Paper");
+  expect(creditPaper(0)).toBe("0 Paper");
+});
 beforeEach(() => {
   localStorage.clear();
   setCacheOrg(null);
@@ -48,7 +56,10 @@ it("keeps BYOK as default and preserves its configuration when credits are selec
   });
   expect(creditChoice().funding).toBe("byok");
   setCreditChoice("credits", "fixture/model");
+  expect(getActiveAiConfig().model).toBe("fixture/model");
   expect(await aiChat([{ role: "user", text: "hello" }])).toBe("done");
+  expect(await aiAgent([{ role: "user", text: "hello" }])).toBe("done");
+  expect(supabase!.functions.invoke).toHaveBeenCalledTimes(2);
   expect(supabase!.functions.invoke).toHaveBeenCalledWith(
     "ai-credits",
     expect.objectContaining({
@@ -58,9 +69,20 @@ it("keeps BYOK as default and preserves its configuration when credits are selec
       }),
     })
   );
+  for (const [, options] of vi.mocked(supabase!.functions.invoke).mock.calls)
+    expect(options?.body).toMatchObject({ request: { model: "fixture/model" } });
   expect(getAiConfig().model).toBe("local-model");
   setCreditChoice("byok");
   expect(getAiConfig().baseUrl).toBe("http://localhost:11434/v1");
+});
+
+it("requires an explicit model for the retired automatic paid selection", async () => {
+  setCreditChoice("credits", "filey-ai");
+  expect(aiReady()).toBe(false);
+  expect(getActiveAiConfig().model).toBe("");
+  await expect(aiChat([{ role: "user", text: "hello" }])).rejects.toThrow("Choose a model");
+  await expect(aiAgent([{ role: "user", text: "hello" }])).rejects.toThrow("Choose a model");
+  expect(supabase!.functions.invoke).not.toHaveBeenCalled();
 });
 
 it("never retries or falls back after a paid request fails", async () => {

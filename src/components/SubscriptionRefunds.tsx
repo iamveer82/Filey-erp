@@ -113,7 +113,7 @@ export default function SubscriptionRefunds() {
   return (
     <SettingsSection
       title="Subscription refunds"
-      description="Request a review of a subscription payment. AI credits are excluded. Requests do not cancel your subscription."
+      description="Request a review of a subscription payment. Paper purchases are excluded. Requests do not cancel your subscription."
     >
       <div className="flex flex-wrap items-center gap-3">
         <button

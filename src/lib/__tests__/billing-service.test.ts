@@ -165,3 +165,24 @@ it("takes a desktop AI credit purchase to the provider page without changing loc
   expect(openUrl).toHaveBeenCalledExactlyOnceWith(url);
   expect(localStorage.getItem("filey_data_mode")).toBe("local");
 });
+
+it("sends custom credit amounts in cents and rejects invalid amounts before checkout", async () => {
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  vi.mocked(openUrl).mockClear();
+  Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
+  const url = "https://checkout.dodopayments.com/custom-credit-fixture";
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({ data: { url }, error: null });
+  expect(await buyAiCredits(1251)).toBe("browser");
+  expect(supabase!.functions.invoke).toHaveBeenCalledExactlyOnceWith("dodo", {
+    body: { action: "checkout_ai_credits", amount_cents: 1251 },
+  });
+  expect(openUrl).toHaveBeenCalledExactlyOnceWith(url);
+  for (const amount of [NaN, Infinity, -500, 499, 10001, 500.1])
+    await expect(buyAiCredits(amount)).rejects.toThrow("$5 to $100");
+  expect(supabase!.functions.invoke).toHaveBeenCalledOnce();
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: null,
+    error: { context: new Response('{"error":"Custom AI credit amounts are not available yet."}', { status: 400 }) },
+  } as never);
+  await expect(buyAiCredits(1251)).rejects.toThrow("Custom AI credit amounts are not available yet.");
+});

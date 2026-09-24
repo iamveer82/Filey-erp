@@ -34,7 +34,7 @@ it("shows account-owned Ultra without a local activation token or a second purch
   vi.mocked(licensePurchased).mockResolvedValue(true);
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
   await waitFor(() => expect(screen.queryByRole("button", { name: /Get Ultra/ })).toBeNull());
-  expect(screen.getByRole("link", { name: "Open AI wallet" })).toHaveAttribute("href", "#/settings?section=credits");
+  expect(screen.getByRole("link", { name: "Open Paper wallet" })).toHaveAttribute("href", "#/settings?section=credits");
 });
 
 it("activates an Ultra return without waiting for a Pro subscription", async () => {

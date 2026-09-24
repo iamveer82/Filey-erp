@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setCacheOrg } from "../api";
 import { aiAgent, aiChat, aiFetch, listAiModels, setAiConfig } from "../ai";
-import { AI_DEV_ORIGINS, aiEffortLevels, anthropicGenerationOptions } from "../aiEndpoint";
+import { AI_DEV_ORIGINS, aiEffortLevels, anthropicGenerationOptions, openAiGenerationOptions } from "../aiEndpoint";
 
 beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("provider-qa", "qa-user"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const reply = () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
+
+it("derives effort options from the selected OpenRouter model", () => {
+  expect(aiEffortLevels({ provider: "openai", model: "openai/gpt-5.2" })).toEqual(["auto", "low", "medium", "high", "xhigh"]);
+  expect(openAiGenerationOptions("openai/gpt-5.2", 2048, 0.2, "high")).toEqual({ max_completion_tokens: 32768, reasoning_effort: "high" });
+  expect(openAiGenerationOptions("fixture/basic-model", 2048, 0.2, "high")).toEqual({ max_tokens: 2048, temperature: 0.2 });
+});
 
 it("sends selected effort to reasoning providers and leaves unsupported models at default", async () => {
   const fetch = vi.fn(async () => reply());

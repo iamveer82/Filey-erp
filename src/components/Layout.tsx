@@ -7,7 +7,6 @@ import {
   LogOut,
   UserRound,
   Settings,
-  Wallet,
   CreditCard,
   Command,
   Menu,
@@ -23,6 +22,7 @@ import {
 } from "lucide-react";
 import WorkspaceNavigation from "./WorkspaceNavigation";
 import Logo from "./Logo";
+import PaperMark from "./PaperMark";
 import ErrorBoundary from "./ErrorBoundary";
 import BrowserPanel from "./BrowserPanel";
 import { PageContextProvider } from "../lib/pageContext";
@@ -879,7 +879,7 @@ function AccountDropdown({
           label={t("Settings")}
           onClick={() => run(() => nav("/settings"))}
         />
-        <MenuItemRow icon={<Wallet size={14} />} label="AI wallet" onClick={() => run(() => nav("/settings?section=credits"))} />
+        <MenuItemRow icon={<PaperMark />} label="Paper wallet" onClick={() => run(() => nav("/settings?section=credits"))} />
         <MenuItemRow icon={<CreditCard size={14} />} label="Plan & billing" onClick={() => run(() => nav("/settings?section=billing"))} />
         <MenuSep />
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">

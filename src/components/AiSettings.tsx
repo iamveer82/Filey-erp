@@ -307,7 +307,7 @@ export default function AiSettings() {
 
   return (
     <SettingsPanel>
-      <SettingsSection title="AI payment method" description="Use your own key or optional Filey Credits on Basic, Pro and Ultra. Credits never activate automatically if your key fails.">
+      <SettingsSection title="AI payment method" description="Use your own key or optional Paper on Basic, Pro and Ultra. Paper is never spent automatically if your key fails.">
         <AiFundingControl />
       </SettingsSection>
       <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">

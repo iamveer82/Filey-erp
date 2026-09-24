@@ -1,34 +1,55 @@
 import { appCheckoutReturn } from "./checkout-return.ts";
+import { creditGateway } from "./ai-credit-gateway.ts";
 import type DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
 import type { SupabaseClient, User } from "https://esm.sh/@supabase/supabase-js@2";
-import { creditPacks, TOPUP_FEE_CENTS, UUID } from "./ai-credits.ts";
+import {
+  creditPacks,
+  creditTopupCents,
+  customCreditProduct,
+  MIN_TOPUP_CENTS,
+  TOPUP_FEE_CENTS,
+  UUID,
+} from "./ai-credits.ts";
 
 export async function createCreditCheckout(
   dodo: DodoPayments,
   db: SupabaseClient,
   user: User,
-  packId: unknown
+  packId: unknown,
+  amountCents?: unknown
 ) {
   if (
-    !Deno.env.get("FILEY_AI_OPENROUTER_KEY") &&
+    !creditGateway() &&
     !(Deno.env.get("HF_API_KEY_ID") && Deno.env.get("HF_API_KEY_SECRET"))
   )
     throw new Error("Filey-funded AI is not available yet.");
   if (!user.email_confirmed_at || !user.email)
     throw new Error("Verify your email before adding AI credits.");
-  const pack = creditPacks(Deno.env.get("DODO_AI_CREDIT_PACKS") ?? "").find(
-    (p) => p.id === packId
-  );
-  if (!pack) throw new Error("Choose an available AI credit pack.");
-  const product = await dodo.products.retrieve(pack.id);
+  if ((packId !== undefined) === (amountCents !== undefined))
+    throw new Error("Choose one AI credit pack or enter a custom amount.");
+  const custom = amountCents !== undefined;
+  const customId = customCreditProduct(Deno.env.get("DODO_AI_CREDIT_PRODUCT_ID") ?? "");
+  const pack = custom
+    ? { id: customId, cents: creditTopupCents(amountCents) }
+    : creditPacks(Deno.env.get("DODO_AI_CREDIT_PACKS") ?? "").find(
+        (p) => p.id === packId
+      );
+  if (custom && !customId)
+    throw new Error("Custom AI credit amounts are not available yet.");
+  if (!pack?.id) throw new Error("Choose an available AI credit pack.");
+  const productId = pack.id;
+  const product = await dodo.products.retrieve(productId);
   const price = product.price;
   if (
     price.type !== "one_time_price" ||
     price.currency !== "USD" ||
-    price.price !== pack.cents + TOPUP_FEE_CENTS ||
-    price.pay_what_you_want ||
+    (custom
+      ? price.price !== MIN_TOPUP_CENTS + TOPUP_FEE_CENTS ||
+        price.pay_what_you_want !== true
+      : price.price !== pack.cents + TOPUP_FEE_CENTS || price.pay_what_you_want) ||
     price.discount ||
     price.discount_bps ||
+    price.purchasing_power_parity ||
     product.is_recurring
   )
     throw new Error("This AI credit pack is not configured correctly.");
@@ -36,13 +57,21 @@ export async function createCreditCheckout(
   const { error } = await db.from("ai_credit_orders").insert({
     id,
     user_id: user.id,
-    product_id: pack.id,
+    product_id: productId,
     credits_micros: pack.cents * 10000,
     service_fee_cents: TOPUP_FEE_CENTS,
   });
   if (error) throw error;
   const session = await dodo.checkoutSessions.create({
-    product_cart: [{ product_id: pack.id, quantity: 1 }],
+    // Dodo's PWYW `amount` fixes this session's price. Omitting it would let
+    // the buyer change the payment independently of the saved credit order.
+    product_cart: [
+      {
+        product_id: productId,
+        quantity: 1,
+        ...(custom ? { amount: pack.cents + TOPUP_FEE_CENTS } : {}),
+      },
+    ],
     customer: { email: user.email },
     billing_currency: "USD",
     feature_flags: { allow_discount_code: false, allow_currency_selection: false },

@@ -54,7 +54,7 @@ it("prefills an integration handoff as an editable draft without running the age
     screen.getByDisplayValue("Prepare an Instagram caption for review.")
   ).toBeInTheDocument();
   expect(run).not.toHaveBeenCalled();
-  expect(screen.getByRole("link", { name: "Add money to AI credits" })).toHaveAttribute("href", "/settings?section=credits");
+  expect(screen.getByRole("link", { name: "Add Paper to AI wallet" })).toHaveAttribute("href", "/settings?section=credits");
 });
 
 it("opens inline chat history, filters saved conversations and collapses with Escape", async () => {
