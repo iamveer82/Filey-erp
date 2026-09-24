@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowLeft, ArrowRight, ArrowUp, Globe, PanelRightClose, Plus, RefreshCw, Square, X, Hand, Play } from "lucide-react";
 import { desktopBrowserCommand, desktopBrowserSupported, getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, newBrowserPanelTab, registerBrowserViewportSync, layoutDesktopBrowser, pauseAgentBrowser, closeDesktopBrowserTabs, type DesktopBrowserRequest } from "../lib/desktopBrowser";
 import { disableComputerUse } from "../lib/computerUse";
+import "./BrowserPanel.css";
 
 const SITES = [{ name: "WhatsApp", url: "https://web.whatsapp.com/" }, { name: "Instagram", url: "https://www.instagram.com/" }, { name: "LinkedIn", url: "https://www.linkedin.com/" }];
 
@@ -12,9 +13,41 @@ export default function BrowserPanel() {
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number | null>(() => {
+    try { const saved = Number(localStorage.getItem("filey.browser.panel.width")); return saved >= 320 && saved <= 760 ? saved : null; }
+    catch { return null; }
+  });
+  const [maxWidth, setMaxWidth] = useState(760);
+  const [measuredWidth, setMeasuredWidth] = useState(480);
+  const [resizing, setResizing] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const working = useRef(false);
   useEffect(() => { setAddress(selected?.url ?? ""); }, [selected?.id, selected?.url]);
+
+  useEffect(() => {
+    if (!state.open) { resizeStart.current = null; setResizing(false); return; }
+    const parent = panel.current?.parentElement;
+    if (!parent) return;
+    const update = () => {
+      const limit = Math.max(320, Math.min(760, parent.getBoundingClientRect().width - 360));
+      setMaxWidth(limit);
+      setPanelWidth(current => current === null ? null : Math.min(current, limit));
+      if (panel.current) setMeasuredWidth(Math.round(panel.current.getBoundingClientRect().width));
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(parent);
+    if (panel.current) observer.observe(panel.current);
+    update();
+    return () => observer.disconnect();
+  }, [state.open]);
+
+  const resizeTo = (width: number) => {
+    const next = Math.round(Math.max(320, Math.min(maxWidth, width)));
+    setPanelWidth(next);
+    try { localStorage.setItem("filey.browser.panel.width", String(next)); } catch { /* layout still works for this session */ }
+  };
 
   useEffect(() => {
     if (!supported) return;
@@ -91,11 +124,35 @@ export default function BrowserPanel() {
     try { await disableComputerUse(); await closeDesktopBrowserTabs(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  return <aside id="filey-browser-panel" aria-label="Built-in browser" hidden={!state.open}
-    className={state.open ? "absolute inset-0 z-30 flex min-h-0 flex-col border-l border-border bg-background xl:relative xl:inset-auto xl:z-auto xl:w-[44%] xl:min-w-[380px] xl:max-w-[760px] xl:shrink-0" : "hidden"}>
+  return <>
+    {state.open && <div role="separator" tabIndex={0} aria-label="Resize browser panel" aria-orientation="vertical" aria-controls="filey-browser-panel" aria-valuemin={320} aria-valuemax={maxWidth} aria-valuenow={Math.min(maxWidth, panelWidth ?? measuredWidth)} aria-valuetext={`${Math.min(maxWidth, panelWidth ?? measuredWidth)} pixels`} title="Drag to resize · Arrow keys to adjust · Enter to collapse"
+      className="filey-browser-resizer relative z-30 hidden w-3 shrink-0 touch-none select-none cursor-col-resize items-center justify-center border-l border-border bg-background outline-none hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring xl:flex"
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        event.preventDefault(); event.currentTarget.focus();
+        resizeStart.current = { x: event.clientX, width: panel.current?.getBoundingClientRect().width ?? panelWidth ?? 480 };
+        event.currentTarget.setPointerCapture(event.pointerId); setResizing(true);
+      }}
+      onPointerMove={event => { if (resizeStart.current) resizeTo(resizeStart.current.width + resizeStart.current.x - event.clientX); }}
+      onLostPointerCapture={() => { resizeStart.current = null; setResizing(false); }}
+      onPointerUp={event => { resizeStart.current = null; setResizing(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+      onPointerCancel={() => { resizeStart.current = null; setResizing(false); }}
+      onDoubleClick={() => { setPanelWidth(null); try { localStorage.removeItem("filey.browser.panel.width"); } catch { /* use default */ } }}
+      onKeyDown={event => {
+        if (event.key === "Enter") { event.preventDefault(); setBrowserPanelOpen(false); return; }
+        const width = panel.current?.getBoundingClientRect().width || panelWidth || 480;
+        if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          resizeTo(event.key === "Home" ? 320 : event.key === "End" ? maxWidth : width + (event.key === "ArrowLeft" ? 24 : -24));
+        }
+      }}><span aria-hidden="true" className="h-8 w-0.5 rounded-full bg-border" /></div>}
+    {resizing && <div data-browser-overlay aria-hidden="true" className="pointer-events-none fixed inset-0 z-40 cursor-col-resize" />}
+    <aside ref={panel} id="filey-browser-panel" aria-label="Built-in browser" hidden={!state.open}
+    style={{ "--filey-browser-width": panelWidth === null ? "44%" : `${panelWidth}px` } as CSSProperties}
+    className={state.open ? "filey-browser-panel absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-background xl:relative xl:inset-auto xl:z-auto xl:shrink-0" : "hidden"}>
     <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
       <Globe size={16} className="shrink-0 text-muted-foreground" /><span className="text-[13px] font-medium">{state.agentId ? "Agent browser" : "Browser"}</span>
-      <span className="ml-auto text-xs text-muted-foreground">{state.paused ? "Your control" : state.tabs.length ? `${state.tabs.length} tabs` : ""}</span>
+      <span className="ml-auto text-xs text-muted-foreground">{state.paused ? "Your control" : state.tabs.length ? `${state.tabs.length} ${state.tabs.length === 1 ? "tab" : "tabs"}` : ""}</span>
       {supported && state.tabs.length > 0 && <>
         <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void takeOver()} aria-label={state.paused ? "Resume agent" : "Take over browser"} title={state.paused ? "Resume agent" : "Take over browser"}>{state.paused ? <Play size={15} /> : <Hand size={15} />}</button>
         <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void stopWork()} aria-label="Stop browser work" title="Stop browser work"><Square size={13} /></button>
@@ -127,5 +184,5 @@ export default function BrowserPanel() {
         {supported && <div className="mt-6 flex flex-wrap justify-center gap-2">{SITES.map(site => <button type="button" key={site.name} disabled={busy} onClick={() => void act({ action: "open", url: site.url })} className="btn-ghost text-xs">{site.name}</button>)}</div>}
       </div>}
     </div>
-  </aside>;
+  </aside></>;
 }

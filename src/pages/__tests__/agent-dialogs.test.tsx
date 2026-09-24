@@ -17,6 +17,7 @@ import { gateFor, getAgentMode } from "../../lib/agentMode";
 import { isCapabilityEnabled, setCapabilityEnabled } from "../../lib/capabilities";
 import { setCacheOrg } from "../../lib/api";
 import * as computer from "../../lib/computerUse";
+import { saveChats, type Chat } from "../../lib/aiChats";
 
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
@@ -53,15 +54,40 @@ it("prefills an integration handoff as an editable draft without running the age
     screen.getByDisplayValue("Prepare an Instagram caption for review.")
   ).toBeInTheDocument();
   expect(run).not.toHaveBeenCalled();
+  expect(screen.getByRole("link", { name: "Add money to AI credits" })).toHaveAttribute("href", "/settings?section=credits");
 });
 
-it("opens named history and memory dialogs and closes them with Escape", async () => {
+it("opens inline chat history, filters saved conversations and collapses with Escape", async () => {
+  saveChats([
+    { id: "invoices", title: "Review invoices", turns: [{ role: "user", text: "Review invoices" }], createdAt: 1, updatedAt: 2 },
+    { id: "marketing", title: "Marketing ideas", turns: [{ role: "user", text: "Marketing ideas" }], createdAt: 1, updatedAt: 1 },
+  ] satisfies Chat[]);
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const toggle = screen.getByRole("button", { name: "Chat history" });
+  fireEvent.click(toggle);
+  const history = screen.getByRole("complementary", { name: "Chat history" });
+  expect(screen.queryByRole("dialog", { name: "Chat history" })).not.toBeInTheDocument();
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(within(history).getByRole("button", { name: "Review invoices" })).toBeInTheDocument();
+  fireEvent.change(within(history).getByRole("searchbox", { name: "Search chats" }), { target: { value: "marketing" } });
+  expect(within(history).queryByRole("button", { name: "Review invoices" })).not.toBeInTheDocument();
+  fireEvent.click(within(history).getByRole("button", { name: "Marketing ideas" }));
+  expect(screen.queryByRole("complementary", { name: "Chat history" })).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Marketing ideas");
+  fireEvent.click(toggle);
+  fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search chats" }), { key: "Escape" });
+  expect(screen.queryByRole("complementary", { name: "Chat history" })).not.toBeInTheDocument();
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await waitFor(() => expect(toggle).toHaveFocus());
+});
+
+it("opens the memory dialog and closes it with Escape", async () => {
   render(
     <MemoryRouter>
       <AgentChat />
     </MemoryRouter>
   );
-  for (const name of ["Chat history", "Agent memory"]) {
+  for (const name of ["Agent memory"]) {
     if (name === "Agent memory") {
       fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
       fireEvent.click(screen.getByRole("menuitem", { name: "Memory" }));

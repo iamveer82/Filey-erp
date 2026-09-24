@@ -66,10 +66,28 @@ it("rejects unsupported actions/coordinates/shortcuts and never passes arbitrary
     { action: "click", snapshot_id: "frame", x: -1, y: 1 },
     { action: "key", snapshot_id: "frame", key: "Win+R" },
     { action: "scroll", snapshot_id: "frame", x: 5, y: 5, delta: 200 },
+    { action: "hover", snapshot_id: "frame", x: 1600, y: 5 },
+    { action: "drag", snapshot_id: "frame", x: 5, y: 5, to_x: -1, to_y: 6 },
+    { action: "drag", snapshot_id: "frame", x: 5, y: 5, to_x: 6.5, to_y: 6 },
+    { action: "scroll", snapshot_id: "frame", x: 5, y: 5, delta: 1, axis: "diagonal" },
   ]) await expect(runComputerUse(request)).rejects.toThrow();
   expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "computer_command")).toHaveLength(0);
   await runComputerUse({ action: "click", snapshot_id: "fresh-frame", x: 10, y: 20, code: "ignored", cwd: "ignored" });
   expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: { action: "click", snapshot_id: "fresh-frame", x: 10, y: 20, button: "left", double_click: false } });
+});
+
+it("passes screenshot-bound hover, drag and horizontal scroll through the existing native session", async () => {
+  await enableComputerUse();
+  for (const request of [
+    { action: "hover", snapshot_id: "hover-frame", x: 10, y: 20 },
+    { action: "drag", snapshot_id: "drag-frame", x: 10, y: 20, to_x: 100, to_y: 120 },
+    { action: "scroll", snapshot_id: "scroll-frame", x: 10, y: 20, delta: -2, axis: "horizontal" },
+  ]) {
+    await runComputerUse(request);
+    expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request });
+  }
+  await runComputerUse({ action: "scroll", snapshot_id: "vertical-frame", x: 10, y: 20, delta: 1 });
+  expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: { action: "scroll", snapshot_id: "vertical-frame", x: 10, y: 20, delta: 1, axis: "vertical" } });
 });
 
 it("revokes native access on workspace changes and prevents the next action", async () => {

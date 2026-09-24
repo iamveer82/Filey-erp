@@ -13,6 +13,7 @@ using System.Runtime.InteropServices;
 public static class FileyDesktop {
   public delegate bool EnumProc(IntPtr window, IntPtr param);
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
   [StructLayout(LayoutKind.Sequential)] public struct Mouse { public int dx, dy; public uint data, flags, time; public UIntPtr extra; }
   [StructLayout(LayoutKind.Sequential)] public struct Keyboard { public ushort key, scan; public uint flags, time; public UIntPtr extra; }
   [StructLayout(LayoutKind.Explicit)] public struct Union { [FieldOffset(0)] public Mouse mouse; [FieldOffset(0)] public Keyboard keyboard; }
@@ -29,6 +30,8 @@ public static class FileyDesktop {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int metric);
   [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
@@ -49,16 +52,37 @@ public static class FileyDesktop {
   public static string Title(IntPtr window) { var text = new StringBuilder(512); GetWindowText(window, text, text.Capacity); return text.ToString(); }
   public static string ClassName(IntPtr window) { var text = new StringBuilder(256); GetClassName(window, text, text.Capacity); return text.ToString(); }
   public static void CheckStop() { if ((GetAsyncKeyState(27) & 0x8000) != 0) throw new Exception("Computer action stopped by Escape."); }
-  static void Send(Input[] values) {
+  static void CheckTarget() {
     CheckStop();
     Rect rect; uint process;
     GetWindowThreadProcessId(Target, out process);
     if (GetForegroundWindow() != GetAncestor(Target, 2) || !IsWindowVisible(Target) || process != ProcessId || !GetWindowRect(Target, out rect)
       || rect.Left != Bounds.Left || rect.Top != Bounds.Top || rect.Right != Bounds.Right || rect.Bottom != Bounds.Bottom)
       throw new Exception("The target window changed. Take another screenshot before acting.");
+  }
+  public static void CheckPoint(int x, int y) {
+    CheckTarget();
+    var hit = WindowFromPoint(new Point { X=x, Y=y });
+    if (x < Bounds.Left || x >= Bounds.Right || y < Bounds.Top || y >= Bounds.Bottom || (hit != Target && !IsChild(Target, hit)))
+      throw new Exception("Another window covers this point. Take a fresh screenshot before acting.");
+  }
+  public static void Move(int x, int y) {
+    CheckPoint(x,y);
+    if (!SetCursorPos(x,y)) throw new Exception("Windows blocked cursor movement.");
+  }
+  static void Send(Input[] values, bool releaseLeftOnFailure=false) {
+    CheckTarget();
     foreach (var input in values) { if (input.type == 1) { CheckKeyboardFocus(); break; } }
-    if (SendInput((uint)values.Length, values, Marshal.SizeOf(typeof(Input))) != values.Length)
+    uint accepted=SendInput((uint)values.Length, values, Marshal.SizeOf(typeof(Input)));
+    if (accepted != values.Length) {
+      // Releasing a partially injected drag is cleanup, never a replay. Do
+      // not gate release on focus/Escape: a held button must be let go.
+      if (releaseLeftOnFailure && accepted > 0) {
+        var release=new[] { new Input { data=new Union { mouse=new Mouse { flags=4 } } } };
+        SendInput(1, release, Marshal.SizeOf(typeof(Input)));
+      }
       throw new Exception("Windows blocked input. Elevated or protected windows cannot be controlled.");
+    }
   }
   static Input Key(ushort code, uint flags) { return new Input { type=1, data=new Union { keyboard=new Keyboard { key=code, flags=flags | ((code >= 33 && code <= 40 || code == 46) ? 1u : 0u) } } }; }
   public static void Type(string text) {
@@ -77,7 +101,24 @@ public static class FileyDesktop {
     var pair=new[] { new Input { data=new Union { mouse=new Mouse { flags=down } } }, new Input { data=new Union { mouse=new Mouse { flags=up } } } };
     Send(pair); if (twice) Send(pair);
   }
-  public static void Scroll(int delta) { Send(new[] { new Input { data=new Union { mouse=new Mouse { flags=2048, data=unchecked((uint)(delta*120)) } } } }); }
+  public static void Scroll(int delta, bool horizontal) { Send(new[] { new Input { data=new Union { mouse=new Mouse { flags=horizontal ? 4096u : 2048u, data=unchecked((uint)(delta*120)) } } } }); }
+  public static void Drag(int x, int y, int toX, int toY) {
+    int left=GetSystemMetrics(76), top=GetSystemMetrics(77), width=GetSystemMetrics(78), height=GetSystemMetrics(79);
+    if (width < 2 || height < 2) throw new Exception("Display dimensions are unavailable.");
+    var inputs=new List<Input>();
+    inputs.Add(new Input { data=new Union { mouse=new Mouse { flags=2 } } });
+    for (int i=1; i<=16; i++) {
+      int px=x+(toX-x)*i/16, py=y+(toY-y)*i/16;
+      CheckPoint(px,py);
+      inputs.Add(new Input { data=new Union { mouse=new Mouse {
+        dx=(int)(((long)px-left)*65535/(width-1)), dy=(int)(((long)py-top)*65535/(height-1)), flags=0xC001
+      } } });
+    }
+    inputs.Add(new Input { data=new Union { mouse=new Mouse { flags=4 } } });
+    // No held button state spans helper calls; partial insertion gets a
+    // best-effort release above. Never retry an uncertain drag.
+    Send(inputs.ToArray(), true);
+  }
   public static long[] Windows() {
     var result=new List<long>();
     EnumWindows((window,param) => { if (IsWindowVisible(window) && Title(window).Length > 0) result.Add(window.ToInt64()); return result.Count < 100; }, IntPtr.Zero);
@@ -88,6 +129,12 @@ public static class FileyDesktop {
 [void][FileyDesktop]::SetProcessDPIAware()
 [FileyDesktop]::CheckStop()
 
+function Test-ControllableProcess([uint32]$processId) {
+  $name = (Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName
+  # Computer tools operate applications, not command shells or credential stores.
+  return $name -and $name -notmatch '^(powershell|pwsh|cmd|WindowsTerminal|OpenConsole|conhost|wscript|cscript|mshta|regedit|mmc|CredentialUIBroker|LogonUI|LockApp|SecHealthUI|KeePass|KeePassXC|1Password|Bitwarden)$'
+}
+
 if ($request.action -eq 'list_windows') {
   $candidates = @([FileyDesktop]::Windows()) + @($request.browser_windows | ForEach-Object { [long]$_ })
   $windows = @($candidates | Select-Object -Unique | ForEach-Object {
@@ -97,7 +144,7 @@ if ($request.action -eq 'list_windows') {
     $rootOwner = [FileyDesktop]::GetAncestor($handle, 3).ToInt64().ToString()
     $windowClass = [FileyDesktop]::ClassName($handle)
     $dialogOwner = if ($request.dialog_owner_id) { $request.dialog_owner_id } else { $request.root_window_id }
-    if ([FileyDesktop]::IsWindowVisible($handle) -and (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or (-not $request.strict_browser -and $rootOwner -eq $dialogOwner -and $windowClass -eq '#32770'))) {
+    if ((Test-ControllableProcess $processId) -and [FileyDesktop]::IsWindowVisible($handle) -and (-not $request.root_window_id -or $_.ToString() -eq $request.root_window_id -or (-not $request.strict_browser -and $rootOwner -eq $dialogOwner -and $windowClass -eq '#32770'))) {
       @{ window_id = $_.ToString(); title = [FileyDesktop]::Title($handle); process_id = $processId; minimized = [FileyDesktop]::IsIconic($handle); root_owner_id = $rootOwner; window_class = $windowClass }
     }
   })
@@ -110,6 +157,7 @@ if (-not [FileyDesktop]::IsWindowVisible($window)) { throw 'The selected window 
 [uint32]$processId = 0
 [void][FileyDesktop]::GetWindowThreadProcessId($window, [ref]$processId)
 if ($processId -ne $request.process_id) { throw 'The selected window was replaced. List windows again.' }
+if (-not (Test-ControllableProcess $processId)) { throw 'This protected application is not available to computer tools.' }
 if ($request.action -eq 'screenshot') {
   if ([FileyDesktop]::IsIconic($window)) { [void][FileyDesktop]::ShowWindow($window, 9) }
 } else {
@@ -176,15 +224,17 @@ if ($rect.Left -ne $expected.x -or $rect.Top -ne $expected.y -or $width -ne $exp
 [FileyDesktop]::Bounds = $rect
 [FileyDesktop]::ProcessId = $processId
 [FileyDesktop]::CheckStop()
-if ($request.action -eq 'click' -or $request.action -eq 'scroll') {
-  if (-not [FileyDesktop]::SetCursorPos([int]$request.screen_x, [int]$request.screen_y)) { throw 'Windows blocked cursor movement. No click or scroll was sent.' }
+if ($request.action -in @('click', 'hover', 'drag', 'scroll')) {
+  [FileyDesktop]::Move([int]$request.screen_x, [int]$request.screen_y)
   $cursor = [Windows.Forms.Cursor]::Position
   if ($cursor.X -ne $request.screen_x -or $cursor.Y -ne $request.screen_y) { throw 'The cursor could not reach the selected point. No click or scroll was sent.' }
 }
 switch ($request.action) {
-  'click' { [FileyDesktop]::Click($request.button -eq 'right', [bool]$request.double_click) }
+  'click' { [FileyDesktop]::CheckPoint([int]$request.screen_x, [int]$request.screen_y); [FileyDesktop]::Click($request.button -eq 'right', [bool]$request.double_click) }
+  'hover' { [FileyDesktop]::CheckPoint([int]$request.screen_x, [int]$request.screen_y) }
+  'drag' { [FileyDesktop]::Drag([int]$request.screen_x, [int]$request.screen_y, [int]$request.screen_to_x, [int]$request.screen_to_y) }
   'type' { [FileyDesktop]::Type([string]$request.text) }
-  'scroll' { [FileyDesktop]::Scroll([int]$request.delta) }
+  'scroll' { [FileyDesktop]::CheckPoint([int]$request.screen_x, [int]$request.screen_y); [FileyDesktop]::Scroll([int]$request.delta, $request.axis -eq 'horizontal') }
   'key' { [FileyDesktop]::Press([uint16]$request.virtual_key, [bool]$request.control) }
   default { throw 'Unsupported computer action.' }
 }

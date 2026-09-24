@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Mic,
+  Wallet,
   Plus,
   Zap,
   Paperclip,
@@ -13,7 +14,9 @@ import {
   ShieldAlert,
   ArrowUp,
   FileText,
-  History,
+  PanelLeft,
+  PanelLeftClose,
+  Search,
   CalendarClock,
   BookOpen,
   SlidersHorizontal,
@@ -95,6 +98,7 @@ import {
   onBridgeState,
   type BridgeState,
 } from "../lib/waBridge";
+import "./AgentChat.css";
 
 /* Filey's conversation workspace. Conversational mode runs
  * the standard tool-calling agent; the "Autonomous" toggle hands a goal to
@@ -148,6 +152,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [mems, setMems] = useState<Memory[]>([]);
   const [histOpen, setHistOpen] = useState(false);
   const [chatList, setChatList] = useState<Chat[]>([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const historyToggleRef = useRef<HTMLButtonElement>(null);
+  const historySearchRef = useRef<HTMLInputElement>(null);
   const [autoOpen, setAutoOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [capsOpen, setCapsOpen] = useState(false);
@@ -247,7 +255,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
   useEffect(() => {
     if (!scope) return;
-    const selectBrowser = () => {
+    const selectBrowser = (event?: Event) => {
+      const key = (event as CustomEvent<{ key?: string }> | undefined)?.detail?.key;
+      if (key && key !== "filey.agent.capabilities") return;
       void selectAgentBrowser(isToolAllowed("agent_computer") ? chat.id : null).catch(error => {
         if (error?.name !== "AbortError") setErr("Could not switch the browser workspace. Close its tabs and try again.");
       });
@@ -635,15 +645,17 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
   const openHistory = () => {
     setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
-    setHistOpen(true);
+    setHistOpen(v => !v);
+    if (!histOpen) requestAnimationFrame(() => historySearchRef.current?.focus());
   };
+  const closeHistory = () => { setHistOpen(false); requestAnimationFrame(() => historyToggleRef.current?.focus()); };
   const switchChat = (c: Chat) => {
     if (busy) return;
     setChat(c);
     setActiveId(c.id);
     setErr(null);
     setStreaming("");
-    setHistOpen(false);
+    if ((workspaceRef.current?.clientWidth ?? 0) < 720) closeHistory();
   };
   const deleteChat = (id: string) => {
     if (busy) return;
@@ -657,7 +669,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
   return (
     <div
-      className="relative flex flex-1 items-start gap-6"
+      ref={workspaceRef}
+      className="filey-agent-workspace relative flex min-w-0 flex-1 items-start gap-4"
       onDragOver={(e) => {
         e.preventDefault();
         if (!busy) setDragging(true);
@@ -673,10 +686,33 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         if (dropped.length && !busy) attach(dropped);
       }}
     >
+      {histOpen && <aside id="filey-chat-history" aria-label="Chat history" className="filey-chat-history sticky top-0 flex shrink-0 flex-col self-start border-r border-border pr-3"
+        onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); closeHistory(); } }}>
+        <div className="flex h-11 shrink-0 items-center justify-between gap-2">
+          <h2 className="pl-2 text-[13px] font-medium">Chats</h2>
+          <button type="button" onClick={closeHistory} className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label="Collapse chat history" title="Collapse chat history"><PanelLeftClose size={17} /></button>
+        </div>
+        <button type="button" disabled={busy} onClick={() => { startNew(); if ((workspaceRef.current?.clientWidth ?? 0) < 720) closeHistory(); }} className="btn-ghost mt-2 w-full justify-start"><Plus size={16} />New chat</button>
+        <label className="relative my-3 block">
+          <Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input ref={historySearchRef} type="search" aria-label="Search chats" placeholder="Search chats" value={historySearch} onChange={event => setHistorySearch(event.target.value)} className="input w-full !rounded-full !pl-9" />
+        </label>
+        {busy && <p className="px-2 pb-3 text-xs leading-relaxed text-muted-foreground">Finish or stop this reply to switch chats.</p>}
+        <nav aria-label="Saved conversations" className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-1">
+          {chatList.filter(c => (c.title || "New chat").toLowerCase().includes(historySearch.trim().toLowerCase())).map(c => <div key={c.id} className={cn("group flex items-center gap-0.5 rounded-xl hover:bg-hover", c.id === chat.id && "bg-hover")}>
+            <button type="button" disabled={busy} onClick={() => switchChat(c)} aria-current={c.id === chat.id ? "page" : undefined} className="min-h-11 min-w-0 flex-1 rounded-xl px-3 py-2 text-left text-[13px] disabled:opacity-50" title={c.title || "New chat"}>
+              <span className="block truncate">{c.title || "New chat"}</span>
+            </button>
+            <button type="button" disabled={busy} onClick={() => deleteChat(c.id)} aria-label={`Delete chat: ${c.title || "New chat"}`} className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 text-muted-foreground hover:!text-danger"><Trash2 size={14} /></button>
+          </div>)}
+          {!chatList.length && <p className="px-3 py-4 text-xs leading-relaxed text-muted-foreground">Your conversations will appear here.</p>}
+          {!!chatList.length && !chatList.some(c => (c.title || "New chat").toLowerCase().includes(historySearch.trim().toLowerCase())) && <p className="px-3 py-4 text-xs text-muted-foreground">No chats match your search.</p>}
+        </nav>
+      </aside>}
       {/* A full-width session header frames the centered conversation. */}
       <div
         ref={topRef}
-        className="filey-chat relative flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col"
+        className={cn("filey-chat relative flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col", histOpen && "filey-chat-with-history")}
       >
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
@@ -690,28 +726,23 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         )}
 
         <header className="sticky top-0 z-30 mb-5 border-b border-border/60 bg-page pb-3 pt-1">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 hover:!bg-hover"><PanelLeft size={17} /></button>
               <h1 className="truncate text-sm font-medium leading-tight text-foreground" title={chat.title || "Filey AI"}>
                 {empty ? "Filey AI" : chat.title || "Conversation"}
               </h1>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-              <button
-                type="button"
-                onClick={openHistory}
-                aria-label="Chat history"
-                title="Chat history"
-                className="btn-ghost !h-9 w-9 !px-0"
-              >
-                <History size={15} />
-              </button>
+              <Link to="/settings?section=credits" className="btn-ghost !border-transparent !bg-transparent !px-3 hover:!bg-hover" aria-label="Add money to AI credits" title="AI wallet and top-ups">
+                <Wallet size={16} /><span className="filey-chat-credit-label">Add credits</span>
+              </Link>
               <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
-                className="btn-ghost !h-9 w-9 !px-0" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
+                className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
                 <PanelRight size={16} />
               </button>
               <div ref={moreRef}>
-                <button type="button" onClick={() => setMoreOpen(v => !v)} className="btn-ghost !h-9 w-9 !px-0" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={18} /></button>
+                <button type="button" onClick={() => setMoreOpen(v => !v)} className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={18} /></button>
                 <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
                   <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
                   <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
@@ -725,7 +756,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 disabled={busy}
                 aria-label="New chat"
                 title="New chat"
-                className="btn-ghost !h-9 w-9 !px-0"
+                className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover"
               >
                 <Plus size={15} />
               </button>
@@ -793,7 +824,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         >
           <div className={COLUMN}>
             {/* A stable composer keeps Stop readable while a reply is running. */}
-            <div className="rounded-[24px] border border-border/70 bg-card p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.025)] transition-colors focus-within:border-muted-foreground/40 sm:p-3">
+            <div className="rounded-2xl border border-border bg-card p-2.5 transition-colors duration-150 motion-reduce:transition-none focus-within:border-muted-foreground/60 sm:p-3">
               {/* Attachment chips — one tile per file, remove always visible
                   (hover-only removal hides the affordance on touch). Several
                   files at once is the merge flow: the order shown is the order
@@ -1159,57 +1190,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         </Modal>
 
-        <Modal open={histOpen} onClose={() => setHistOpen(false)} title="Chat history">
-          <button
-            disabled={busy}
-            onClick={() => {
-              startNew();
-              setHistOpen(false);
-            }}
-            className="btn-primary mb-4"
-          >
-            <Plus size={16} /> New chat
-          </button>
-          {busy && (
-            <p className="mb-3 text-xs text-muted-foreground">
-              Wait for this reply to finish, or stop generating, before switching chats.
-            </p>
-          )}
-          {chatList.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No chats yet.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {chatList.map((c) => (
-                <div
-                  key={c.id}
-                  className={cn(
-                    "flex items-center gap-2 rounded-lg border border-border p-2",
-                    c.id === chat.id && "bg-muted"
-                  )}
-                >
-                  <button
-                    disabled={busy}
-                    onClick={() => switchChat(c)}
-                    aria-current={c.id === chat.id ? "true" : undefined}
-                    className="min-h-10 min-w-0 flex-1 rounded-lg px-2 text-left text-[13px] text-foreground hover:bg-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
-                  >
-                    <span className="block truncate">{c.title || "New chat"}</span>
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => deleteChat(c.id)}
-                    aria-label={`Delete chat: ${c.title || "New chat"}`}
-                    className="btn-ghost w-10 !px-0 shrink-0 text-danger"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Modal>
         <AutomationsDrawer open={autoOpen} onClose={() => setAutoOpen(false)} />
         <SkillsDrawer open={skillsOpen} onClose={() => setSkillsOpen(false)} />
         <CapabilitiesDrawer

@@ -12,6 +12,7 @@ const transport = vi.hoisted(() => ({
   stat: vi.fn(),
   saveCreds: vi.fn(),
   writeKeys: vi.fn(),
+  authLoad: vi.fn(),
   sockets: [] as any[],
   qr: vi.fn(),
 }));
@@ -42,12 +43,13 @@ vi.mock("@whiskeysockets/baileys", () => ({
     });
   },
   DisconnectReason: { loggedOut: 401 },
-  useMultiFileAuthState: async () => ({ state: { keys: { set: transport.writeKeys } }, saveCreds: transport.saveCreds }),
+  useMultiFileAuthState: (...args: any[]) => transport.authLoad(...args),
   downloadMediaMessage: transport.download,
   normalizeMessageContent: (message: any) => message?.ephemeralMessage?.message || message,
   generateMessageIDV2: () => "outgoing-id",
 }));
 vi.mock("qrcode", () => ({ default: { toDataURL: transport.qr } }));
+vi.mock("./launch.mjs", () => ({ bridgeLaunch: () => ({ stateDir: "fixture-auth", ownerNumber: "" }) }));
 
 let output: ReturnType<typeof vi.spyOn>;
 beforeEach(async () => {
@@ -58,6 +60,7 @@ beforeEach(async () => {
   transport.sockets = [];
   transport.saveCreds.mockResolvedValue(undefined);
   transport.writeKeys.mockResolvedValue(undefined);
+  transport.authLoad.mockImplementation(async () => ({ state: { keys: { set: transport.writeKeys } }, saveCreds: transport.saveCreds }));
   transport.qr.mockResolvedValue("data:image/png;base64,fixture");
   transport.send.mockResolvedValue({ key: { id: "accepted-id" } });
   transport.download.mockImplementation(async () => Readable.from([Buffer.from("voice")]));
@@ -81,6 +84,70 @@ const emitted = (type: string) =>
     .map((line) => JSON.parse(line.slice(6)))
     .filter((value) => value.type === type);
 const command = (data: unknown) => transport.line(`FILEY ${JSON.stringify(data)}`);
+
+it("reports only safe startup stage and known error codes, never exception contents", async () => {
+  const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+  for (const [failure, expected] of [
+    [Object.assign(new Error("private pairing content and path"), { code: "EACCES" }), "pairing: EACCES"],
+    [Object.assign(new TypeError("private pairing content and path"), { code: "private-key-not-a-code" }), "pairing: TypeError"],
+  ] as const) {
+    vi.resetModules();
+    output.mockClear();
+    transport.authLoad.mockRejectedValueOnce(failure);
+    await import("./index.mjs");
+    await vi.waitFor(() => expect(emitted("status")).toEqual([
+      { type: "status", state: "error", error: `WhatsApp bridge could not start (${expected}). Close Filey and reconnect.` },
+    ]));
+    expect(output.mock.calls.flat().join(" ")).not.toContain("private");
+  }
+  expect(exit).toHaveBeenCalledWith(1);
+});
+
+it("accepts fresh self-chat append messages once and delivers the owner's reply", async () => {
+  const message = { key: { id: "append-self", fromMe: true, remoteJid: "900000000001@lid" },
+    messageTimestamp: Math.floor(Date.now() / 1000), message: { conversation: "/status" } };
+  await transport.handlers["messages.upsert"]({ type: "append", messages: [message] });
+  const incoming = emitted("message")[0];
+  expect(incoming).toMatchObject({ text: "/status", from: "971500000001", chatJid: "900000000001@lid" });
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [message] });
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    ...message, key: { ...message.key, remoteJid: "971500000001@s.whatsapp.net" },
+  }] });
+  expect(emitted("message")).toHaveLength(1);
+  command({ type: "reply", id: incoming.id, text: "Filey is connected", requestId: "append-reply" });
+  await vi.waitFor(() => expect(emitted("delivery")).toContainEqual(expect.objectContaining({ requestId: "append-reply", ok: true })));
+  expect(transport.send).toHaveBeenCalledWith("900000000001@lid", { text: "Filey is connected" }, expect.any(Object));
+});
+
+it("ignores malformed protocol data without losing the next valid owner request", async () => {
+  for (const value of [null, [], "unexpected", 1]) expect(() => command(value)).not.toThrow();
+  for (const event of [null, {}, { type: "notify", messages: null }])
+    await transport.handlers["messages.upsert"](event);
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [
+    null, {}, { key: { remoteJid: 123, id: "bad-jid" } },
+    { key: { remoteJid: "971500000001@s.whatsapp.net", id: "bad-text" }, message: { conversation: { text: "invalid" } } },
+    { key: { remoteJid: "971500000001@s.whatsapp.net", id: "valid" }, message: { conversation: "/status" } },
+  ] });
+  expect(emitted("message")).toHaveLength(1);
+  expect(emitted("message")[0]).toMatchObject({ text: "/status", from: "971500000001" });
+});
+
+it("does not execute synchronized history, missing dates, strangers or Filey's own replies", async () => {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const message = { key: { id: "old-self", fromMe: true, remoteJid: "971500000001@s.whatsapp.net" },
+    messageTimestamp: timestamp - 60, message: { conversation: "Send the invoice" } };
+  const header = '*' + [...'Filey Agent'].map(c => c === ' ' ? c : c + '\u0332').join('') + '*';
+  await transport.handlers["messages.upsert"]({ type: "append", messages: [
+    message,
+    { ...message, key: { ...message.key, id: "no-date" }, messageTimestamp: undefined },
+    { ...message, key: { ...message.key, id: "future" }, messageTimestamp: timestamp + 3600 },
+    { ...message, key: { ...message.key, id: "stranger", fromMe: false, remoteJid: "971500000099@s.whatsapp.net" }, messageTimestamp: timestamp },
+    { ...message, key: { ...message.key, id: "other-chat", remoteJid: "971500000099@s.whatsapp.net" }, messageTimestamp: timestamp },
+    { ...message, key: { ...message.key, id: "prior-reply" }, messageTimestamp: timestamp, message: { conversation: header + '\n\nYour invoice is ready' } },
+  ] });
+  expect(emitted("message")).toHaveLength(0);
+  expect(transport.send).not.toHaveBeenCalled();
+});
 
 it("forwards owner documents with captions and refuses stranger downloads", async () => {
   transport.download.mockImplementation(async () => Readable.from([Buffer.from("%PDF-test")]));

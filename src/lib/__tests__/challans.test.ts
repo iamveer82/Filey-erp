@@ -134,7 +134,7 @@ describe("create_delivery_challan", () => {
   });
 
   it("defaults a missing qty to 1 and drops blank lines", async () => {
-    await runTool(
+    const out = await runTool(
       "create_delivery_challan",
       {
         party_name: "Acme",
@@ -143,6 +143,7 @@ describe("create_delivery_challan", () => {
       undefined,
       true
     );
+    expect(out).toMatchObject({ ok: true, items: 1 });
     const items = (await loadChallans())[0].form?.items ?? [];
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({ description: "Widget", qty: 1 });
@@ -171,13 +172,22 @@ describe("create_delivery_challan", () => {
   });
 
   it("falls back to a delivery challan when the type is not recognised", async () => {
-    await runTool(
+    const out = await runTool(
       "create_delivery_challan",
       { party_name: "Acme", items: [{ description: "x" }], dc_type: "nonsense" },
       undefined,
       true
     );
+    expect(out).toMatchObject({ ok: true });
     expect((await loadChallans())[0].dc_type).toBe("delivery");
+  });
+
+  it("still rejects invalid quantity types before saving any challan", async () => {
+    const out = await runTool("create_delivery_challan", {
+      party_name: "Acme", items: [{ description: "Widget", qty: "3" }],
+    }, undefined, true);
+    expect(out).toMatchObject({ code: "invalid_arguments" });
+    expect(await loadChallans()).toEqual([]);
   });
 
   it("gives each challan a distinct number", async () => {

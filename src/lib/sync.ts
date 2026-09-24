@@ -238,27 +238,86 @@ async function clearConflict(table: string, recordId: string | number): Promise<
   const { error } = await localClient.from("sync_conflicts").delete().eq("id", `${table}:${recordId}`);
   if (error) throw error;
 }
-export async function reviewSyncConflict(conflict: SyncConflict): Promise<{ local: Record<string, any> | null; cloud: Record<string, any> | null }> {
-  if (!supabase) throw new Error("Cloud is not configured.");
-  assertWorkspaceCurrent();
-  const session = await freshSession(supabase);
-  if (!session) throw new Error("Sign in to review conflicts.");
-  assertLocalAccount(session.user.id);
-  await inRealOrg(supabase, session.user.id, true);
-  const { data, error } = await supabase.from(conflict.table).select("*").eq("id", conflict.recordId).maybeSingle();
-  if (error) throw error;
-  return { local: (await loadColl(conflict.table)).find(row => row.id === conflict.recordId) ?? null, cloud: data };
-}
-export async function resolveSyncConflict(conflict: SyncConflict, cloud: Record<string, any> | null, keepLocal: boolean, reviewedLocal: Record<string, any> | null): Promise<void> {
-  if (running || migrating) throw new Error("Wait for the current transfer to finish.");
-  if (!keepLocal && !cloud) throw new Error("The cloud record is unavailable. Your local record was preserved; check the workspace before resolving this conflict.");
-  assertWorkspaceCurrent();
-  const session = supabase && await freshSession(supabase);
-  if (!session) throw new Error("Sign in to resolve conflicts.");
-  assertLocalAccount(session.user.id);
-  await resolveLocalSyncConflict(conflict.table, conflict.recordId, cloud, keepLocal, reviewedLocal);
-  await clearConflict(conflict.table, conflict.recordId);
-  notify();
+/** Apply one preference to current conflicts, then reconcile both ways.
+ * Fresh revisions remain compare-and-swap bases; never force a cloud write. */
+export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null): Promise<boolean> {
+  const supa = client ?? supabase;
+  if (!isLocalMode() || !supa) throw new Error("Open this device's workspace and connect your cloud account first.");
+  if (running || migrating) throw new Error("Wait for the current sync to finish, then choose again.");
+  running = true;
+  setStatus({ state: "syncing" });
+  try {
+    assertWorkspaceCurrent();
+    const session = await freshSession(supa);
+    if (!session) throw new Error("Sign in to your cloud account, then choose again.");
+    const uid = session.user.id;
+    const checkAccount = async () => {
+      assertWorkspaceCurrent();
+      if (!isLocalMode() || (await freshSession(supa))?.user.id !== uid)
+        throw new Error("Your account changed. Reopen sync in the correct workspace.");
+      assertLocalAccount(uid);
+      if (localWorkspaceOwner() && !isLocalSignedIn()) throw new Error("Sign in to this device's workspace first.");
+    };
+    await checkAccount();
+    await inRealOrg(supa, uid, true);
+    const conflicts = await listSyncConflicts();
+    const version = await journalVersion();
+    const choices: { conflict: SyncConflict; local: Record<string, any> | null; cloud: Record<string, any> | null }[] = [];
+    for (const table of new Set(conflicts.map(c => c.table))) {
+      if (!PUSH_TABLES.includes(table)) throw new Error("Update Filey before syncing these changes.");
+      const rows = new Map((await loadColl(table)).map(row => [String(row.id), row]));
+      const group = conflicts.filter(c => c.table === table);
+      // Company-wide singletons/settings are independently created on each
+      // device. Match their business key, not an unrelated generated row ID.
+      const companyRows = table === "company_profile" ? await pullPaged(supa, table, "*") : null;
+      if (companyRows && companyRows.length > 1) throw new Error("Your company settings need attention. Contact Filey support before syncing.");
+      for (let offset = 0; offset < group.length; offset += 500) {
+        const batch = group.slice(offset, offset + 500);
+        const { data, error } = await supa.from(table).select("*").in("id", batch.map(c => c.recordId));
+        if (error || !Array.isArray(data)) throw new Error("Couldn't read cloud changes. Your device data is safe. Reconnect and try again.");
+        const remote = new Map(data.map(row => [String(row.id), row]));
+        const keys = table === "app_settings" ? batch.map(c => rows.get(String(c.recordId))?.key).filter((key): key is string => typeof key === "string") : [];
+        const settings = new Map<string, Record<string, any>>();
+        if (keys.length) {
+          const result = await supa.from(table).select("*").in("key", keys);
+          if (result.error || !Array.isArray(result.data)) throw new Error("Couldn't read your cloud company settings. Try again when connected.");
+          for (const row of result.data) {
+            if (settings.has(row.key)) throw new Error("Your company settings need attention. Contact Filey support before syncing.");
+            settings.set(row.key, row);
+          }
+        }
+        for (const conflict of batch) {
+          const local = rows.get(String(conflict.recordId)) ?? null;
+          const cloud = companyRows ? companyRows[0] ?? null
+            : table === "app_settings" && local ? settings.get(local.key) ?? null
+            : remote.get(String(conflict.recordId)) ?? null;
+          if (local?.org_id && cloud?.org_id && local.org_id !== cloud.org_id)
+            throw new Error("These company details belong to a different workspace. Open the matching workspace before syncing.");
+          // RLS can hide a record: absence alone is not proof of deletion.
+          if (!keepLocal && !cloud) throw new Error("Some cloud records aren't available to this account. Your device data is unchanged. Check your workspace and try again.");
+          choices.push({ conflict, local, cloud });
+        }
+      }
+    }
+    await checkAccount();
+    if (await journalVersion() !== version) throw new Error("Data changed while syncing. Choose again to include the latest changes.");
+    for (const { conflict, local, cloud } of choices) {
+      await checkAccount();
+      await resolveLocalSyncConflict(conflict.table, conflict.recordId, cloud, keepLocal, local);
+      await clearConflict(conflict.table, conflict.recordId);
+    }
+  } catch (error) {
+    setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  } finally {
+    running = false;
+  }
+  try {
+    return await syncCycle(supa, { manual: true });
+  } catch (error) {
+    setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
 }
 
 export async function pushFileBlobs(
@@ -776,6 +835,7 @@ export function startAutoSync(): () => void {
     if (!document.hidden) scheduleSync(1000);
   };
   document.addEventListener("visibilitychange", visible);
+  window.addEventListener("focus", visible);
   scheduleSync(3000); // catch up on writes made while offline or signed out
   // Idle poll so teammate / second-device edits land. A poll used to re-download
   // a full snapshot of every table, which burnt cloud egress 24/7 for nothing —
@@ -790,6 +850,7 @@ export function startAutoSync(): () => void {
     window.removeEventListener("filey:local-write", saved);
     window.removeEventListener("online", online);
     document.removeEventListener("visibilitychange", visible);
+    window.removeEventListener("focus", visible);
     clearInterval(interval);
     if (timer) clearTimeout(timer);
     timer = null;

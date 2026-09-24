@@ -24,6 +24,7 @@ import { agentStorageScope } from "./agentStorage";
 import { getCacheScope } from "./api";
 import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
 import { creditChoice, createCreditFetch } from "./aiCredits";
+import { agentProgressRecorder, priorAgentProgress } from "./agentRunState";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -612,7 +613,8 @@ export async function* aiAgentStream(
     throw new AiError("No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
   const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
   const scope = agentStorageScope();
-  const prior = opts.isOwner === false ? "" : journalDigest();
+  const prior = opts.isOwner === false ? "" : [journalDigest(), opts.agentId && scope ? priorAgentProgress(opts.agentId) : ""].filter(Boolean).join("\n\n");
+  const checkpoint = opts.isOwner && opts.agentId && scope ? agentProgressRecorder(opts.agentId, scope) : undefined;
   const context = prior ? [{ role: "system" as const, text: prior }, ...messages] : messages;
   const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing ? createCreditFetch(cfg.billing) : aiFetch });
   const events: AgentEvent[] = [];
@@ -620,6 +622,7 @@ export async function* aiAgentStream(
     for (;;) {
       const step = await stream.next();
       if (step.done) return step.value;
+      checkpoint?.(step.value);
       if (step.value.type === "tool_result") events.push(step.value);
       if (step.value.type === "done" && opts.isOwner !== false && scope && scope === agentStorageScope())
         recordRun({ goal, reason: step.value.reason, failures: failuresFrom(events) }, scope);

@@ -25,6 +25,8 @@ export interface BridgeState {
   error?: string | null;
   /** The paired JID once connected (owner's own chat in self-chat mode). */
   me?: string | null;
+  /** Native supervisor generation; never reused after a restart or re-pair. */
+  sessionId?: string | null;
 }
 
 const AUTO_KEY = "filey.wa_bridge.auto";
@@ -158,6 +160,7 @@ export function onBridgeState(cb: (s: BridgeState) => void): () => void {
 /** Incoming WhatsApp message (routed from the sidecar through Rust). */
 export interface WaMessage {
   id: string;
+  bridgeSession: string;
   from: string;
   text: string;
   fromName?: string;
@@ -175,6 +178,7 @@ export function onWaMessage(cb: (m: WaMessage) => void): () => void {
  *  and feeds the words to the agent exactly like a typed message. */
 export interface WaVoice {
   id: string;
+  bridgeSession: string;
   from: string;
   text: string; // unused for voice (kept for shape parity)
   fromName?: string;
@@ -190,21 +194,32 @@ export function onWaVoice(cb: (v: WaVoice) => void): () => void {
 }
 
 /** Answer an incoming message — this is the local agent's reply channel. */
-export async function replyWa(id: string, text: string): Promise<void> {
+export async function replyWa(id: string, text: string, sessionId: string): Promise<void> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
+  if (!sessionId) throw new Error("This WhatsApp request has expired. Send it again after reconnecting.");
   const account = boundAccount();
+  const scope = agentStorageScope();
   await requireModuleAccess("integrations");
-  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
-  await invoke("wa_bridge_reply", { id, text });
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
+  await invoke("wa_bridge_reply", { id, text, sessionId });
+}
+
+async function connectedSession(expected?: string): Promise<string> {
+  const state = await bridgeState();
+  if (state.state !== "connected" || !state.sessionId || (expected && expected !== state.sessionId))
+    throw new Error("WhatsApp disconnected or restarted. Reconnect before sending.");
+  return state.sessionId;
 }
 
 /** Send a proactive message to a specific JID (owner notifications). */
-export async function sendWa(to: string, text: string): Promise<string> {
+export async function sendWa(to: string, text: string, expectedSessionId?: string): Promise<string> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
   const account = boundAccount();
+  const scope = agentStorageScope();
+  const sessionId = await connectedSession(expectedSessionId);
   await requireModuleAccess("integrations");
-  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
-  return await invoke<string>("wa_bridge_send", { to, text });
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
+  return await invoke<string>("wa_bridge_send", { to, text, sessionId });
 }
 
 /** Send a file (PDF, photo, document) to a JID. The desktop sidecar reads it
@@ -212,19 +227,23 @@ export async function sendWa(to: string, text: string): Promise<string> {
  *  documents. Throws when the bridge is down or the file is missing. */
 export async function sendWaFile(
   to: string,
-  file: { path: string; filename: string; mimetype?: string; caption?: string }
+  file: { path: string; filename: string; mimetype?: string; caption?: string },
+  expectedSessionId?: string
 ): Promise<string> {
   if (!hasDesktop)
     throw new Error("Sending files over WhatsApp runs in the desktop app only.");
   const account = boundAccount();
+  const scope = agentStorageScope();
+  const sessionId = await connectedSession(expectedSessionId);
   await requireModuleAccess("integrations");
-  if (account !== boundAccount()) throw new Error("Workspace changed before sending WhatsApp.");
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
   return await invoke<string>("wa_bridge_send_file", {
     to,
     path: file.path,
     filename: file.filename,
     mimetype: file.mimetype ?? "",
     caption: file.caption ?? "",
+    sessionId,
   });
 }
 

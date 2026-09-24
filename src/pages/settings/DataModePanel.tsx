@@ -122,7 +122,7 @@ function CloudSyncCard() {
   const uploadAll = async () => {
     if (
       !window.confirm(
-        "Upload all local data now? Filey will preserve conflicting cloud records and ask you to review them."
+        "Upload all device data now? If both sides have changed, you can choose which version to keep."
       )
     )
       return;
@@ -137,7 +137,7 @@ function CloudSyncCard() {
     } catch (e) {
       // Without this the whole thing failed in silence: setErr("") above, no
       // catch, and the rejection vanished into an unhandled promise.
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr("Couldn't finish uploading. Your saved data is safe. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -147,7 +147,9 @@ function CloudSyncCard() {
     sync.state === "syncing"
       ? "Syncing…"
       : sync.state === "error"
-        ? `Sync failed: ${sync.error}`
+        ? sync.failures?.length && sync.failures.every(failure => failure.kind === "conflict")
+          ? "Choose which changes to keep below."
+          : "Sync couldn't finish. Your saved data is safe. Check your connection and try again; if this continues, contact Filey support."
         : sync.at
           ? `Last synced ${new Date(sync.at).toLocaleString()}`
           : "Waiting for changes to sync.";
@@ -160,7 +162,7 @@ function CloudSyncCard() {
       <p className="text-sm leading-relaxed text-muted-foreground">
         Keep working offline on this device; changes upload to your cloud account within
         seconds, and edits from your other devices or teammates download automatically.
-        Conflicting edits stay on this device until you review which version to keep.
+        If both sides change the same record, choose which version to keep and Filey will merge and sync it.
       </p>
 
       {connected ? (
@@ -170,7 +172,7 @@ function CloudSyncCard() {
               <Check size={14} className="mt-0.5 shrink-0" />{" "}
               <span className="min-w-0 break-words">Connected as {connected}</span>
             </span>
-            <button className="btn-ghost shrink-0" onClick={disconnect}>
+            <button className="btn-ghost shrink-0" disabled={busy || sync.state === "syncing"} onClick={disconnect}>
               Disconnect
             </button>
           </div>
@@ -191,30 +193,23 @@ function CloudSyncCard() {
               disabled={busy || sync.state === "syncing"}
               onClick={() => {
                 setErr("");
-                void syncCycle(null, { manual: true }).catch((e) =>
-                  setErr(e instanceof Error ? e.message : String(e))
+                void syncCycle(null, { manual: true }).catch(() =>
+                  setErr("Couldn't finish syncing. Your saved data is safe. Check your connection and try again.")
                 );
               }}
             >
               Sync now
             </button>
-            <button className="btn-ghost" disabled={busy} onClick={uploadAll}>
+            <button className="btn-ghost" disabled={busy || sync.state === "syncing"} onClick={uploadAll}>
               Upload all local data
             </button>
           </div>
           <p
-            className={`text-xs ${sync.state === "error" ? "text-danger" : "text-brand-500"}`}
+            role="status"
+            className="text-xs text-muted-foreground"
           >
             {statusLine}
           </p>
-          {!!sync.failures?.some(failure => failure.kind !== "conflict") && <details className="text-xs">
-            <summary className="cursor-pointer font-medium">Upload issues</summary>
-            <ul className="mt-2 space-y-2 text-muted-foreground">
-              {[...new Set(sync.failures.filter(failure => failure.kind !== "conflict")
-                .map(failure => `${failure.table.replace(/_/g, " ")}: ${failure.message}`))]
-                .map(message => <li key={message}>{message}</li>)}
-            </ul>
-          </details>}
           <SyncConflictReview />
         </>
       ) : (

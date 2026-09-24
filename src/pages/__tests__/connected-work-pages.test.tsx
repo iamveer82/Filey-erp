@@ -20,12 +20,14 @@ vi.mock("../../lib/workServices", async (original) => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   browser.setBrowserPanelOpen(true);
   vi.mocked(browser.desktopBrowserSupported).mockReturnValue(false);
 });
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 it("keeps the browser in a collapsible panel without opening a popup", () => {

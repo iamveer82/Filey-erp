@@ -464,11 +464,20 @@ export function resolveLocalSyncConflict(coll: string, id: string | number, remo
     const original = await journalSnapshot();
     const journal = structuredClone(original);
     const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
+    const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
+    if (targetId !== id && rows.some(row => row.id === targetId))
+      throw new Error("Company settings changed on this device. Sync again before choosing a version.");
     let next = rows;
     if (keepLocal) {
-      next = rows.map(row => row.id === id ? { ...row, sync_revision: remote?.sync_revision ?? null } : row);
-      if (entry.deleted.includes(id)) entry.deletedRevisions = { ...entry.deletedRevisions, [String(id)]: remote?.sync_revision ?? null };
-      else if (!entry.changed.includes(id)) entry.changed.push(id);
+      next = rows.map(row => row.id === id ? { ...row, id: targetId, sync_revision: remote?.sync_revision ?? null } : row);
+      if (entry.deleted.includes(id)) {
+        entry.deleted = entry.deleted.map(value => value === id ? targetId : value);
+        entry.deletedRevisions = { ...entry.deletedRevisions, [String(targetId)]: remote?.sync_revision ?? null };
+        if (targetId !== id) delete entry.deletedRevisions[String(id)];
+      } else {
+        entry.changed = entry.changed.filter(value => value !== id);
+        if (!entry.changed.includes(targetId)) entry.changed.push(targetId);
+      }
     } else {
       next = [...rows.filter(row => row.id !== id), ...(remote ? [remote] : [])];
       if (entry.all) { entry.changed = rows.map(row => row.id); delete entry.all; }

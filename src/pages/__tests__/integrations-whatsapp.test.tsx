@@ -19,7 +19,7 @@ vi.mock("../../lib/waLog", () => ({ waLogList: () => [] }));
 vi.mock("../../lib/waBridge", () => ({
   get hasDesktop() { return native.desktop; },
   bridgeState: vi.fn(), startBridge: vi.fn(), stopBridge: vi.fn(), resetBridge: vi.fn(),
-  getBridgeConfig: () => ({ autoStart: false, ownerNumber: "" }),
+  getBridgeConfig: vi.fn(() => ({ autoStart: false, ownerNumber: "" })),
   setBridgeConfig: vi.fn(),
   onBridgeState: vi.fn((listener) => { native.listener = listener; return vi.fn(); }),
 }));
@@ -32,8 +32,18 @@ beforeEach(() => {
   native.desktop = true;
   vi.mocked(bridge.bridgeState).mockReset().mockResolvedValue({ state: "stopped" });
   vi.mocked(bridge.startBridge).mockReset().mockResolvedValue({ state: "starting" });
+  vi.mocked(bridge.getBridgeConfig).mockReturnValue({ autoStart: false, ownerNumber: "" });
+  vi.mocked(bridge.setBridgeConfig).mockImplementation(cfg => ({ autoStart: false, ownerNumber: "", ...cfg }));
 });
 afterEach(cleanup);
+
+it("explains self-chat when the configured owner is the paired phone itself", async () => {
+  vi.mocked(bridge.getBridgeConfig).mockReturnValue({ autoStart: true, ownerNumber: "971500000001" });
+  vi.mocked(bridge.bridgeState).mockResolvedValue({ state: "connected", me: "971500000001:2@s.whatsapp.net" });
+  show("free");
+  expect(await screen.findByText(/Message yourself/)).toBeInTheDocument();
+  expect(screen.queryByText(/From your owner number/)).not.toBeInTheDocument();
+});
 
 it("opens built-in pairing from the directory and connects without visiting CRM", async () => {
   show();
@@ -63,15 +73,36 @@ it("shows native startup failures and allows retry", async () => {
   show("free");
   vi.mocked(bridge.startBridge).mockRejectedValueOnce(new Error("WhatsApp bridge binary is not installed with this build"));
   fireEvent.click(screen.getByRole("button", { name: "Connect WhatsApp" }));
-  expect(await within(screen.getByRole("region", { name: "WhatsApp connection" })).findByRole("status")).toHaveTextContent("bridge binary is not installed");
+  expect(await within(screen.getByRole("region", { name: "WhatsApp connection" })).findByRole("status")).toHaveTextContent("Install the latest Filey update");
+  expect(screen.queryByText(/bridge binary is not installed/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Connect WhatsApp" })).toBeEnabled();
   expect(screen.getByText("/integrations?tab=free")).toBeInTheDocument();
+});
+
+it.each([
+  ["WhatsApp bridge could not start. Review the desktop logs and reconnect.", "WhatsApp could not start on this computer"],
+  ["could not start bridge: unexpected native failure", "WhatsApp could not start on this computer"],
+  ["WhatsApp could not save its pairing. Check free disk space, then reconnect.", "Check free disk space and folder permissions"],
+  ["WhatsApp rejected this session. Close other Filey instances, then reconnect or re-pair in Integrations.", "WhatsApp rejected or replaced this session"],
+  ["Could not read WhatsApp connection status: native failure", "Filey could not check the WhatsApp connection"],
+  ["WhatsApp is already running in another Filey window. Close that window before connecting here.", "Close that window, then connect here"],
+  ["Could not protect the WhatsApp session: access denied", "Filey cannot access its WhatsApp session files"],
+  ["Could not clear WhatsApp pairing: access denied", "Filey could not remove the old WhatsApp pairing"],
+  ["WhatsApp could not reconnect. Restart the bridge in Integrations.", "The WhatsApp connection was lost"],
+  ["Unknown provider failure", "WhatsApp could not complete this action"],
+])("explains connection failure safely: %s", async (error, message) => {
+  vi.mocked(bridge.bridgeState).mockResolvedValue({ state: "error", error: `${error} [PRIVATE_DIAGNOSTIC]` });
+  show("free");
+  const status = await within(screen.getByRole("region", { name: "WhatsApp connection" })).findByRole("status");
+  expect(status).toHaveTextContent(message);
+  expect(status).not.toHaveTextContent("PRIVATE_DIAGNOSTIC");
+  expect(screen.getByRole("button", { name: "Connect WhatsApp" })).toBeEnabled();
 });
 
 it("explains the desktop requirement in a browser without calling native commands", () => {
   native.desktop = false;
   show("free");
-  expect(screen.getByText(/This browser preview cannot run the WhatsApp bridge/)).toBeInTheDocument();
+  expect(screen.getByText(/This browser cannot pair a WhatsApp account/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Connect WhatsApp" })).toBeDisabled();
   expect(bridge.bridgeState).not.toHaveBeenCalled();
   expect(bridge.startBridge).not.toHaveBeenCalled();
@@ -91,4 +122,22 @@ it("keeps the provider setup shortcut pointed at the same built-in connection", 
   fireEvent.click(screen.getByRole("link", { name: "Set up WhatsApp (QR)" }));
   expect(await screen.findByRole("region", { name: "WhatsApp connection" })).toBeInTheDocument();
   expect(screen.getByText("/integrations?tab=free")).toBeInTheDocument();
+});
+
+it("only changes the allowed owner number after an explicit save", async () => {
+  show("free");
+  const input = screen.getByRole("textbox", { name: "My WhatsApp number" });
+  fireEvent.change(input, { target: { value: "+971500000002" } });
+  fireEvent.blur(input);
+  expect(bridge.setBridgeConfig).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save number" }));
+  await waitFor(() => expect(bridge.setBridgeConfig).toHaveBeenCalledWith({ ownerNumber: "+971500000002" }));
+});
+
+it("lets customers clear directory filters and find the built-in connection again", async () => {
+  show();
+  fireEvent.change(screen.getByRole("textbox", { name: "Search integrations" }), { target: { value: "no-such-filey-integration" } });
+  expect(screen.getByText("No matching integrations")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(screen.getByRole("link", { name: "Set up WhatsApp" })).toBeInTheDocument();
 });

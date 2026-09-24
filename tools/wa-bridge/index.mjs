@@ -23,11 +23,11 @@
  * that folder IS the login. Anyone holding it can message as you, so keep it
  * off shared drives and out of git.
  */
-import path from "node:path";
 import crypto from "node:crypto";
 import readline from "node:readline";
 import { sendConfirmed } from "./delivery.mjs";
-import { ownerIdentity } from "./identity.mjs";
+import { ownerIdentity, phoneNumber } from "./identity.mjs";
+import { bridgeLaunch } from "./launch.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -38,7 +38,10 @@ import QR from "qrcode";
 
 // Pairing keys are private to this OS user on platforms with POSIX permissions.
 process.umask(0o077);
-const ownerNumber = process.env.FILEY_BRIDGE_OWNER || "";
+const { stateDir, ownerNumber } = bridgeLaunch();
+// Self-chat arrives as append too. Only accept live entries from this process
+// lifetime; synchronized history must never execute old business requests.
+const startedAtSeconds = Math.floor(Date.now() / 1000);
 
 /** One JSON object per line on stdout. The desktop app parses these to show
  *  the QR/state and to route messages to the local agent. Keep it one-line —
@@ -48,14 +51,15 @@ const emit = (obj) => console.log("FILEY " + JSON.stringify(obj));
 /** Plain text out of the many shapes a WhatsApp message can arrive in. */
 function textOf(m) {
   const c = normalizeMessageContent(m.message) ?? {};
-  return (
+  const text = (
     c.conversation ??
     c.extendedTextMessage?.text ??
     c.imageMessage?.caption ??
     c.videoMessage?.caption ??
     c.documentMessage?.caption ??
     ""
-  ).trim();
+  );
+  return typeof text === "string" ? text.trim() : "";
 }
 
 /** Replies arrive on stdin as `FILEY {"type":"reply","id":...,"text":...}`.
@@ -153,6 +157,7 @@ function startStdinLoop() {
     } catch {
       return;
     }
+    if (!v || typeof v !== "object" || Array.isArray(v)) return;
     if (v.type === "reply") {
       const r = pending.get(v.id);
       if (r) {
@@ -240,6 +245,15 @@ async function downloadLimited(message, limit) {
 let reconnecting = false;
 let backoffStep = 0;
 let credentialWrites = Promise.resolve();
+let startupStage = "pairing";
+
+/** Safe support details only: provider exceptions may contain pairing material. */
+function startupFailure(error) {
+  const codes = ["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EISDIR", "ENOMEM", "ENOSPC", "EMFILE", "ENFILE", "EBUSY", "ERR_INVALID_ARG_TYPE", "ERR_INVALID_ARG_VALUE", "ERR_INVALID_URL", "ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ERR_DLOPEN_FAILED", "ERR_WORKER_INIT_FAILED"];
+  const names = ["TypeError", "RangeError", "ReferenceError", "SyntaxError", "Error"];
+  const detail = codes.includes(error?.code) ? error.code : names.includes(error?.name) ? error.name : "Error";
+  return { type: "status", state: "error", error: `WhatsApp bridge could not start (${startupStage}: ${detail}). Close Filey and reconnect.` };
+}
 
 function reconnect(dead) {
   if (closing) return;
@@ -268,12 +282,7 @@ function reconnect(dead) {
     dead?.ev?.removeAllListeners?.("creds.update");
     reconnecting = false;
     start().catch((e) => {
-      emit({
-        type: "status",
-        state: "error",
-        error: "WhatsApp could not reconnect. Restart the bridge in Integrations.",
-      });
-      console.error("reconnect failed:", e?.message);
+      emit(startupFailure(e));
       reconnect(activeSock);
     });
   }, wait);
@@ -284,7 +293,7 @@ async function start() {
   // The session folder IS the login, so it must survive app updates and live
   // somewhere writable. The desktop app passes its per-user data dir; a human
   // running this from the repo gets ./auth next to the script.
-  const authDir = process.env.FILEY_BRIDGE_STATE || path.join(process.cwd(), "auth");
+  const authDir = stateDir;
   // Never two sockets on one auth folder. Both would write signal state and the
   // phone would stop being able to decrypt us; one live socket is the whole
   // invariant this file has to hold.
@@ -299,6 +308,7 @@ async function start() {
       // already gone
     }
   }
+  startupStage = "pairing";
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   if (closing) return;
   // Signal keys and credentials belong to the same session. A reconnect must
@@ -315,6 +325,7 @@ async function start() {
     return result;
   };
   state.keys.set = (data) => persist(() => writeKeys(data));
+  startupStage = "socket";
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
@@ -326,6 +337,7 @@ async function start() {
   });
   activeSock = sock;
   connected = false;
+  startupStage = "listeners";
 
   sock.ev.on("creds.update", () => {
     void persist(saveCreds).catch(() => {});
@@ -375,11 +387,14 @@ async function start() {
     }
   });
 
-  sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+  sock.ev.on("messages.upsert", async (event) => {
+    if (!event || !Array.isArray(event.messages)) return;
+    const { messages, type } = event;
+    if (type !== "notify" && type !== "append") return;
     for (const m of messages) {
       if (closing || sock !== activeSock || !connected) return;
-      if (m.key.remoteJid?.endsWith("@g.us")) continue; // ignore group chats
+      if (!m?.key || typeof m.key.remoteJid !== "string" || typeof m.key.id !== "string" || !m.key.id) continue;
+      if (m.key.remoteJid.endsWith("@g.us")) continue; // ignore group chats
       if (sentIds.has(m.key.id)) continue; // our own reply echoing back
 
       const identity = ownerIdentity(m.key, sock.user, ownerNumber);
@@ -388,14 +403,27 @@ async function start() {
       if (!identity) continue;
       const { jid, phone } = identity;
 
-      const receivedId = `${jid}:${m.key.id}`;
-      if (!m.key.id || receivedIds.has(receivedId)) continue;
+      if (type === "append") {
+        const timestamp = Number(m.messageTimestamp);
+        if (!m.key.fromMe || phone !== phoneNumber(sock.user?.id) ||
+            !Number.isFinite(timestamp) || timestamp < startedAtSeconds ||
+            timestamp > Math.floor(Date.now() / 1000) + 60) continue;
+      }
+
+      const text = textOf(m);
+      // IDs protect current sends; the marker also protects restored self-chat
+      // answers whose IDs are no longer in the bounded in-memory set.
+      if (m.key.fromMe && text.startsWith(HEADER)) continue;
+
+      // WhatsApp may re-deliver a message using its phone JID and its LID.
+      // Both are the same authenticated owner and must execute only once.
+      const receivedId = `${phone}:${m.key.id}`;
+      if (receivedIds.has(receivedId)) continue;
       receivedIds.add(receivedId);
       if (receivedIds.size > 1000) receivedIds.delete(receivedIds.values().next().value);
 
       const name = m.pushName ?? phone;
 
-      const text = textOf(m);
       const content = normalizeMessageContent(m.message) ?? {};
       const document = content.documentMessage || content.imageMessage;
       if (document) {
@@ -480,11 +508,6 @@ async function start() {
 
 startStdinLoop();
 start().catch((e) => {
-  emit({
-    type: "status",
-    state: "error",
-    error: "WhatsApp bridge could not start. Review the desktop logs and reconnect.",
-  });
-  console.error("bridge failed to start:", e);
+  emit(startupFailure(e));
   process.exit(1);
 });

@@ -8,10 +8,9 @@ import { CompanyAssetImage } from "./CompanyAssetImage";
 /* Company-wide stamp & signature images uploaded once in
  * Settings → Company Details, then optionally enabled per document.
  *
- * Images are uploaded to Supabase Storage (`files` bucket) and only the
- * storage path + a cached signed URL are kept in `app_settings`. This keeps
- * settings small, makes images follow the user across devices, and survives
- * browser cache clearing. */
+ * Cloud uploads use private Storage paths; offline uploads keep image bytes
+ * inline in app_settings and the regular sync queue uploads them on reconnect.
+ * Preview URLs are transient and must never replace either durable value. */
 
 export interface CompanyStampSig {
   stamp?: StampSig;
@@ -88,8 +87,7 @@ export async function saveCompanyStampSig(s: CompanyStampSig): Promise<void> {
   // with a link that had already expired by the next visit.
   const persist = (v?: StampSig) => {
     if (!v) return {};
-    const { _previewUrl: _drop, ...rest } = v;
-    return rest;
+    return durable(v);
   };
   await tools.setSetting(STAMP_KEY, JSON.stringify(persist(s.stamp)));
   await tools.setSetting(SIGN_KEY, JSON.stringify(persist(s.signature)));

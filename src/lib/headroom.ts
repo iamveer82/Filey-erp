@@ -53,6 +53,12 @@ function rememberOriginal(text: string): string {
   return id;
 }
 
+/** Keep older observations recoverable when the active context is shortened. */
+export function retainToolOutput(text: string): WireText {
+  const ccrId = rememberOriginal(text);
+  return { ccrId, text: `${text.slice(0, 300)}\n[Earlier observation; full output: headroom_retrieve("${ccrId}").]` };
+}
+
 export function headroomRetrieve(id: string): unknown {
   const hit = ccr.get(id);
   if (!hit)
