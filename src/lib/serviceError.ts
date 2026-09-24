@@ -34,6 +34,15 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
     return new Error(
       "Set a task limit from $0.01 to $50, and a daily limit between your task limit and $100."
     );
+  if (
+    [
+      "Choose an AI credit amount from $5.00 to $100.00, in whole cents.",
+      "Choose one AI credit pack or enter a custom amount.",
+      "Custom AI credit amounts are not available yet.",
+      "Filey AI has no available model for this request. Try a smaller conversation or use your own API key.",
+    ].includes(detail)
+  )
+    return new Error(detail);
   if (/^All \d+ device slots are in use\./.test(detail))
     return new Error(
       "All your device slots are in use. Remove an old device from Billing to continue."

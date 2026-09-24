@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowUpRight, RefreshCw, Wallet } from "lucide-react";
+import { ArrowUpRight, RefreshCw } from "lucide-react";
+import PaperMark from "../../components/PaperMark";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { FileySpinner } from "../../components/FileySpinner";
 import PaymentReview from "../../components/PaymentReview";
@@ -9,6 +10,7 @@ import {
   buyAiCredits,
   creditHistory,
   creditMoney,
+  creditPaper,
   getCreditStatus,
   saveCreditLimits,
   type CreditStatus,
@@ -25,6 +27,8 @@ export default function AiCreditsPanel() {
   const [params, setParams] = useSearchParams();
   const [hasMore, setHasMore] = useState(false);
   const [accountVersion, setAccountVersion] = useState(0);
+  const [customAmount, setCustomAmount] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
   useEffect(() => {
     const sub = supabase?.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_OUT" || event === "SIGNED_IN") {
@@ -77,8 +81,8 @@ export default function AiCreditsPanel() {
     if (!state) return;
     setNotice(
       state === "cancelled"
-        ? "Checkout cancelled. No credits were added."
-        : "Checkout finished. Credits appear after payment is verified. Refresh if your balance has not updated yet."
+        ? "Checkout cancelled. No Paper was added."
+        : "Checkout finished. Paper appears after payment is verified. Refresh if your balance has not updated yet."
     );
     const next = new URLSearchParams(params);
     next.delete("credit_checkout");
@@ -117,30 +121,63 @@ export default function AiCreditsPanel() {
     }
   }
 
+  const customLimits = data?.custom_topup;
+  const modelCount = data?.models.filter((model) => model.id !== "filey-ai").length ?? 0;
+  const modelQuery = modelSearch.trim().toLowerCase();
+  const rateModels =
+    data?.models.filter(
+      (model) =>
+        model.id !== "filey-ai" &&
+        `${model.name} ${model.id}`.toLowerCase().includes(modelQuery)
+    ) ?? [];
+  const validCustomCents = (cents: number) =>
+    !!customLimits &&
+    Number.isSafeInteger(cents) &&
+    cents >= customLimits.min_cents &&
+    cents <= customLimits.max_cents;
+  const amountParts = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(customAmount.trim());
+  const customCents = amountParts
+    ? Number(amountParts[1]) * 100 + Number((amountParts[2] ?? "").padEnd(2, "0"))
+    : NaN;
+  const customValid = validCustomCents(customCents);
+  const amountParam = params.get("amount_cents") ?? "";
+  const requestedCents = /^\d+$/.test(amountParam) ? Number(amountParam) : NaN;
   const selectedPack = data?.packs.find((pack) => pack.id === params.get("pack"));
-  if (selectedPack && data?.topups_enabled) {
+  const selectedTopup = params.has("amount_cents")
+    ? !params.has("pack") && validCustomCents(requestedCents)
+      ? { cents: requestedCents, choice: requestedCents }
+      : null
+    : selectedPack
+      ? { cents: selectedPack.cents, choice: selectedPack.id }
+      : null;
+  const customHelp = customLimits
+    ? `Enter ${creditMoney(customLimits.min_cents * 10000)}–${creditMoney(customLimits.max_cents * 10000)} USD, with up to two decimal places. 1 Paper = $1.`
+    : "";
+  if (selectedTopup && data?.topups_enabled) {
     return (
       <PaymentReview
-        key={selectedPack.id}
-        title="Add AI credits"
+        key={String(selectedTopup.choice)}
+        title="Add Paper"
+        artwork={<PaperMark size={64} />}
         lines={[
           {
-            label: "Spendable AI credit",
-            value: creditMoney(selectedPack.cents * 10000),
+            label: creditPaper(selectedTopup.cents * 10000),
+            value: creditMoney(selectedTopup.cents * 10000),
           },
           {
             label: "Filey service fee",
             value: creditMoney((data.topup_fee_cents ?? 0) * 10000),
           },
         ]}
-        total={`${creditMoney((selectedPack.cents + (data.topup_fee_cents ?? 0)) * 10000)} USD`}
-        terms="One-time top-up. No subscription or auto-recharge. AI credits do not expire and are excluded from the subscription refund program."
+        total={`${creditMoney((selectedTopup.cents + (data.topup_fee_cents ?? 0)) * 10000)} USD`}
+        terms="1 Paper = $1 of AI usage. One-time top-up. No subscription or auto-recharge. Paper does not expire and is excluded from the subscription refund program."
         onBack={() => {
           const next = new URLSearchParams(params);
           next.delete("pack");
+          next.delete("amount_cents");
           setParams(next);
         }}
-        onPay={() => buyAiCredits(selectedPack.id)}
+        onPay={() => buyAiCredits(selectedTopup.choice)}
         onVerify={async () => {
           const value = await getCreditStatus(true);
           const added = value.history.some(
@@ -159,11 +196,15 @@ export default function AiCreditsPanel() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">AI wallet</h2>
-          <p className="mt-1 text-[13px] text-muted-foreground">
-            Optional, on every plan. Your balance stays with your account.
-          </p>
+        <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+          <PaperMark size={64} />
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold">Paper wallet</h2>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Paper powers Filey AI. Optional on every plan, with your balance saved to your
+              account.
+            </p>
+          </div>
         </div>
         <button
           type="button"
@@ -197,7 +238,7 @@ export default function AiCreditsPanel() {
       {!data && !busy && (
         <SettingsPanel>
           <SettingsSection
-            title="Your AI credits"
+            title="Your Paper"
             description="Your balance, top-ups and spending history will appear here when your Filey account is connected."
           >
             <p className="text-sm text-muted-foreground">
@@ -219,23 +260,27 @@ export default function AiCreditsPanel() {
         <SettingsPanel>
           <SettingsSection
             title="Your balance"
-            description="AI credits are separate from your Basic, Pro or Ultra subscription."
+            description="Paper is Filey's AI credit. It is separate from your Basic, Pro or Ultra subscription."
           >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Wallet size={16} />
-                  Available to spend · USD
+                  <PaperMark />
+                  Available to spend
                 </div>
                 <p className="text-3xl font-semibold tabular-nums">
-                  {creditMoney(Math.max(0, data.account.available_micros))}
+                  {creditPaper(Math.max(0, data.account.available_micros), true)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {creditMoney(Math.max(0, data.account.available_micros), true)} USD · 1
+                  Paper = $1
                 </p>
               </div>
               <AiFundingControl />
             </div>
             {data.account.reserved_micros > 0 && (
               <p className="text-xs text-muted-foreground">
-                {creditMoney(data.account.reserved_micros, true)} reserved for requests in
+                {creditPaper(data.account.reserved_micros, true)} reserved for requests in
                 progress. Unused funds are released when they finish.
               </p>
             )}
@@ -244,8 +289,8 @@ export default function AiCreditsPanel() {
               data.account.available_micros < 1000000 && (
                 <p role="status" className="text-[13px] text-warning">
                   {data.account.available_micros === 0
-                    ? "Add credits to start using Filey-funded models."
-                    : "Your AI balance is below $1. Top up before your next large task."}
+                    ? "Add Paper to start using paid Filey AI models."
+                    : "Your balance is below 1 Paper ($1). Top up before your next large task."}
                 </p>
               )}
             {data.account.blocked && (
@@ -255,7 +300,7 @@ export default function AiCreditsPanel() {
             )}
             {data.account.balance_micros < 0 && (
               <p role="alert" className="text-sm text-danger">
-                Refund adjustment: {creditMoney(data.account.balance_micros, true)}.
+                Refund adjustment: {creditPaper(data.account.balance_micros, true)}.
                 Top-ups first cover this amount.
               </p>
             )}
@@ -264,12 +309,14 @@ export default function AiCreditsPanel() {
             )}
             {!data.topups_enabled && (
               <p role="status" className="text-sm text-muted-foreground">
-                Credit purchases are not available yet. You can keep using your own API
+                Paper purchases are not available yet. You can keep using your own API
                 key; no payment will be taken.
               </p>
             )}
-            <h3 className="text-sm font-semibold">Add money</h3>
-            <p className="text-[13px] text-muted-foreground">Choose an amount, review the total, then continue to secure payment.</p>
+            <h3 className="text-sm font-semibold">Add Paper</h3>
+            <p className="text-[13px] text-muted-foreground">
+              Choose an amount, review the total, then continue to secure payment.
+            </p>
             <div className="flex flex-wrap gap-2">
               {data.packs.map((pack) => (
                 <button
@@ -279,6 +326,7 @@ export default function AiCreditsPanel() {
                   disabled={!!busy || !data.topups_enabled}
                   onClick={() => {
                     const next = new URLSearchParams(params);
+                    next.delete("amount_cents");
                     next.set("pack", pack.id);
                     setParams(next);
                   }}
@@ -288,17 +336,73 @@ export default function AiCreditsPanel() {
                   ) : (
                     <ArrowUpRight size={15} />
                   )}
-                  {creditMoney(pack.cents * 10000)} credit · Pay{" "}
+                  {creditPaper(pack.cents * 10000)} · Pay{" "}
                   {creditMoney((pack.cents + (data.topup_fee_cents ?? 0)) * 10000)}
                 </button>
               ))}
             </div>
+            {customLimits && (
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!customValid || busy || !data.topups_enabled) return;
+                  const next = new URLSearchParams(params);
+                  next.delete("pack");
+                  next.set("amount_cents", String(customCents));
+                  setParams(next);
+                }}
+              >
+                <label
+                  htmlFor="ai-credit-custom-amount"
+                  className="block text-[13px] font-medium"
+                >
+                  Custom amount · USD
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    id="ai-credit-custom-amount"
+                    className="input min-h-11 w-full sm:max-w-56"
+                    type="text"
+                    inputMode="decimal"
+                    maxLength={12}
+                    placeholder="e.g. 12.50"
+                    autoComplete="off"
+                    required
+                    value={customAmount}
+                    disabled={!!busy || !data.topups_enabled}
+                    aria-describedby="ai-credit-custom-help"
+                    aria-invalid={!!customAmount && !customValid}
+                    onChange={(event) => setCustomAmount(event.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    className="btn-secondary min-h-11"
+                    disabled={!customValid || !!busy || !data.topups_enabled}
+                  >
+                    Review top-up <ArrowUpRight size={15} />
+                  </button>
+                </div>
+                <p
+                  id="ai-credit-custom-help"
+                  className={`text-xs ${customAmount && !customValid ? "text-danger" : "text-muted-foreground"}`}
+                >
+                  {customHelp}
+                </p>
+                {customValid && (
+                  <p className="text-xs text-muted-foreground">
+                    You receive {creditPaper(customCents * 10000)}. The service fee is
+                    added separately.
+                  </p>
+                )}
+              </form>
+            )}
             <p className="text-xs leading-relaxed text-muted-foreground">
               Each top-up includes a {creditMoney((data.topup_fee_cents ?? 0) * 10000)}{" "}
-              Filey service fee, separate from your spendable credit. No auto-recharge or
-              subscription required. Taxes, if applicable, appear at checkout. Paid
-              credits do not expire and are excluded from the subscription refund program.
-              A stopped request can still use credits for work already performed.
+              Filey service fee, separate from your spendable Paper. No auto-recharge or
+              subscription required. Taxes, if applicable, appear at checkout. Paid Paper
+              does not expire and is excluded from the subscription refund program. A
+              stopped request can still use Paper for work already performed.
             </p>
             <Link
               to="/settings?section=ai"
@@ -349,18 +453,15 @@ export default function AiCreditsPanel() {
           </SettingsSection>
           <SettingsSection
             title="AI rates"
-            description={
-              data.markup_bps
-                ? `Chat rates include ${data.markup_bps / 100}% service markup. Cached input is charged at the provider's actual cost.`
-                : "Chat uses the provider's usage cost, with no Filey usage markup. Free chat models never deduct credit and have shared availability limits."
-            }
+            description="Chat uses the provider's usage cost, with no Filey usage markup. Free chat models never deduct Paper and have shared availability limits."
             stacked
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
               <div>
                 <p className="text-sm font-medium">Brand videos · Seedance 2.0</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  $0.25 per second · 720p · 4–15 seconds · Charged on completion
+                  0.25 Paper ($0.25) per second · 720p · 4–15 seconds · Charged on
+                  completion
                 </p>
               </div>
               <Link className="btn-ghost" to="/agent?video=1">
@@ -368,9 +469,35 @@ export default function AiCreditsPanel() {
                 <ArrowUpRight size={14} />
               </Link>
             </div>
-            {data.models.length ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
+            <div>
+              <p className="text-sm font-medium">Choose your model</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                Choose a paid or free model in Filey AI. Paid model usage is deducted from
+                your Paper balance. Spending limits apply before requests run.
+              </p>
+            </div>
+            {!!modelCount && (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <input
+                  type="search"
+                  aria-label="Search model rates"
+                  placeholder="Search paid and free models"
+                  className="input min-h-11 w-full sm:max-w-sm"
+                  value={modelSearch}
+                  onChange={(event) => setModelSearch(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {rateModels.length} of {modelCount} models · 1 Paper = $1
+                </p>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Rates vary by provider, context and time. You pay actual usage; these rates
+              are spending estimates.
+            </p>
+            {rateModels.length ? (
+              <div className="max-h-96 overflow-auto">
+                <table className="w-full text-left" aria-label="AI model rates">
                   <thead>
                     <tr>
                       <th className="th">Model</th>
@@ -379,25 +506,29 @@ export default function AiCreditsPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.models.map((model) => (
+                    {rateModels.map((model) => (
                       <tr key={model.id}>
                         <td className="td">
                           <span className="font-medium">{model.name}</span>
                           <span className="mt-1 block text-xs text-muted-foreground">
-                            {model.vision ? "Text, images & tools" : "Text & tools"}
+                            {model.vision ? "Text & images" : "Text"}
                           </span>
-                        </td>
-                        <td className="td whitespace-nowrap">
-                          {creditMoney(
-                            model.input * 1e12 * (1 + data.markup_bps / 10000),
-                            true
+                          {!model.free && !!model.image && model.image > 0 && (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Up to {creditPaper(Math.ceil(model.image * 1e6), true)} /
+                              input image
+                            </span>
                           )}
                         </td>
                         <td className="td whitespace-nowrap">
-                          {creditMoney(
-                            model.output * 1e12 * (1 + data.markup_bps / 10000),
-                            true
-                          )}
+                          {model.free
+                            ? "Free"
+                            : `Up to ${creditPaper(model.input * 1e12, true)}`}
+                        </td>
+                        <td className="td whitespace-nowrap">
+                          {model.free
+                            ? "Free"
+                            : `Up to ${creditPaper(model.output * 1e12, true)}`}
                         </td>
                       </tr>
                     ))}
@@ -406,18 +537,20 @@ export default function AiCreditsPanel() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Model rates will appear when Filey-funded AI is available.
+                {modelQuery
+                  ? "No matching models. Try a provider or model name."
+                  : "Model rates will appear when they are available."}
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              Credits currently cover chat, vision input and agent reasoning. Separate
+              1 Paper = $1. Paper covers chat, vision input and agent reasoning. Separate
               image-generation, voice and external service fees use their own provider
               connections.
             </p>
           </SettingsSection>
           <SettingsSection
             title="Activity"
-            description="Your top-ups, model usage and refunds. Small usage charges are shown to six decimal places."
+            description="Your top-ups, model usage and refunds. Small usage charges are shown to six decimal places in Paper."
             stacked
           >
             {data.history.length ? (
@@ -428,7 +561,7 @@ export default function AiCreditsPanel() {
                       <tr>
                         <th className="th">Activity</th>
                         <th className="th">Date</th>
-                        <th className="th text-right">Amount · USD</th>
+                        <th className="th text-right">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -454,7 +587,10 @@ export default function AiCreditsPanel() {
                           </td>
                           <td className="td whitespace-nowrap text-right tabular-nums">
                             {row.amount_micros > 0 ? "+" : ""}
-                            {creditMoney(row.amount_micros, true)}
+                            {creditPaper(row.amount_micros, true)}
+                            <span className="block text-xs text-muted-foreground">
+                              {creditMoney(row.amount_micros, true)} USD
+                            </span>
                           </td>
                         </tr>
                       ))}

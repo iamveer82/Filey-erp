@@ -17,6 +17,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
+import PaperMark from "../../components/PaperMark";
 import { SettingsPanel } from "../../components/SettingsLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
 import { cloudConfigured } from "../../lib/supabase";
@@ -58,7 +59,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
-  { id: "credits", label: "AI Wallet", icon: Wallet },
+  { id: "credits", label: "Paper wallet", icon: Wallet },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
@@ -121,10 +122,14 @@ export default function Settings() {
                     "text-muted-foreground hover:bg-hover data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:after:hidden"
                   )}
                 >
-                  <Icon
-                    className={cn("h-3.5 w-3.5 shrink-0", isActive && "text-background")}
-                    strokeWidth={1.75}
-                  />
+                  {id === "credits" ? (
+                    <PaperMark />
+                  ) : (
+                    <Icon
+                      className={cn("h-3.5 w-3.5 shrink-0", isActive && "text-background")}
+                      strokeWidth={1.75}
+                    />
+                  )}
                   <span>{label}</span>
                 </TabsTrigger>
               );

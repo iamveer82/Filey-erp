@@ -281,12 +281,12 @@ export default function AccountProfile() {
 
   return (
     <SettingsPanel>
-      <SettingsSection title="Your Filey account" description="Your plan, AI wallet and payment history in one place.">
+      <SettingsSection title="Your Filey account" description="Your plan, Paper wallet and payment history in one place.">
         <div className="flex flex-wrap gap-2">
-          <Link className="btn-primary" to="/settings?section=credits">Open AI wallet</Link>
+          <Link className="btn-primary" to="/settings?section=credits">Open Paper wallet</Link>
           <Link className="btn-ghost" to="/settings?section=billing">Manage plan & billing</Link>
         </div>
-        <p className="text-sm text-muted-foreground">AI credits are optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
+        <p className="text-sm text-muted-foreground">Paper is optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
       </SettingsSection>
       <SettingsSection
         title="Profile Information"

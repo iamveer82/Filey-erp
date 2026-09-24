@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { ArrowLeft, ArrowUpRight, LockKeyhole } from "lucide-react";
 import { FileySpinner } from "./FileySpinner";
 import { BILLING_UNAVAILABLE } from "../lib/billingService";
+import type { ReactNode } from "react";
 
 /** Review an order before leaving Filey for the provider's secure payment page. */
 export default function PaymentReview({
   title,
+  artwork,
   lines,
   total,
   terms,
@@ -14,6 +16,7 @@ export default function PaymentReview({
   onVerify,
 }: {
   title: string;
+  artwork?: ReactNode;
   lines: { label: string; value: string }[];
   total: string;
   terms: string;
@@ -86,15 +89,18 @@ export default function PaymentReview({
       >
         <ArrowLeft size={16} /> {paid ? "Back to Filey" : "Back"}
       </button>
-      <div>
-        <p className="text-xs text-muted-foreground">Secure checkout</p>
-        <h2
-          ref={heading}
-          tabIndex={-1}
-          className="mt-2 text-xl font-semibold outline-none"
-        >
-          {title}
-        </h2>
+      <div className="flex items-center gap-4">
+        {artwork}
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">Secure checkout</p>
+          <h2
+            ref={heading}
+            tabIndex={-1}
+            className="mt-2 text-xl font-semibold outline-none"
+          >
+            {title}
+          </h2>
+        </div>
       </div>
       <dl className="divide-y divide-border rounded-xl border border-border bg-card px-5">
         {lines.map((line) => (

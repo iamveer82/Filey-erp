@@ -10,6 +10,7 @@ export interface CreditModel {
   name: string;
   input: number;
   output: number;
+  image?: number;
   context: number;
   maxOutput: number;
   vision: boolean;
@@ -35,6 +36,7 @@ export interface CreditStatus {
   history: CreditEntry[];
   models: CreditModel[];
   packs: { id: string; cents: number }[];
+  custom_topup?: { min_cents: number; max_cents: number };
   markup_bps: number;
   topup_fee_cents?: number;
   free_requests_per_day?: number;
@@ -50,6 +52,11 @@ export const creditMoney = (micros: number, detailed = false) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: detailed ? 6 : 2,
   }).format(micros / 1_000_000);
+// Paper is a display unit only: 1 Paper = $1. The ledger stays in USD micros.
+export const creditPaper = (micros: number, detailed = false) =>
+  `${new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: detailed ? 6 : 2,
+  }).format(micros / 1_000_000)} Paper`;
 export function creditChoice(): { funding: AiFunding; model: string } {
   try {
     const value = JSON.parse(readAgentStorage("filey.ai.funding") ?? "{}");
@@ -69,11 +76,11 @@ export function setCreditChoice(funding: AiFunding, model = creditChoice().model
 }
 
 export async function aiAccountSession() {
-  if (!supabase) throw new Error("Connect your Filey account to use AI credits.");
+  if (!supabase) throw new Error("Connect your Filey account to use Paper.");
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session)
     throw new Error(
-      "Sign in to your cloud account to use AI credits. Your device records stay on this device."
+      "Sign in to your cloud account to use Paper. Your device records stay on this device."
     );
   return data.session;
 }
@@ -89,12 +96,19 @@ export async function callAiService<T>(
   // No automatic retries for anything that might charge money or call a model.
   const { data, error } = await supabase!.functions.invoke(name, { body });
   if (error) {
-    throw await serviceError(error, "Your AI wallet is temporarily unavailable. Please try again shortly.");
+    throw await serviceError(
+      error,
+      "Your AI wallet is temporarily unavailable. Please try again shortly."
+    );
   }
-  if (data?.error) throw await serviceError(new Error(data.error), "Your AI wallet is temporarily unavailable. Please try again shortly.");
+  if (data?.error)
+    throw await serviceError(
+      new Error(data.error),
+      "Your AI wallet is temporarily unavailable. Please try again shortly."
+    );
   const current = await accountSession();
   if (current.user.id !== session.user.id)
-    throw new Error("Your account changed. Refresh AI Credits.");
+    throw new Error("Your account changed. Refresh your Paper wallet.");
   return data as T;
 }
 const call = callAiService;
@@ -130,10 +144,15 @@ export async function creditHistory(before: number) {
     await call<{ history: CreditEntry[] }>("ai-credits", { action: "history", before })
   ).history;
 }
-export async function buyAiCredits(packId: string) {
+export async function buyAiCredits(amount: string | number) {
+  if (
+    typeof amount === "number" &&
+    (!Number.isSafeInteger(amount) || amount < 500 || amount > 10000)
+  )
+    throw new Error("Enter an AI credit amount from $5 to $100.");
   const { url } = await call<{ url: string }>("dodo", {
     action: "checkout_ai_credits",
-    pack_id: packId,
+    ...(typeof amount === "number" ? { amount_cents: amount } : { pack_id: amount }),
   });
   return openBilling(url);
 }

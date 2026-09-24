@@ -98,7 +98,7 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
 
 export function getActiveAiConfig(): AiConfig {
   const choice = creditChoice();
-  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model, apiKey: "", billing: choice.funding } : getAiConfig();
+  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model === "filey-ai" ? "" : choice.model, apiKey: "", billing: choice.funding } : getAiConfig();
 }
 
 async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
@@ -337,7 +337,7 @@ export async function aiChat(
   const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
     throw new AiError(
-      "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
+      cfg.billing ? "Choose a model in the chat's AI model selector before starting a task." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
     );
   return cfg.provider === "anthropic"
     ? anthropicChat(cfg, messages, opts)
@@ -610,7 +610,7 @@ export async function* aiAgentStream(
 ): AsyncGenerator<AgentEvent, string, void> {
   const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
-    throw new AiError("No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
+    throw new AiError(cfg.billing ? "Choose a model in the chat's AI model selector before starting a task." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
   const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
   const scope = agentStorageScope();
   const prior = opts.isOwner === false ? "" : [journalDigest(), opts.agentId && scope ? priorAgentProgress(opts.agentId) : ""].filter(Boolean).join("\n\n");

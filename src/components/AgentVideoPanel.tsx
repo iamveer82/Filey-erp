@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Film, ArrowUpRight, ImagePlus, X, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { FileySpinner } from "./FileySpinner";
-import { creditMoney, invalidateCreditStatus } from "../lib/aiCredits";
+import { creditPaper, invalidateCreditStatus } from "../lib/aiCredits";
 import {
   getVideo,
   listVideos,
@@ -127,7 +127,7 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
             </span>
           </div>
           <span className="shrink-0 text-sm tabular-nums">
-            {creditMoney(
+            {creditPaper(
               job.state === "completed" || noCharge
                 ? job.charged_micros
                 : job.charge_micros
@@ -147,7 +147,7 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
           <p className="text-xs leading-relaxed text-muted-foreground">
             {expired
               ? "Request a new quote in Videos to continue."
-              : `${creditMoney(job.charge_micros)} will be held from your AI credits. Charged only when the video completes. Failed requests release the hold.`}
+              : `${creditPaper(job.charge_micros)} will be held from your Paper wallet. Charged only when the video completes. Failed requests release the hold.`}
           </p>
         )}
         {active && (
@@ -158,13 +158,13 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
         )}
         {job.state === "completed" && (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {creditMoney(job.charged_micros)} charged. Download the MP4 to keep it; the
+            {creditPaper(job.charged_micros)} charged. Download the MP4 to keep it; the
             provider keeps outputs for at least 7 days.
           </p>
         )}
         {noCharge && (
           <p className="text-xs text-muted-foreground">
-            No credits charged. Any hold for this video has been released.
+            No Paper charged. Any hold for this video has been released.
           </p>
         )}
         {(job.error || error) && (
@@ -186,7 +186,7 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
               onClick={() => void act("start")}
             >
               {busy ? <FileySpinner size={15} /> : <Film size={15} />}Generate ·{" "}
-              {creditMoney(job.charge_micros)}
+              {creditPaper(job.charge_micros)}
             </button>
           )}
           {["draft", "queued"].includes(job.state) && (
@@ -327,7 +327,7 @@ export default function AgentVideoPanel({ onClose }: { onClose: () => void }) {
             <Film size={18} /> Brand videos
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            From an idea to a short film. $0.25 per second.
+            From an idea to a short film. 0.25 Paper ($0.25) per second.
           </p>
         </div>
         <button
@@ -465,14 +465,14 @@ export default function AgentVideoPanel({ onClose }: { onClose: () => void }) {
             disabled={busy || !configured || !prompt.trim()}
           >
             {busy && <FileySpinner size={15} />}Review video ·{" "}
-            {creditMoney(duration * 250000)}
+            {creditPaper(duration * 250000)}
           </button>
           <span className="text-xs text-muted-foreground">
             Seedance 2.0 · 720p · No charge for a quote
           </span>
         </div>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Available on every plan using your AI credit balance. Your task and daily
+          Available on every plan using your Paper balance. Your task and daily
           spending limits apply. Video generation is separate from chat’s free models or
           your own API key.
         </p>

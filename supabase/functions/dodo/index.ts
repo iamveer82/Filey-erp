@@ -128,7 +128,10 @@ Deno.serve(async (req) => {
     await logAction(supa, user.id, "dodo_action", { action });
 
     // Account-owned and available on every tier, independently of org billing.
-    if (action === "checkout_ai_credits") return json(await createCreditCheckout(dodo, supa, user, payload.pack_id));
+    if (action === "checkout_ai_credits") {
+      if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
+      return json(await createCreditCheckout(dodo, supa, user, payload.pack_id, payload.amount_cents));
+    }
 
     if (["subscription_refunds", "subscription_refund_payments", "request_subscription_refund", "review_subscription_refund", "refresh_subscription_refund"].includes(action)) {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);

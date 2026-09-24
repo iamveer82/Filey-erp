@@ -51,7 +51,7 @@ it("routes old desktop license links into billing and makes the wallet discovera
   render(<MemoryRouter initialEntries={["/settings?section=license&checkout=success"]}><Settings /><LocationControls /></MemoryRouter>);
   await screen.findByText("Plan and device management");
   expect(screen.queryByRole("tab", { name: "Desktop License" })).toBeNull();
-  expect(screen.getByRole("tab", { name: "AI Wallet" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Paper wallet" })).toBeVisible();
   expect(screen.getByTestId("location")).toHaveTextContent("section=billing&checkout=success&plan=ultra");
 });
 
