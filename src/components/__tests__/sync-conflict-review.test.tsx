@@ -1,16 +1,25 @@
-import { beforeEach, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import SyncConflictReview from "../SyncConflictReview";
+afterEach(cleanup);
 
-const mocks = vi.hoisted(() => ({ resolve: vi.fn(), list: vi.fn() }));
+const mocks = vi.hoisted(() => ({ resolve: vi.fn(), list: vi.fn(), status: vi.fn() }));
 vi.mock("../../lib/sync", () => ({
-  getSyncStatus: () => ({ state: "idle" }),
+  getSyncStatus: mocks.status,
+  syncStatusMessage: () => "Some older records need repair. Your saved data is safe.",
   listSyncConflicts: mocks.list,
   resolveSyncConflicts: mocks.resolve,
 }));
 beforeEach(() => {
+  mocks.status.mockReturnValue({ state: "idle" });
   mocks.list.mockResolvedValue([{ id: "invoice_docs:8", table: "invoice_docs", recordId: 8 }]);
   mocks.resolve.mockReset().mockImplementation(async () => { mocks.list.mockResolvedValue([]); return true; });
+});
+it("offers the same choice for retired workspace records even without a saved conflict", async () => {
+  mocks.list.mockResolvedValue([]);
+  mocks.status.mockReturnValue({ state: "error", failures: [{ kind: "permission", message: "This record belongs to a different company." }] });
+  render(<SyncConflictReview />);
+  expect(await screen.findByRole("button", { name: "Use this device's changes" })).toBeEnabled();
 });
 for (const local of [true, false]) {
   it(`offers one ${local ? "device" : "cloud"} choice without technical details or individual reviews`, async () => {
@@ -30,4 +39,11 @@ it("keeps the choice available after a failure without exposing internal errors"
   expect(await screen.findByRole("alert")).toHaveTextContent("Your saved data is safe");
   expect(screen.queryByText(/SQL/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Use cloud changes" })).toBeEnabled();
+});
+
+it("reports an incomplete merge instead of silently dismissing the error", async () => {
+  mocks.resolve.mockResolvedValue(false);
+  render(<SyncConflictReview />);
+  fireEvent.click(await screen.findByRole("button", { name: "Use this device's changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("older records need repair");
 });

@@ -84,3 +84,12 @@ test("saving an older signature stores its durable cloud path instead of an expi
   expect(JSON.parse(row!.value).data).toBe("uid/company/sign.png");
   expect(row!.value).not.toContain("token=");
 });
+
+
+test("new marks use full opacity while an explicitly saved custom opacity is preserved", async () => {
+  const { STAMP_DEFAULT, SIGN_DEFAULT, normStampSig } = await import("../../components/StampSignature");
+  expect(STAMP_DEFAULT.opacity).toBe(100);
+  expect(SIGN_DEFAULT.opacity).toBe(100);
+  expect(normStampSig({ data: "sample.png" }, STAMP_DEFAULT)?.opacity).toBe(100);
+  expect(normStampSig({ data: "sample.png", opacity: 65 }, SIGN_DEFAULT)?.opacity).toBe(65);
+});

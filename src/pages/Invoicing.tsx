@@ -112,6 +112,9 @@ import TemplateDesigner from "../components/TemplateDesigner";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import {
   StampSignatureLayer,
+  normStampSig,
+  STAMP_DEFAULT,
+  SIGN_DEFAULT,
   StampSigAdjust,
   DraggableBlock,
   type StampSig,
@@ -537,34 +540,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
-        stamp: d.stamp
-          ? {
-              data: durableStampSig(d.stamp).data,
-              x: d.stamp.x ?? 75,
-              y: d.stamp.y ?? 70,
-              opacity: d.stamp.opacity ?? 30,
-              color: d.stamp.color ?? "#cc0000",
-              cropTop: d.stamp.cropTop ?? 0,
-              cropRight: d.stamp.cropRight ?? 0,
-              cropBottom: d.stamp.cropBottom ?? 0,
-              cropLeft: d.stamp.cropLeft ?? 0,
-              scale: (d.stamp as any).scale ?? 100,
-            }
-          : undefined,
-        signature: d.signature
-          ? {
-              data: durableStampSig(d.signature).data,
-              x: d.signature.x ?? 75,
-              y: d.signature.y ?? 85,
-              opacity: d.signature.opacity ?? 35,
-              color: d.signature.color ?? "#0000cc",
-              cropTop: d.signature.cropTop ?? 0,
-              cropRight: d.signature.cropRight ?? 0,
-              cropBottom: d.signature.cropBottom ?? 0,
-              cropLeft: d.signature.cropLeft ?? 0,
-              scale: (d.signature as any).scale ?? 100,
-            }
-          : undefined,
+        stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
+        signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
@@ -651,34 +628,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
-        stamp: d.stamp
-          ? {
-              data: durableStampSig(d.stamp).data,
-              x: d.stamp.x ?? 75,
-              y: d.stamp.y ?? 70,
-              opacity: d.stamp.opacity ?? 30,
-              color: d.stamp.color ?? "#cc0000",
-              cropTop: d.stamp.cropTop ?? 0,
-              cropRight: d.stamp.cropRight ?? 0,
-              cropBottom: d.stamp.cropBottom ?? 0,
-              cropLeft: d.stamp.cropLeft ?? 0,
-              scale: (d.stamp as any).scale ?? 100,
-            }
-          : undefined,
-        signature: d.signature
-          ? {
-              data: durableStampSig(d.signature).data,
-              x: d.signature.x ?? 75,
-              y: d.signature.y ?? 85,
-              opacity: d.signature.opacity ?? 35,
-              color: d.signature.color ?? "#0000cc",
-              cropTop: d.signature.cropTop ?? 0,
-              cropRight: d.signature.cropRight ?? 0,
-              cropBottom: d.signature.cropBottom ?? 0,
-              cropLeft: d.signature.cropLeft ?? 0,
-              scale: (d.signature as any).scale ?? 100,
-            }
-          : undefined,
+        stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
+        signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
@@ -3435,14 +3386,14 @@ function Editor({
                 }
                 active={!!form.show_stamp}
                 onToggle={() => {
-                  if (!companyStampSig.stamp?.data) return;
+                  if (!form.stamp?.data && !companyStampSig.stamp?.data) return;
                   const on = !form.show_stamp;
                   setForm({
                     ...form,
                     show_stamp: on,
                     stamp:
                       on && !form.stamp?.data && companyStampSig.stamp?.data
-                        ? { ...companyStampSig.stamp }
+                        ? { ...companyStampSig.stamp, opacity: 100 }
                         : form.stamp,
                   });
                 }}
@@ -3470,14 +3421,14 @@ function Editor({
                 }
                 active={!!form.show_signature}
                 onToggle={() => {
-                  if (!companyStampSig.signature?.data) return;
+                  if (!form.signature?.data && !companyStampSig.signature?.data) return;
                   const on = !form.show_signature;
                   setForm({
                     ...form,
                     show_signature: on,
                     signature:
                       on && !form.signature?.data && companyStampSig.signature?.data
-                        ? { ...companyStampSig.signature }
+                        ? { ...companyStampSig.signature, opacity: 100 }
                         : form.signature,
                   });
                 }}

@@ -456,37 +456,60 @@ export function rememberSyncRevisions(coll: string, revisions: Map<string | numb
 }
 
 /** Apply an explicit conflict choice. A subsequent push still compares revisions. */
+type ConflictChoice = { id: string | number; remote: Row | null; reviewedLocal: Row | null; keepLocal?: boolean; localOrgId?: string };
 export function resolveLocalSyncConflict(coll: string, id: string | number, remote: Row | null, keepLocal: boolean, reviewedLocal: Row | null): Promise<void> {
+  return resolveLocalSyncConflicts(coll, [{ id, remote, reviewedLocal }], keepLocal);
+}
+
+/** Validate the whole collection first, then persist it and its journal once. */
+export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[], keepLocal: boolean): Promise<void> {
   return serializeWrite(async () => {
     const rows = await loadColl(coll);
-    if (JSON.stringify(rows.find(row => row.id === id) ?? null) !== JSON.stringify(reviewedLocal))
-      throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
+    const byId = new Map(rows.map(row => [row.id, row]));
+    for (const { id, reviewedLocal } of choices) {
+      if (JSON.stringify(byId.get(id) ?? null) !== JSON.stringify(reviewedLocal))
+        throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
+    }
     const original = await journalSnapshot();
     const journal = structuredClone(original);
     const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
-    const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
-    if (targetId !== id && rows.some(row => row.id === targetId))
-      throw new Error("Company settings changed on this device. Sync again before choosing a version.");
-    let next = rows;
-    if (keepLocal) {
-      next = rows.map(row => row.id === id ? { ...row, id: targetId, sync_revision: remote?.sync_revision ?? null } : row);
-      if (entry.deleted.includes(id)) {
-        entry.deleted = entry.deleted.map(value => value === id ? targetId : value);
-        entry.deletedRevisions = { ...entry.deletedRevisions, [String(targetId)]: remote?.sync_revision ?? null };
-        if (targetId !== id) delete entry.deletedRevisions[String(id)];
+    const changed = new Set(entry.all ? rows.map(row => row.id) : entry.changed);
+    const deleted = new Set(entry.deleted);
+    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of choices) {
+      const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
+      if (targetId !== id && byId.has(targetId))
+        throw new Error("Company settings changed on this device. Sync again before choosing a version.");
+      if (preference) {
+        const row = byId.get(id);
+        byId.delete(id);
+        if (row) byId.set(targetId, { ...row, id: targetId, ...(localOrgId ? { org_id: localOrgId } : {}), sync_revision: remote?.sync_revision ?? null });
+        changed.delete(id);
+        if (deleted.has(id)) {
+          deleted.delete(id); deleted.add(targetId);
+          entry.deletedRevisions = { ...entry.deletedRevisions, [String(targetId)]: remote?.sync_revision ?? null };
+          if (targetId !== id) delete entry.deletedRevisions[String(id)];
+        } else if (row) changed.add(targetId);
       } else {
-        entry.changed = entry.changed.filter(value => value !== id);
-        if (!entry.changed.includes(targetId)) entry.changed.push(targetId);
+        byId.delete(id);
+        if (remote) byId.set(targetId, remote);
+        changed.delete(id);
+        deleted.delete(id);
+        if (entry.deletedRevisions) delete entry.deletedRevisions[String(id)];
       }
-    } else {
-      next = [...rows.filter(row => row.id !== id), ...(remote ? [remote] : [])];
-      if (entry.all) { entry.changed = rows.map(row => row.id); delete entry.all; }
-      entry.changed = entry.changed.filter(value => value !== id);
-      entry.deleted = entry.deleted.filter(value => value !== id);
-      if (entry.deletedRevisions) delete entry.deletedRevisions[String(id)];
-      if (!entry.changed.length && !entry.deleted.length) delete journal.tables[coll];
     }
+    entry.changed = [...changed]; entry.deleted = [...deleted]; delete entry.all;
+    if (!changed.size && !deleted.size) delete journal.tables[coll];
     journal.v++;
+    const next = [...byId.values()];
+    if (hasTauri) {
+      const json = await dehydrate(next);
+      // The chosen versions and their upload queue must survive together.
+      await invoke("cache_set_many", { entries: [["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]] });
+      memo.set(coll, { rows: next, json });
+      journalMemo = journal;
+      window.dispatchEvent(new Event("filey:remote-update"));
+      return;
+    }
     try {
       await saveColl(coll, next);
       await journalSave(journal);

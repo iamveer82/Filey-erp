@@ -61,7 +61,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   sales: {
     about:
-      "Send invoices, mark them paid, recurring billing, orders, receipts, templates",
+      "Invoice appearance, logos, saved stamps/signatures, templates, sending, payments, recurring billing, orders and receipts",
     tools: [
       "send_invoice",
       "export_invoice_pdf",
@@ -69,6 +69,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "mark_invoice_paid",
       "set_recurring",
       "set_invoice_template",
+      "update_invoice_appearance",
       "create_order",
       "create_payment_receipt",
       "list_payment_receipts",

@@ -19,7 +19,7 @@ import { getCountryMarketData, getPublicHolidays, listHolidayCountries, searchCr
 vi.mock("../log", async original => ({ ...await original<typeof import("../log")>(), log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../reactPdf", () => ({ reactToPdfBytes: vi.fn() }));
 vi.mock("../../components/InvoiceExportSheet", () => ({ default: () => null }));
-vi.mock("../../components/StampSignatureSettings", () => ({ loadCompanyStampSig: async () => ({}), EMPTY_STAMP_SIG: {} }));
+vi.mock("../../components/StampSignatureSettings", () => ({ loadCompanyStampSig: async () => ({}), durableStampSig: (value: unknown) => value, EMPTY_STAMP_SIG: {} }));
 vi.mock("../../components/BankDetails", () => ({ loadBankInfo: async () => ({}), EMPTY_BANK: {} }));
 vi.mock("../agentFiles", () => ({ deliverFile: vi.fn() }));
 vi.mock("../desktopBrowser", () => ({ desktopBrowserSupported: () => true, desktopBrowserCommand: vi.fn(), getBrowserPanelState: vi.fn(() => ({ paused: false })) }));
@@ -328,4 +328,23 @@ describe("social publishing boundaries", () => {
     expect(zernio.createPost).toHaveBeenCalledTimes(1);
     expect(desktopBrowserCommand).not.toHaveBeenCalled();
   });
+});
+
+
+it("lets the owner hide branding and apply saved marks at full opacity without resaving invoice lines", async () => {
+  const mark = { data: "data:image/png;base64,fixture", x: 75, y: 70, opacity: 30 };
+  vi.mocked(billing.getDoc).mockResolvedValue(document({ status: "paid", stamp: mark, signature: mark }));
+  const update = vi.spyOn(billing, "updateAppearance").mockResolvedValue();
+  const save = vi.spyOn(billing, "saveDoc");
+  const args = { invoice_number: "INV-12", show_logo: false, show_stamp: true, show_signature: true, stamp_opacity: 100, signature_opacity: 100 };
+  expect(await call("update_invoice_appearance", args)).toMatchObject({ ok: true });
+  expect(update).toHaveBeenCalledWith(12, expect.objectContaining({ show_logo: false, show_stamp: true, show_signature: true,
+    stamp: expect.objectContaining({ opacity: 100, data: mark.data }), signature: expect.objectContaining({ opacity: 100, data: mark.data }) }));
+  expect(save).not.toHaveBeenCalled();
+  update.mockClear();
+  expect(await runTool("update_invoice_appearance", args, () => true, false)).toMatchObject({ error: expect.stringMatching(/owner-only/) });
+  expect(await call("update_invoice_appearance", { ...args, stamp_opacity: 101 })).toMatchObject({ code: "invalid_arguments" });
+  vi.mocked(billing.getDoc).mockResolvedValue(document());
+  expect(await call("update_invoice_appearance", args)).toMatchObject({ error: expect.stringMatching(/No saved stamp/) });
+  expect(update).not.toHaveBeenCalled();
 });

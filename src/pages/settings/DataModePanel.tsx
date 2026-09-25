@@ -10,6 +10,7 @@ import {
   autoSyncEnabled,
   setAutoSyncEnabled,
   getSyncStatus,
+  syncStatusMessage,
   syncNow,
   syncCycle,
   markAllForSync,
@@ -154,9 +155,7 @@ function CloudSyncCard() {
       : sync.state === "error"
         ? sync.error?.includes(CLOUD_RECONNECT_MESSAGE)
           ? CLOUD_RECONNECT_MESSAGE
-          : sync.failures?.length && sync.failures.every(failure => failure.kind === "conflict")
-          ? "Choose which changes to keep below."
-          : "Sync couldn't finish. Your saved data is safe. Check your connection and try again; if this continues, contact Filey support."
+          : syncStatusMessage(sync)
         : sync.at
           ? `Last synced ${new Date(sync.at).toLocaleString()}`
           : "Waiting for changes to sync.";

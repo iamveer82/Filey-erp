@@ -39,7 +39,7 @@ import { startingTemplate } from "../components/DocPresetBar";
 import CompanyModal from "../components/CompanyModal";
 import TemplateDesigner from "../components/TemplateDesigner";
 import { useCustomTemplates } from "../lib/customTemplates";
-import { StampSignatureLayer, type StampSig } from "../components/StampSignature";
+import { StampSignatureLayer, StampSigAdjust, type StampSig } from "../components/StampSignature";
 import { loadCompanyStampSig, type CompanyStampSig } from "../components/StampSignatureSettings";
 import FitPreview from "../components/FitPreview";
 import ReceiptVoucher from "../components/ReceiptVoucher";
@@ -240,8 +240,8 @@ export default function PaymentReceipt() {
       const savedSignature = (d.signature as Form["signature"] | null | undefined) ?? undefined;
       setForm({
         ...d,
-        stamp: savedStamp?.data ? savedStamp : stampSig.stamp,
-        signature: savedSignature?.data ? savedSignature : stampSig.signature,
+        stamp: savedStamp?.data ? savedStamp : stampSig.stamp && { ...stampSig.stamp, opacity: 100 },
+        signature: savedSignature?.data ? savedSignature : stampSig.signature && { ...stampSig.signature, opacity: 100 },
         show_stamp: d.show_stamp || false,
         show_signature: d.show_signature || false,
       });
@@ -1093,7 +1093,8 @@ export default function PaymentReceipt() {
                         <input
                           type="checkbox"
                           checked={!!form.show_stamp}
-                          onChange={(e) => update({ show_stamp: e.target.checked })}
+                          disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
+                          onChange={(e) => update({ show_stamp: e.target.checked, stamp: form.stamp?.data ? form.stamp : companyStampSig.stamp && { ...companyStampSig.stamp, opacity: 100 } })}
                         />
                         Show company stamp
                       </label>
@@ -1101,10 +1102,15 @@ export default function PaymentReceipt() {
                         <input
                           type="checkbox"
                           checked={!!form.show_signature}
-                          onChange={(e) => update({ show_signature: e.target.checked })}
+                          disabled={!form.signature?.data && !companyStampSig.signature?.data}
+                          onChange={(e) => update({ show_signature: e.target.checked, signature: form.signature?.data ? form.signature : companyStampSig.signature && { ...companyStampSig.signature, opacity: 100 } })}
                         />
                         Show authorised signature
                       </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {form.show_stamp && (form.stamp || companyStampSig.stamp) && <StampSigAdjust label="Stamp" value={(form.stamp || companyStampSig.stamp)!} onChange={stamp => update({ stamp })} />}
+                        {form.show_signature && (form.signature || companyStampSig.signature) && <StampSigAdjust label="Signature" value={(form.signature || companyStampSig.signature)!} onChange={signature => update({ signature })} />}
+                      </div>
                     </div>
                   </div>
                 }

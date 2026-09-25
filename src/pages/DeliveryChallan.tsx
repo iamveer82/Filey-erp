@@ -48,7 +48,7 @@ import {
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
 import { ResizablePanels } from "../components/ResizablePanels";
-import { StampSignatureLayer } from "../components/StampSignature";
+import { StampSignatureLayer, StampSigAdjust } from "../components/StampSignature";
 import ColorPicker from "../components/ColorPicker";
 import TemplateDesigner from "../components/TemplateDesigner";
 import { deleteCustomTemplate, useCustomTemplates } from "../lib/customTemplates";
@@ -997,7 +997,8 @@ function DcEditor({
                   type="checkbox"
                   className="toggle"
                   checked={form.show_stamp}
-                  onChange={(e) => set("show_stamp", e.target.checked)}
+                  disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
+                  onChange={(e) => setForm({ ...form, show_stamp: e.target.checked, stamp: form.stamp?.data ? form.stamp : companyStampSig.stamp && { ...companyStampSig.stamp, opacity: 100 } })}
                 />
               </label>
               <label className="flex items-center justify-between card !p-3 cursor-pointer">
@@ -1006,9 +1007,14 @@ function DcEditor({
                   type="checkbox"
                   className="toggle"
                   checked={form.show_signature}
-                  onChange={(e) => set("show_signature", e.target.checked)}
+                  disabled={!form.signature?.data && !companyStampSig.signature?.data}
+                  onChange={(e) => setForm({ ...form, show_signature: e.target.checked, signature: form.signature?.data ? form.signature : companyStampSig.signature && { ...companyStampSig.signature, opacity: 100 } })}
                 />
               </label>
+            </div>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {form.show_stamp && (form.stamp || companyStampSig.stamp) && <StampSigAdjust label="Stamp" value={(form.stamp || companyStampSig.stamp)!} onChange={v => set("stamp", v)} />}
+              {form.show_signature && (form.signature || companyStampSig.signature) && <StampSigAdjust label="Signature" value={(form.signature || companyStampSig.signature)!} onChange={v => set("signature", v)} />}
             </div>
           </Step>
 
@@ -1041,7 +1047,7 @@ function DcEditor({
               />
             </div>
           )}
-          <DcPreview form={form} dcRef={dcRef} companyStampSig={companyStampSig} />
+          <DcPreview form={form} dcRef={dcRef} companyStampSig={companyStampSig} onChange={setForm} />
 
           </div>
         }
@@ -1068,10 +1074,12 @@ function DcPreview({
   form,
   dcRef,
   companyStampSig,
+  onChange,
 }: {
   form: DcForm;
   dcRef?: React.RefObject<HTMLDivElement | null>;
   companyStampSig?: CompanyStampSig;
+  onChange?: (form: DcForm) => void;
 }) {
   const clean = (s: string) => s || "—";
   const totalQty = form.items.reduce((s, i) => s + i.qty, 0);
@@ -1088,10 +1096,10 @@ function DcPreview({
       style={{ borderTop: `4px solid ${a}`, fontFamily: form.font || undefined }}
     >
       <StampSignatureLayer
-        stamp={form.show_stamp ? (companyStampSig ?? EMPTY_STAMP_SIG).stamp : undefined}
-        signature={form.show_signature ? (companyStampSig ?? EMPTY_STAMP_SIG).signature : undefined}
-        onStampMove={() => {}}
-        onSignatureMove={() => {}}
+        stamp={form.show_stamp ? (form.stamp ?? companyStampSig?.stamp) : undefined}
+        signature={form.show_signature ? (form.signature ?? companyStampSig?.signature) : undefined}
+        onStampMove={(x, y) => { const mark = form.stamp ?? companyStampSig?.stamp; if (mark) onChange?.({ ...form, stamp: { ...mark, x, y } }); }}
+        onSignatureMove={(x, y) => { const mark = form.signature ?? companyStampSig?.signature; if (mark) onChange?.({ ...form, signature: { ...mark, x, y } }); }}
       />
       <div className="p-8 min-h-[700px]">
         {/* Header */}

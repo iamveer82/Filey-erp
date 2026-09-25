@@ -36,6 +36,28 @@ async function freshClient() {
 beforeEach(() => store.clear());
 
 describe("localdb desktop read cache", () => {
+  it("commits a sync choice with its upload queue atomically and preserves both after a failed write", async () => {
+    const client = await freshClient();
+    const { resolveLocalSyncConflicts, journalSnapshot } = await import("../localdb");
+    await client.from("products").insert({ id: 1, name: "Local", sync_revision: 1 });
+    const local = (await client.from("products").select().single()).data;
+    const choice = { id: 1, reviewedLocal: local, remote: { id: 1, name: "Cloud", sync_revision: 3 } };
+    const before = await journalSnapshot();
+    const savedInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "cache_set_many") throw new Error("Disk full");
+      return savedInvoke(cmd, args);
+    });
+    try {
+      await expect(resolveLocalSyncConflicts("products", [choice], true)).rejects.toThrow("Disk full");
+      expect((await client.from("products").select().single()).data).toEqual(local);
+      expect(await journalSnapshot()).toEqual(before);
+    } finally { invoke.mockImplementation(savedInvoke); }
+    await resolveLocalSyncConflicts("products", [choice], true);
+    const restarted = await freshClient();
+    expect((await restarted.from("products").select().single()).data).toMatchObject({ name: "Local", sync_revision: 3 });
+    expect((await (await import("../localdb")).journalSnapshot()).tables.products.changed).toEqual([1]);
+  });
   it("reads storage once, then serves repeat queries from memory", async () => {
     const c = await freshClient();
     await c.from("widgets").insert([{ name: "A" }, { name: "B" }]);

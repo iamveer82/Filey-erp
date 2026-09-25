@@ -838,7 +838,7 @@ function DeclarationEditor({
                           <span className="mt-1 block text-xs text-muted-foreground">{form.stamp?.data || companyStampSig.stamp?.data ? "Position your stamp directly on the preview." : "Add a stamp in Settings → Company Details."}</span>
                         </span>
                       </span>
-                      <Toggle label="Show stamp" disabled={!form.stamp?.data && !companyStampSig.stamp?.data} on={showStamp} onChange={setShowStamp} />
+                      <Toggle label="Show stamp" disabled={!form.stamp?.data && !companyStampSig.stamp?.data} on={showStamp} onChange={(on) => { setShowStamp(on); if (on && !form.stamp?.data && companyStampSig.stamp?.data) set("stamp", { ...companyStampSig.stamp, opacity: 100 }); }} />
                     </label>
                     <label className="flex items-center justify-between gap-4 py-4 cursor-pointer">
                       <span className="flex min-w-0 items-start gap-3">
@@ -848,7 +848,7 @@ function DeclarationEditor({
                           <span className="mt-1 block text-xs text-muted-foreground">{form.signature?.data || companyStampSig.signature?.data ? "Position your signature directly on the preview." : "Add a signature in Settings → Company Details."}</span>
                         </span>
                       </span>
-                      <Toggle label="Show signature" disabled={!form.signature?.data && !companyStampSig.signature?.data} on={showSignature} onChange={setShowSignature} />
+                      <Toggle label="Show signature" disabled={!form.signature?.data && !companyStampSig.signature?.data} on={showSignature} onChange={(on) => { setShowSignature(on); if (on && !form.signature?.data && companyStampSig.signature?.data) set("signature", { ...companyStampSig.signature, opacity: 100 }); }} />
                     </label>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

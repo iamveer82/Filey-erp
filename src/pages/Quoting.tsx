@@ -1819,13 +1819,13 @@ export default function Quoting() {
                           show_stamp: on,
                           stamp:
                             on && !form.stamp?.data && companyStampSig.stamp?.data
-                              ? { ...companyStampSig.stamp }
+                              ? { ...companyStampSig.stamp, opacity: 100 }
                               : form.stamp,
                         });
                       }}
                       className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
                       title="Show company stamp"
-                      disabled={!companyStampSig.stamp?.data}
+                      disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
                     >
                       <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
                     </button>
@@ -1838,20 +1838,20 @@ export default function Quoting() {
                           show_signature: on,
                           signature:
                             on && !form.signature?.data && companyStampSig.signature?.data
-                              ? { ...companyStampSig.signature }
+                              ? { ...companyStampSig.signature, opacity: 100 }
                               : form.signature,
                         });
                       }}
                       className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
                       title="Show company signature"
-                      disabled={!companyStampSig.signature?.data}
+                      disabled={!form.signature?.data && !companyStampSig.signature?.data}
                     >
                       <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
                     </button>
                   </div>
 
                   {(form.show_stamp || form.show_signature) &&
-                    (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
+                    (form.stamp?.data || form.signature?.data || companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
                       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
                         {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
                           <StampSigAdjust

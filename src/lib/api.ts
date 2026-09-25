@@ -4051,6 +4051,14 @@ export const billing = {
       };
       return isLocalMode() ? withLocalTransaction(saveAndPost) : saveAndPost(sb());
     }),
+  // Appearance edits must not replace lines or reverse/repost stock and payments.
+  updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature">>) =>
+    online(async () => {
+      const allowed = ["template", "show_logo", "show_stamp", "show_signature", "stamp", "signature"];
+      const fields = Object.fromEntries(Object.entries(patch).filter(([key, value]) => allowed.includes(key) && value !== undefined));
+      if (!Object.keys(fields).length) throw new Error("Choose an appearance change first.");
+      await sUpdate("invoice_docs", docId, fields);
+    }),
   deleteDoc: (docId: number) =>
     online(async () => {
       const { data: doc, error } = await sb()
