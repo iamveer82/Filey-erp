@@ -1,6 +1,7 @@
 /* Delivery challans share one record shape and persistence boundary for the
  * editor and AI tools. app_settings belongs to the active local/cloud workspace;
  * the former shared browser blob is retained only as a legacy device fallback. */
+import type { StampSig } from "../components/StampSignature";
 import { tools } from "./api";
 import { todayYmd } from "./format";
 import { isLocalMode } from "./dataMode";
@@ -31,6 +32,8 @@ export type DcForm = {
   notes: string;
   font: string;
   items: DcItem[];
+  stamp?: StampSig;
+  signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
 };

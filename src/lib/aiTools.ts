@@ -3674,6 +3674,53 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "update_invoice_appearance",
+    ownerOnly: true,
+    sensitive: true,
+    description: "Edit an existing invoice's appearance, including sent/paid invoices: hide/show its logo and apply its saved company stamp or signature. This changes only this invoice, never Company Settings, amounts, lines or payments. Uses existing saved images only. Opacity is 5–100 percent; newly applied marks default to 100%. Export a fresh PDF afterward if requested.",
+    parameters: {
+      type: "object",
+      properties: {
+        invoice_number: { type: "string" },
+        show_logo: { type: "boolean" },
+        show_stamp: { type: "boolean" },
+        show_signature: { type: "boolean" },
+        stamp_opacity: { type: "number", minimum: 5, maximum: 100 },
+        signature_opacity: { type: "number", minimum: 5, maximum: 100 },
+      },
+      required: ["invoice_number"],
+      additionalProperties: false,
+    },
+    run: async (a, signal) => {
+      const scope = agentStorageScope();
+      const found = await findInvoice(a.invoice_number);
+      if (!found) return { error: `No invoice matching "${str(a.invoice_number)}"` };
+      const doc = await billing.getDoc(Number(found.id));
+      const { loadCompanyStampSig, durableStampSig } = await import("../components/StampSignatureSettings");
+      const { normStampSig, STAMP_DEFAULT, SIGN_DEFAULT } = await import("../components/StampSignature");
+      const companyMarks = await loadCompanyStampSig();
+      const patch: Parameters<typeof billing.updateAppearance>[1] = {};
+      if (typeof a.show_logo === "boolean") patch.show_logo = a.show_logo;
+      for (const kind of ["stamp", "signature"] as const) {
+        const show = a[`show_${kind}`];
+        const opacity = a[`${kind}_opacity`];
+        if (typeof show === "boolean") patch[`show_${kind}`] = show;
+        if (show !== true && opacity === undefined) continue;
+        const base = doc[kind]?.data ? doc[kind] : companyMarks[kind];
+        if (!base?.data) return { error: `No saved ${kind} is available. Upload it in Settings → Company Details first. No invoice changes were made.` };
+        const mark = normStampSig(durableStampSig(base), kind === "stamp" ? STAMP_DEFAULT : SIGN_DEFAULT)!;
+        if (!doc[kind]?.data) mark.opacity = 100;
+        if (typeof opacity === "number") mark.opacity = opacity;
+        patch[kind] = mark;
+      }
+      if (!Object.keys(patch).length) return { error: "Choose logo visibility, stamp, signature or opacity to change." };
+      signal?.throwIfAborted();
+      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      await billing.updateAppearance(Number(doc.id), patch);
+      return { ok: true, invoice_number: doc.number, message: "Invoice appearance updated. Export a fresh PDF to share these changes." };
+    },
+  },
+  {
     name: "set_invoice_template",
     description:
       "Change the design of an existing invoice. Accepts an id or a name the user said, e.g. 'corporate'. Changing the company-wide default design is a Settings decision and stays with the user.",
@@ -3685,7 +3732,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["invoice_number", "template"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const scope = agentStorageScope();
       const wanted = resolveTemplate(str(a.template));
       if (!wanted)
         return {
@@ -3694,17 +3742,9 @@ export const TOOLS: ToolDef[] = [
         };
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
-      const doc = (await billing.getDoc(Number(d.id))) as unknown as Record<
-        string,
-        unknown
-      >;
-      // saveDoc replaces the document, so the existing one is passed straight
-      // back through with only the design changed.
-      await billing.saveDoc({
-        ...(doc as unknown as InvoiceDocInput),
-        id: Number(d.id),
-        template: wanted,
-      });
+      signal?.throwIfAborted();
+      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      await billing.updateAppearance(Number(d.id), { template: wanted });
       return {
         ok: true,
         message: `Invoice ${str(d.number)} now uses the ${DOC_TEMPLATES.find((template) => template.id === wanted)?.name || wanted} design.`,

@@ -29,7 +29,7 @@ import {
   journalMark,
   localClient,
   rememberSyncRevisions,
-  resolveLocalSyncConflict,
+  resolveLocalSyncConflicts,
 } from "./localdb";
 
 const FILES_BUCKET = "files";
@@ -73,6 +73,24 @@ function syncFailure(table: string, recordId: string | number, error: any, confl
 
 let status: SyncStatus = { state: "idle" };
 export const getSyncStatus = (): SyncStatus => status;
+
+/** Customer-facing status, without SQL/table details or misleading retry advice. */
+export function syncStatusMessage(s: SyncStatus): string {
+  if (s.failures?.some(f => f.kind === "permission" && /different company/.test(f.message)))
+    return "Some saved records need to reconnect to your workspace. Choose which changes to keep below. Your device data is safe.";
+  if (s.state === "idle") return "New changes arrived during sync. Filey will include them in the next sync.";
+  if (s.failures?.some(f => f.kind === "schema"))
+    return "Filey Cloud needs a sync update. Contact Filey support; your saved data is safe.";
+  if (s.failures?.some(f => f.kind === "record"))
+    return "Some older records have missing or invalid links. Your data is preserved; Filey support can help repair them. Other valid changes can still sync.";
+  if (s.failures?.some(f => f.kind === "permission"))
+    return "Some records aren't accessible in this workspace. Check that you're using the right company account. Your saved data is safe.";
+  if (s.failures?.some(f => f.kind === "file"))
+    return "Some files could not sync. Check that the original files are available on this device and your cloud has space.";
+  if (s.failures?.length && s.failures.every(f => f.kind === "conflict"))
+    return "Choose which changes to keep below.";
+  return "Sync couldn't finish. Your saved data is safe. Check your connection and try again; if this continues, contact Filey support.";
+}
 
 function notify(): void {
   if (typeof window !== "undefined")
@@ -150,14 +168,9 @@ export async function pushCollection(
       throw new Error("Your cloud account changed during upload. Remaining changes are still on this device.");
   };
   const failed: (string | number)[] = [];
-  const ready = rows.filter(row => {
-    if (["invoice_doc_items", "invoice_payments"].includes(table) && row.invoice_id == null) {
-      failed.push(row.id);
-      onFailure?.({ table, recordId: row.id, kind: "record", message: "This record has no linked invoice. Review it before uploading; Filey has preserved it on this device." });
-      return false;
-    }
-    return true;
-  });
+  // Nullable legacy links are preserved. Cloud constraints and RLS validate
+  // actual links; inventing a parent or refusing every null prevents backup.
+  const ready = rows;
   for (let offset = 0; offset < ready.length;) {
     const batch: Record<string, any>[] = [];
     let characters = 0;
@@ -238,7 +251,7 @@ async function clearConflict(table: string, recordId: string | number): Promise<
   const { error } = await localClient.from("sync_conflicts").delete().eq("id", `${table}:${recordId}`);
   if (error) throw error;
 }
-/** Apply one preference to current conflicts, then reconcile both ways.
+/** Apply one preference to the saved workspace, then reconcile both ways.
  * Fresh revisions remain compare-and-swap bases; never force a cloud write. */
 export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null): Promise<boolean> {
   const supa = client ?? supabase;
@@ -261,12 +274,40 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
     await checkAccount();
     await inRealOrg(supa, uid, true);
     const conflicts = await listSyncConflicts();
-    const version = await journalVersion();
+    const knownConflicts = new Set(conflicts.map(c => c.id));
+    const journal = await journalSnapshot();
+    const version = journal.v;
+    const snapshot = new Map<string, Record<string, any>[]>();
+    const orgId = orgCache!.orgId;
+    const sources = new Set<string>();
+    for (const table of PUSH_TABLES) {
+      const rows = await loadColl(table);
+      snapshot.set(table, rows);
+      for (const row of rows) if (row.org_id && row.org_id !== orgId) {
+        if (row.user_id !== uid) throw new Error("Some device records belong to another account. Open their original workspace before syncing.");
+        sources.add(row.org_id);
+      }
+    }
+    if (sources.size) {
+      await checkAccount();
+      const { data, error } = await supa.rpc("filey_prepare_workspace_sync", { p_source_orgs: [...sources] });
+      if (error || data?.org_id !== orgId || !Array.isArray(data?.recovered_orgs)
+        || [...sources].some(source => !data.recovered_orgs.includes(source)))
+        throw new Error("Couldn't reconnect your older workspace. Your device data is safe. Update Filey and try again, or contact support.");
+    }
     const choices: { conflict: SyncConflict; local: Record<string, any> | null; cloud: Record<string, any> | null }[] = [];
-    for (const table of new Set(conflicts.map(c => c.table))) {
+    for (const table of new Set([...PUSH_TABLES, ...conflicts.map(c => c.table)])) {
       if (!PUSH_TABLES.includes(table)) throw new Error("Update Filey before syncing these changes.");
-      const rows = new Map((await loadColl(table)).map(row => [String(row.id), row]));
-      const group = conflicts.filter(c => c.table === table);
+      const rows = new Map(snapshot.get(table)!.map(row => [String(row.id), row]));
+      const pending = journal.tables[table];
+      // Cached teammate records remain governed by cloud permissions. Do not
+      // re-upload untouched read-only records just because they are visible.
+      const ids = new Set([...rows.values()].filter(row => !row.user_id || row.user_id === uid
+        || pending?.all || pending?.changed.includes(row.id) || knownConflicts.has(`${table}:${row.id}`)).map(row => row.id));
+      for (const id of journal.tables[table]?.deleted ?? []) ids.add(id);
+      for (const conflict of conflicts.filter(c => c.table === table)) ids.add(conflict.recordId);
+      if (!ids.size) continue;
+      const group = [...ids].map(recordId => ({ id: `${table}:${recordId}`, table, recordId, at: new Date().toISOString() }));
       // Company-wide singletons/settings are independently created on each
       // device. Match their business key, not an unrelated generated row ID.
       const companyRows = table === "company_profile" ? await pullPaged(supa, table, "*") : null;
@@ -291,20 +332,26 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
           const cloud = companyRows ? companyRows[0] ?? null
             : table === "app_settings" && local ? settings.get(local.key) ?? null
             : remote.get(String(conflict.recordId)) ?? null;
-          if (local?.org_id && cloud?.org_id && local.org_id !== cloud.org_id)
+          if (local?.org_id && cloud?.org_id && local.org_id !== cloud.org_id && !(sources.has(local.org_id) && cloud.org_id === orgId))
             throw new Error("These company details belong to a different workspace. Open the matching workspace before syncing.");
           // RLS can hide a record: absence alone is not proof of deletion.
-          if (!keepLocal && !cloud) throw new Error("Some cloud records aren't available to this account. Your device data is unchanged. Check your workspace and try again.");
+          if (!keepLocal && !cloud && knownConflicts.has(conflict.id)) throw new Error("Some cloud records aren't available to this account. Your device data is unchanged. Check your workspace and try again.");
           choices.push({ conflict, local, cloud });
         }
       }
     }
     await checkAccount();
     if (await journalVersion() !== version) throw new Error("Data changed while syncing. Choose again to include the latest changes.");
-    for (const { conflict, local, cloud } of choices) {
+    for (const table of new Set(choices.map(choice => choice.conflict.table))) {
       await checkAccount();
-      await resolveLocalSyncConflict(conflict.table, conflict.recordId, cloud, keepLocal, local);
-      await clearConflict(conflict.table, conflict.recordId);
+      const group = choices.filter(choice => choice.conflict.table === table);
+      await resolveLocalSyncConflicts(table, group.map(({ conflict, local, cloud }) => ({
+        id: conflict.recordId, remote: cloud, reviewedLocal: local,
+        keepLocal: keepLocal || !cloud,
+        ...(local?.org_id && sources.has(local.org_id) ? { localOrgId: orgId } : {}),
+      })), keepLocal);
+      const { error } = await localClient.from("sync_conflicts").delete().in("id", group.map(choice => choice.conflict.id));
+      if (error) throw error;
     }
   } catch (error) {
     setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
@@ -750,8 +797,14 @@ export async function pullNow(
       if ((await freshSession(supa))?.user.id !== uid)
         throw new Error("Your session changed. Local records were not replaced for this table.");
       assertWorkspaceCurrent();
-      if ((await journalVersion()) !== before.v) break;
-      if (await replaceColl(t, rows, before.v)) changed.push(t);
+      const replaced = await replaceColl(t, rows, before.v);
+      if (replaced) changed.push(t);
+      if ((await journalVersion()) !== before.v) {
+        if (changed.length) window.dispatchEvent(new CustomEvent("filey:remote-update", { detail: { tables: changed } }));
+        setStatus({ state: "idle" });
+        scheduleSync(1000);
+        return false;
+      }
     }
     if (changed.length && typeof window !== "undefined")
       window.dispatchEvent(new CustomEvent("filey:remote-update", { detail: { tables: changed } }));
@@ -786,6 +839,11 @@ export async function syncCycle(
   const pulled = tables?.length === 0 || await pullNow(client, { ...opts, tables });
   // A successful pull must not hide the records still awaiting upload/review.
   if (!pushed) setStatus(uploadStatus);
+  if (pushed && pulled && Object.keys((await journalSnapshot()).tables).length) {
+    setStatus({ state: "idle" });
+    scheduleSync(1000);
+    return false;
+  }
   return pushed && pulled;
 }
 

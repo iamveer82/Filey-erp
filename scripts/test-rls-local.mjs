@@ -108,6 +108,11 @@ try {
   assert.equal(videoRaces.filter(r=>r.stdout.trim()==='true').length,1);
   assert.equal(run('psql',[...creditArgs,'-tAc',"select reserved_micros from ai_credit_accounts where user_id='31000000-0000-4000-8000-000000000001'"]).trim(),'1250000');
   console.log('PASS: eight concurrent Generate clicks reserve and claim exactly one video.');
+  run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','workspace_sync']);
+  const workspaceArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','workspace_sync','-X','-q','-v','ON_ERROR_STOP=1'];
+  const recoveryMigration=sql('supabase/2026-09-25-workspace-sync-recovery.sql');
+  console.log(run('psql',workspaceArgs,sql('scripts/fixtures/workspace-sync-setup.sql')+'\n'+migration+'\n'+syncMigration+'\n'
+    +recoveryMigration+'\n'+recoveryMigration+'\n'+sql('scripts/fixtures/workspace-sync-assertions.sql')).trim());
 } catch (error) {
   console.error(error.stderr?.toString() || error.message);
   try { console.error(readFileSync(join(temp, 'server.log'), 'utf8')); } catch { /* startup may not have created it */ }

@@ -75,6 +75,7 @@ function fakeCloud(opts?: {
   deletedBeforeBody?: Record<string, number[]>;
   /** Seconds from now the access token dies. Default: comfortably alive. */
   expiresInSecs?: number;
+  recoverableOrgs?: string[];
 }) {
   const uid = opts?.uid ?? UID;
   const refreshes: number[] = [];
@@ -100,6 +101,18 @@ function fakeCloud(opts?: {
       },
     },
     async rpc(name: string, args?: any): Promise<{ data: any; error: any }> {
+      if (name === "filey_prepare_workspace_sync") {
+        calls.push({ table: "(rpc)", op: name, payload: args });
+        if (!args.p_source_orgs.every((org: string) => opts?.recoverableOrgs?.includes(org)))
+          return { data: null, error: { code: "42501" } };
+        for (const rows of Object.values(opts?.pull ?? {})) for (const row of rows) {
+          if (args.p_source_orgs.includes(row.org_id) && row.user_id === uid) {
+            row.org_id = opts?.org;
+            row.sync_revision++;
+          }
+        }
+        return { data: { org_id: opts?.org, recovered_orgs: args.p_source_orgs }, error: null };
+      }
       if (name === "sync_records") {
         const data = [];
         for (const request of args.p_records) {
@@ -483,7 +496,8 @@ describe("pullNow", () => {
       }
       return getSession();
     };
-    await pullNow(client);
+    expect(await pullNow(client)).toBe(false);
+    expect(getSyncStatus().state).not.toBe("done");
     expect((await localClient.from("products").select("*")).data?.[0].name).toBe("Local edit");
   });
 
@@ -669,11 +683,13 @@ for (const keepLocal of [true, false]) {
     await localClient.from("products").insert([
       { id: 1, name: "Device version", sync_revision: 1 },
       { id: 2, name: "Device only" },
+      { id: 4, name: "Not yet flagged", sync_revision: 1 },
     ]);
     await localClient.from("sync_conflicts").insert({ id: "products:1", table: "products", recordId: 1 });
     const remote = [
       { id: 1, name: "Cloud version", sync_revision: 2 },
       { id: 3, name: "Cloud only", sync_revision: 1 },
+      { id: 4, name: "Undetected cloud conflict", sync_revision: 2 },
     ];
     const { client } = fakeCloud({ pull: { products: remote } });
     const rpc = client.rpc.bind(client);
@@ -694,13 +710,84 @@ for (const keepLocal of [true, false]) {
       expect.objectContaining({ id: 1, name: keepLocal ? "Device version" : "Cloud version" }),
       expect.objectContaining({ id: 2, name: "Device only" }),
       expect.objectContaining({ id: 3, name: "Cloud only" }),
+      expect.objectContaining({ id: 4, name: keepLocal ? "Not yet flagged" : "Undetected cloud conflict" }),
     ]));
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     remote[0] = { ...remote[0], name: "Later cloud edit", sync_revision: remote[0].sync_revision + 1 };
     expect(await syncCycle(client)).toBe(true);
     expect((await localClient.from("products").select().eq("id", 1).single()).data.name).toBe("Later cloud edit");
   });
 }
+
+for (const keepLocal of [true, false]) {
+  it(`reconnects a verified retired workspace before applying the ${keepLocal ? "device" : "cloud"} choice`, async () => {
+    localStorage.setItem("filey_cloud_seeded", "1");
+    await localClient.from("products").insert({ id: 1, name: "Device", org_id: "retired", user_id: UID });
+    await localClient.from("app_settings").insert({ id: 10, key: "company_signature", value: "device-image" });
+    const stored: Record<string, Record<string, any>[]> = {
+      products: [{ id: 1, name: "Cloud", org_id: "retired", user_id: UID, sync_revision: 3 }],
+      app_settings: [{ id: 20, key: "company_signature", value: "cloud-image", org_id: "retired", user_id: UID, sync_revision: 3 }],
+    };
+    const { client, calls } = fakeCloud({ org: "current", recoverableOrgs: ["retired"], pull: stored });
+    const rpc = client.rpc.bind(client);
+    client.rpc = async (name: string, args: any) => {
+      if (name !== "sync_record") return rpc(name, args);
+      const rows = stored[args.p_table];
+      const index = rows.findIndex(row => row.id === args.p_row.id);
+      if (index < 0 || args.p_expected !== rows[index].sync_revision)
+        return { data: { ok: false, conflict: true }, error: null };
+      rows[index] = { ...rows[index], ...args.p_row, sync_revision: args.p_expected + 1 };
+      return { data: { ok: true, revision: args.p_expected + 1 }, error: null };
+    };
+    expect(await resolveSyncConflicts(keepLocal, client)).toBe(true);
+    expect(calls[0]).toMatchObject({ op: "filey_prepare_workspace_sync", payload: { p_source_orgs: ["retired"] } });
+    expect((await localClient.from("products").select()).data).toEqual(stored.products);
+    expect(stored.products[0]).toMatchObject({ org_id: "current", name: keepLocal ? "Device" : "Cloud" });
+    expect((await localClient.from("app_settings").select()).data).toEqual(stored.app_settings);
+    expect(stored.app_settings[0]).toMatchObject({ id: 20, org_id: "current", value: keepLocal ? "device-image" : "cloud-image" });
+    expect((await journalSnapshot()).tables).toEqual({});
+  });
+}
+
+it("does not relabel local workspace records when the cloud rejects recovery", async () => {
+  await localClient.from("products").insert({ id: 1, name: "Keep", org_id: "active-elsewhere", user_id: UID });
+  const before = await journalSnapshot();
+  const { client, calls } = fakeCloud({ org: "current" });
+  await expect(resolveSyncConflicts(true, client)).rejects.toThrow(/Couldn't reconnect/);
+  expect((await localClient.from("products").select().single()).data.org_id).toBe("active-elsewhere");
+  expect(await journalSnapshot()).toEqual(before);
+  expect(calls.some(call => call.op === "upsert")).toBe(false);
+});
+
+for (const keepLocal of [true, false]) {
+  it(`handles an explicitly deleted local row with the ${keepLocal ? "device" : "cloud"} preference`, async () => {
+    localStorage.setItem("filey_cloud_seeded", "1");
+    await replaceColl("products", [{ id: 1, name: "Deleted here", sync_revision: 1 }]);
+    await localClient.from("products").delete().eq("id", 1);
+    const remote = [{ id: 1, name: "Cloud changed", sync_revision: 2 }];
+    const { client } = fakeCloud({ pull: { products: remote } });
+    const rpc = client.rpc.bind(client);
+    client.rpc = async (name: string, args: any) => {
+      if (name !== "sync_record") return rpc(name, args);
+      expect(args).toMatchObject({ p_delete: true, p_expected: 2 });
+      remote.splice(0);
+      return { data: { ok: true }, error: null };
+    };
+    expect(await resolveSyncConflicts(keepLocal, client)).toBe(true);
+    expect((await localClient.from("products").select()).data).toEqual(keepLocal ? [] : remote);
+    expect((await journalSnapshot()).tables).toEqual({});
+  });
+}
+
+it("does not re-upload an unchanged read-only teammate record during reconciliation", async () => {
+  localStorage.setItem("filey_cloud_seeded", "1");
+  const row = { id: 9, name: "Shared", org_id: "current", user_id: "teammate", sync_revision: 1 };
+  await replaceColl("products", [row]);
+  const { client, calls } = fakeCloud({ org: "current", pull: { products: [row] } });
+  expect(await resolveSyncConflicts(true, client)).toBe(true);
+  expect(calls.some(call => call.op === "upsert")).toBe(false);
+  expect((await localClient.from("products").select()).data).toEqual([row]);
+});
 
 it("preserves every device record if a cloud choice cannot read one of the overlapping records", async () => {
   await localClient.from("products").insert([{ id: 1, name: "One" }, { id: 2, name: "Two" }]);

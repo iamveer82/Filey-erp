@@ -123,3 +123,17 @@ it("does not delete the invoice when ledger cleanup fails", async () => {
   finally { spy.mockRestore(); }
   expect((await billing.getDoc(id)).items).toHaveLength(1);
 });
+
+
+it("changes invoice appearance without replacing lines, payments, stock or ledger", async () => {
+  const id = await billing.saveDoc(invoice());
+  await pay(id, 40);
+  const tables = ["invoice_doc_items", "invoice_payments", "transactions", "accounts", "orders", "stock_movements"];
+  const before = await Promise.all(tables.map(async table => (await localClient.from(table).select("*")).data));
+  const mark = { data: "data:image/png;base64,fixture", x: 75, y: 70, opacity: 100 };
+  await billing.updateAppearance(id, { show_logo: false, show_stamp: true, show_signature: true, stamp: mark, signature: mark, status: "draft" } as never);
+  const doc = await billing.getDoc(id);
+  expect(doc).toMatchObject({ status: "sent", show_logo: false, stamp: mark, signature: mark });
+  expect(await Promise.all(tables.map(async table => (await localClient.from(table).select("*")).data))).toEqual(before);
+  await expect(billing.updateAppearance(999999, { show_logo: false })).rejects.toBeTruthy();
+});

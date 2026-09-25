@@ -68,6 +68,9 @@ import DocTemplateGallery from "../components/DocTemplateGallery";
 import TemplateDesigner, { type CustomTemplate } from "../components/TemplateDesigner";
 import {
   StampSignatureLayer,
+  normStampSig,
+  STAMP_DEFAULT,
+  SIGN_DEFAULT,
   StampSigAdjust,
   DraggableBlock,
   type StampSig,
@@ -200,25 +203,6 @@ const toDocItem = (it: Item): DocItem => ({
   custom: it.custom,
   pageBreakBefore: it.pageBreakBefore,
 });
-
-const normStamp = (
-  v: Partial<StampSig> | null | undefined,
-  def?: StampSig
-): StampSig | undefined => {
-  if (!v || !v.data) return undefined;
-  return {
-    data: v.data,
-    x: v.x ?? def?.x ?? 60,
-    y: v.y ?? def?.y ?? 60,
-    opacity: v.opacity ?? def?.opacity ?? 1,
-    color: v.color ?? def?.color ?? "#000000",
-    cropTop: v.cropTop ?? 0,
-    cropRight: v.cropRight ?? 0,
-    cropBottom: v.cropBottom ?? 0,
-    cropLeft: v.cropLeft ?? 0,
-    scale: v.scale ?? def?.scale ?? 1,
-  };
-};
 
 /* ------------------------------------------------------------------ */
 /*  Main Component                                                     */
@@ -815,10 +799,10 @@ function poDocToForm(
     tax_rate: po.tax_rate ?? 0,
     discount: po.discount ?? 0,
     total: po.total,
-    stamp: normStamp((po as any).stamp as Partial<StampSig> | undefined, EMPTY_STAMP_SIG.stamp),
-    signature: normStamp(
+    stamp: normStampSig((po as any).stamp as Partial<StampSig> | undefined, STAMP_DEFAULT),
+    signature: normStampSig(
       (po as any).signature as Partial<StampSig> | undefined,
-      EMPTY_STAMP_SIG.signature
+      SIGN_DEFAULT
     ),
     show_stamp: po.show_stamp ?? false,
     show_signature: po.show_signature ?? false,
@@ -1858,12 +1842,12 @@ function Editor({
                       show_stamp: on,
                       stamp:
                         on && !form.stamp?.data && companyStampSig.stamp?.data
-                          ? { ...companyStampSig.stamp }
+                          ? { ...companyStampSig.stamp, opacity: 100 }
                           : form.stamp,
                     });
                   }}
                   className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!companyStampSig.stamp?.data}
+                  disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
                 >
                   <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
                 </button>
@@ -1876,19 +1860,19 @@ function Editor({
                       show_signature: on,
                       signature:
                         on && !form.signature?.data && companyStampSig.signature?.data
-                          ? { ...companyStampSig.signature }
+                          ? { ...companyStampSig.signature, opacity: 100 }
                           : form.signature,
                     });
                   }}
                   className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!companyStampSig.signature?.data}
+                  disabled={!form.signature?.data && !companyStampSig.signature?.data}
                 >
                   <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
                 </button>
               </div>
 
               {(form.show_stamp || form.show_signature) &&
-                (companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
+                (form.stamp?.data || form.signature?.data || companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
                     {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
                       <StampSigAdjust

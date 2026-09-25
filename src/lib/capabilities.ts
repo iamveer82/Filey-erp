@@ -56,6 +56,7 @@ export const CAPABILITIES: Capability[] = [
       "create_order",
       "create_quote",
       "set_invoice_template",
+      "update_invoice_appearance",
     ],
   },
   {

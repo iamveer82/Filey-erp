@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { localClient, journalSnapshot, replaceColl, resolveLocalSyncConflict, rememberSyncRevision } from "../localdb";
-import { pushCollection, listSyncConflicts, syncNow, getSyncStatus } from "../sync";
+import { localClient, journalSnapshot, replaceColl, resolveLocalSyncConflict, resolveLocalSyncConflicts, rememberSyncRevision } from "../localdb";
+import { pushCollection, listSyncConflicts, syncNow, getSyncStatus, syncStatusMessage } from "../sync";
 
 beforeEach(() => localStorage.clear());
 
@@ -43,7 +43,7 @@ it("resolving one record preserves unrelated pending edits and rejects an outdat
   expect((await journalSnapshot()).tables.products.changed).toEqual([2, 1]);
 });
 
-it("reports conflicts, permissions, missing invoice links and schema failures separately without leaking server details", async () => {
+it("reports server validation failures without leaking details and preserves nullable invoice links", async () => {
   localStorage.setItem("filey_data_mode", "local");
   await localClient.from("products").insert({ id: 1, name: "Pending" });
   await localClient.from("invoice_payments").insert({ id: 2, invoice_id: null, amount: 100 });
@@ -56,18 +56,19 @@ it("reports conflicts, permissions, missing invoice links and schema failures se
   for (const [response, kind] of [
     [{ data: { ok: false, conflict: true }, error: null }, "conflict"],
     [{ data: null, error: { code: "42501", message: "private record details" } }, "permission"],
+    [{ data: null, error: { code: "23503", message: "private record details" } }, "record"],
     [{ data: null, error: { code: "PGRST202", message: "missing sync_record" } }, "schema"],
   ] as const) {
     rpc.mockResolvedValue(response);
     expect(await syncNow(client, { manual: true })).toBe(false);
     expect(getSyncStatus().failures).toEqual([
       expect.objectContaining({ table: "products", kind }),
-      expect.objectContaining({ table: "invoice_payments", kind: "record" }),
+      expect.objectContaining({ table: "invoice_payments", kind }),
     ]);
     expect(getSyncStatus().error?.includes("schema needs an update")).toBe(kind === "schema");
     expect(JSON.stringify(getSyncStatus())).not.toContain("private record details");
   }
-  expect(rpc.mock.calls.some(([, args]) => args?.p_table === "invoice_payments")).toBe(false);
+  expect(rpc.mock.calls.some(([, args]) => args?.p_table === "invoice_payments" && args.p_row.invoice_id === null)).toBe(true);
   expect((await journalSnapshot()).tables.invoice_payments.changed).toEqual([2]);
   localStorage.setItem("filey_auto_sync", "on");
   rpc.mockClear();
@@ -78,4 +79,26 @@ it("reports conflicts, permissions, missing invoice links and schema failures se
   await syncNow(client, { manual: true });
   expect(rpc.mock.calls.some(([, args]) => args?.p_table === "products")).toBe(true);
   expect(await listSyncConflicts()).toEqual([]);
+});
+
+
+it("resolves a collection in one write and leaves all records unchanged if any reviewed row changed", async () => {
+  const rows = Array.from({ length: 137 }, (_, id) => ({ id: id + 1, name: `Local ${id}`, sync_revision: 1 }));
+  await replaceColl("products", rows);
+  await localClient.from("products").update({ name: "New edit" }).eq("id", 137);
+  const choices = rows.map(row => ({ id: row.id, reviewedLocal: row, remote: { ...row, name: "Cloud", sync_revision: 2 } }));
+  await expect(resolveLocalSyncConflicts("products", choices, false)).rejects.toThrow(/changed while/);
+  expect((await localClient.from("products").select().eq("id", 1).single()).data.name).toBe("Local 0");
+  choices[136].reviewedLocal = { ...rows[136], name: "New edit" };
+  const write = vi.spyOn(Storage.prototype, "setItem");
+  await resolveLocalSyncConflicts("products", choices, true);
+  expect(write.mock.calls.filter(([key]) => key.endsWith("localdb:products"))).toHaveLength(1);
+  expect((await journalSnapshot()).tables.products.changed).toHaveLength(137);
+  expect((await localClient.from("products").select().eq("id", 137).single()).data).toMatchObject({ name: "New edit", sync_revision: 2 });
+  write.mockRestore();
+});
+
+it("explains workspace and record repairs without claiming a connection retry fixes them", () => {
+  expect(syncStatusMessage({ state: "error", failures: [{ table: "invoices", recordId: 1, kind: "permission", message: "This record belongs to a different company." }] })).toMatch(/Choose which changes/);
+  expect(syncStatusMessage({ state: "error", failures: [{ table: "items", recordId: 1, kind: "record", message: "Missing parent" }] })).toMatch(/missing or invalid links/);
 });

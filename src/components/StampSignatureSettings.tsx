@@ -2,8 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { Upload, X, Stamp, PenTool } from "lucide-react";
 import { tools } from "../lib/api";
 import { uploadCompanyAsset } from "../lib/files";
-import { STAMP_DEFAULT, SIGN_DEFAULT, type StampSig } from "./StampSignature";
-import { CompanyAssetImage } from "./CompanyAssetImage";
+import { STAMP_DEFAULT, SIGN_DEFAULT, StampSigAdjust, type StampSig } from "./StampSignature";
 
 /* Company-wide stamp & signature images uploaded once in
  * Settings → Company Details, then optionally enabled per document.
@@ -133,63 +132,23 @@ function UploadCard({
     }
   };
 
-  // Prefer the durable reference (data: URL in local mode, storage path in cloud)
-  // over the transient signed URL — _previewUrl expires in 5 minutes and would
-  // show a broken image once it does. CompanyAssetImage resolves storage paths
-  // on its own, so `data` is always the safe choice.
-  const previewUrl = value?.data || value?._previewUrl;
-
   return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-2 text-foreground font-medium text-[13px]">
-        {icon} {label}
-      </div>
-      <div className="mt-3">
-        {previewUrl ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <CompanyAssetImage
-              src={previewUrl}
-              alt={label}
-              className="object-contain rounded"
-              style={{
-                width: `${(180 * (value?.scale ?? 100)) / 100}px`,
-                maxWidth: "100%",
-                maxHeight: `${(80 * (value?.scale ?? 100)) / 100}px`,
-                clipPath: `inset(${value?.cropTop}% ${value?.cropRight}% ${value?.cropBottom}% ${value?.cropLeft}%)`,
-                opacity: (value?.opacity ?? 100) / 100,
-              }}
-            />
-            <button
-              title={`Remove ${label.toLowerCase()}`}
-              aria-label={`Remove ${label.toLowerCase()}`}
-              className="btn-ghost w-10 shrink-0 p-0 text-danger"
-              onClick={() => onChange(undefined)}
-            >
-              <X size={15} />
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <button
-              type="button"
-              aria-label={`Upload ${label}`}
-              disabled={uploading}
-              onClick={() => ref.current?.click()}
-              className="btn-ghost"
-            >
-              <Upload size={16} />
-              <span>{uploading ? "Uploading…" : "Upload"}</span>
-            </button>
-            <p className="text-xs text-muted-foreground">Transparent PNG works best</p>
-          </div>
-        )}
+    <div className="min-w-0 space-y-3">
+      {value?.data ? <StampSigAdjust label={label} icon={icon} value={value} onChange={onChange} />
+        : <h3 className="flex items-center gap-2 text-sm font-medium">{icon}{label}</h3>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-ghost" disabled={uploading} onClick={() => ref.current?.click()} aria-label={`${value?.data ? 'Replace' : 'Upload'} ${label}`}>
+          <Upload size={15} /> {uploading ? "Uploading…" : value?.data ? "Replace image" : "Upload image"}
+        </button>
+        {value?.data && <button type="button" className="btn-ghost text-danger" aria-label={`Remove ${label.toLowerCase()}`} onClick={() => onChange(undefined)}><X size={15} /> Remove</button>}
         <input
           ref={ref}
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          onChange={(e) => { void handleFile(e.target.files?.[0]); e.target.value = ""; }}
         />
+        <p className="w-full text-xs text-muted-foreground">Transparent PNG works best. New images start at 100% opacity.</p>
         {err && (
           <p role="alert" className="mt-2 text-xs text-danger">
             {err}

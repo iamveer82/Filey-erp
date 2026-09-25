@@ -162,3 +162,19 @@ Apply `2026-09-20-ai-credits.sql` before deploying `ai-credits` and the updated
 `filey_ai_wallet` transaction function. These tables must **not** be added to the
 desktop synchronization allowlist. See [AI credits setup](../docs/ai-credits.md)
 for provider secrets, Dodo products, webhook events and release checks.
+
+## Workspace sync recovery — 25 September 2026
+
+Apply `2026-09-25-workspace-sync-recovery.sql` before shipping the expanded
+device/cloud choice. Installation changes no business records. The explicit
+choice can reconnect the signed-in owner's records from a retired workspace
+they also own, only when no profiles and no other members remain there. It
+preserves IDs, content, links and archived company profiles. Nullable invoice
+lines/payments are preserved as private owner data; linked-row permissions and
+revision checks remain enforced. `node scripts/test-rls-local.mjs` exercises
+these guards on disposable PostgreSQL data.
+
+Applied to `voyrjqgaypiylwskkwpr` on 25 September 2026. Read-back verified
+the recovery RPC, authenticated-only execution, private eligibility helper,
+and both owner-only unlinked-row policies. The recovery RPC was **not called**
+against customer data; the 12 legacy workspace settings remained in place.
