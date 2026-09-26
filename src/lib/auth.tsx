@@ -469,6 +469,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithPassword = async (c: Credential, password: string) => {
     const email = c.value.trim().toLowerCase();
     if (local) {
+      // Why the cloud could not confirm the password, when we asked it. Drives
+      // the message below, which used to blame this device for a failed request.
+      let cloudMiss: "rejected" | "unreachable" | "not-asked" = "not-asked";
       // Prefer the server so the password stays authoritative and the cached
       // hash is refreshed. Fall back to the device only when the server can't
       // be reached — an offline install must not be locked out of its own data
@@ -494,10 +497,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (/workspace belongs to another account/i.test(e?.message ?? "")) throw e;
           const msg = e?.message ?? String(e);
           const rejected = /invalid login credentials|invalid email or password/i.test(msg);
+          // Why the cloud could not answer, so the message below can be honest.
+          // Without this the device was blamed for a request that never landed:
+          // a signed-in user, online, with a perfectly good password was told
+          // "this device has never seen your password — connect to the internet".
+          cloudMiss = rejected ? "rejected" : "unreachable";
           // A server rejection can only be overridden by a password this device
           // has actually seen. With an identity-only claim (OTP sign-in, or sync
-          // switched off) there is no hash to check, so the server is the answer.
-          if (rejected && !hasLocalPassword()) throw e;
+          // switched off) there is no hash to check, so the server is the answer
+          // — surfaced as the plain-language message below rather than Supabase's
+          // raw "Invalid login credentials", which reads as a system fault.
           if (!rejected && !hasLocalCredential()) throw e;
           // Otherwise fall through to the device.
           // Otherwise the server was unreachable: fall through to the device.
@@ -507,10 +516,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(
           "This device isn't linked to a Filey account yet. Connect to the internet once to sign in or create one."
         );
-      if (!hasLocalPassword())
+      if (!hasLocalPassword()) {
+        // The account is real and its password is stored in the cloud — this
+        // device simply never received it. Say which of those is true, and give
+        // the step that actually works, instead of implying the password is wrong.
         throw new Error(
-          "This device knows your account but has never seen your password. Connect to the internet once to sign in — after that it works offline."
+          cloudMiss === "rejected"
+            ? "That email and password don't match your Filey account. Check them, or sign in with a one-time code."
+            : cloudMiss === "unreachable"
+              ? "Can't reach Filey to check your password. Check your connection, or sign in with a one-time code."
+              : "You're offline, and this device has not been taught your password yet. Sign in with a one-time code, or connect once and sign in with your password."
         );
+      }
       if (!(await verifyLocalPassword(email, password)))
         throw new Error("That email and password don't match this device's account.");
       completeLocalSignIn(localUserFrom(getLocalCredential()));

@@ -1282,6 +1282,7 @@ export default function CustomerDetail() {
         <div className="mb-5">
           <PartyBankDetails
             value={customer.bank_details}
+            countryCode={customer.country_code}
             onSave={async (bank) => {
               await crm.updateCustomer(customer.id, { bank_details: bank });
               await crm.customers().then(setCustomers).catch(() => {});

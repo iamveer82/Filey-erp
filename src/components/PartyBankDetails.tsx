@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
 import { Landmark, Check } from "lucide-react";
-import { BANK_FIELDS, EMPTY_BANK, type BankInfo } from "./BankDetails";
+import { EMPTY_BANK, bankFields, type BankInfo } from "./BankDetails";
 import { useUI } from "../lib/ui";
 
 /* Editable bank-details section for a single customer or supplier. Reuses the
- * same field set as the company bank details. Saves the whole object back via
- * onSave (the parent persists it on the customer/supplier record). */
+ * same country-aware field set as the company bank details — an Indian supplier
+ * is asked for an IFSC, a UAE one for an IBAN. Omit countryCode and every field
+ * is shown, so nothing already saved can be hidden. Saves the whole object back
+ * via onSave (the parent persists it on the customer/supplier record). */
 export default function PartyBankDetails({
   value,
+  countryCode,
   onSave,
 }: {
   value?: Record<string, string> | null;
+  countryCode?: string | null;
   onSave: (bank: Record<string, string>) => Promise<void>;
 }) {
   const { toast } = useUI();
@@ -55,7 +59,7 @@ export default function PartyBankDetails({
         Save this party's bank account for payments and reference.
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {BANK_FIELDS.map((f) => (
+        {bankFields(countryCode).map((f) => (
           <div className="field" key={f.key}>
             <label className="label">{f.label}</label>
             <input

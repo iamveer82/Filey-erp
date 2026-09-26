@@ -21,7 +21,7 @@ import {
   loadBankInfo,
   saveBankInfo,
   EMPTY_BANK,
-  BANK_FIELDS,
+  bankFields,
   type BankInfo,
 } from "../../components/BankDetails";
 import {
@@ -102,9 +102,25 @@ export default function CompanyDetails() {
       .catch((e) => console.warn("Failed to load document formats", e));
   }, []);
 
+  /** Format errors for the identifiers this country actually uses. An Indian
+   *  IFSC and a UAE IBAN are checked; a field the country does not use is not
+   *  validated, and never blocked. */
+  const [bankErr, setBankErr] = useState<Partial<Record<keyof BankInfo, string>>>({});
+
   const setBankField = (k: keyof BankInfo, v: string) => {
     setBank((b) => ({ ...b, [k]: v }));
     setSaved(false);
+  };
+
+  const checkBank = (country: string | null | undefined) => {
+    const errs: Partial<Record<keyof BankInfo, string>> = {};
+    for (const f of bankFields(country)) {
+      if (!f.validate) continue;
+      const problem = f.validate(bank[f.key] ?? "");
+      if (problem) errs[f.key] = problem;
+    }
+    setBankErr(errs);
+    return Object.keys(errs).length === 0;
   };
 
   if (!c)
@@ -161,6 +177,9 @@ export default function CompanyDetails() {
       hasErr = true;
     }
     if (hasErr) return;
+    // A mistyped IFSC or IBAN is worth catching here: it is printed on
+    // invoices, and the bank rejects it days later when a payment fails.
+    if (!checkBank(c.country_code)) return;
 
     setSaving(true);
     try {
@@ -524,13 +543,20 @@ export default function CompanyDetails() {
         description="Payment details you can include on invoices and other documents."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {BANK_FIELDS.map((f) => (
-            <FormField key={f.key} label={f.label}>
+          {bankFields(c.country_code).map((f) => (
+            <FormField
+              key={f.key}
+              label={f.label}
+              error={bankErr[f.key] || undefined}
+            >
               <input
                 className="input"
                 placeholder={f.placeholder}
                 value={bank[f.key] ?? ""}
-                onChange={(e) => setBankField(f.key, e.target.value)}
+                onChange={(e) => {
+                  setBankField(f.key, e.target.value);
+                  if (bankErr[f.key]) setBankErr((prev) => ({ ...prev, [f.key]: "" }));
+                }}
               />
             </FormField>
           ))}
