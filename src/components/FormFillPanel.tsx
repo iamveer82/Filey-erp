@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { Loader2, FileType2 } from "lucide-react";
+import { FileType2 } from "lucide-react";
 import { readFormFields, fillForm, type PdfFormField } from "../lib/pdfTools";
 import { errMsg } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
@@ -31,6 +32,8 @@ export default function FormFillPanel({
     }
     let alive = true;
     setLoading(true);
+    setFields(null);
+    setValues({});
     setError("");
     readFormFields(file)
       .then((f) => {
@@ -55,16 +58,15 @@ export default function FormFillPanel({
     setRunning(true);
     setError("");
     try {
-      // Only send fields the user actually set. Passing "" for an untouched
-      // dropdown asks pdf-lib to select an option that does not exist, which
-      // fails the whole fill with "Attempted to set invalid field value".
+      // Send changed fields, including empty strings used to clear old values.
       const payload: Record<string, string | boolean> = {};
-      for (const [k, v] of Object.entries(values)) {
-        if (typeof v === "string" && v.trim() === "") continue;
-        payload[k] = v;
+      for (const field of fields ?? []) {
+        const initial = field.value ?? (field.kind === "CheckBox" ? false : "");
+        const value = values[field.name] ?? initial;
+        if (value !== initial) payload[field.name] = value;
       }
       if (Object.keys(payload).length === 0) {
-        setError("Nothing to fill in yet. Type into at least one field first.");
+        setError("No changes yet. Update at least one field first.");
         return;
       }
       onDone(await fillForm(file, JSON.stringify(payload)));
@@ -165,9 +167,9 @@ export default function FormFillPanel({
       {error && <p className="mt-4 text-[12.5px] text-danger">{error}</p>}
 
       <div className="mt-5 flex items-center gap-3">
-        <button className="btn-primary" onClick={apply} disabled={running}>
+        <button className="btn-primary" onClick={apply} disabled={running || !fields?.length}>
           {running ? <Loader2 size={14} className="animate-spin" /> : null}
-          {running ? "Filling…" : "Fill and download"}
+          {running ? "Filling…" : "Create filled PDF"}
         </button>
         <span className="text-[12.5px] text-muted-foreground">
           {(fields ?? []).length} field{(fields ?? []).length === 1 ? "" : "s"} in this PDF

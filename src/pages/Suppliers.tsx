@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Building2,
@@ -88,7 +88,7 @@ export default function Suppliers() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["products", "suppliers", "purchase_orders", "purchase_order_items"]);
 
   const groups = useMemo<CategoryGroup[]>(() => {
     const m = new Map<string, CategoryGroup>();
@@ -219,7 +219,7 @@ export default function Suppliers() {
                     { key: "address", label: "Address" },
                     { key: "tax_id", label: "Tax ID / TRN" },
                   ]
-                )
+                ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))
               }
             >
               <Download size={15} /> Export
@@ -267,9 +267,9 @@ export default function Suppliers() {
           changeTone="up"
         />
         <MetricCard
-          label="Sourced SKUs"
+          label="Catalog SKUs"
           value={num(products.length)}
-          change={`Across ${groups.length} categories`}
+          change="Full inventory catalog"
           changeTone="up"
         />
         <MetricCard
@@ -294,6 +294,7 @@ export default function Suppliers() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              aria-label="Search supplier or category"
               placeholder="Search supplier or category…"
               className="pl-8 pr-3 h-8 rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground text-[13px] w-[300px] outline-none focus:border-muted-foreground"
             />
@@ -309,7 +310,7 @@ export default function Suppliers() {
                 <TH label="Supplier" k="name" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Category" k="category" sortBy={sortBy} onSort={toggleSort} />
                 <TH label="Contact" k="contact" sortBy={sortBy} onSort={toggleSort} />
-                <TH label="Open balance" k="balance" sortBy={sortBy} onSort={toggleSort} right />
+                <TH label="PO remainder" k="balance" sortBy={sortBy} onSort={toggleSort} right />
                 <th className="th w-10" />
               </tr>
             </thead>
@@ -569,7 +570,7 @@ function supplierQuickView(s: Supplier, onFullPage: () => void): QuickViewData {
       <div className="mt-4 flex justify-end border-t border-border pt-3">
         <button
           onClick={onFullPage}
-          className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+          className="btn-ghost"
         >
           Open full page
         </button>
@@ -599,8 +600,12 @@ function SupplierModal({
     tax_id: "",
     notes: "",
   });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const pending = useRef(false);
   useEffect(() => {
     if (open) {
+      setError("");
       setF({
         name: initial?.name ?? "",
         contact_person: initial?.contact_person ?? "",
@@ -614,8 +619,9 @@ function SupplierModal({
   }, [open, initial]);
 
   const save = async () => {
+    if (pending.current) return;
     if (!f.name.trim()) {
-      toast.error("Supplier name is required.");
+      setError("Supplier name is required.");
       return;
     }
     const payload = {
@@ -627,27 +633,38 @@ function SupplierModal({
       tax_id: f.tax_id || undefined,
       notes: f.notes || undefined,
     };
+    pending.current = true;
+    setSaving(true);
+    setError("");
     try {
       if (initial) await suppliersApi.update(initial.id, payload);
       else await suppliersApi.create(payload);
       toast.success(initial ? "Supplier updated." : "Supplier added.");
       onSaved();
     } catch (e) {
-      toast.error(
+      setError(
         `Could not save supplier: ${e instanceof Error ? e.message : String(e)}`
       );
+    } finally {
+      pending.current = false;
+      setSaving(false);
     }
   };
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
-      title={initial ? "Edit Supplier" : "New supplier"}
+      onClose={() => { if (!pending.current) onClose(); }}
+      title={initial ? "Edit supplier" : "New supplier"}
     >
+      <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      {error && <div className="mb-4"><ErrorBanner message={error} /></div>}
       <div className="space-y-3">
         <Field label="Name *">
           <input
+            required
+            autoFocus
             className="input"
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
@@ -660,7 +677,7 @@ function SupplierModal({
             onChange={(e) => setF({ ...f, contact_person: e.target.value })}
           />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Email">
             <input
               className="input"
@@ -701,14 +718,16 @@ function SupplierModal({
           />
         </Field>
       </div>
-      <div className="flex justify-end gap-2 mt-5">
-        <Button variant="outline" onClick={onClose}>
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
+        <button type="button" className="btn-ghost" onClick={onClose}>
           Cancel
-        </Button>
-        <Button variant="primary" onClick={save}>
-          Save Supplier
-        </Button>
+        </button>
+        <button type="submit" className="btn-primary">
+          {saving ? "Saving…" : initial ? "Save changes" : "Create supplier"}
+        </button>
       </div>
+      </fieldset>
+      </form>
     </Modal>
   );
 }

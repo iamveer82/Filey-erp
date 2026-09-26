@@ -30,7 +30,7 @@ const READ_PREFIXES = [
 ];
 
 export const isReadOnly = (name: string): boolean =>
-  READ_PREFIXES.some((p) => name.startsWith(p));
+  name === "work_service" || READ_PREFIXES.some((p) => name.startsWith(p));
 
 export interface Step {
   name: string;
@@ -81,17 +81,20 @@ const shortNote = (name: string, result: unknown): string => {
  *  it looks terminal. Telling it how many steps remain, and that adapting is
  *  expected, is the difference between one failed call ending the task and the
  *  agent routing around it. */
-export function coachResult(
-  result: unknown,
-  roundsLeft: number
-): unknown {
+export function coachResult(result: unknown, roundsLeft: number): unknown {
+  if ((result as { retry_safe?: boolean } | null)?.retry_safe === false) return result;
   const err = (result as { error?: string } | null)?.error;
   if (!err) return result;
+  const refused =
+    /not approve|owner-only|capability.*(off|disabled)|Plan mode|permission|access.*(disabled|enable|expired)/i.test(
+      String(err)
+    );
   return {
     ...(result as Record<string, unknown>),
     steps_remaining: roundsLeft,
-    what_to_do:
-      roundsLeft <= 1
+    what_to_do: refused
+      ? "Respect this access or approval boundary. Do not retry through a different tool or channel. Explain what access or decision is needed; continue only with independently authorized work."
+      : roundsLeft <= 1
         ? "This was the last step. Tell the user plainly what worked, what didn't, and what you'd try next."
         : "This attempt failed — that is normal, not a reason to stop. Try a DIFFERENT approach: another tool, different arguments, or look up the thing you assumed. Repeating this identical call will be refused.",
   };
@@ -103,6 +106,15 @@ export function createGuard(): AgentGuard {
 
   return {
     before(name, args) {
+      if (["workspace_browser", "get_video_job", "list_video_jobs"].includes(name)) return {};
+      // Screen observations are perishable; reusing one can target a changed window.
+      if (
+        (name === "computer_use" || name === "agent_computer" || name === "browser") &&
+        ["screenshot", "snapshot", "list", "list_windows", "list_tabs"].includes(
+          String(args.action)
+        )
+      )
+        return {};
       const k = keyOf(name, args);
       if (!seen.has(k)) return {};
       const prior = seen.get(k);
@@ -122,8 +134,13 @@ export function createGuard(): AgentGuard {
     },
     after(name, args, result) {
       const k = keyOf(name, args);
-      seen.set(k, result);
       const failed = !!(result as { error?: string } | null)?.error;
+      if (!failed && !isReadOnly(name)) {
+        // Verify against current records after a write, not the pre-write cache.
+        for (const key of seen.keys())
+          if (isReadOnly(key.split(":")[0])) seen.delete(key);
+      }
+      seen.set(k, result);
       log.push({ name, args, ok: !failed, note: shortNote(name, result) });
     },
     steps() {

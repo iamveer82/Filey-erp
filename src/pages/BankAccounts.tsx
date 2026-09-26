@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Plus, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { log } from "../lib/log";
-import { aed, fmtDate, money, numInput } from "../lib/format";
+import { nextLocalId } from "../lib/recordId";
+import { aed, fmtDate, money, numInput, plural } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -20,7 +20,9 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { fin, tools } from "../lib/api";
+import { fin, tools, getCacheScope } from "../lib/api";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
+import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
 import {
   parseStatementCsv,
@@ -31,6 +33,11 @@ import {
 
 const BANK_KEY = "filey_bank_accounts"; // device-local cache
 const BANK_SETTING_KEY = "bank_accounts"; // app_settings - synced + backed up
+const cacheKey = () => {
+  try { assertWorkspaceCurrent(); } catch { return null; }
+  const scope = getCacheScope();
+  return scope ? `${BANK_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
+};
 
 interface BankAccount {
   id: number;
@@ -46,36 +53,34 @@ interface BankAccount {
 
 function load(): BankAccount[] {
   try {
-    try { return JSON.parse(localStorage.getItem(BANK_KEY) || "[]"); } catch { return []; }
+    const key = cacheKey();
+    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load bank accounts", e);
     return [];
   }
 }
-function save(a: BankAccount[]) {
-  try {
-    localStorage.setItem(BANK_KEY, JSON.stringify(a));
-  } catch (e) {
-    console.warn("Failed to save bank accounts", e);
-  }
-  // Write-through to app_settings: bare localStorage never syncs across
-  // devices and the desktop backup doesn't include it (same as challans).
-  void tools.setSetting(BANK_SETTING_KEY, JSON.stringify(a)).catch((e) =>
-    // Local storage already holds it, so nothing is lost here — but a failed
-    // write-through means other devices never see it. Surface that in
-    // Settings -> Diagnostics instead of dropping it on the floor.
-    log.warn("sync", "bank accounts did not reach app_settings", e)
-  );
+async function save(rows: BankAccount[], expectedKey: string | null) {
+  if (!expectedKey || cacheKey() !== expectedKey) throw new Error("Workspace changed. Reopen this section before saving.");
+  await tools.setSetting(BANK_SETTING_KEY, JSON.stringify(rows));
+  if (cacheKey() !== expectedKey) throw new Error("Workspace changed while saving. Reopen this section to review the result.");
+  // The durable store is authoritative. Failure of its disposable mirror does
+  // not turn a completed write into a failed save.
+  try { localStorage.setItem(expectedKey, JSON.stringify(rows)); }
+  catch { /* Rebuilt from app_settings on the next load. */ }
 }
 
 /** Pull accounts saved on the user's other devices; remote wins when present. */
 async function syncBankAccounts(): Promise<BankAccount[]> {
+  const key = cacheKey();
+  if (!key) return [];
   try {
     const settings = await tools.settings();
+    if (cacheKey() !== key) return [];
     const row = settings.find((s) => s.key === BANK_SETTING_KEY);
     if (row?.value) {
       const remote: BankAccount[] = JSON.parse(row.value);
-      localStorage.setItem(BANK_KEY, JSON.stringify(remote));
+      localStorage.setItem(key, JSON.stringify(remote));
       return remote;
     }
   } catch (e) {
@@ -87,6 +92,18 @@ async function syncBankAccounts(): Promise<BankAccount[]> {
 export default function BankAccounts() {
   const { toast, confirm } = useUI();
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
+  const [screenScope] = useState(cacheKey);
+  const writing = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const persist = async (next: BankAccount[], message: string): Promise<boolean> => {
+    if (writing.current) return false;
+    writing.current = true; setSaving(true);
+    try {
+      await save(next, screenScope);
+      setAccounts(next); toast.success(message); return true;
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); return false; }
+    finally { writing.current = false; setSaving(false); }
+  };
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<BankAccount | null>(null);
   const [reconOpen, setReconOpen] = useState(false);
@@ -99,6 +116,7 @@ export default function BankAccounts() {
       .then(setAccounts) // …then reconcile with other devices
       .finally(() => setSyncing(false));
   }, []);
+  useLiveSync(() => { void syncBankAccounts().then(setAccounts); });
 
   const del = async (a: BankAccount) => {
     const ok = await confirm({
@@ -109,9 +127,7 @@ export default function BankAccounts() {
     });
     if (!ok) return;
     const next = accounts.filter((x) => x.id !== a.id);
-    setAccounts(next);
-    save(next);
-    toast.success("Deleted.");
+    void persist(next, "Deleted.");
   };
 
   const dup = (a: BankAccount) => {
@@ -119,14 +135,12 @@ export default function BankAccounts() {
       ...accounts,
       {
         ...a,
-        id: Date.now(),
+        id: nextLocalId(accounts),
         account_name: `${a.account_name} copy`,
         created_at: new Date().toISOString(),
       },
     ];
-    setAccounts(next);
-    save(next);
-    toast.success("Duplicated.");
+    void persist(next, "Duplicated.");
   };
 
   const openEdit = (a: BankAccount) => {
@@ -158,8 +172,17 @@ export default function BankAccounts() {
       )
     : accounts;
 
-  const total = accounts.reduce((s, a) => s + a.current_balance, 0);
-  const currencies = new Set(accounts.map((a) => a.currency)).size;
+  // Bank records do not store a historical exchange rate. Keep each native
+  // currency separate instead of treating the raw balance as AED.
+  const totalsByCurrency = new Map<string, { balance: number; accounts: number }>();
+  for (const account of accounts) {
+    const currency = account.currency || "AED";
+    const total = totalsByCurrency.get(currency) || { balance: 0, accounts: 0 };
+    total.balance += account.current_balance;
+    total.accounts += 1;
+    totalsByCurrency.set(currency, total);
+  }
+  const currencies = totalsByCurrency.size;
 
   return (
     <div className="">
@@ -190,16 +213,20 @@ export default function BankAccounts() {
           change={accounts.length > 0 ? "Connected" : "None yet"}
           changeTone={accounts.length > 0 ? "up" : "warn"}
         />
-        <MetricCard
-          label="Total Balance"
-          value={aed(total)}
-          change="Across all accounts"
-          changeTone="up"
-        />
+        {currencies === 0 ? (
+          <MetricCard label="Total balance" value="—" change="No accounts yet" />
+        ) : Array.from(totalsByCurrency, ([currency, total]) => (
+          <MetricCard
+            key={currency}
+            label={`Total balance (${currency})`}
+            value={money(total.balance, currency)}
+            change={plural(total.accounts, "account")}
+          />
+        ))}
         <MetricCard
           label="Currencies"
           value={String(currencies)}
-          change={currencies > 1 ? "Multi-currency" : "Single currency"}
+          change={currencies === 0 ? "No accounts yet" : currencies > 1 ? "Multi-currency" : "Single currency"}
           changeTone="up"
         />
       </div>
@@ -262,7 +289,7 @@ export default function BankAccounts() {
             sortValue: (a) => a.current_balance,
             render: (a) => (
               <span className="font-medium text-ink tabular-nums">
-                {aed(a.current_balance)}
+                {money(a.current_balance, a.currency)}
               </span>
             ),
           },
@@ -289,18 +316,16 @@ export default function BankAccounts() {
         <BankModal
           open={open}
           edit={edit}
-          onClose={() => setOpen(false)}
-          onSaved={(a) => {
+          saving={saving}
+          onClose={() => { if (!saving) setOpen(false); }}
+          onSaved={async (a) => {
             const next = edit
               ? accounts.map((x) => (x.id === a.id ? a : x))
               : [
                   ...accounts,
-                  { ...a, id: Date.now(), created_at: new Date().toISOString() },
+                  { ...a, id: nextLocalId(accounts), created_at: new Date().toISOString() },
                 ];
-            setAccounts(next);
-            save(next);
-            setOpen(false);
-            toast.success(edit ? "Updated." : "Account added.");
+            if (await persist(next, edit ? "Updated." : "Account added.")) setOpen(false);
           }}
         />
       )}
@@ -357,6 +382,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   const [recorded, setRecorded] = useState<Set<number>>(new Set());
 
   const onFile = async (file: File) => {
+    if (busy) return;
     setErr("");
     setBusy(true);
     setResult(null);
@@ -380,6 +406,11 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
           description: t.description || t.account_name,
           date: t.txn_date,
           amount: Number(t.amount),
+          // Cash and bank accounts are assets, so a debit is money arriving and
+          // a credit is money leaving. The ledger keeps every amount positive,
+          // so without this the matcher cannot tell the two apart and will
+          // happily reconcile a payment against a receipt of the same size.
+          direction: (t.txn_type === "debit" ? "in" : "out") as "in" | "out",
         }));
       setResult(matchStatement(lines, book));
     } catch (e) {
@@ -390,7 +421,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const confirmMatches = async () => {
-    if (!result?.matched.length) return;
+    if (busy || !result?.matched.length) return;
     setBusy(true);
     try {
       await fin.markReconciled(result.matched.map((m) => m.txnId));
@@ -407,7 +438,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   const recordExpense = async (i: number) => {
     const line = result?.unmatchedLines[i];
-    if (!line || line.amount >= 0) return;
+    if (busy || recorded.has(i) || !line || line.amount >= 0) return;
     setBusy(true);
     try {
       await fin.createExpense(
@@ -434,10 +465,12 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 
   return (
-    <Modal open={open} onClose={onClose} title="Reconcile bank statement">
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="Reconcile bank statement">
       <input
         type="file"
         accept=".csv,text/csv"
+        aria-label="Bank statement CSV"
+        disabled={busy}
         className="input"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -480,6 +513,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
           )}
           {result.unmatchedLines.length > 0 && (
             <ReconList
+              disabled={busy}
               title="On the statement, not in your books"
               hint="Money out can be recorded as an expense here; money in usually belongs to an invoice payment - record it there."
               rows={result.unmatchedLines.map((l, i) => ({
@@ -516,9 +550,11 @@ function ReconList({
   title,
   hint,
   rows,
+  disabled,
 }: {
   title: string;
   hint: string;
+  disabled?: boolean;
   rows: {
     date: string;
     desc: string;
@@ -534,7 +570,7 @@ function ReconList({
         {rows.map((r, i) => (
           <div
             key={i}
-            className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
+            className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 px-3 py-2 text-sm"
           >
             <span className="text-xs text-brand-500 tabular-nums w-20 shrink-0">
               {r.date}
@@ -544,7 +580,8 @@ function ReconList({
             {r.action &&
               (r.action.onClick ? (
                 <button
-                  className="btn-ghost h-7 shrink-0 text-xs"
+                  className="btn-ghost shrink-0"
+                  disabled={disabled}
                   onClick={r.action.onClick}
                 >
                   {r.action.label}
@@ -564,10 +601,12 @@ function BankModal({
   edit,
   onClose,
   onSaved,
+  saving,
 }: {
   open: boolean;
   edit: BankAccount | null;
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
+  saving: boolean;
   onSaved: (a: BankAccount) => void;
 }) {
   const [f, setF] = useState(
@@ -589,7 +628,7 @@ function BankModal({
       onClose={onClose}
       title={edit ? "Edit Account" : "Add Bank Account"}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Bank Name *">
           <input
             className="input"
@@ -648,16 +687,16 @@ function BankModal({
           />
         </Field>
       </div>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn-primary"
-          disabled={!valid}
-          onClick={() => onSaved(f as BankAccount)}
+          disabled={!valid || saving}
+          onClick={() => void onSaved(f as BankAccount)}
         >
-          {edit ? "Update" : "Add account"}
+          {saving ? "Saving…" : edit ? "Save changes" : "Create account"}
         </button>
       </div>
     </Modal>

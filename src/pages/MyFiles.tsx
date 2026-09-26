@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -20,7 +21,6 @@ import {
   FolderInput,
   Download,
   Trash2,
-  Loader2,
   ArrowLeft,
   Pencil,
   Share2,
@@ -52,6 +52,7 @@ import {
   EmptyState,
   Modal,
   MetricCard,
+  ErrorBanner,
 } from "../components/ui";
 import { cn, num } from "../lib/format";
 
@@ -79,6 +80,8 @@ export default function MyFiles() {
     files,
     folders,
     loading,
+    error,
+    refresh,
     remove,
     rename,
     upload,
@@ -428,6 +431,19 @@ export default function MyFiles() {
         <div className="grid h-60 place-items-center">
           <Loader2 size={22} className="animate-spin text-muted-foreground" />
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <PageHeader
+          title="My Files"
+          subtitle="Organise documents into folders: drag, drop, and arrange your way"
+        />
+        <ErrorBanner message={error} />
+        <button className="btn-secondary mt-3" onClick={() => void refresh()}>Retry</button>
       </div>
     );
   }
@@ -923,7 +939,7 @@ function RowAction({
       disabled={busy}
       onClick={onClick}
       className={cn(
-        "h-7 w-7 grid place-items-center rounded-md border border-transparent transition-colors cursor-pointer",
+        "btn-ghost w-10 !px-0 shrink-0",
         tone === "danger"
           ? "text-danger hover:bg-danger/10"
           : "text-muted-foreground hover:text-foreground hover:bg-hover hover:border-border"
@@ -988,11 +1004,11 @@ function FilePreviewPage({
     <div className="flex h-[calc(100vh-7rem)] flex-col">
       <div className="mb-3 flex items-center gap-3 flex-wrap">
         <button
-          className="rounded-md p-2 text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer"
+          className="btn-ghost"
           onClick={onBack}
           aria-label="Back"
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={16} /> Back
         </button>
         <div className="min-w-0 flex-1">
           <h1

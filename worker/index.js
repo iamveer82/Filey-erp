@@ -112,26 +112,63 @@ const handlers = {
 };
 
 /** Claim the oldest pending worker job atomically (status guard prevents
- *  two workers grabbing the same job). Returns the job or null. */
+ *  two workers grabbing the same job). Returns the job or null.
+ *  Errors are logged and treated as "no job" so one bad read does not kill
+ *  the loop — the outer catch also sleeps and retries. */
 async function claimJob() {
-  const { data: rows } = await sb
-    .from("tool_jobs")
-    .select("*")
-    .eq("status", "pending")
-    .eq("engine", "worker")
-    .order("created_at", { ascending: true })
-    .limit(1);
+  let rows;
+  try {
+    const res = await sb
+      .from("tool_jobs")
+      .select("*")
+      .eq("status", "pending")
+      .eq("engine", "worker")
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (res.error) throw res.error;
+    rows = res.data;
+  } catch (e) {
+    console.error("claimJob select failed:", (e && e.message) || e);
+    return null;
+  }
   const job = rows?.[0];
   if (!job) return null;
 
-  const { data: claimed } = await sb
-    .from("tool_jobs")
-    .update({ status: "processing", updated_at: new Date().toISOString() })
-    .eq("id", job.id)
-    .eq("status", "pending")
-    .select()
-    .maybeSingle();
-  return claimed ?? null; // null = another worker took it
+  try {
+    const { data: claimed, error } = await sb
+      .from("tool_jobs")
+      .update({ status: "processing", updated_at: new Date().toISOString() })
+      .eq("id", job.id)
+      .eq("status", "pending")
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+    return claimed ?? null; // null = another worker took it
+  } catch (e) {
+    console.error(`claimJob update failed for ${job.id}:`, (e && e.message) || e);
+    return null;
+  }
+}
+
+/** Jobs stuck in `processing` (worker crash/restart) go back to pending so
+ *  they can be retried instead of hanging forever. */
+async function requeueStuckJobs() {
+  try {
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data, error } = await sb
+      .from("tool_jobs")
+      .update({ status: "pending", updated_at: new Date().toISOString() })
+      .eq("status", "processing")
+      .eq("engine", "worker")
+      .lt("updated_at", cutoff)
+      .select("id");
+    if (error) throw error;
+    if (data?.length) {
+      console.log(`↻ requeued ${data.length} stuck job(s): ${data.map((r) => r.id).join(", ")}`);
+    }
+  } catch (e) {
+    console.error("requeueStuckJobs failed:", (e && e.message) || e);
+  }
 }
 
 async function processJob(job) {
@@ -167,13 +204,12 @@ async function processJob(job) {
       const up = await sb.storage
         .from(OUTPUT_BUCKET)
         .upload(dest, buf, { upsert: true, contentType: o.type });
-      if (!up.error) {
-        paths.push(dest);
-        total += buf.length;
-      }
+      if (up.error) throw new Error(`Could not save ${o.name}: ${up.error.message}`);
+      paths.push(dest);
+      total += buf.length;
     }
 
-    await sb
+    const { error: completionError } = await sb
       .from("tool_jobs")
       .update({
         status: "done",
@@ -182,6 +218,7 @@ async function processJob(job) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", job.id);
+    if (completionError) throw completionError;
     console.log(`✓ ${job.tool} ${job.id} -> ${paths.length} file(s)`);
   } catch (e) {
     const msg = (e && e.message) || String(e);
@@ -203,6 +240,8 @@ async function main() {
   console.log(
     `Filey worker up. Tools: ${Object.keys(handlers).join(", ")}. Polling every ${POLL_MS}ms.`
   );
+  await requeueStuckJobs();
+  setInterval(requeueStuckJobs, 5 * 60 * 1000);
   for (;;) {
     try {
       const job = await claimJob();

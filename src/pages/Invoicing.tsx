@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { invoiceMessageVersion } from "../lib/messageOutbox";
+import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
+import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
+import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/documentMessage";
+import { isLocalMode } from "../lib/dataMode";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { useSearchParams } from "react-router-dom";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
   Plus,
   Trash2,
@@ -11,10 +17,9 @@ import {
   Upload,
   X,
   Pencil,
-  Check,
   CheckCircle2,
   Send,
-  Monitor,
+  MessageCircle,
   Smartphone,
   Minus,
   Settings,
@@ -33,18 +38,23 @@ import {
   Landmark,
   SeparatorHorizontal,
   FileCode,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import {
   advances,
+  suppliers,
   billing,
   crm,
   erp,
   recurrences,
   InvoiceDocSummary,
+  type InvoiceDoc,
   InvoiceDocInput,
   InvoicePayment,
   CompanyProfile,
   CrmCustomer,
+  type Supplier,
   Product,
   Recurrence,
 } from "../lib/api";
@@ -66,14 +76,13 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
-import { DOC_TEMPLATES } from "../lib/docTemplates";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
-import { SelectMenu } from "../components/ui-menu";
+import { SelectMenu, MenuPopover } from "../components/ui-menu";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -86,7 +95,7 @@ import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
 import StatStrip from "../components/StatStrip";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
-import { autoSaveDocument } from "../lib/files";
+import { autoSaveDocument, safeName } from "../lib/files";
 import {
   splitItemMeta,
   mergeItemMeta,
@@ -97,16 +106,15 @@ import {
   FB_KEY,
 } from "../lib/docItems";
 import ScanDocModal from "../components/ScanDocModal";
+import { offerUpgrade, isPlanLimitError } from "../lib/license";
 import { CustomerAdvancesPanel } from "../components/AdvanceCard";
-import TemplateDesigner, {
-  loadCustomTemplates,
-  deleteCustomTemplate,
-  syncCustomTemplates,
-  type CustomTemplate,
-} from "../components/TemplateDesigner";
-import TemplateTilePreview from "../components/TemplateTilePreview";
+import TemplateDesigner from "../components/TemplateDesigner";
+import DocTemplateGallery from "../components/DocTemplateGallery";
 import {
   StampSignatureLayer,
+  normStampSig,
+  STAMP_DEFAULT,
+  SIGN_DEFAULT,
   StampSigAdjust,
   DraggableBlock,
   type StampSig,
@@ -143,6 +151,7 @@ import {
 } from "../lib/einvoice";
 import {
   PageHeader,
+  ErrorBanner,
   MetricCard,
   DataTable,
   Badge,
@@ -153,12 +162,10 @@ import {
   SearchInput,
   FilterChip,
   ToggleTile,
-  keyActivate,
 } from "../components/ui";
 import {
   RowActions,
   QuickViewModal,
-  shareVia,
   type QuickViewData,
   type ShareKind,
 } from "../components/RowActions";
@@ -220,7 +227,6 @@ type Form = Omit<InvoiceDocInput, "items" | "doc_type"> & {
   aed_exchange_rate?: number | null;
 };
 
-const TEMPLATES = DOC_TEMPLATES;
 
 const today = () => todayYmd();
 const addDays = (n: number) =>
@@ -230,9 +236,7 @@ const addDays = (n: number) =>
  *  display fields under the same names already; only the per-line meta needs
  *  unpacking out of the item's `custom` jsonb, exactly as the editor does when
  *  it loads a document for editing. */
-function docToExportForm(doc: {
-  items: { custom?: Record<string, string> | null }[];
-}) {
+function docToExportForm(doc: InvoiceDoc) {
   return {
     ...doc,
     items: doc.items.map((i) => {
@@ -249,7 +253,7 @@ function docToExportForm(doc: {
         tax,
       };
     }),
-  } as never;
+  };
 }
 
 /** VAT rate that actually applies to a line: its own override, else the
@@ -330,10 +334,7 @@ function blankForm(
   mode: DocMode = "sales",
   formats?: DocFormats
 ): Form {
-  // New documents are raised in the currency the app is being worked in —
-  // the active display currency — under that currency's tax regime
-  // (AED → UAE VAT 5%, INR → India GST 18%, …). Switching the currency
-  // switcher to INR therefore produces GST invoices, not VAT ones.
+  // Display currency chooses denomination; company country chooses tax jurisdiction.
   const currency = getDisplayCurrency() || c.currency || "AED";
   return {
     number: pickInvoiceNumber(mode, existing, formats),
@@ -343,6 +344,7 @@ function blankForm(
     accent: c.default_accent || "#222222",
     currency,
     seller_name: c.name,
+    tax_country_code: c.country_code,
     seller_address: c.address,
     seller_trn: c.trn,
     seller_email: c.email,
@@ -362,13 +364,13 @@ function blankForm(
     round_off: false,
     notes: "Thank you for your business.",
     terms: "Payment due within 30 days.",
-    tax_rate: defaultTaxRate(currency, c.default_tax_rate),
+    tax_rate: c.tax_type === "None" ? 0 : defaultTaxRate(c.currency, c.default_tax_rate, c.country_code),
     discount: 0,
     // UAE e-invoice (Peppol PINT-AE) — sensible defaults; user overrides as needed.
     invoice_type_code: DEFAULT_INVOICE_TYPE_CODE,
     transaction_type: DEFAULT_TRANSACTION_TYPE,
     payment_means_code: DEFAULT_PAYMENT_MEANS_CODE,
-    buyer_country_code: UAE_COUNTRY_CODE,
+    buyer_country_code: c.country_code || UAE_COUNTRY_CODE,
     items: [
       {
         description: "",
@@ -413,6 +415,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [numFmt, setNumFmt] = useState<DocFormats>({});
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
+  const [messageDialog, setMessageDialog] = useState<DocumentMessageProps | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -431,23 +434,23 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     data: QuickViewData;
   } | null>(null);
   const [reminding, setReminding] = useState(false);
-  // Free-tier invoice cap hit (client check or server trigger) → upgrade modal.
-  const [capOpen, setCapOpen] = useState(false);
-  const isCapError = (e: unknown) => errMsg(e).includes("Free plan limit reached");
   const [docsLoading, setDocsLoading] = useState(true);
-  const loadDocs = () =>
-    billing
+  const [docsError, setDocsError] = useState(false);
+  const loadDocs = useCallback(() => {
+    setDocsLoading(true);
+    return billing
       .listDocs(mode)
-      .then(setDocs)
-      .catch(() => toast.error("Failed to load documents"))
+      .then((rows) => { setDocs(rows); setDocsError(false); })
+      .catch(() => { setDocsError(true); toast.error("Failed to load documents"); })
       .finally(() => setDocsLoading(false));
-  const loadRecurs = () =>
+  }, [mode, toast]);
+  const loadRecurs = useCallback(() =>
     recurrences
       .list()
       .then(setRecurs)
-      .catch(() => toast.error("Failed to load recurrences"));
+      .catch(() => toast.error("Failed to load recurrences")), [toast]);
 
-  const reload = () => {
+  const reload = useCallback(() => {
     billing
       .getCompany()
       .then(setCompany)
@@ -455,9 +458,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     loadDocFormats().then(setNumFmt).catch(() => {});
     loadDocs();
     loadRecurs();
-  };
-  useEffect(reload, []);
-  useLiveSync(reload);
+  }, [loadDocs, loadRecurs, toast]);
+  useEffect(reload, [reload]);
+  useLiveSync(reload, ["invoice_docs", "invoice_doc_items", "invoice_payments", "invoice_recurrence", "company_profile", "app_settings"]);
 
   // Generate any due recurring invoices once on load.
   useEffect(() => {
@@ -491,9 +494,11 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     setForm(f);
   };
 
-const editInvoice = async (id: number) => {
+  const editInvoice = useCallback(async (id: number) => {
     try {
+      const scope = agentStorageScope();
       const d = await billing.getDoc(id);
+      requireAgentStorageScope(scope ?? "signed-out");
       setForm({
         id: d.id,
         number: d.number,
@@ -503,6 +508,7 @@ const editInvoice = async (id: number) => {
         accent: d.accent,
         currency: d.currency,
         seller_name: d.seller_name,
+        tax_country_code: d.tax_country_code,
         seller_address: d.seller_address,
         seller_trn: d.seller_trn,
         seller_email: d.seller_email,
@@ -516,7 +522,7 @@ const editInvoice = async (id: number) => {
         customer_address: d.customer_address,
         customer_trn: d.customer_trn,
         customer_email: d.customer_email,
-        customer_id: d.customer_id,
+        customer_id: isPurchase ? undefined : d.customer_id,
         issue_date: d.issue_date,
         due_date: d.due_date,
         po_number: d.po_number,
@@ -534,39 +540,13 @@ const editInvoice = async (id: number) => {
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
-        stamp: d.stamp
-          ? {
-              data: durableStampSig(d.stamp).data,
-              x: d.stamp.x ?? 75,
-              y: d.stamp.y ?? 70,
-              opacity: d.stamp.opacity ?? 30,
-              color: d.stamp.color ?? "#cc0000",
-              cropTop: d.stamp.cropTop ?? 0,
-              cropRight: d.stamp.cropRight ?? 0,
-              cropBottom: d.stamp.cropBottom ?? 0,
-              cropLeft: d.stamp.cropLeft ?? 0,
-              scale: (d.stamp as any).scale ?? 100,
-            }
-          : undefined,
-        signature: d.signature
-          ? {
-              data: durableStampSig(d.signature).data,
-              x: d.signature.x ?? 75,
-              y: d.signature.y ?? 85,
-              opacity: d.signature.opacity ?? 35,
-              color: d.signature.color ?? "#0000cc",
-              cropTop: d.signature.cropTop ?? 0,
-              cropRight: d.signature.cropRight ?? 0,
-              cropBottom: d.signature.cropBottom ?? 0,
-              cropLeft: d.signature.cropLeft ?? 0,
-              scale: (d.signature as any).scale ?? 100,
-            }
-          : undefined,
+        stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
+        signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
         show_bank: (d as any).show_bank ?? false,
-        advance_applied: (d as any).advance_applied ?? 0,
+        advance_applied: isPurchase ? 0 : (d as any).advance_applied ?? 0,
         fx_rate: d.fx_rate ?? null,
         items: d.items.map((i) => {
           const {
@@ -598,7 +578,15 @@ const editInvoice = async (id: number) => {
     } catch (e: any) {
       toast.error(e?.message || "Failed to load invoice");
     }
-  };
+  }, [toast, isPurchase]);
+
+  useEffect(() => {
+    if (!params.has("open") || !company) return;
+    const id = Number(params.get("open"));
+    setParams({}, { replace: true });
+    if (Number.isSafeInteger(id) && id > 0) void editInvoice(id);
+    else toast.error("Choose an existing invoice.");
+  }, [params, company, editInvoice, setParams, toast]);
 
   const duplicateInvoice = async (id: number) => {
     try {
@@ -611,6 +599,7 @@ const editInvoice = async (id: number) => {
         accent: d.accent,
         currency: d.currency,
         seller_name: d.seller_name,
+        tax_country_code: d.tax_country_code,
         seller_address: d.seller_address,
         seller_trn: d.seller_trn,
         seller_email: d.seller_email,
@@ -624,7 +613,7 @@ const editInvoice = async (id: number) => {
         customer_address: d.customer_address,
         customer_trn: d.customer_trn,
         customer_email: d.customer_email,
-        customer_id: d.customer_id,
+        customer_id: isPurchase ? undefined : d.customer_id,
         issue_date: today(),
         due_date: addDays(30),
         po_number: d.po_number,
@@ -639,34 +628,8 @@ const editInvoice = async (id: number) => {
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
         buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
-        stamp: d.stamp
-          ? {
-              data: durableStampSig(d.stamp).data,
-              x: d.stamp.x ?? 75,
-              y: d.stamp.y ?? 70,
-              opacity: d.stamp.opacity ?? 30,
-              color: d.stamp.color ?? "#cc0000",
-              cropTop: d.stamp.cropTop ?? 0,
-              cropRight: d.stamp.cropRight ?? 0,
-              cropBottom: d.stamp.cropBottom ?? 0,
-              cropLeft: d.stamp.cropLeft ?? 0,
-              scale: (d.stamp as any).scale ?? 100,
-            }
-          : undefined,
-        signature: d.signature
-          ? {
-              data: durableStampSig(d.signature).data,
-              x: d.signature.x ?? 75,
-              y: d.signature.y ?? 85,
-              opacity: d.signature.opacity ?? 35,
-              color: d.signature.color ?? "#0000cc",
-              cropTop: d.signature.cropTop ?? 0,
-              cropRight: d.signature.cropRight ?? 0,
-              cropBottom: d.signature.cropBottom ?? 0,
-              cropLeft: d.signature.cropLeft ?? 0,
-              scale: (d.signature as any).scale ?? 100,
-            }
-          : undefined,
+        stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
+        signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
         show_logo: d.show_logo ?? false,
@@ -722,7 +685,7 @@ const editInvoice = async (id: number) => {
       return;
     }
     if (!form.customer_name.trim() && !(form.customer_email || "").trim()) {
-      toast.error("Customer name or email is required");
+      toast.error(`${isPurchase ? "Supplier" : "Customer"} name or email is required`);
       return;
     }
     // Check for duplicate invoice number
@@ -761,12 +724,15 @@ const editInvoice = async (id: number) => {
       (payload as any).show_signature = form.show_signature ?? false;
       (payload as any).show_logo = form.show_logo ?? false;
       (payload as any).show_bank = form.show_bank ?? false;
-      (payload as any).advance_applied = Number(form.advance_applied) || 0;
+      (payload as Record<string, unknown>).advance_applied = isPurchase ? 0 : Number(form.advance_applied) || 0;
+      // This column references CRM customers. A supplier is a document snapshot,
+      // never a customer FK; null also clears a legacy wrongly linked purchase.
+      if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       // Consume the applied advance from the customer's credit ledger
       // (idempotent per invoice id; duplicates start at 0 so copies never
       // re-consume).
-      if (form.customer_id)
+      if (!isPurchase && form.customer_id)
         await advances
           .applyToInvoice(
             form.customer_id,
@@ -779,7 +745,8 @@ const editInvoice = async (id: number) => {
       await loadDocs();
       return id;
     } catch (e) {
-      if (isCapError(e)) setCapOpen(true);
+      // Cap hit (client check or server trigger) → the global upgrade dialog.
+      if (isPlanLimitError(e)) offerUpgrade();
       else toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
       setSaving(false);
@@ -801,7 +768,7 @@ const editInvoice = async (id: number) => {
       return;
     }
     if (!form.customer_name.trim() && !(form.customer_email || "").trim()) {
-      toast.error("Customer name or email is required");
+      toast.error(`${isPurchase ? "Supplier" : "Customer"} name or email is required`);
       return;
     }
     // Check for duplicate invoice number
@@ -837,12 +804,13 @@ const editInvoice = async (id: number) => {
       (payload as any).show_signature = form.show_signature ?? false;
       (payload as any).show_logo = form.show_logo ?? false;
       (payload as any).show_bank = form.show_bank ?? false;
-      (payload as any).advance_applied = Number(form.advance_applied) || 0;
+      (payload as Record<string, unknown>).advance_applied = isPurchase ? 0 : Number(form.advance_applied) || 0;
+      if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
       // Consume the applied advance from the customer's credit ledger
       // (idempotent per invoice id; duplicates start at 0 so copies never
       // re-consume).
-      if (form.customer_id)
+      if (!isPurchase && form.customer_id)
         await advances
           .applyToInvoice(
             form.customer_id,
@@ -859,16 +827,132 @@ const editInvoice = async (id: number) => {
           : "Moved back to draft."
       );
     } catch (e) {
-      if (isCapError(e)) setCapOpen(true);
+      if (isPlanLimitError(e)) offerUpgrade();
       else toast.error(`Could not update: ${errMsg(e)}`);
     } finally {
       setSaving(false);
     }
   };
 
+  // Share one invoice via WhatsApp / email / SMS, or copy its public portal
+  // link (same real link as the bulk "Copy public link" action).
+  const sendDoc = async (kind: ShareKind, d: Pick<InvoiceDocSummary, "id">) => {
+    try {
+      if (kind === "copyLink") {
+        const url = await invoicePublicLink(d.id);
+        await navigator.clipboard.writeText(url);
+        toast.success("Public invoice link copied");
+        return;
+      }
+      const doc = await billing.getDoc(d.id);
+      const exported = docToExportForm(doc);
+      const total = applyRoundOff(docTotals(exported.items, exported.discount || 0, exported.tax_rate || 0, exported.unit_price_formula), !!exported.round_off).total;
+      // Resolve the correct party; supplier IDs are not CRM customer IDs.
+      let phone = "";
+      try {
+        const custs = isPurchase ? [] : await crm.customers();
+        const cust =
+          custs.find((c) => c.id === doc.customer_id) ??
+          custs.find((c) => (c.company || c.name) === doc.customer_name);
+        phone = isPurchase
+          ? (await suppliers.list()).find((supplier) => supplier.name === doc.customer_name)?.phone || ""
+          : cust?.phone_e164 || cust?.phone || "";
+      } catch {
+        /* phone is optional */
+      }
+      const ccy = doc.currency || "AED";
+      const text = `Hi ${doc.customer_name || "there"},\n\n${
+        isPurchase ? "Purchase invoice" : "Invoice"
+      } ${doc.number} for ${money(total, ccy)} is available. Thank you!`;
+      const subject = `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`;
+      // Email sends through Resend (server), not the OS mail client — so the
+      // customer actually receives it. WhatsApp/SMS still open the user's apps.
+      if (kind === "email") {
+        if (!doc.customer_email) {
+          toast.error("This customer has no email address on file.");
+          return;
+        }
+        let portalUrl = "";
+        try {
+          portalUrl = await invoicePublicLink(d.id);
+        } catch {
+          /* link optional */
+        }
+        // Attach the rendered invoice, same as the editor's Send. Best-effort:
+        // the summary and portal link still go out if rendering fails, but a
+        // list-row send is the common path and used to arrive with no document
+        // at all.
+        let attachments: { filename: string; content: string }[] | undefined;
+        try {
+          const [bankInfo, stampSig] = await Promise.all([
+            loadBankInfo().catch(() => EMPTY_BANK),
+            loadCompanyStampSig().catch(() => EMPTY_STAMP_SIG),
+          ]);
+          const base = doc.number || "invoice";
+          const pdf = await reactToPdfBytes(
+            <InvoiceExportSheet
+              form={docToExportForm(doc)}
+              companyStampSig={stampSig}
+              bank={bankInfo}
+            />,
+            base
+          );
+          attachments = [
+            { filename: `${base}.pdf`, content: bytesToBase64(pdf.bytes) },
+          ];
+        } catch {
+          /* attachment optional — never block the send on it */
+        }
+        await sendEmail({
+          to: doc.customer_email,
+          subject,
+          attachments,
+          html: emailShell(
+            subject,
+            `<p>Dear ${esc(doc.customer_name || "customer")},</p>
+             <p>Your ${esc(isPurchase ? "purchase invoice" : "invoice")} <b>${esc(
+               doc.number
+             )}</b> for <b>${esc(money(total, ccy))}</b> is ready.</p>
+             ${
+               portalUrl
+                 ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>`
+                 : ""
+             }
+             <p>${esc(doc.notes ?? "")}</p>`
+          ),
+        });
+        toast.success(`Invoice emailed to ${doc.customer_email}`);
+        return;
+      }
+      if (kind === "whatsapp" || kind === "sms") {
+        setMessageDialog({
+          documentKey: `invoice:${d.id}`,
+          documentVersion: await invoiceMessageVersion(doc),
+          title: subject,
+          phone,
+          message: text,
+          channel: kind,
+          createLink: !isLocalMode() && publicAppBase() ? () => invoicePublicLink(d.id) : undefined,
+          loadPdf: async () => {
+            const [bank, stampSig] = await Promise.all([
+              loadBankInfo().catch(() => EMPTY_BANK),
+              loadCompanyStampSig().catch(() => EMPTY_STAMP_SIG),
+            ]);
+            const base = safeName(`Invoice-${doc.number || doc.id}`).slice(0, 120);
+            const pdf = await reactToPdfBytes(<InvoiceExportSheet form={exported} companyStampSig={stampSig} bank={bank} />, base);
+            return new File([pdf.bytes.slice().buffer], `${base}.pdf`, { type: "application/pdf" });
+          },
+        });
+      }
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
+
   if (form) {
     return (
       <>
+        {messageDialog && <DocumentMessageDialog {...messageDialog} onClose={() => setMessageDialog(null)} />}
         {company && (
           <CompanyModal
             open={companyOpen}
@@ -882,6 +966,7 @@ const editInvoice = async (id: number) => {
                 return {
                   ...prev,
                   seller_name: c.name,
+    tax_country_code: c.country_code,
                   seller_address: c.address ?? prev.seller_address,
                   seller_trn: c.trn ?? prev.seller_trn,
                   seller_email: c.email ?? prev.seller_email,
@@ -902,11 +987,13 @@ const editInvoice = async (id: number) => {
             loadDocs();
           }}
           onSave={save}
+          onMessage={async (channel) => { const id = await save(); if (id !== undefined) await sendDoc(channel, { id }); }}
           onFinalize={() => setDocStatus("sent")}
           onRevertDraft={() => setDocStatus("draft")}
           saving={saving}
           onEditCompany={() => setCompanyOpen(true)}
           partyLabel={partyLabel}
+          supplierMode={isPurchase}
           docs={docs}
         />
       </>
@@ -1017,105 +1104,7 @@ const editInvoice = async (id: number) => {
     }
   };
 
-  // Share one invoice via WhatsApp / email / SMS, or copy its public portal
-  // link (same real link as the bulk "Copy public link" action).
-  const sendDoc = async (kind: ShareKind, d: InvoiceDocSummary) => {
-    try {
-      if (kind === "copyLink") {
-        const token = await billing.publicLink(d.id);
-        const url = `${location.origin}${location.pathname}#/portal/${token}`;
-        await navigator.clipboard.writeText(url);
-        toast.success("Public invoice link copied");
-        return;
-      }
-      const doc = await billing.getDoc(d.id);
-      // WhatsApp/SMS need a phone: look it up in CRM by id, then by name.
-      let phone = "";
-      try {
-        const custs = await crm.customers();
-        const cust =
-          custs.find((c) => c.id === doc.customer_id) ??
-          custs.find((c) => (c.company || c.name) === d.customer_name);
-        phone = cust?.phone_e164 || cust?.phone || "";
-      } catch {
-        /* phone is optional */
-      }
-      const ccy = d.currency || doc.currency || "AED";
-      const text = `Hi ${doc.customer_name || "there"},\n\n${
-        isPurchase ? "Purchase invoice" : "Invoice"
-      } ${doc.number} for ${money(d.total, ccy)} is available. Thank you!`;
-      const subject = `${doc.doc_title || (isPurchase ? "Purchase Invoice" : "Invoice")} ${doc.number}`;
-      // Email sends through Resend (server), not the OS mail client — so the
-      // customer actually receives it. WhatsApp/SMS still open the user's apps.
-      if (kind === "email") {
-        if (!doc.customer_email) {
-          toast.error("This customer has no email address on file.");
-          return;
-        }
-        let portalUrl = "";
-        try {
-          const token = await billing.publicLink(d.id);
-          portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
-        } catch {
-          /* link optional */
-        }
-        // Attach the rendered invoice, same as the editor's Send. Best-effort:
-        // the summary and portal link still go out if rendering fails, but a
-        // list-row send is the common path and used to arrive with no document
-        // at all.
-        let attachments: { filename: string; content: string }[] | undefined;
-        try {
-          const [bankInfo, stampSig] = await Promise.all([
-            loadBankInfo().catch(() => EMPTY_BANK),
-            loadCompanyStampSig().catch(() => EMPTY_STAMP_SIG),
-          ]);
-          const base = doc.number || "invoice";
-          const pdf = await reactToPdfBytes(
-            <InvoiceExportSheet
-              form={docToExportForm(doc)}
-              companyStampSig={stampSig}
-              bank={bankInfo}
-            />,
-            base
-          );
-          attachments = [
-            { filename: `${base}.pdf`, content: bytesToBase64(pdf.bytes) },
-          ];
-        } catch {
-          /* attachment optional — never block the send on it */
-        }
-        await sendEmail({
-          to: doc.customer_email,
-          subject,
-          attachments,
-          html: emailShell(
-            subject,
-            `<p>Dear ${esc(doc.customer_name || "customer")},</p>
-             <p>Your ${esc(isPurchase ? "purchase invoice" : "invoice")} <b>${esc(
-               doc.number
-             )}</b> for <b>${esc(money(d.total, ccy))}</b> is ready.</p>
-             ${
-               portalUrl
-                 ? `<p style="margin:16px 0"><a href="${portalUrl}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>`
-                 : ""
-             }
-             <p>${esc(doc.notes ?? "")}</p>`
-          ),
-        });
-        toast.success(`Invoice emailed to ${doc.customer_email}`);
-        return;
-      }
-      shareVia(kind, {
-        phone,
-        email: doc.customer_email || "",
-        text,
-        // shareVia uses `url` as the mail subject for email shares.
-        url: subject,
-      });
-    } catch (e) {
-      toast.error(errMsg(e));
-    }
-  };
+
 
   // Email a payment reminder for every overdue invoice that has a customer
   // email — same sendEmail/emailShell path as the editor's Save & Send.
@@ -1145,8 +1134,7 @@ const editInvoice = async (id: number) => {
           }
           let portalUrl = "";
           try {
-            const token = await billing.publicLink(d.id);
-            portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+            portalUrl = await invoicePublicLink(d.id);
           } catch {
             /* link optional */
           }
@@ -1197,6 +1185,7 @@ const editInvoice = async (id: number) => {
 
   return (
     <div>
+      {messageDialog && <DocumentMessageDialog {...messageDialog} onClose={() => setMessageDialog(null)} />}
       <PageHeader
         title={isPurchase ? "Purchase Invoices" : "Invoicing"}
         subtitle={
@@ -1241,7 +1230,7 @@ const editInvoice = async (id: number) => {
         <MetricCard
           label="Paid"
           value={aed(paidTotal)}
-          change="Collected"
+          change={isPurchase ? "Paid to suppliers" : "Collected"}
           changeTone="up"
         />
         <MetricCard
@@ -1319,7 +1308,7 @@ const editInvoice = async (id: number) => {
         onShared={() => loadDocs()}
       />
 
-      <CustomerAdvancesPanel />
+      {!isPurchase && <CustomerAdvancesPanel />}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <SearchInput
@@ -1390,7 +1379,7 @@ const editInvoice = async (id: number) => {
                 icon: <FileText size={16} />,
               },
               {
-                label: "Collected",
+                label: isPurchase ? "Paid to suppliers" : "Collected",
                 value: aed(fPaid),
                 icon: <CheckCircle2 size={16} />,
               },
@@ -1404,12 +1393,22 @@ const editInvoice = async (id: number) => {
         </div>
       )}
 
+      {docsError && (
+        <div className="mb-4">
+          <ErrorBanner message="Could not refresh documents. Displayed records may be incomplete." />
+          <button className="btn-ghost mt-2" disabled={docsLoading} onClick={() => void loadDocs()}>
+            {docsLoading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
       <DataTable<InvoiceDocSummary>
         pageSize={10}
         rows={filteredDocs}
         loading={docsLoading}
         empty={
-          search || statusFilter !== "all"
+          docsError
+            ? "Documents could not be loaded"
+            : search || statusFilter !== "all"
             ? "No invoices match your filter"
             : "No invoices yet - create your first one"
         }
@@ -1443,8 +1442,7 @@ const editInvoice = async (id: number) => {
             label: "Copy public link",
             run: async (sel) => {
               try {
-                const token = await billing.publicLink(sel[0].id);
-                const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                const url = await invoicePublicLink(sel[0].id);
                 await navigator.clipboard.writeText(url);
                 loadDocs();
                 toast.success("Public invoice link copied");
@@ -1476,14 +1474,14 @@ const editInvoice = async (id: number) => {
             label: "Invoice #",
             sortValue: (d) => d.number,
             render: (d) => (
-              <span className="font-mono text-xs font-medium">{d.number}</span>
+              <span className="font-mono text-xs font-medium whitespace-nowrap">{d.number}</span>
             ),
           },
           {
             key: "cust",
             label: partyLabel,
             sortValue: (d) => d.customer_name,
-            render: (d) => <span className="font-medium">{d.customer_name}</span>,
+            render: (d) => <span className="font-medium block min-w-40 max-w-72">{d.customer_name}</span>,
           },
           {
             key: "tpl",
@@ -1496,7 +1494,7 @@ const editInvoice = async (id: number) => {
             label: "Total",
             sortValue: (d) => d.total,
             render: (d) => (
-              <span className="font-medium block text-right">
+              <span className="font-medium block text-right whitespace-nowrap">
                 {money(d.total, d.currency || "AED")}
               </span>
             ),
@@ -1530,7 +1528,7 @@ const editInvoice = async (id: number) => {
             key: "upd",
             label: "Date",
             sortValue: (d) => d.issue_date ?? "",
-            render: (d) => fmtDate(d.issue_date),
+            render: (d) => <span className="whitespace-nowrap">{fmtDate(d.issue_date)}</span>,
           },
           {
             key: "share",
@@ -1558,7 +1556,7 @@ const editInvoice = async (id: number) => {
                 <button
                   aria-label="Payments"
                   title="Record payment"
-                  className="rounded-xl p-1.5 text-brand-500 hover:bg-brand-100 hover:text-ink active:scale-95 cursor-pointer transition-colors duration-200"
+                  className="rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground cursor-pointer transition-colors duration-200"
                   onClick={() => setPayFor(d)}
                 >
                   <CreditCard size={15} />
@@ -1599,36 +1597,6 @@ const editInvoice = async (id: number) => {
 
       <ScanDocModal open={scanOpen} onClose={() => setScanOpen(false)} mode={mode} />
 
-      {/* Free-tier invoice cap - upgrade path instead of a bare error toast. */}
-      <Modal
-        open={capOpen}
-        onClose={() => setCapOpen(false)}
-        title="Free plan limit reached"
-      >
-        <p className="text-[13px] text-brand-500">
-          You've used all 20 invoices in this calendar month on the Free plan.
-          Upgrade to keep invoicing without interruption:
-        </p>
-        <ul className="mt-3 space-y-1.5 text-[13px] text-brand-500 list-disc pl-5">
-          <li>
-            <b className="text-ink">Offline</b>. One-time purchase, fully offline,
-            no monthly cap.
-          </li>
-          <li>
-            <b className="text-ink">Pro</b>. Cloud sync and multi-device, no monthly
-            cap.
-          </li>
-        </ul>
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn-ghost" onClick={() => setCapOpen(false)}>
-            Not now
-          </button>
-          <a href="#/settings?section=billing" className="btn-primary">
-            View plans
-          </a>
-        </div>
-      </Modal>
-
       {company && (
         <CompanyModal
           open={companyOpen}
@@ -1642,6 +1610,7 @@ const editInvoice = async (id: number) => {
               return {
                 ...prev,
                 seller_name: c.name,
+    tax_country_code: c.country_code,
                 seller_address: c.address ?? prev.seller_address,
                 seller_trn: c.trn ?? prev.seller_trn,
                 seller_email: c.email ?? prev.seller_email,
@@ -1677,7 +1646,7 @@ const editInvoice = async (id: number) => {
 
 /* ---------------- Payments ---------------- */
 
-function PaymentsModal({
+export function PaymentsModal({
   doc,
   onClose,
   onSaved,
@@ -1693,21 +1662,31 @@ function PaymentsModal({
   const [paidAt, setPaidAt] = useState(todayYmd());
   const [busy, setBusy] = useState(false);
 
-  const load = () => {
-    if (!doc) return;
-    billing
-      .payments(doc.id)
-      .then(setRows)
-      .catch(() => setRows([]));
-  };
-  useEffect(load, [doc?.id]);
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const paymentRequest = useRef(0);
+  const documentId = doc?.id;
+  const selectedDocument = useRef(documentId);
+  selectedDocument.current = documentId;
+  const load = useCallback(() => {
+    const generation = ++paymentRequest.current;
+    if (selectedDocument.current !== documentId) return;
+    setRows([]); setPaymentError(""); setPaymentsLoading(true);
+    if (!documentId) return;
+    const current = () => generation === paymentRequest.current && selectedDocument.current === documentId;
+    void billing.payments(documentId)
+      .then(rows => { if (current()) setRows(rows); })
+      .catch(error => { if (current()) setPaymentError("Could not load payments: " + errMsg(error)); })
+      .finally(() => { if (current()) setPaymentsLoading(false); });
+  }, [documentId]);
+  useEffect(() => { load(); }, [load]);
 
   const total = doc?.total ?? 0;
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
   const balance = Math.max(0, total - paid);
 
   const add = async () => {
-    if (!doc || amount <= 0) return;
+    if (!doc || amount <= 0 || busy || paymentsLoading || paymentError) return;
     setBusy(true);
     try {
       await billing.addPayment(doc.id, amount, method || null, paidAt);
@@ -1743,6 +1722,7 @@ function PaymentsModal({
   const ccy = doc.currency || "AED";
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments - ${doc.number}`}>
+      {paymentError && <div className="mb-3 space-y-2"><ErrorBanner message={paymentError} /><button className="btn-secondary" onClick={load}>Reload payments</button></div>}
       <div className="grid grid-cols-3 joined-kpis mb-4">
         <div className="rounded-xl bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Total</p>
@@ -1753,13 +1733,13 @@ function PaymentsModal({
         <div className="rounded-xl bg-success/10 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Paid</p>
           <p className="font-medium font-medium text-success tabular-nums">
-            {money(paid, ccy)}
+            {paymentsLoading || paymentError ? "—" : money(paid, ccy)}
           </p>
         </div>
         <div className="rounded-xl bg-primary-100 px-3 py-2.5">
           <p className="text-[11px] text-brand-500">Balance</p>
           <p className="font-medium font-medium text-ink tabular-nums">
-            {money(balance, ccy)}
+            {paymentsLoading || paymentError ? "—" : money(balance, ccy)}
           </p>
         </div>
       </div>
@@ -1791,7 +1771,7 @@ function PaymentsModal({
 
       <div className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
         <Field label="Amount">
-          <input
+          <input aria-label="Payment amount"
             type="number"
             className="input"
             placeholder="0"
@@ -1812,7 +1792,7 @@ function PaymentsModal({
             ]}
           />
         </Field>
-        <button className="btn-primary" disabled={busy || amount <= 0} onClick={add}>
+        <button className="btn-primary" disabled={busy || paymentsLoading || !!paymentError || amount <= 0} onClick={add}>
           <Plus size={15} /> Add
         </button>
       </div>
@@ -1845,7 +1825,7 @@ function InventoryImportModal({
         .products()
         .then(setProducts)
         .catch(() => toast.error("Failed to load products"));
-  }, [open]);
+  }, [open, toast]);
   const filtered = products.filter(
     (p) =>
       p.name.toLowerCase().includes(q.toLowerCase()) ||
@@ -1900,25 +1880,29 @@ function Editor({
   setForm,
   onBack,
   onSave,
+  onMessage,
   onFinalize,
   onRevertDraft,
   saving,
   onEditCompany,
   partyLabel,
+  supplierMode,
   docs,
 }: {
   form: Form;
   setForm: (f: Form) => void;
   onBack: () => void;
   onSave: () => Promise<number | undefined>;
+  onMessage: (channel: MessageChannel) => Promise<void>;
   onFinalize: () => void | Promise<void>;
   onRevertDraft: () => void;
   saving: boolean;
   onEditCompany: () => void;
   partyLabel: string;
+  supplierMode: boolean;
   docs: InvoiceDocSummary[];
 }) {
-  const { toast, confirm } = useUI();
+  const { toast } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
   // Off-screen container that renders EVERY page stacked as real A4 sheets —
   // captured for the PDF so the export contains all items (not just the page
@@ -1937,15 +1921,23 @@ function Editor({
     .slice(0, curPageIdx)
     .reduce((n, g) => n + g.length, 0);
   const isLastPreviewPage = curPageIdx === previewPages - 1;
-  const downloadPdf = () => {
-    const el = exportRef.current || invoiceRef.current;
-    if (el) {
-      downloadElementAsPdf(el, form.number || "invoice");
-    } else window.print();
+  const [downloading, setDownloading] = useState(false);
+  const downloadPdf = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const el = exportRef.current || invoiceRef.current;
+      if (!el) throw new Error("The invoice preview is not ready. Please try again.");
+      await downloadElementAsPdf(el, form.number || "invoice");
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setDownloading(false);
+    }
   };
   // Export the UAE e-Invoice (Peppol PINT-AE UBL) XML. Blocks on missing
   // mandatory fields; surfaces recommended-field gaps as a non-blocking note.
-  const exportXml = () => {
+  const exportXml = async () => {
     const v = validateEInvoice(form as never);
     if (v.errors.length) {
       toast.error(`Can't export e-Invoice XML - missing: ${v.errors.join(", ")}`);
@@ -1953,19 +1945,21 @@ function Editor({
     }
     const xml = buildInvoiceXml(form as never);
     const name = `${form.number || "invoice"}.xml`;
-    // Desktop: blob `<a download>` silently fails in the Tauri WebView2.
-    if (hasTauri) {
-      void saveBytes(name, new TextEncoder().encode(xml)).catch((e) =>
-        toast.error(`XML export failed: ${errMsg(e)}`)
-      );
-    } else {
-      const blob = new Blob([xml], { type: "application/xml" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(url);
+    try {
+      if (hasTauri) {
+        if (!(await saveBytes(name, new TextEncoder().encode(xml)))) return;
+      } else {
+        const blob = new Blob([xml], { type: "application/xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+      }
+    } catch (e) {
+      toast.error(`XML export failed: ${errMsg(e)}`);
+      return;
     }
     if (v.warnings.length)
       toast.info(`XML exported. Recommended fields still empty: ${v.warnings.join(", ")}`);
@@ -2006,32 +2000,7 @@ function Editor({
     custBalance.get((name || "").trim().toLowerCase()) || 0;
 
   const [designing, setDesigning] = useState(false);
-  const [customTemplates, setCustomTemplates] =
-    useState<CustomTemplate[]>(loadCustomTemplates);
-  // Pull templates saved on the user's other devices (Supabase-backed).
-  useEffect(() => {
-    syncCustomTemplates()
-      .then(setCustomTemplates)
-      .catch(() => {});
-  }, []);
-  const allTemplates = [
-    ...TEMPLATES,
-    ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
-  ];
-  const removeTpl = async (id: string, name: string) => {
-    if (
-      !(await confirm({
-        title: "Delete template",
-        message: `Delete custom template "${name}"? This cannot be undone.`,
-        confirmLabel: "Delete",
-        danger: true,
-      }))
-    )
-      return;
-    setCustomTemplates(deleteCustomTemplate(id));
-    if (form.template === id) set("template", "minimal");
-    toast.success("Template deleted.");
-  };
+  const [templateRevision, setTemplateRevision] = useState(0);
 
   const setItem = (idx: number, patch: Partial<Item>) => {
     const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
@@ -2115,6 +2084,9 @@ function Editor({
   };
 
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
+  const [vendors, setVendors] = useState<Supplier[]>([]);
+  const [partyError, setPartyError] = useState("");
+  const [loadingParties, setLoadingParties] = useState(true);
   const [custModal, setCustModal] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
@@ -2133,7 +2105,7 @@ function Editor({
       .catch(() => {});
   }, []);
   useEffect(() => {
-    if (!form.customer_id) {
+    if (supplierMode || !form.customer_id) {
       setAvailAdvance(0);
       return;
     }
@@ -2141,7 +2113,7 @@ function Editor({
       .creditForInvoice(form.customer_id, form.id)
       .then(setAvailAdvance)
       .catch(() => {});
-  }, [form.customer_id, form.id]);
+  }, [form.customer_id, form.id, supplierMode]);
   // Append an inventory product as an invoice line item (fills description &
   // unit price); drops a leftover empty row so the first import replaces it.
   const addItemFromProduct = (p: Product) => {
@@ -2164,14 +2136,35 @@ function Editor({
       ],
     });
   };
-  const loadCustomers = () =>
-    crm
-      .customers()
-      .then(setCustomers)
-      .catch(() => toast.error("Failed to load customers"));
+  const loadParties = async () => {
+    setPartyError("");
+    setLoadingParties(true);
+    try {
+      if (supplierMode) setVendors(await suppliers.list());
+      else setCustomers(await crm.customers());
+    } catch (error) {
+      setPartyError(`Could not load ${supplierMode ? "suppliers" : "customers"}: ${errMsg(error)}`);
+    } finally {
+      setLoadingParties(false);
+    }
+  };
   useEffect(() => {
-    loadCustomers();
-  }, []);
+    void loadParties();
+    // The directory changes only when this editor's document kind changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierMode]);
+
+  const applySupplier = (supplier: Supplier, countryCode?: string) =>
+    setForm({
+      ...form,
+      customer_id: undefined,
+      customer_name: supplier.name,
+      customer_address: supplier.address ?? "",
+      customer_email: supplier.email ?? "",
+      customer_trn: supplier.tax_id ?? "",
+      buyer_country_code: countryCode || form.buyer_country_code,
+      advance_applied: 0,
+    });
 
   const applyCustomer = (c: CrmCustomer) =>
     setForm({
@@ -2191,6 +2184,9 @@ function Editor({
     });
 
   const [viewAll, setViewAll] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const [lineOptions, setLineOptions] = useState(() => !!form.unit_price_formula || form.customColumns.length > 0 || form.items.some((item) => (item.discount || 0) > 0 || (item.calcMode && item.calcMode !== "auto") || (item.tax_category && item.tax_category !== DEFAULT_TAX_CATEGORY)));
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
@@ -2219,13 +2215,14 @@ function Editor({
 
   const [showDiscount, setShowDiscount] = useState((form.discount || 0) > 0);
   const m = (v: number) => money(v, form.currency || "AED");
-  const shown = viewAll ? allTemplates : allTemplates.slice(0, 5);
+  const invoiceTotals = applyRoundOff(docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula), !!form.round_off);
 
   const saveAndSend = async () => {
     const savedId = await onSave();
-    const effectiveId = savedId ?? form.id;
+    if (savedId === undefined) return;
+    const effectiveId = savedId;
     if (!form.customer_email) {
-      toast.error("Add a customer email (Invoice Details) to send this invoice.");
+      toast.error(`Add a ${partyLabel.toLowerCase()} email (Invoice Details) to send this invoice.`);
       return;
     }
     const t = applyRoundOff(
@@ -2235,8 +2232,7 @@ function Editor({
     let portalUrl = "";
     try {
       if (effectiveId) {
-        const token = await billing.publicLink(effectiveId);
-        portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+        portalUrl = await invoicePublicLink(effectiveId);
       }
     } catch {
       /* link optional */
@@ -2278,7 +2274,7 @@ function Editor({
              }
              ${
                (form.tax_rate || 0) > 0
-                 ? `<tr><td>${taxRegimeFor(form.currency).taxLabel} (${form.tax_rate}%)</td><td style="text-align:right">${m(
+                 ? `<tr><td>${taxRegimeFor(form.currency, form.tax_country_code).taxLabel} (${form.tax_rate}%)</td><td style="text-align:right">${m(
                      t.tax
                    )}</td></tr>`
                  : ""
@@ -2329,67 +2325,64 @@ function Editor({
 
   return (
     <div>
-      {/* header bar */}
-      <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
-        <div className="flex items-start gap-3">
-          <button
-            className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
-            onClick={onBack}
-            aria-label="Back"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div>
-            <h1 className="text-[22px] font-semibold text-foreground tracking-tight">Create Invoice</h1>
-            <p className="text-[13px] text-muted-foreground mt-0.5">
-              Create and send professional invoices to your customers
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge tone={statusTone(form.status)}>{form.status}</Badge>
-          {!form.id && (
-            <span className="text-xs font-medium text-brand-400">Unsaved</span>
-          )}
+      <PageHeader
+        title={form.id ? (partyLabel === "Supplier" ? "Edit Purchase Invoice" : "Edit Invoice") : (partyLabel === "Supplier" ? "New Purchase Invoice" : "New Invoice")}
+        subtitle={partyLabel === "Supplier" ? "Record a supplier invoice and its line items" : "Prepare an invoice for your customer"}
+        action={<div className="flex flex-wrap items-center gap-2">
+          <button className="btn-ghost" onClick={onBack} disabled={saving}><ArrowLeft size={15} /> Back</button>
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-            <Maximize2 size={15} /> View
+            <Maximize2 size={15} /> Preview
           </button>
           <button
             className="btn-ghost"
             onClick={downloadPdf}
+            disabled={downloading}
             title="Download PDF (Ctrl+P)"
           >
-            <Download size={15} /> PDF
+            <Download size={15} /> {downloading ? "Exporting…" : "Download PDF"}
           </button>
-          {/* Peppol PINT-AE is the UAE e-invoice — only meaningful for
-              documents under the UAE VAT regime. */}
-          {partyLabel !== "Supplier" && isUaeRegime(form.currency) && (
-            <button
-              className="btn-ghost"
-              onClick={exportXml}
-              title="Export UAE e-Invoice XML (Peppol PINT-AE)"
-            >
-              <FileCode size={15} /> XML
-            </button>
-          )}
           <button
-            className="btn-ghost"
+            className="btn-primary"
             onClick={onSave}
             disabled={saving}
             title="Save without sending (Ctrl+S)"
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
-          <button
-            className="btn-ghost"
+          <button ref={moreRef} className="btn-ghost" disabled={saving} aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={15} /> More</button>
+          <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
+            <div className="flex flex-col gap-1"
+              ref={(node) => { node?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); }}
+              onClick={(event) => { if ((event.target as HTMLElement).closest('button')) setMoreOpen(false); }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") { moreRef.current?.focus(); return; }
+                if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+              }}>
+          {/* Peppol PINT-AE is the UAE e-invoice — only meaningful for
+              documents under the UAE VAT regime. */}
+          {partyLabel !== "Supplier" && isUaeRegime(form.currency, form.tax_country_code) && (
+            <button role="menuitem"
+              className="btn-ghost justify-start w-full"
+              onClick={exportXml}
+              title="Export UAE e-Invoice XML (Peppol PINT-AE)"
+            >
+              <FileCode size={15} /> XML
+            </button>
+          )}
+          <button role="menuitem"
+            className="btn-ghost justify-start w-full"
             onClick={onEditCompany}
             title="Edit company details"
           >
             <Building2 size={15} /> Company
           </button>
           {form.status === "draft" ? (
-            <button
-              className="btn-primary"
+            <button role="menuitem"
+              className="btn-ghost justify-start w-full"
               onClick={handleFinalize}
               disabled={saving}
               title="Finalize: posts to Orders & Accounting, updates inventory for linked products, and shows in reports & the dashboard"
@@ -2397,8 +2390,8 @@ function Editor({
               <CheckCircle2 size={15} /> Mark as done
             </button>
           ) : (
-            <button
-              className="btn-ghost"
+            <button role="menuitem"
+              className="btn-ghost justify-start w-full"
               onClick={onRevertDraft}
               disabled={saving}
               title="Move this invoice back to draft"
@@ -2406,24 +2399,38 @@ function Editor({
               <Pencil size={15} /> Move to draft
             </button>
           )}
-          <button
-            className="btn-primary"
+          <button role="menuitem" className="btn-ghost justify-start w-full" disabled={saving} onClick={() => void onMessage("whatsapp")} title="Save and prepare the invoice for WhatsApp">
+            <MessageCircle size={15} /> WhatsApp
+          </button>
+          <button role="menuitem" className="btn-ghost justify-start w-full" disabled={saving} onClick={() => void onMessage("sms")} title="Save and prepare an invoice message">
+            <Smartphone size={15} /> Messages
+          </button>
+          <button role="menuitem"
+            className="btn-ghost justify-start w-full"
             onClick={saveAndSend}
             disabled={saving}
-            title="Save and email the invoice to the customer (Ctrl+Enter)"
+            title={`Save and email the invoice to the ${partyLabel.toLowerCase()} (Ctrl+Enter)`}
           >
-            <Send size={15} /> Send
+            <Send size={15} /> Email
           </button>
-        </div>
-      </div>
+            </div>
+          </MenuPopover>
+        </div>}
+      />
 
       <CustomerModal
         open={custModal}
+        supplierMode={supplierMode}
         onClose={() => setCustModal(false)}
         onSaved={(c) => {
           applyCustomer(c);
           setCustModal(false);
-          loadCustomers();
+          void loadParties();
+        }}
+        onSupplierSaved={(supplier, countryCode) => {
+          applySupplier(supplier, countryCode);
+          setCustModal(false);
+          void loadParties();
         }}
       />
 
@@ -2436,22 +2443,22 @@ function Editor({
         }}
       />
 
-            <ResizablePanels
+      <ResizablePanels
+        defaultCollapsed
         left={
           <div className="no-print space-y-4">
             
-          {/* 1 · Choose template */}
+          {/* Choose template */}
           <Step
-            n={1}
-            title="Choose Template"
-            subtitle="Select a template for your invoice"
+            title="Template"
+            subtitle="Choose a document layout"
             action={
               <div className="flex items-center gap-2">
                 <button
                   className="btn-ghost text-xs"
                   onClick={() => setViewAll((v) => !v)}
                 >
-                  {viewAll ? "Show less" : "View all templates"}
+                  {viewAll ? "Close templates" : "Browse templates"}
                 </button>
                 <button
                   className="btn-ghost text-xs flex items-center gap-1"
@@ -2462,90 +2469,45 @@ function Editor({
               </div>
             }
           >
-            <div
-              className={
-                viewAll
-                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3"
-                  : "flex gap-3 overflow-x-auto pb-1"
-              }
-            >
-              {shown.map((tpl) => {
-                const active = form.template === tpl.id;
-                const isCustom = tpl.id.startsWith("custom-");
-                const ct = isCustom ? customTemplates.find((c) => c.id === tpl.id) : null;
-                const isFile = ct?.type === "file";
-                return (
-                  <button
-                      key={tpl.id}
-                      onClick={() => set("template", tpl.id)}
-                      className={`group relative shrink-0 w-32 rounded-xl border-2 p-2 text-left transition-all cursor-pointer ${
-                        active
-                          ? "border-primary-400 bg-primary-50 "
-                          : "border-brand-100 bg-white hover:border-primary-300"
-                      }`}
-                    >
-                      {active && (
-                        <span className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-primary-400 text-ink grid place-items-center z-10">
-                          <Check size={11} strokeWidth={3} />
-                        </span>
-                      )}
-                      {isCustom && (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Delete template ${tpl.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeTpl(tpl.id, tpl.name);
-                          }}
-                          onKeyDown={keyActivate(() => removeTpl(tpl.id, tpl.name))}
-                          className="absolute top-1.5 left-1.5 z-20 grid h-5 w-5 place-items-center rounded-full bg-white/90 text-brand-400 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100 cursor-pointer shadow-sm border border-brand-100"
-                        >
-                          <Trash2 size={11} />
-                        </span>
-                      )}
-                      <TemplateTilePreview
-                        templateId={tpl.id}
-                        customTemplates={customTemplates}
-                      />
-                      <p className="text-xs font-medium text-ink mt-2 flex items-center gap-1">
-                        {tpl.name}
-                        {isFile ? (
-                          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-amber-100 text-amber-700 font-medium flex items-center gap-0.5">
-                            <Upload size={8} /> Uploaded
-                          </span>
-                        ) : isCustom ? (
-                          <span className="text-[9px] px-1 py-0.5 rounded-lg bg-primary-100 text-primary-700 font-medium">
-                            Custom
-                          </span>
-                        ) : null}
-                      </p>
-                    </button>
-                );
-              })}
-            </div>
+            <DocTemplateGallery
+              key={templateRevision}
+              hideHeader
+              value={form.template}
+              onChange={(id) => set("template", id)}
+              onDesign={() => setDesigning(true)}
+              docType="invoice"
+              viewAll={viewAll}
+              onViewAllToggle={setViewAll}
+            />
           </Step>
 
-          {/* 2 · Invoice details */}
-          <Step n={2} title="Invoice Details">
+          {/* Invoice details */}
+          <Step title="Invoice details" action={<Badge tone={statusTone(form.status)}>{form.status}</Badge>}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
                 <Field label={partyLabel}>
                   <div className="flex gap-2">
                     <SelectMenu
+                      ariaLabel={`Select saved ${partyLabel.toLowerCase()}`}
+                      disabled={loadingParties || !!partyError || saving}
                       value=""
                       onChange={(v) => {
+                        if (supplierMode) {
+                          const supplier = vendors.find((row) => String(row.id) === v);
+                          if (supplier) applySupplier(supplier);
+                          return;
+                        }
                         const c = customers.find((x) => String(x.id) === v);
                         if (c) applyCustomer(c);
                       }}
                       options={[
                         {
                           value: "",
-                          label: customers.length
-                            ? "Select saved customer…"
-                            : "No saved customers yet",
+                          label: loadingParties ? `Loading ${partyLabel.toLowerCase()}s…` : partyError ? "Directory unavailable" : (supplierMode ? vendors.length : customers.length)
+                            ? `Select saved ${partyLabel.toLowerCase()}…`
+                            : `No saved ${partyLabel.toLowerCase()}s yet`,
                         },
-                        ...customers.map((c) => {
+                        ...(supplierMode ? vendors.map((supplier) => ({ value: String(supplier.id), label: supplier.name })) : customers.map((c) => {
                           const bal = balFor(c.company || c.name);
                           return {
                             value: String(c.id),
@@ -2553,31 +2515,34 @@ function Editor({
                               bal > 0 ? ` · BAL ${Math.round(bal).toLocaleString()}` : ""
                             }`,
                           };
-                        }),
+                        })),
                       ]}
                     />
                     <button
                       type="button"
                       className="btn-ghost shrink-0"
                       onClick={() => setCustModal(true)}
-                      title="Add customer"
+                      title={`Add ${partyLabel.toLowerCase()}`}
+                      aria-label={`Add ${partyLabel.toLowerCase()}`}
+                      disabled={saving}
                     >
                       <Plus size={15} />
                     </button>
                   </div>
+                  {partyError && <div role="alert" className="mt-2 text-xs text-danger">{partyError} <button className="btn-ghost mt-2" onClick={() => { void loadParties(); }}>Retry directory</button></div>}
                 </Field>
                 <Field label={`${partyLabel} / Company Name`}>
-                  <input
+                  <input aria-label={`${partyLabel} name`}
                     className="input"
-                    placeholder="Gulf Line Trading LLC"
+                    placeholder={`${partyLabel} or company name`}
                     value={form.customer_name}
                     onChange={(e) => set("customer_name", e.target.value)}
                   />
                   {balFor(form.customer_name) > 0 &&
                     (() => {
                       const bal = balFor(form.customer_name);
-                      const limit = customers.find((c) => c.id === form.customer_id)
-                        ?.credit_limit;
+                      const limit = !supplierMode ? customers.find((c) => c.id === form.customer_id)
+                        ?.credit_limit : undefined;
                       const over = limit != null && limit > 0 && bal > limit;
                       return (
                         <p className={`text-xs mt-1 ${over ? "text-danger" : "text-brand-500"}`}>
@@ -2590,17 +2555,59 @@ function Editor({
                 <Field label="Billing Address">
                   <textarea
                     className="textarea"
-                    rows={4}
+                    rows={2}
                     placeholder="Street, City, Country"
                     value={form.customer_address ?? ""}
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
-                {form.customer_id != null &&
+                <Field label={`${partyLabel} Email / TRN`}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input aria-label={`${partyLabel} email`}
+                      className="input"
+                      placeholder="Email"
+                      value={form.customer_email ?? ""}
+                      onChange={(e) => set("customer_email", e.target.value)}
+                    />
+                    <input aria-label={`${partyLabel} tax registration number`}
+                      className="input"
+                      placeholder={taxRegimeFor(form.currency, form.tax_country_code).trnLabel}
+                      value={form.customer_trn ?? ""}
+                      onChange={(e) => set("customer_trn", e.target.value)}
+                    />
+                  </div>
+                </Field>
+                <Field label={`${partyLabel} City / Emirate / Country`}>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input aria-label={`${partyLabel} city`}
+                      className="input"
+                      placeholder="City"
+                      value={form.buyer_city ?? ""}
+                      onChange={(e) => set("buyer_city", e.target.value)}
+                    />
+                    <SelectMenu
+                      value={form.buyer_country_subdivision ?? ""}
+                      onChange={(v) => set("buyer_country_subdivision", v)}
+                      options={[
+                        { value: "", label: "Emirate…" },
+                        ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
+                      ]}
+                    />
+                    <input aria-label={`${partyLabel} country code`}
+                      className="input"
+                      placeholder="AE"
+                      value={form.buyer_country_code ?? ""}
+                      onChange={(e) =>
+                        set("buyer_country_code", e.target.value.toUpperCase())
+                      }
+                    />
+                  </div>
+                </Field>
+                {!supplierMode && form.customer_id != null &&
                   (availAdvance > 0 || (Number(form.advance_applied) || 0) > 0) && (
                     <Field label="Apply customer advance">
                       <div className="flex items-center gap-2">
-                        <input
+                        <input aria-label="Advance payment applied"
                           className="input"
                           type="number"
                           min={0}
@@ -2640,85 +2647,16 @@ function Editor({
                       </p>
                     </Field>
                   )}
-                <Field label={`${partyLabel} Email / TRN`}>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      className="input"
-                      placeholder="Email"
-                      value={form.customer_email ?? ""}
-                      onChange={(e) => set("customer_email", e.target.value)}
-                    />
-                    <input
-                      className="input"
-                      placeholder={taxRegimeFor(form.currency).trnLabel}
-                      value={form.customer_trn ?? ""}
-                      onChange={(e) => set("customer_trn", e.target.value)}
-                    />
-                  </div>
-                </Field>
-                <Field label={`${partyLabel} City / Emirate / Country`}>
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      className="input"
-                      placeholder="City"
-                      value={form.buyer_city ?? ""}
-                      onChange={(e) => set("buyer_city", e.target.value)}
-                    />
-                    <SelectMenu
-                      value={form.buyer_country_subdivision ?? ""}
-                      onChange={(v) => set("buyer_country_subdivision", v)}
-                      options={[
-                        { value: "", label: "Emirate…" },
-                        ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
-                      ]}
-                    />
-                    <input
-                      className="input"
-                      placeholder="AE"
-                      value={form.buyer_country_code ?? ""}
-                      onChange={(e) =>
-                        set("buyer_country_code", e.target.value.toUpperCase())
-                      }
-                    />
-                  </div>
-                </Field>
               </div>
-              <div className="space-y-3">
-                <Field label="Document Title">
-                  <input
-                    className="input"
-                    placeholder="INVOICE"
-                    value={form.doc_title || ""}
-                    list="doc-title-suggestions"
-                    onChange={(e) => set("doc_title", e.target.value)}
-                  />
-                  <datalist id="doc-title-suggestions">
-                    <option value="Tax Invoice" />
-                    <option value="Proforma Invoice" />
-                    <option value="Commercial Invoice" />
-                    <option value="Invoice" />
-                    <option value="Quotation" />
-                    <option value="Receipt" />
-                    <option value="Credit Note" />
-                    <option value="Debit Note" />
-                    <option value="Delivery Note" />
-                    <option value="Purchase Order" />
-                    <option value="Statement" />
-                  </datalist>
-                </Field>
+              <div className="grid grid-cols-2 gap-3 content-start">
                 <Field label="Invoice Number">
                   <div className="flex gap-2">
-                    <input
+                    <input aria-label="Invoice number"
                       className="input"
                       value={form.number}
                       onChange={(e) => set("number", e.target.value)}
                     />
-                    <span
-                      className="grid place-items-center rounded-xl border border-brand-200 px-2.5 text-brand-400"
-                      title="Numbering"
-                    >
-                      <Settings size={15} />
-                    </span>
+
                   </div>
                 </Field>
                 <Field label="Invoice Date">
@@ -2727,6 +2665,10 @@ function Editor({
                     onChange={(v) => set("issue_date", v)}
                     clearable={false}
                   />
+                </Field>
+                <Field label="Tax country">
+                  <SelectMenu value={form.tax_country_code || ""} onChange={v => setForm({ ...form, tax_country_code: v || undefined, template:v && v !== "AE" && /(^|-)uae($|-)/.test(form.template || "") ? "minimal" : form.template })}
+                    options={[{ value:"", label:"Legacy currency defaults" }, ...COUNTRY_OPTIONS]} />
                 </Field>
                 <Field label="Currency">
                   <SelectMenu
@@ -2765,6 +2707,51 @@ function Editor({
                     onChange={(v) => set("due_date", v)}
                   />
                 </Field>
+                {(form.currency || "AED") !== "AED" && (
+                  <Field label="Exchange Rate to AED (e-invoice)">
+                    <input aria-label="Exchange rate to AED"
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      className="input"
+                      placeholder={`1 ${form.currency || "AED"} = ? AED`}
+                      value={form.aed_exchange_rate ?? ""}
+                      onChange={(e) =>
+                        set(
+                          "aed_exchange_rate",
+                          e.target.value === "" ? null : Number(e.target.value)
+                        )
+                      }
+                    />
+                  </Field>
+                )}
+              </div>
+            </div>
+            <details className="group mt-3 border-t border-border pt-2">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">E-invoice details<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
+                <Field label="Document Title">
+                  <input aria-label="Document title"
+                    className="input"
+                    placeholder="INVOICE"
+                    value={form.doc_title || ""}
+                    list="doc-title-suggestions"
+                    onChange={(e) => set("doc_title", e.target.value)}
+                  />
+                  <datalist id="doc-title-suggestions">
+                    <option value="Tax Invoice" />
+                    <option value="Proforma Invoice" />
+                    <option value="Commercial Invoice" />
+                    <option value="Invoice" />
+                    <option value="Quotation" />
+                    <option value="Receipt" />
+                    <option value="Credit Note" />
+                    <option value="Debit Note" />
+                    <option value="Delivery Note" />
+                    <option value="Purchase Order" />
+                    <option value="Statement" />
+                  </datalist>
+                </Field>
                 <Field label="Date of Supply (optional)">
                   <DateField
                     value={form.date_of_supply ?? ""}
@@ -2772,7 +2759,7 @@ function Editor({
                   />
                 </Field>
                 <Field label="PO Number (optional)">
-                  <input
+                  <input aria-label="Purchase order number"
                     className="input"
                     placeholder="e.g. PO-2024-001"
                     value={form.po_number || ""}
@@ -2800,7 +2787,7 @@ function Editor({
                 ) && (
                   <>
                     <Field label="Original Invoice No. (credit/debit note)">
-                      <input
+                      <input aria-label="Original invoice number"
                         className="input"
                         placeholder="e.g. INV-2026-001"
                         value={form.original_invoice_number || ""}
@@ -2808,7 +2795,7 @@ function Editor({
                       />
                     </Field>
                     <Field label="Original Invoice Date">
-                      <input
+                      <input aria-label="Original invoice date"
                         type="date"
                         className="input"
                         value={form.original_invoice_date || ""}
@@ -2816,24 +2803,6 @@ function Editor({
                       />
                     </Field>
                   </>
-                )}
-                {(form.currency || "AED") !== "AED" && (
-                  <Field label="Exchange Rate to AED (e-invoice)">
-                    <input
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      className="input"
-                      placeholder={`1 ${form.currency || "AED"} = ? AED`}
-                      value={form.aed_exchange_rate ?? ""}
-                      onChange={(e) =>
-                        set(
-                          "aed_exchange_rate",
-                          e.target.value === "" ? null : Number(e.target.value)
-                        )
-                      }
-                    />
-                  </Field>
                 )}
                 <Field label="Payment Means (e-invoice)">
                   <SelectMenu
@@ -2890,19 +2859,30 @@ function Editor({
                   The PDF is the human-readable copy your customer sees. Under the
                   FTA e-invoicing mandate (MD 243/2025), the legal invoice is the
                   PINT-AE XML exchanged via your accredited service provider —
-                  export it with the XML button in the toolbar above.
+                  export it from More → XML.
                 </p>
               </div>
-            </div>
+            </details>
           </Step>
 
-          {/* 3 · Items */}
-          <Step n={3} title="Items">
-            <div className="rounded-xl border border-brand-200 p-3 mb-3">
+          {/* Items */}
+          <Step title="Items" action={
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                {taxRegimeFor(form.currency, form.tax_country_code).taxLabel} %
+                <input aria-label="Document tax rate percent" type="number" min="0" max="100" className="input w-20 text-right" value={form.tax_rate} onChange={(e) => set("tax_rate", Math.min(100, Math.max(0, numInput(e.target.value))))} />
+              </label>
+              <button type="button" className="btn-ghost" aria-expanded={lineOptions} onClick={() => setLineOptions((open) => !open)}>Line options<ChevronDown size={15} className={lineOptions ? "rotate-180" : ""} /></button>
+            </div>
+          }>
+            <div hidden={!lineOptions} className="rounded-xl border border-border p-3 mb-3">
               <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 mb-2">
                 Multiply field with unit price
                 <button
                   type="button"
+                  role="switch"
+                  aria-label="Multiply field with unit price"
+                  aria-checked={!!form.unit_price_formula}
                   onClick={() =>
                     set(
                       "unit_price_formula",
@@ -2947,23 +2927,23 @@ function Editor({
               )}
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[640px] text-sm [&_th]:whitespace-nowrap">
                 <thead>
                   <tr className="text-left text-xs font-semibold text-brand-500">
                     <th className="py-2 pr-2 w-6">#</th>
-                    <th className="py-2 px-2">Description</th>
-                    <th className="py-2 px-2 w-24 text-right">Qty</th>
-                    <th className="py-2 px-2 w-24 text-right">Unit</th>
-                    <th className="py-2 px-2 w-28 text-right">Calc</th>
+                    <th className="py-2 px-2 min-w-48">Description</th>
+                    <th className="py-2 px-2 w-24 min-w-24 text-right">Qty</th>
+                    <th className="py-2 px-2 w-24 min-w-24 text-right">Unit</th>
+                    <th hidden={!lineOptions} className="py-2 px-2 w-28 min-w-28 text-right">Calc</th>
                     {(form.tax_rate || 0) > 0 && (
-                      <th className="py-2 px-2 w-16 text-right" title="Tax category">
+                      <th hidden={!lineOptions} className="py-2 px-2 w-16 min-w-16 text-right" title="Tax category">
                         Tax
                       </th>
                     )}
                     {form.customColumns.map((col, idx) => (
                       <th
                         key={col.key}
-                        className="py-2 px-2 text-right group relative cursor-grab active:cursor-grabbing"
+                        className="py-2 px-2 min-w-28 text-right group relative cursor-grab active:cursor-grabbing"
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData("text/plain", col.key);
@@ -3003,12 +2983,12 @@ function Editor({
                         </button>
                       </th>
                     ))}
-                    <th className="py-2 px-2 w-32 text-right">Unit Price</th>
-                    <th className="py-2 px-2 w-20 text-right" title="Per-line discount %">
+                    <th className="py-2 px-2 w-32 min-w-32 text-right">Unit Price</th>
+                    <th hidden={!lineOptions} className="py-2 px-2 w-20 min-w-20 text-right" title="Per-line discount %">
                       Disc %
                     </th>
                     {(form.tax_rate || 0) > 0 && (
-                      <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency).taxLabel}</th>
+                      <th className="py-2 px-2 w-24 text-right">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel}</th>
                     )}
                     <th className="py-2 px-2 w-28 text-right">Amount</th>
                     <th className="w-8" />
@@ -3024,7 +3004,7 @@ function Editor({
                         )}
                       </td>
                       <td className="py-2 px-2">
-                        <input
+                        <input aria-label={"Description for line " + (i + 1)}
                           className="input"
                           placeholder="Item description"
                           value={it.description}
@@ -3032,7 +3012,7 @@ function Editor({
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <input
+                        <input aria-label={"Quantity for line " + (i + 1)}
                           type="number"
                           className="input text-right !px-2"
                           value={it.qty || ""}
@@ -3051,7 +3031,7 @@ function Editor({
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <input
+                        <input aria-label={"Unit for line " + (i + 1)}
                           className="input text-right !px-2"
                           placeholder="pcs"
                           value={it.unit || ""}
@@ -3059,7 +3039,7 @@ function Editor({
                           onChange={(e) => setItem(i, { unit: e.target.value })}
                         />
                       </td>
-                      <td className="py-2 px-2">
+                      <td hidden={!lineOptions} className="py-2 px-2">
                         <SelectMenu
                           value={
                             it.calcMode === "manual"
@@ -3106,7 +3086,7 @@ function Editor({
                         />
                       </td>
                       {(form.tax_rate || 0) > 0 && (
-                        <td className="py-2 px-2">
+                        <td hidden={!lineOptions} className="py-2 px-2">
                           <SelectMenu
                             ariaLabel="UAE e-invoice tax category"
                             value={it.tax_category || DEFAULT_TAX_CATEGORY}
@@ -3120,7 +3100,7 @@ function Editor({
                       )}
                       {form.customColumns.map((col) => (
                         <td key={col.key} className="py-2 px-2">
-                          <input
+                          <input aria-label={col.label + " for line " + (i + 1)}
                             className="input text-right !px-2 !py-1 text-xs"
                             placeholder={col.label}
                             value={it.custom?.[col.key] || ""}
@@ -3129,7 +3109,7 @@ function Editor({
                         </td>
                       ))}
                       <td className="py-2 px-2">
-                        <input
+                        <input aria-label={"Unit price for line " + (i + 1)}
                           type="number"
                           className={`input text-right !px-2 ${
                             it.calcMode !== "manual" &&
@@ -3146,8 +3126,8 @@ function Editor({
                           }
                         />
                       </td>
-                      <td className="py-2 px-2">
-                        <input
+                      <td hidden={!lineOptions} className="py-2 px-2">
+                        <input aria-label={"Discount percent for line " + (i + 1)}
                           type="number"
                           min="0"
                           max="100"
@@ -3175,7 +3155,7 @@ function Editor({
                       )}
                       <td className="py-2 px-2 text-right font-medium text-ink">
                         {it.calcMode === "manual" ? (
-                          <input
+                          <input aria-label={"Line amount for line " + (i + 1)}
                             type="number"
                             className="input text-right !px-2"
                             placeholder="0"
@@ -3284,7 +3264,7 @@ function Editor({
               </div>
             )}
             <div className="flex flex-wrap gap-2 mt-3">
-              <button className="btn-primary" onClick={addItem}>
+              <button className="btn-ghost" onClick={addItem}>
                 <Plus size={14} /> Add item
               </button>
               <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
@@ -3340,7 +3320,7 @@ function Editor({
             {showDiscount && (
               <div className="mt-3 max-w-xs">
                 <Field label="Discount (amount)">
-                  <input
+                  <input aria-label="Document discount"
                     type="number"
                     className="input"
                     placeholder="0"
@@ -3352,10 +3332,21 @@ function Editor({
             )}
           </Step>
 
-          {/* 4 · Branding & finalize */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
+            <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
+              <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
+              {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
+              <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>
+              {!!invoiceTotals.round_off && <span className="text-muted-foreground">Rounding <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.round_off)}</strong></span>}
+              <span>Total <strong className="ml-1 text-base">{m(invoiceTotals.total)}</strong></span>
+              {(Number(form.advance_applied) || 0) > 0 && <span>After advance <strong className="ml-1 text-base">{m(Math.max(0, invoiceTotals.total - Number(form.advance_applied)))}</strong></span>}
+            </div>
+          </div>
+          {/* Branding */}
           <Step
-            n={4}
-            title="Branding & finalize"
+            collapsed
+            title="Branding"
             subtitle="Logo, bank details, stamp and signature on the printed invoice"
           >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3395,14 +3386,14 @@ function Editor({
                 }
                 active={!!form.show_stamp}
                 onToggle={() => {
-                  if (!companyStampSig.stamp?.data) return;
+                  if (!form.stamp?.data && !companyStampSig.stamp?.data) return;
                   const on = !form.show_stamp;
                   setForm({
                     ...form,
                     show_stamp: on,
                     stamp:
                       on && !form.stamp?.data && companyStampSig.stamp?.data
-                        ? { ...companyStampSig.stamp }
+                        ? { ...companyStampSig.stamp, opacity: 100 }
                         : form.stamp,
                   });
                 }}
@@ -3430,14 +3421,14 @@ function Editor({
                 }
                 active={!!form.show_signature}
                 onToggle={() => {
-                  if (!companyStampSig.signature?.data) return;
+                  if (!form.signature?.data && !companyStampSig.signature?.data) return;
                   const on = !form.show_signature;
                   setForm({
                     ...form,
                     show_signature: on,
                     signature:
                       on && !form.signature?.data && companyStampSig.signature?.data
-                        ? { ...companyStampSig.signature }
+                        ? { ...companyStampSig.signature, opacity: 100 }
                         : form.signature,
                   });
                 }}
@@ -3460,55 +3451,14 @@ function Editor({
             </div>
           </Step>
 
-          {/* 5 · Additional settings */}
-          <Step n={4} title="Additional Settings">
+          {/* Additional settings */}
+          <Step collapsed title="Notes and document settings" subtitle="Terms, status and logo">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="rounded-xl border border-border p-4">
                 <div className="flex items-center gap-2 text-ink font-semibold text-sm">
                   <Settings size={15} /> Invoice Settings
                 </div>
                 <div className="mt-3 space-y-2">
-                  <div>
-                    <p className="text-xs font-semibold text-brand-500 mb-1.5">Apply VAT</p>
-                    <div className="flex rounded-xl bg-brand-50 p-0.5">
-                      {(
-                        [
-                          ["Yes", true],
-                          ["No", false],
-                        ] as const
-                      ).map(([lbl, on]) => {
-                        const active = (form.tax_rate || 0) > 0 === on;
-                        return (
-                          <button
-                            key={lbl}
-                            type="button"
-                            onClick={() =>
-                              set(
-                                "tax_rate",
-                                on ? (form.tax_rate > 0 ? form.tax_rate : 5) : 0
-                              )
-                            }
-                            className={`flex-1 rounded-lg px-2.5 py-1 text-xs font-semibold cursor-pointer transition-colors ${
-                              active
-                                ? "bg-background text-foreground shadow-sm"
-                                : "text-brand-500 hover:text-ink"
-                            }`}
-                          >
-                            {lbl}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {(form.tax_rate || 0) > 0 && (
-                    <input
-                      type="number"
-                      className="input"
-                      placeholder={`${taxRegimeFor(form.currency).taxLabel} rate %`}
-                      value={form.tax_rate}
-                      onChange={(e) => set("tax_rate", numInput(e.target.value))}
-                    />
-                  )}
                   {/* These must be the statuses the rest of the app understands.
                       "issued"/"cancelled" used to be offered here: saveDoc only
                       posts to Orders/Inventory/Accounting on "sent", so picking
@@ -3598,19 +3548,6 @@ function Editor({
         right={
           <div className="sticky top-4 space-y-4">
             
-          {/* Template Designer - shown above preview when creating */}
-          {designing && (
-            <TemplateDesigner
-              onSave={(tpl) => {
-                setCustomTemplates((prev) => [...prev, tpl]);
-                // Select the new template immediately
-                set("template", tpl.id);
-                setDesigning(false);
-              }}
-              onClose={() => setDesigning(false)}
-            />
-          )}
-
           {/* Live Preview - always visible */}
           <div className="card !p-4">
             <div className="no-print flex items-center justify-between mb-3">
@@ -3705,7 +3642,7 @@ function Editor({
             {previewPages > 1 && (
               <div className="no-print flex items-center justify-center gap-2 mt-2">
                 <button
-                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  className="btn-ghost"
                   disabled={previewPage <= 1}
                   onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
                 >
@@ -3715,7 +3652,7 @@ function Editor({
                   Page {previewPage} / {previewPages}
                 </span>
                 <button
-                  className="btn-ghost h-8 px-3 text-xs disabled:opacity-40"
+                  className="btn-ghost"
                   disabled={previewPage >= previewPages}
                   onClick={() => setPreviewPage((p) => Math.min(previewPages, p + 1))}
                 >
@@ -3724,63 +3661,26 @@ function Editor({
               </div>
             )}
 
-            <div className="no-print flex items-center justify-between mt-3 gap-2 flex-wrap">
-              <div className="flex items-center gap-1 rounded-xl bg-brand-50 p-1">
-                <button
-                  className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                    device === "desktop"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-brand-500 hover:text-ink"
-                  }`}
-                  onClick={() => setDevice("desktop")}
-                  aria-label="Desktop preview"
-                >
-                  <Monitor size={15} />
-                </button>
-                <button
-                  className={`rounded-lg p-1.5 cursor-pointer transition-colors ${
-                    device === "mobile"
-                      ? "bg-primary-100 text-primary-700"
-                      : "text-brand-500 hover:text-ink"
-                  }`}
-                  onClick={() => setDevice("mobile")}
-                  aria-label="Mobile preview"
-                >
-                  <Smartphone size={15} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
-                  aria-label="Zoom out"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="text-xs font-semibold text-brand-500 w-10 text-center">
-                  {zoom}%
-                </span>
-                <button
-                  className="rounded-lg border border-brand-200 p-1.5 text-brand-500 cursor-pointer hover:bg-brand-50 transition-colors"
-                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
-                  aria-label="Zoom in"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="btn-ghost text-xs" onClick={onSave} disabled={saving}>
-                  <Save size={14} /> Save
-                </button>
-                <button className="btn-primary text-xs" onClick={downloadPdf}>
-                  <Download size={14} /> PDF
-                </button>
-              </div>
-            </div>
+            <DocumentPreviewControls device={device} onDeviceChange={setDevice} zoom={zoom} onZoomChange={setZoom}>
+              <button className="btn-ghost" onClick={downloadPdf} disabled={downloading}><Download size={15} /> {downloading ? "Exporting…" : "PDF"}</button>
+              <button className="btn-primary" onClick={onSave} disabled={saving}><Save size={15} /> {saving ? "Saving…" : "Save"}</button>
+            </DocumentPreviewControls>
           </div>
           </div>
         }
       />
+
+      {designing && (
+          <TemplateDesigner
+            inDialog
+            onSave={(tpl) => {
+              setTemplateRevision((revision) => revision + 1);
+              set("template", tpl.id);
+              setDesigning(false);
+            }}
+            onClose={() => setDesigning(false)}
+          />
+      )}
 
       {/* Off-screen full render: every page stacked as a real A4 sheet.
           Always mounted so PDF export works even when the preview panel is collapsed.
@@ -3803,70 +3703,20 @@ function Editor({
         />
       </div>
 
-      {/* Portaled: the page renders inside <main>, which scrolls, and WebView2
-          composites a `fixed` overlay into its scrolling ancestor's layer and
-          then repaints only part of it. */}
-      {viewOpen && createPortal(
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-4"
-          onClick={() => setViewOpen(false)}
-        >
-          <div
-            className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border outline-none shadow-lg"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">
-              <div className="flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-ink">
-                  {form.number || "Invoice preview"}
-                </h2>
-                <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
-                  Page {viewPage} of {viewPageCount}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {viewPageCount > 1 && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                      disabled={viewPage <= 1}
-                      onClick={() => setViewPage((p) => Math.max(1, p - 1))}
-                    >
-                      Prev
-                    </button>
-                    <span className="text-xs text-brand-500 font-medium w-16 text-center">
-                      {viewPage} / {viewPageCount}
-                    </span>
-                    <button
-                      className="btn-ghost h-8 px-2 text-xs disabled:opacity-40"
-                      disabled={viewPage >= viewPageCount}
-                      onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-                <button className="btn-ghost h-9 text-xs" onClick={downloadPdf}>
-                  <Download size={14} /> PDF
-                </button>
-                <button
-                  onClick={() => setViewOpen(false)}
-                  className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
-                  aria-label="Close"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto p-6">
-              <div className="mx-auto max-w-5xl">
-                <div
-                  data-no-i18n
-                  dir="ltr"
-                  className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                >
-                  <div style={{ position: "relative", minHeight: 1059 }}>
-                    <StampSignatureLayer
+      <Modal open={viewOpen} onClose={() => setViewOpen(false)} title={form.number || "Invoice preview"} size="document">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm text-muted-foreground">Page {viewPage} of {viewPageCount}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {viewPageCount > 1 && <>
+              <button className="btn-ghost" disabled={viewPage <= 1} onClick={() => setViewPage((p) => Math.max(1, p - 1))}>Previous page</button>
+              <button className="btn-ghost" disabled={viewPage >= viewPageCount} onClick={() => setViewPage((p) => Math.min(viewPageCount, p + 1))}>Next page</button>
+            </>}
+            <button className="btn-ghost" onClick={downloadPdf} disabled={downloading}><Download size={15} /> {downloading ? "Exporting…" : "PDF"}</button>
+          </div>
+        </div>
+            <FitPreview baseWidth={794} zoom={100} zoomable>
+                  <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
+                    {isLastViewPage && <StampSignatureLayer
                       stamp={
                         form.show_stamp
                           ? form.stamp?.data
@@ -3891,7 +3741,7 @@ function Editor({
                           : companyStampSig.signature;
                         if (base) setForm({ ...form, signature: { ...base, x, y } });
                       }}
-                    />
+                    />}
                     <DocView
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
@@ -3912,45 +3762,27 @@ function Editor({
                       </DraggableBlock>
                     )}
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+            </FitPreview>
+      </Modal>
     </div>
   );
 }
 
-function Step({
-  n,
-  title,
-  subtitle,
-  action,
-  children,
-}: {
-  n: number;
+function Step({ title, subtitle, action, children, collapsed = false }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
+  collapsed?: boolean;
 }) {
-  return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="px-5 py-4 border-b border-border flex items-center gap-3 flex-wrap">
-        <span className="w-7 h-7 rounded-full bg-foreground text-background grid place-items-center text-[13px] font-semibold shrink-0">
-          {n}
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-semibold text-foreground leading-tight">{title}</p>
-          {subtitle && <p className="text-[12.5px] text-muted-foreground mt-0.5">{subtitle}</p>}
-        </div>
-        {action}
-      </div>
-      <div className="p-5">{children}</div>
-    </div>
+  const heading = <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-foreground">{title}</h2>{subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}</div>;
+  if (collapsed) return (
+    <details className="group rounded-xl border border-border bg-card">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 px-5 py-3 [&::-webkit-details-marker]:hidden">{heading}<ChevronDown size={16} className="shrink-0 text-muted-foreground group-open:rotate-180" /></summary>
+      <div className="border-t border-border p-5">{action && <div className="mb-4 flex justify-end">{action}</div>}{children}</div>
+    </details>
   );
+  return <section className="rounded-xl border border-border bg-card"><div className="flex flex-col items-start gap-3 px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center">{heading}{action}</div><div className="px-5 pb-5">{children}</div></section>;
 }
 
 /* ---------------- Customer modal (UAE FTA) ---------------- */
@@ -3959,10 +3791,14 @@ function CustomerModal({
   open,
   onClose,
   onSaved,
+  supplierMode,
+  onSupplierSaved,
 }: {
   open: boolean;
   onClose: () => void;
   onSaved: (c: CrmCustomer) => void;
+  supplierMode: boolean;
+  onSupplierSaved: (supplier: Supplier, countryCode?: string) => void;
 }) {
   const { toast } = useUI();
   const [f, setF] = useState({
@@ -3972,6 +3808,7 @@ function CustomerModal({
     email: "",
     phone: "",
     trn: "",
+    country_code: "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -3984,36 +3821,37 @@ function CustomerModal({
         email: "",
         phone: "",
         trn: "",
+    country_code: "",
       });
-  }, [open]);
+  }, [open, supplierMode]);
 
-  const trnValid = !f.trn || /^\d{15}$/.test(f.trn.replace(/\s/g, ""));
+  const trnError = taxIdError(f.trn, f.country_code);
+  const trnValid = !trnError;
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Customer">
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title={supplierMode ? "Add supplier" : "Add customer"}>
       <p className="text-xs text-brand-500 -mt-2 mb-4">
-        UAE FTA tax invoices require the customer's legal name, address and 15-digit TRN
-        for B2B supplies.
+        Enter the {supplierMode ? "supplier's" : "customer's"} legal name and country. Tax ID formats depend on the registration country.
       </p>
-      <div className="space-y-3">
+      <fieldset disabled={saving} className="space-y-3">
         <Field label="Company / Legal Name">
-          <input
+          <input aria-label="Company name"
             className="input"
             placeholder="Gulf Line Trading LLC"
             value={f.company}
             onChange={(e) => setF({ ...f, company: e.target.value })}
           />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Contact Name">
-            <input
+            <input aria-label="Contact name"
               className="input"
               value={f.name}
               onChange={(e) => setF({ ...f, name: e.target.value })}
             />
           </Field>
           <Field label="Phone">
-            <input
+            <input aria-label="Phone number"
               className="input"
               value={f.phone}
               onChange={(e) => setF({ ...f, phone: e.target.value })}
@@ -4028,35 +3866,37 @@ function CustomerModal({
             onChange={(e) => setF({ ...f, address: e.target.value })}
           />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Email">
-            <input
+            <input aria-label="Email address"
               className="input"
               value={f.email}
               onChange={(e) => setF({ ...f, email: e.target.value })}
             />
           </Field>
-          <Field label={`${taxRegimeFor(getDisplayCurrency()).trnLabel} (15 digits)`}>
-            <input
+          <Field label="Country"><SelectMenu value={f.country_code} onChange={v => setF({ ...f, country_code:v })} options={[{value:"", label:"Select country"}, ...COUNTRY_OPTIONS]} /></Field>
+          <Field label={taxRegimeFor(undefined, f.country_code).trnLabel}>
+            <input aria-label="Tax registration number"
               className="input"
-              placeholder="100000000000003"
+              placeholder="Tax registration ID"
               value={f.trn}
               onChange={(e) => setF({ ...f, trn: e.target.value })}
             />
           </Field>
         </div>
         {!trnValid && (
-          <p className="text-xs text-danger">{taxRegimeFor(getDisplayCurrency()).trnLabel} must be exactly 15 digits.</p>
+          <p className="text-xs text-danger">{trnError}</p>
         )}
-      </div>
+      </fieldset>
       <div className="flex justify-end gap-2 mt-5">
-        <button className="btn-ghost" onClick={onClose}>
+        <button className="btn-ghost" onClick={onClose} disabled={saving}>
           Cancel
         </button>
         <button
           className="btn-primary"
           disabled={saving || (!f.company.trim() && !f.name.trim()) || !trnValid}
           onClick={async () => {
+            if (saving) return;
             setSaving(true);
             const trn = f.trn.replace(/\s/g, "");
             const payload = {
@@ -4066,8 +3906,23 @@ function CustomerModal({
               phone: f.phone || undefined,
               address: f.address || undefined,
               trn: trn || undefined,
+              country_code: f.country_code || undefined,
             };
             try {
+              if (supplierMode) {
+                const supplierFields = {
+                  name: f.company.trim() || f.name.trim(),
+                  contact_person: f.name.trim() || undefined,
+                  email: f.email.trim() || undefined,
+                  phone: f.phone.trim() || undefined,
+                  address: f.address.trim() || undefined,
+                  tax_id: trn || undefined,
+                };
+                const id = await suppliers.create(supplierFields);
+                // Country is a bill snapshot; suppliers has no country column.
+                onSupplierSaved({ id, created_at: "", ...supplierFields }, f.country_code || undefined);
+                return;
+              }
               // createCustomer returns the new row id. Use it for the FK
               // instead of fabricating an { id: 0 } record (which persisted a
               // wrong customer_id on the invoice until the user re-picked).
@@ -4076,13 +3931,13 @@ function CustomerModal({
               );
               onSaved({ id, created_at: "", ...payload } as CrmCustomer);
             } catch (e) {
-              toast.error(e instanceof Error ? e.message : "Failed to create customer");
+              toast.error(e instanceof Error ? e.message : `Failed to create ${supplierMode ? "supplier" : "customer"}`);
             } finally {
               setSaving(false);
             }
           }}
         >
-          {saving ? "Saving…" : "Save Customer"}
+          {saving ? "Saving…" : supplierMode ? "Create supplier" : "Create customer"}
         </button>
       </div>
     </Modal>
@@ -4090,4 +3945,3 @@ function CustomerModal({
 }
 
 /* ---------------- Company modal ---------------- */
-

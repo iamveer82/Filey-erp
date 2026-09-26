@@ -1,27 +1,22 @@
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { supabase, cloudConfigured } from "../../lib/supabase";
-import { isLocalMode } from "../../lib/dataMode";
-import { cloudSessionEmail } from "../../lib/sync";
 import { useAuth } from "../../lib/auth";
 import { useUI } from "../../lib/ui";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Check, Eye, EyeOff, Pencil } from "lucide-react";
 import { Badge, FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
 import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
+import { checkPassword, strengthLabel } from "../../lib/password";
 
 /* ---------------- Account & Profile ---------------- */
 
-const PW_RULES = [
-  { label: "At least 8 characters", test: (p: string) => p.length >= 8 },
-  {
-    label: "Contains uppercase and lowercase letters",
-    test: (p: string) => /[a-z]/.test(p) && /[A-Z]/.test(p),
-  },
-  {
-    label: "Contains a number or special character",
-    test: (p: string) => /[0-9!@#$%^&*]/.test(p),
-  },
-];
+// The composition rules that used to live here (mixed case, a digit or symbol)
+// are gone. They are what NIST SP 800-63B tells you not to do: they rule out
+// "correct horse battery staple" and wave through "Passw0rd1", and they were
+// stricter than signup, so a password accepted at the front door was refused
+// here. One policy now, in lib/password.
 
 function PwInput({
   val,
@@ -45,8 +40,9 @@ function PwInput({
       <button
         type="button"
         onClick={toggle}
-        aria-label="Toggle visibility"
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-400 cursor-pointer"
+        aria-label={shown ? "Hide password" : "Show password"}
+        aria-pressed={shown}
+        className="absolute right-0 top-0 grid h-10 w-10 place-items-center rounded-full text-muted-foreground cursor-pointer hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {shown ? <EyeOff size={15} /> : <Eye size={15} />}
       </button>
@@ -55,7 +51,8 @@ function PwInput({
 }
 
 export default function AccountProfile() {
-  const { profile, user, updateProfile, signInWithPassword } = useAuth();
+  const { profile, updateProfile, signInWithPassword, refreshMfaPending } =
+    useAuth();
   const { toast, prompt } = useUI();
   const [p, setP] = useState({
     name: profile?.name ?? "",
@@ -67,7 +64,7 @@ export default function AccountProfile() {
     date_format: profile?.date_format ?? "DD MMM, YYYY",
     time_format: profile?.time_format ?? "12 Hour (02:30 PM)",
   });
-  const set = (k: keyof typeof p, v: string) => setP({ ...p, [k]: v });
+  const set = (k: keyof typeof p, v: string) => setP(current => ({ ...current, [k]: v }));
   const avatarRef = useRef<HTMLInputElement>(null);
   const [savedProfile, setSavedProfile] = useState(false);
   const [savedPrefs, setSavedPrefs] = useState(false);
@@ -87,9 +84,9 @@ export default function AccountProfile() {
   // with no email_confirmed_at — reading verification from it always shows
   // "Unverified" even for a fully confirmed account. Read from the real
   // Supabase session instead.
-  const verified = !!(supabase && !isLocalMode() && (user as any)?.email_confirmed_at);
+  const [verified, setVerified] = useState(false);
 
-  const onAvatar = (file?: File) => {
+  const onAvatar = async (file?: File) => {
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       toast.error("Avatar must be under 2 MB — pick a smaller image.");
@@ -99,9 +96,23 @@ export default function AccountProfile() {
       toast.error("Pick an image file (PNG, JPG, etc.).");
       return;
     }
-    const r = new FileReader();
-    r.onload = () => set("avatar", String(r.result));
-    r.readAsDataURL(file);
+    try {
+      const image = await createImageBitmap(file);
+      try {
+        // Profile photos appear in small avatars. Keep their source bounded so
+        // profile reads and the offline retry queue don't carry megapixel files.
+        const scale = Math.min(1, 512 / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Image processing is unavailable.");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        set("avatar", canvas.toDataURL("image/webp", 0.85));
+      } finally { image.close(); }
+    } catch {
+      toast.error("Could not read that photo. Try a PNG or JPG image.");
+    }
   };
 
   // ---- password ----
@@ -112,7 +123,6 @@ export default function AccountProfile() {
   const [pwBusy, setPwBusy] = useState(false);
   const [usernameBusy, setUsernameBusy] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; t: string } | null>(null);
-  const pwValid = PW_RULES.every((r) => r.test(npw));
   // cloudConfigured is true in every build (Supabase is baked in), so it says
   // nothing about whether this install has an account — and offline mode is
   // NOT the answer either: an offline install still signs in to the cloud for
@@ -124,20 +134,31 @@ export default function AccountProfile() {
   const [cloudChecked, setCloudChecked] = useState(false);
   useEffect(() => {
     let alive = true;
-    cloudSessionEmail()
-      .then((e) => alive && setCloudEmail(e))
+    if (!supabase) { setCloudChecked(true); return; }
+    const readSession = (account: { email?: string; email_confirmed_at?: string } | null) => {
+      if (!alive) return;
+      setCloudEmail(account?.email ?? null);
+      setVerified(!!account?.email_confirmed_at);
+    };
+    supabase.auth.getSession()
+      .then(({ data }) => readSession(data.session?.user ?? null))
       .catch(() => {})
       .finally(() => alive && setCloudChecked(true));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => readSession(session?.user ?? null));
     return () => {
       alive = false;
+      data.subscription.unsubscribe();
     };
   }, []);
   const cloudAccount = cloudConfigured && !!cloudEmail;
   /** The address the cloud account actually uses. Offline with no live session
    *  there is no cloud email to read, but the device knows which account
    *  claimed it — that is the same address, so show it rather than nothing. */
-  const accountEmail =
-    cloudEmail ?? getLocalCredential()?.email ?? profile?.email ?? "";
+  const accountEmail = cloudEmail ?? getLocalCredential()?.email ?? profile?.email ?? "";
+  // Declared after accountEmail on purpose — the policy checks the new password
+  // against the address it protects.
+  const pwVerdict = checkPassword(npw, accountEmail || undefined);
+  const pwValid = pwVerdict.ok;
   // An email change in flight: the new address plus the code sent to it.
   const [pending, setPending] = useState<{ next: string; nw: string } | null>(null);
   const [emailBusy, setEmailBusy] = useState(false);
@@ -194,8 +215,7 @@ export default function AccountProfile() {
 
   const confirmEmailChange = async () => {
     if (!supabase || !pending || !accountEmail) return;
-    if (pending.nw.length !== 6)
-      return toast.error("Enter the 6-digit code.");
+    if (pending.nw.length !== 6) return toast.error("Enter the 6-digit code.");
     setEmailBusy(true);
     try {
       const { error } = await supabase.auth.verifyOtp({
@@ -218,7 +238,9 @@ export default function AccountProfile() {
 
   const updatePassword = async () => {
     setPwMsg(null);
-    if (!pwValid) return setPwMsg({ ok: false, t: "New password too weak." });
+    // Say which rule it missed. "Too weak" leaves the user guessing, and the
+    // usual guess is to bolt a "1!" on the end.
+    if (!pwValid) return setPwMsg({ ok: false, t: `${pwVerdict.problem}.` });
     if (npw !== cpw) return setPwMsg({ ok: false, t: "Passwords do not match." });
     if (!supabase || !accountEmail) return;
     setPwBusy(true);
@@ -233,13 +255,20 @@ export default function AccountProfile() {
       // the old password and rejected the new one.
       await rememberLocalCredential(
         accountEmail,
-        user?.id ?? getLocalCredential()?.userId ?? "",
+        (await supabase.auth.getSession()).data.session?.user.id ?? getLocalCredential()?.userId ?? "",
         npw
       );
       setPwMsg({ ok: true, t: "Password updated." });
       setCur("");
       setNpw("");
       setCpw("");
+      // The re-auth above started a FRESH session, and a fresh session on a
+      // 2FA account comes back at aal1 — assurance the app was already holding
+      // is silently gone. Re-check now that the flow is finished: the gate asks
+      // for a code (rather than yanking the user out mid-change), and anything
+      // that needs aal2 — turning 2FA off, notably — keeps working. No-op when
+      // 2FA is off.
+      await refreshMfaPending();
     } catch (e: any) {
       setPwMsg({
         ok: false,
@@ -251,408 +280,400 @@ export default function AccountProfile() {
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-4 items-start">
-      {/* left column */}
-      <div className="space-y-4 min-w-0">
-        {/* Profile Information */}
-        <div className="card">
-          <div className="flex items-start justify-between mb-1 gap-3">
-            <div>
-              <p className="font-medium text-ink">Profile Information</p>
-              <p className="text-sm text-brand-500 mt-0.5">
-                Update your personal details and profile information
-              </p>
+    <SettingsPanel>
+      <SettingsSection title="Your Filey account" description="Your plan, Paper wallet and payment history in one place.">
+        <div className="flex flex-wrap gap-2">
+          <Link className="btn-primary" to="/settings?section=credits">Open Paper wallet</Link>
+          <Link className="btn-ghost" to="/settings?section=billing">Manage plan & billing</Link>
+        </div>
+        <p className="text-sm text-muted-foreground">Paper is optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
+      </SettingsSection>
+      <SettingsSection
+        title="Profile Information"
+        description="Your personal details and profile photo."
+        actions={
+          <button
+            className="btn-primary"
+            onClick={async () => {
+              clearFieldErrors();
+              let hasErr = false;
+              if (!p.name?.trim()) {
+                setFieldError("name", "Full name is required");
+                hasErr = true;
+              }
+              if (hasErr) return;
+              try {
+                await updateProfile({
+                  name: p.name,
+                  phone: p.phone,
+                  avatar: p.avatar,
+                  username: p.username,
+                });
+                setSavedProfile(true);
+                setTimeout(() => setSavedProfile(false), 2500);
+                toast.success("Profile saved.");
+              } catch (e) {
+                toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
+              }
+            }}
+          >
+            {savedProfile ? "Saved" : "Save Changes"}
+          </button>
+        }
+      >
+        <div className="flex flex-col sm:flex-row items-start gap-5">
+          <div className="relative shrink-0">
+            <div className="w-20 h-20 rounded-full bg-foreground text-background grid place-items-center text-xl font-medium overflow-hidden">
+              {p.avatar ? (
+                <img
+                  src={p.avatar}
+                  alt="Profile photo"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                initials
+              )}
             </div>
             <button
-              className="btn-primary text-xs"
-              onClick={async () => {
-                clearFieldErrors();
-                let hasErr = false;
-                if (!p.name?.trim()) {
-                  setFieldError("name", "Full name is required");
-                  hasErr = true;
-                }
-                if (hasErr) return;
-                try {
-                  await updateProfile({
-                    name: p.name,
-                    phone: p.phone,
-                    avatar: p.avatar,
-                    username: p.username,
-                  });
-                  setSavedProfile(true);
-                  setTimeout(() => setSavedProfile(false), 2500);
-                  toast.success("Profile saved.");
-                } catch (e) {
-                  toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
-                }
-              }}
+              onClick={() => avatarRef.current?.click()}
+              aria-label="Change photo"
+              className="btn-primary absolute -bottom-1 -right-1 w-10 p-0"
             >
-              {savedProfile ? "Saved" : "Save Changes"}
+              <Pencil size={12} />
             </button>
+            <input
+              ref={avatarRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onAvatar(e.target.files?.[0])}
+            />
           </div>
-          <div className="flex items-start gap-5 mt-4">
-            <div className="relative shrink-0">
-              <div className="w-20 h-20 rounded-full bg-ink text-white grid place-items-center text-xl font-medium overflow-hidden">
-                {p.avatar ? (
-                  <img
-                    src={p.avatar}
-                    alt="avatar"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  initials
+          <div className="w-full min-w-0 flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="Full Name" error={fieldErrors.name} required>
+              <input
+                className="input"
+                value={p.name}
+                onChange={(e) => {
+                  set("name", e.target.value);
+                  if (fieldErrors.name) setFieldError("name", "");
+                }}
+              />
+            </FormField>
+            <FormField label="Email Address" hint="Contact admin to change">
+              <input className="input bg-muted" value={profile?.email ?? ""} disabled />
+            </FormField>
+            <FormField label="Phone Number" hint="+971 50 123 4567">
+              <input
+                className="input"
+                placeholder="+971 50 123 4567"
+                value={p.phone}
+                onChange={(e) => set("phone", e.target.value)}
+              />
+            </FormField>
+          </div>
+        </div>
+      </SettingsSection>
+      <SettingsSection
+        title="Login Credentials"
+        description="Manage your username, email and sign-in methods."
+      >
+        {cloudChecked && !cloudAccount && (
+          <p className="text-sm text-muted-foreground rounded-lg bg-muted px-3 py-2.5">
+            This device isn't signed in to a Filey account yet, so there's no login email
+            to manage. Sign in under Data &amp; Storage - it works in offline mode too,
+            and is what enables sync, sharing and licensing.
+          </p>
+        )}
+        {cloudAccount && (
+          <>
+            <label className="label">Login Email</label>
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <div className="input min-w-0 flex items-center justify-between gap-2">
+                <span className="truncate">{accountEmail}</span>
+                <Badge tone={verified ? "success" : "warn"}>
+                  {verified ? "Verified" : "Unverified"}
+                </Badge>
+              </div>
+              <button
+                className="btn-ghost shrink-0"
+                onClick={changeEmail}
+                disabled={!!pending}
+              >
+                Change Email
+              </button>
+            </div>
+            {!verified && (
+              <div className="mb-3">
+                <button
+                  className="btn-ghost"
+                  onClick={() => void sendVerification()}
+                  disabled={verifyBusy}
+                >
+                  {verifyBusy ? "Sending…" : "Send verification link"}
+                </button>
+                {verifyMsg && (
+                  <p
+                    className={
+                      verifyMsg.ok
+                        ? "mt-1.5 text-[12px] font-medium text-success"
+                        : "mt-1.5 text-[12px] font-medium text-danger"
+                    }
+                  >
+                    {verifyMsg.t}
+                  </p>
                 )}
               </div>
-              <button
-                onClick={() => avatarRef.current?.click()}
-                aria-label="Change photo"
-                className="absolute -bottom-1 -right-1 rounded-full bg-primary-400 text-ink p-1.5 cursor-pointer"
-              >
-                <Pencil size={12} />
-              </button>
-              <input
-                ref={avatarRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => onAvatar(e.target.files?.[0])}
-              />
-            </div>
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField label="Full Name" error={fieldErrors.name} required>
-                <input
-                  className="input"
-                  value={p.name}
-                  onChange={(e) => {
-                    set("name", e.target.value);
-                    if (fieldErrors.name) setFieldError("name", "");
-                  }}
-                />
-              </FormField>
-              <FormField label="Email Address" hint="Contact admin to change">
-                <input
-                  className="input bg-brand-50"
-                  value={profile?.email ?? ""}
-                  disabled
-                />
-              </FormField>
-              <FormField label="Phone Number" hint="+971 50 123 4567">
-                <input
-                  className="input"
-                  placeholder="+971 50 123 4567"
-                  value={p.phone}
-                  onChange={(e) => set("phone", e.target.value)}
-                />
-              </FormField>
-            </div>
-          </div>
-        </div>
+            )}
 
-        {/* Login Credentials */}
-        <div className="card">
-          <p className="font-medium text-ink">Login Credentials</p>
-          <p className="text-sm text-brand-500 mt-0.5 mb-4">
-            Manage your login email and connected methods
-          </p>
-          {cloudChecked && !cloudAccount && (
-            <p className="text-sm text-brand-500 rounded-lg bg-muted px-3 py-2.5">
-              This device isn't signed in to a Filey account yet, so there's no
-              login email to manage. Sign in under Data &amp; Sync - it works in
-              offline mode too, and is what enables sync, sharing and licensing.
-            </p>
-          )}
-          {cloudAccount && (
-            <>
-              <label className="label">Login Email</label>
-              <div className="flex gap-2 mb-3">
-                <div className="input flex items-center justify-between">
-                  <span className="truncate">{accountEmail}</span>
-                  <Badge tone={verified ? "success" : "warn"}>
-                    {verified ? "Verified" : "Unverified"}
-                  </Badge>
+            {pending && (
+              <div className="mb-4 min-w-0 rounded-lg border border-border p-3">
+                <p className="break-all text-sm font-medium text-foreground">
+                  Confirm the change to {pending.next}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-3">
+                  We emailed a 6-digit code to your new address.
+                </p>
+                <div>
+                  <FormField
+                    label={`Code sent to ${pending.next}`}
+                    className="min-w-0 break-all"
+                  >
+                    <input
+                      className="input"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={pending.nw}
+                      onChange={(e) =>
+                        setPending({
+                          ...pending,
+                          nw: e.target.value.replace(/\D/g, "").slice(0, 6),
+                        })
+                      }
+                    />
+                  </FormField>
                 </div>
-                <button
-                  className="btn-ghost shrink-0"
-                  onClick={changeEmail}
-                  disabled={!!pending}
-                >
-                  Change Email
-                </button>
-              </div>
-              {!verified && (
-                <div className="mb-3">
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <button
+                    className="btn-primary"
+                    onClick={confirmEmailChange}
+                    disabled={emailBusy || pending.nw.length < 6}
+                  >
+                    {emailBusy ? "Confirming…" : "Confirm change"}
+                  </button>
                   <button
                     className="btn-ghost"
-                    onClick={() => void sendVerification()}
-                    disabled={verifyBusy}
+                    onClick={() => setPending(null)}
+                    disabled={emailBusy}
                   >
-                    {verifyBusy ? "Sending…" : "Send verification link"}
+                    Cancel
                   </button>
-                  {verifyMsg && (
-                    <p
-                      className={
-                        verifyMsg.ok
-                          ? "mt-1.5 text-[12px] font-medium text-success"
-                          : "mt-1.5 text-[12px] font-medium text-danger"
-                      }
-                    >
-                      {verifyMsg.t}
-                    </p>
-                  )}
                 </div>
-              )}
-
-              {pending && (
-                <div className="mb-4 rounded-lg border border-brand-200 dark:border-white/10 p-3">
-                  <p className="text-sm font-medium text-ink">
-                    Confirm the change to {pending.next}
-                  </p>
-                  <p className="text-xs text-brand-500 mt-0.5 mb-3">
-                    We emailed a 6-digit code to your new address.
-                  </p>
-                  <div>
-                    <FormField label={`Code sent to ${pending.next}`}>
-                      <input
-                        className="input"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        maxLength={6}
-                        placeholder="000000"
-                        value={pending.nw}
-                        onChange={(e) =>
-                          setPending({
-                            ...pending,
-                            nw: e.target.value.replace(/\D/g, "").slice(0, 6),
-                          })
-                        }
-                      />
-                    </FormField>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      className="btn-primary"
-                      onClick={confirmEmailChange}
-                      disabled={emailBusy || pending.nw.length < 6}
-                    >
-                      {emailBusy ? "Confirming…" : "Confirm change"}
-                    </button>
-                    <button
-                      className="btn-ghost"
-                      onClick={() => setPending(null)}
-                      disabled={emailBusy}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-          <label className="label">Username</label>
-          <div className="flex gap-2 mb-4">
-            <input
-              className="input"
-              placeholder="username"
-              value={p.username}
-              onChange={(e) => set("username", e.target.value)}
-            />
+              </div>
+            )}
+          </>
+        )}
+        <label className="label" htmlFor="profile-username">
+          Username
+        </label>
+        <div className="flex flex-col sm:flex-row gap-2 mb-4">
+          <input
+            className="input"
+            id="profile-username"
+            placeholder="username"
+            value={p.username}
+            onChange={(e) => set("username", e.target.value)}
+          />
+          <button
+            className="btn-ghost shrink-0"
+            disabled={usernameBusy}
+            onClick={async () => {
+              setUsernameBusy(true);
+              try {
+                await updateProfile({ username: p.username });
+                toast.success("Username saved.");
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : String(e));
+              } finally {
+                setUsernameBusy(false);
+              }
+            }}
+          >
+            Change Username
+          </button>
+        </div>
+        <p className="label">Connected Accounts</p>
+        <p className="text-xs text-muted-foreground mb-2">
+          Connect your account with other services
+        </p>
+        {[
+          { n: "Google", s: "Not available yet" },
+          { n: "Apple", s: "Not available yet" },
+        ].map((a) => (
+          <div
+            key={a.n}
+            className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0"
+          >
+            <div>
+              <p className="text-sm font-medium text-foreground">{a.n}</p>
+              <p className="text-[11px] text-muted-foreground">{a.s}</p>
+            </div>
             <button
-              className="btn-ghost shrink-0"
-              disabled={usernameBusy}
-              onClick={async () => {
-                setUsernameBusy(true);
-                try {
-                  await updateProfile({ username: p.username });
-                  toast.success("Username saved.");
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : String(e));
-                } finally {
-                  setUsernameBusy(false);
-                }
-              }}
+              className="btn-ghost text-xs"
+              disabled
+              title="This sign-in option is not available yet"
             >
-              Change Username
+              Connect
             </button>
           </div>
-          <p className="label">Connected Accounts</p>
-          <p className="text-xs text-brand-400 mb-2">
-            Connect your account with other services
-          </p>
-          {[
-            { n: "Google", s: "OAuth not configured" },
-            { n: "Apple", s: "OAuth not configured" },
-          ].map((a) => (
-            <div
-              key={a.n}
-              className="flex items-center justify-between rounded-xl border border-brand-200 px-3 py-2.5 mb-2"
-            >
-              <div>
-                <p className="text-sm font-medium text-ink">{a.n}</p>
-                <p className="text-[11px] text-brand-400">{a.s}</p>
-              </div>
-              <button
-                className="btn-ghost text-xs"
-                disabled
-                title="Configure the provider in Supabase Auth to enable"
-              >
-                Connect
-              </button>
-            </div>
-          ))}
+        ))}
+      </SettingsSection>
+      <SettingsSection
+        title="Preferences"
+        description="Language, timezone and display formats for your account."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Language">
+            <SelectMenu
+              value={p.language}
+              onChange={(v) => set("language", v)}
+              options={["English (US)", "English (UK)", "Arabic", "Hindi"].map((l) => ({
+                value: l,
+                label: l,
+              }))}
+            />
+          </FormField>
+          <FormField label="Timezone">
+            <SelectMenu
+              value={p.timezone}
+              onChange={(v) => set("timezone", v)}
+              options={[
+                "(GMT+04:00) Dubai, UAE",
+                "(GMT+00:00) UTC",
+                "(GMT+05:30) India",
+                "(GMT+01:00) Central Europe",
+              ].map((t) => ({ value: t, label: t }))}
+            />
+          </FormField>
+          <FormField label="Date Format">
+            <SelectMenu
+              value={p.date_format}
+              onChange={(v) => set("date_format", v)}
+              options={["DD MMM, YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].map((d) => ({
+                value: d,
+                label: d,
+              }))}
+            />
+          </FormField>
+          <FormField label="Time Format">
+            <SelectMenu
+              value={p.time_format}
+              onChange={(v) => set("time_format", v)}
+              options={["12 Hour (02:30 PM)", "24 Hour (14:30)"].map((t) => ({
+                value: t,
+                label: t,
+              }))}
+            />
+          </FormField>
         </div>
-
-        {/* Preferences */}
-        <div className="card">
-          <p className="font-medium text-ink">Preferences</p>
-          <p className="text-sm text-brand-500 mt-0.5 mb-4">
-            Manage your language, timezone and other preferences
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Language">
-              <SelectMenu
-                value={p.language}
-                onChange={(v) => set("language", v)}
-                options={["English (US)", "English (UK)", "Arabic", "Hindi"].map((l) => ({
-                  value: l,
-                  label: l,
-                }))}
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-4">
+          {savedPrefs && <span className="text-sm font-medium text-success">Saved</span>}
+          <button
+            className="btn-primary"
+            onClick={async () => {
+              try {
+                await updateProfile({
+                  language: p.language,
+                  timezone: p.timezone,
+                  date_format: p.date_format,
+                  time_format: p.time_format,
+                });
+                setSavedPrefs(true);
+                setTimeout(() => setSavedPrefs(false), 2500);
+                toast.success("Preferences saved.");
+              } catch (e) {
+                toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
+              }
+            }}
+          >
+            Save Preferences
+          </button>
+        </div>
+      </SettingsSection>
+      {cloudAccount && (
+        <SettingsSection
+          title="Change Password"
+          description="Verify your current password to choose a new one."
+        >
+          <div className="max-w-lg space-y-4">
+            <FormField label="Current Password">
+              <PwInput
+                val={cur}
+                onChange={setCur}
+                shown={show.c}
+                toggle={() => setShow({ ...show, c: !show.c })}
               />
             </FormField>
-            <FormField label="Timezone">
-              <SelectMenu
-                value={p.timezone}
-                onChange={(v) => set("timezone", v)}
-                options={[
-                  "(GMT+04:00) Dubai, UAE",
-                  "(GMT+00:00) UTC",
-                  "(GMT+05:30) India",
-                  "(GMT+01:00) Central Europe",
-                ].map((t) => ({ value: t, label: t }))}
+            <FormField label="New Password">
+              <PwInput
+                val={npw}
+                onChange={setNpw}
+                shown={show.n}
+                toggle={() => setShow({ ...show, n: !show.n })}
               />
             </FormField>
-            <FormField label="Date Format">
-              <SelectMenu
-                value={p.date_format}
-                onChange={(v) => set("date_format", v)}
-                options={["DD MMM, YYYY", "MM/DD/YYYY", "YYYY-MM-DD"].map((d) => ({
-                  value: d,
-                  label: d,
-                }))}
+            {/* One line that says what is actually wrong, rather than a checklist
+              of composition rules that a weak password can satisfy in full. */}
+            {npw.length > 0 && (
+              <p
+                className={`flex items-center gap-2 text-xs ${
+                  pwVerdict.ok ? "text-success" : "text-muted-foreground"
+                }`}
+                aria-live="polite"
+              >
+                <span
+                  className={`grid place-items-center w-4 h-4 rounded-full shrink-0 ${
+                    pwVerdict.ok
+                      ? "bg-success text-white"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <Check size={10} strokeWidth={3} />
+                </span>
+                {pwVerdict.ok
+                  ? `Strength: ${strengthLabel(pwVerdict.score)}`
+                  : pwVerdict.problem}
+              </p>
+            )}
+            <FormField label="Confirm New Password">
+              <PwInput
+                val={cpw}
+                onChange={setCpw}
+                shown={show.k}
+                toggle={() => setShow({ ...show, k: !show.k })}
               />
             </FormField>
-            <FormField label="Time Format">
-              <SelectMenu
-                value={p.time_format}
-                onChange={(v) => set("time_format", v)}
-                options={["12 Hour (02:30 PM)", "24 Hour (14:30)"].map((t) => ({
-                  value: t,
-                  label: t,
-                }))}
-              />
-            </FormField>
-          </div>
-          <div className="flex items-center justify-end gap-3 mt-4">
-            {savedPrefs && (
-              <span className="text-sm font-medium text-success">Saved</span>
+            {pwMsg && (
+              <p
+                className={`text-xs font-semibold rounded-lg px-3 py-2 ${
+                  pwMsg.ok ? "text-success bg-success/10" : "text-danger bg-danger/10"
+                }`}
+              >
+                {pwMsg.t}
+              </p>
             )}
             <button
               className="btn-primary"
-              onClick={async () => {
-                try {
-                  await updateProfile({
-                    language: p.language,
-                    timezone: p.timezone,
-                    date_format: p.date_format,
-                    time_format: p.time_format,
-                  });
-                  setSavedPrefs(true);
-                  setTimeout(() => setSavedPrefs(false), 2500);
-                  toast.success("Preferences saved.");
-                } catch (e) {
-                  toast.error(`Could not save: ${e instanceof Error ? e.message : e}`);
-                }
-              }}
+              disabled={pwBusy || !cur || !pwValid || npw !== cpw}
+              onClick={updatePassword}
             >
-              Save Preferences
+              {pwBusy ? "Updating…" : "Update Password"}
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* right column: Change Password (cloud auth only) */}
-      {cloudAccount && (
-      <div className="card xl:sticky xl:top-2">
-        <p className="font-medium text-ink">Change Password</p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Update your password to keep your account secure
-        </p>
-        <div className="space-y-3">
-          <FormField label="Current Password">
-            <PwInput
-              val={cur}
-              onChange={setCur}
-              shown={show.c}
-              toggle={() => setShow({ ...show, c: !show.c })}
-            />
-          </FormField>
-          <FormField label="New Password">
-            <PwInput
-              val={npw}
-              onChange={setNpw}
-              shown={show.n}
-              toggle={() => setShow({ ...show, n: !show.n })}
-            />
-          </FormField>
-          <ul className="space-y-1.5">
-            {PW_RULES.map((r) => {
-              const ok = r.test(npw);
-              return (
-                <li
-                  key={r.label}
-                  className={`flex items-center gap-2 text-xs ${
-                    ok ? "text-success" : "text-brand-400"
-                  }`}
-                >
-                  <span
-                    className={`grid place-items-center w-4 h-4 rounded-full ${
-                      ok ? "bg-success text-white" : "bg-brand-200 text-white"
-                    }`}
-                  >
-                    <Check size={10} strokeWidth={3} />
-                  </span>
-                  {r.label}
-                </li>
-              );
-            })}
-          </ul>
-          <FormField label="Confirm New Password">
-            <PwInput
-              val={cpw}
-              onChange={setCpw}
-              shown={show.k}
-              toggle={() => setShow({ ...show, k: !show.k })}
-            />
-          </FormField>
-          {pwMsg && (
-            <p
-              className={`text-xs font-semibold rounded-lg px-3 py-2 ${
-                pwMsg.ok ? "text-success bg-success/10" : "text-danger bg-danger/10"
-              }`}
-            >
-              {pwMsg.t}
-            </p>
-          )}
-          <button
-            className="btn-primary w-full justify-center"
-            disabled={pwBusy || !cur || !pwValid || npw !== cpw}
-            onClick={updatePassword}
-          >
-            {pwBusy ? "Updating…" : "Update Password"}
-          </button>
-        </div>
-      </div>
+        </SettingsSection>
       )}
-    </div>
+    </SettingsPanel>
   );
 }

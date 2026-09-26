@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Modal } from "./ui";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
@@ -7,10 +7,6 @@ import {
   UserRound,
   Target,
   Contact,
-  FileText,
-  Package,
-  LayoutDashboard,
-  Plus,
 } from "lucide-react";
 import { useModules } from "../lib/modules";
 import AppIcon from "../components/AppIcon";
@@ -39,37 +35,37 @@ const QUICK_ACTIONS: {
   {
     label: "New invoice",
     to: "/invoicing?new=1",
-    icon: <FileText size={15} />,
+    icon: <AppIcon name="invoicing" className="h-4 w-4" />,
     keywords: ["invoice", "bill"],
   },
   {
     label: "New quotation",
     to: "/quoting?new=1",
-    icon: <FileText size={15} />,
+    icon: <AppIcon name="quotations" className="h-4 w-4" />,
     keywords: ["quotation", "quote"],
   },
   {
     label: "Add product",
     to: "/inventory?new=1",
-    icon: <Package size={15} />,
+    icon: <AppIcon name="inventory" className="h-4 w-4" />,
     keywords: ["product", "stock", "item"],
   },
   {
     label: "Add customer",
-    to: "/crm?new=1",
-    icon: <UserRound size={15} />,
+    to: "/customers?new=1",
+    icon: <AppIcon name="customers" className="h-4 w-4" />,
     keywords: ["customer", "client", "crm"],
   },
   {
     label: "New sales order",
     to: "/orders?new=1",
-    icon: <LayoutDashboard size={15} />,
+    icon: <AppIcon name="orders" className="h-4 w-4" />,
     keywords: ["order", "sales"],
   },
   {
     label: "Record expense",
     to: "/purchase?new=1",
-    icon: <Plus size={15} />,
+    icon: <AppIcon name="purchase" className="h-4 w-4" />,
     keywords: ["purchase", "expense", "spend"],
   },
 ];
@@ -80,7 +76,7 @@ export default function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
-  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
@@ -101,22 +97,25 @@ export default function CommandPalette() {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
-  // Lazy-load CRM records the first time we open.
+  // Refresh each time: records may have changed since the last search.
   useEffect(() => {
     if (!open) return;
     setQ("");
     setActive(0);
     setTimeout(() => inputRef.current?.focus(), 0);
-    if (loaded) return;
+    let cancelled = false;
+    setError("");
     Promise.all([crm.customers(), crm.leads(), crm.opportunities()])
       .then(([c, l, o]) => {
+        if (cancelled) return;
         setCustomers(c);
         setLeads(l);
         setOpps(o);
-        setLoaded(true);
+
       })
-      .catch(() => setLoaded(true));
-  }, [open, loaded]);
+      .catch(() => { if (!cancelled) { setCustomers([]); setLeads([]); setOpps([]); setError("Records could not be loaded. Close and reopen search to retry."); } });
+    return () => { cancelled = true; };
+  }, [open]);
 
   const go = (to: string) => {
     setOpen(false);
@@ -136,13 +135,6 @@ export default function CommandPalette() {
         a.keywords.some((k) => k.includes(term))
     );
     if (quickMatches.length) {
-      out.push({
-        key: "qa-header",
-        group: "Quick actions",
-        label: "",
-        icon: null,
-        run: () => {},
-      });
       for (const a of quickMatches) {
         out.push({
           key: `qa-${a.label}`,
@@ -188,7 +180,7 @@ export default function CommandPalette() {
             label: o.title,
             sub: o.customer_name,
             icon: <Target size={15} />,
-            run: () => go("/crm"),
+            run: () => go(`/crm?view=deals&q=${encodeURIComponent(o.title)}`),
           });
       }
       for (const l of leads) {
@@ -213,24 +205,12 @@ export default function CommandPalette() {
     if (active >= items.length) setActive(0);
   }, [items.length, active]);
 
-  if (!open) return null;
 
   // Group consecutive items for headings while keeping a flat index.
   let lastGroup = "";
 
-  return createPortal(
-    <div
-      className="materialize-scrim fixed inset-0 z-[60] flex items-start justify-center bg-ink/40 p-4 pt-[12vh]"
-      onClick={() => setOpen(false)}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        style={{ "--materialize-origin": "top" } as CSSProperties}
-        className="materialize-surface w-full max-w-lg overflow-hidden rounded-xl border border-brand-200 bg-white"
-        onClick={(e) => e.stopPropagation()}
-      >
+  return (
+    <Modal open={open} onClose={() => setOpen(false)} title="Search workspace">
         <div className="flex items-center gap-2 border-b border-brand-200 px-4">
           <Search size={16} className="text-brand-400" />
           <input
@@ -252,6 +232,7 @@ export default function CommandPalette() {
                 items[active]?.run();
               }
             }}
+            aria-label="Search pages, customers, deals"
             placeholder="Search pages, customers, deals…"
             className="h-12 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-brand-400"
           />
@@ -260,6 +241,7 @@ export default function CommandPalette() {
           </kbd>
         </div>
 
+        {error && <p role="alert" className="px-3 py-2 text-sm text-danger">{error}</p>}
         <div className="max-h-[55vh] overflow-y-auto p-1.5">
           {!items.length ? (
             <p className="px-3 py-8 text-center text-sm text-brand-400">
@@ -268,10 +250,9 @@ export default function CommandPalette() {
           ) : (
             items.map((it, i) => {
               const head = it.group !== lastGroup ? (lastGroup = it.group) : null;
-              if (head && it.key === "qa-header") return null;
               return (
                 <div key={it.key}>
-                  {head && it.key !== "qa-header" && (
+                  {head && (
                     <p className="px-3 pb-1 pt-2 text-[10px] font-medium text-brand-400">
                       {it.group}
                     </p>
@@ -332,8 +313,6 @@ export default function CommandPalette() {
             close
           </span>
         </div>
-      </div>
-    </div>,
-    document.body
+    </Modal>
   );
 }

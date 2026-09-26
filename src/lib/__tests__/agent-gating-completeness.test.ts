@@ -18,6 +18,7 @@ import { billing } from "../api";
  *  needs no classification. Grouped reads (web research, social listings,
  *  file tools) are NOT listed here — they carry their classification already. */
 const READ_ONLY: Record<string, string> = {
+  list_work_items: "read-only projects and support tickets",
   get_stats: "dashboard numbers",
   financial_summary: "read-only balances",
   vat_return: "computed report",
@@ -33,6 +34,7 @@ const READ_ONLY: Record<string, string> = {
   list_invoices: "list",
   list_deals: "list",
   crm_pipeline: "list",
+  crm_records: "read-only CRM records and field definitions",
   get_deal_contacts: "list",
   list_activities: "list",
   list_purchase_invoices: "list",
@@ -49,6 +51,7 @@ const READ_ONLY: Record<string, string> = {
   get_attendance_today: "list",
   remember: "local memory note (deliberately ungated, see ai-agent.md §4)",
   recall: "local memory search",
+  search_conversations: "read-only search of this account's local chat history",
   generate_image: "produces content but changes no business state",
   list_connected_apps: "list",
   list_skills: "list",

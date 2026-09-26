@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -7,7 +8,6 @@ import {
   CircleDollarSign,
   Clock,
   FileText,
-  Loader2,
   Mail,
   Phone,
   Wallet,
@@ -78,8 +78,8 @@ function tenure(hireDate?: string): string {
 }
 
 const STATUS_PILL: Record<string, string> = {
-  paid: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  pending: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  paid: "bg-success/10 text-success",
+  pending: "bg-warning/10 text-warning",
 };
 
 export default function EmployeeDetail() {
@@ -91,11 +91,14 @@ export default function EmployeeDetail() {
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const empId = Number(id);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
       const [emps, pay, att] = await Promise.all([
         hr.employees(),
@@ -106,12 +109,10 @@ export default function EmployeeDetail() {
       setPayroll(pay.filter((p) => Number(p.employee_id) === empId));
       setAttendance(att.filter((a) => Number(a.employee_id) === empId));
     } catch (e) {
-      toast.error(errMsg(e));
+      setError(errMsg(e));
     } finally {
       setLoading(false);
     }
-    // toast identity changes every render — including it would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empId]);
 
   useEffect(() => {
@@ -180,11 +181,16 @@ export default function EmployeeDetail() {
         <button
           type="button"
           onClick={() => nav("/people")}
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-ink"
+          className="btn-ghost mb-3"
         >
           <ArrowLeft className="h-4 w-4" /> People
         </button>
-        <p className="text-sm text-ink">That employee no longer exists.</p>
+        {error ? (
+          <div role="alert" className="space-y-3">
+            <p className="text-sm text-danger">Could not load employee: {error}</p>
+            <button className="btn-ghost" onClick={() => { void load(); }}>Retry</button>
+          </div>
+        ) : <p className="text-sm text-ink">That employee no longer exists.</p>}
       </div>
     );
   }
@@ -194,14 +200,15 @@ export default function EmployeeDetail() {
       <button
         type="button"
         onClick={() => nav("/people")}
-        className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-transform hover:text-ink active:scale-[0.97]"
+        className="btn-ghost mb-3"
       >
         <ArrowLeft className="h-4 w-4" /> People
       </button>
+      {error && <div role="alert" className="mb-4 text-sm text-danger">Could not refresh employee: {error} <button className="btn-ghost ml-2" onClick={() => { void load(); }}>Retry</button></div>}
 
       <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-semibold text-ink">{employee.name}</h1>
+          <h1 className="truncate text-[22px] font-semibold tracking-tight text-foreground">{employee.name}</h1>
           <p className="text-sm text-muted-foreground">
             {[employee.position, employee.department].filter(Boolean).join(" · ") ||
               "No role set"}
@@ -213,7 +220,7 @@ export default function EmployeeDetail() {
             className={cn(
               "rounded-full px-2.5 py-1 text-xs",
               employee.status === "active"
-                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                ? "bg-success/10 text-success"
                 : "bg-muted text-muted-foreground"
             )}
           >
@@ -221,14 +228,14 @@ export default function EmployeeDetail() {
           </span>
           <Link
             to={`/people/${employee.id}/payslip`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm text-ink transition-transform active:scale-[0.97]"
+            className="btn-ghost"
           >
             <FileText className="h-4 w-4" /> Payslip
           </Link>
         </div>
       </header>
 
-      <div className="mb-5 grid grid-cols-2 gap-3 rounded-xl border border-line bg-card p-4 sm:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-4">
         <Info icon={CalendarDays} label="Joined" value={fmtDate(employee.hire_date)} />
         <Info icon={Clock} label="Tenure" value={tenure(employee.hire_date)} />
         <Info icon={Wallet} label="Monthly salary" value={aed(employee.salary)} />
@@ -257,15 +264,15 @@ export default function EmployeeDetail() {
 
       <Section title="Salary history">
         {sortedPayroll.length === 0 ? (
-          <p className="rounded-xl border border-line bg-card p-4 text-sm text-muted-foreground">
+          <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
             No payroll runs for {employee.name} yet. Run payroll from the People
             page and it will show up here.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-line bg-card">
+          <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                   <th className="px-3 py-2 font-medium">Period</th>
                   <th className="px-3 py-2 text-right font-medium">Basic</th>
                   <th className="px-3 py-2 text-right font-medium">Allowances</th>
@@ -277,7 +284,7 @@ export default function EmployeeDetail() {
               </thead>
               <tbody>
                 {sortedPayroll.map((p) => (
-                  <tr key={p.id} className="border-b border-line last:border-0">
+                  <tr key={p.id} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 text-ink">{p.period}</td>
                     <td className="px-3 py-2 text-right text-ink">{aed(p.basic)}</td>
                     <td className="px-3 py-2 text-right text-ink">{aed(p.allowances)}</td>
@@ -292,14 +299,15 @@ export default function EmployeeDetail() {
                       <button
                         type="button"
                         onClick={() => markPaid(p)}
-                        disabled={busyId === p.id}
+                        disabled={busyId !== null}
+                        aria-label={`${p.status === "paid" ? "Move salary to pending" : "Mark salary paid"}: ${p.period}`}
                         title={
                           p.status === "paid"
                             ? "Move back to pending"
                             : "Mark this salary paid"
                         }
                         className={cn(
-                          "rounded-full px-2.5 py-1 text-xs transition-transform active:scale-[0.97] disabled:opacity-50",
+                          "btn-ghost",
                           STATUS_PILL[p.status] ?? "bg-muted text-muted-foreground"
                         )}
                       >
@@ -320,16 +328,16 @@ export default function EmployeeDetail() {
 
       <Section title="Attendance">
         {attendance.length === 0 ? (
-          <p className="rounded-xl border border-line bg-card p-4 text-sm text-muted-foreground">
+          <p className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
             No attendance recorded yet.
           </p>
         ) : (
-          <div className="rounded-xl border border-line bg-card p-4">
+          <div className="rounded-xl border border-border bg-card p-4">
             <div className="mb-3 flex flex-wrap gap-2">
               {Object.entries(attendanceMix).map(([status, n]) => (
                 <span
                   key={status}
-                  className="rounded-full bg-bg px-2.5 py-1 text-xs text-muted-foreground"
+                  className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground"
                 >
                   {status}: <span className="text-ink">{n}</span>
                 </span>
@@ -338,7 +346,7 @@ export default function EmployeeDetail() {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[420px] text-sm">
                 <thead>
-                  <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                     <th className="px-3 py-2 font-medium">Date</th>
                     <th className="px-3 py-2 font-medium">In</th>
                     <th className="px-3 py-2 font-medium">Out</th>
@@ -347,7 +355,7 @@ export default function EmployeeDetail() {
                 </thead>
                 <tbody>
                   {recentAttendance.map((a) => (
-                    <tr key={a.id} className="border-b border-line last:border-0">
+                    <tr key={a.id} className="border-b border-border last:border-0">
                       <td className="px-3 py-2 text-ink">{fmtDate(a.date)}</td>
                       <td className="px-3 py-2 text-muted-foreground">{a.check_in || "—"}</td>
                       <td className="px-3 py-2 text-muted-foreground">{a.check_out || "—"}</td>

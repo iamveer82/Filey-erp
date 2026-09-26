@@ -14,6 +14,9 @@ describe("FREE_LIMITS", () => {
 describe("resolveTier", () => {
   it("returns pro for any paid plan with a live/grace status", () => {
     for (const status of ["active", "trialing", "past_due"]) {
+      // "cloud" is the plan sold today; past_due matters because a failed $5
+      // renewal must not lock someone out mid-retry.
+      expect(resolveTier(false, "cloud", status)).toBe("pro");
       expect(resolveTier(false, "pro", status)).toBe("pro");
       expect(resolveTier(false, "enterprise", status)).toBe("pro");
       expect(resolveTier(false, "business", status)).toBe("pro");
@@ -38,7 +41,7 @@ describe("planCardFor", () => {
   // returned undefined would crash the billing panel of the very customers who
   // paid the most.
   it("still answers for plans that are no longer sold", () => {
-    for (const legacy of ["pro", "business", "enterprise"]) {
+    for (const legacy of ["pro", "business"]) {
       expect(planCardFor(legacy).id).toBe("lite");
     }
   });
@@ -49,15 +52,28 @@ describe("planCardFor", () => {
     expect(planCardFor(null).id).toBe("free");
   });
 
-  it("sells exactly two plans: Free, and Freedom as a one-time licence", () => {
-    expect(PLANS.map((p) => p.id)).toEqual(["free", "lite"]);
-    expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
-    expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
+  it("maps the Cloud plan to its own card", () => {
+    expect(planCardFor("cloud").id).toBe("cloud");
+    expect(planCardFor("enterprise").id).toBe("enterprise");
   });
 
-  it("carries the current prices (AED)", () => {
-    expect(PLANS.find((p) => p.id === "free")?.price).toBe("AED 0");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("AED 1,499");
+  it("sells Free, Cloud monthly, Freedom as a one-time licence, and Enterprise contact-sales", () => {
+    expect(PLANS.map((p) => p.id)).toEqual(["free", "cloud", "lite", "enterprise"]);
+    expect(PLANS.find((p) => p.id === "cloud")?.kind).toBe("subscription");
+    expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
+    expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
+    expect(PLANS.find((p) => p.id === "enterprise")?.kind).toBe("contact");
+  });
+
+  // These are the prices charged by the live Dodo products. A card that says
+  // one number while the checkout charges another is the worst kind of bug to
+  // find out about from a customer.
+  it("carries the current prices", () => {
+    expect(PLANS.find((p) => p.id === "free")?.price).toBe("$0");
+    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$5");
+    expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("$100");
+    expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 });
 

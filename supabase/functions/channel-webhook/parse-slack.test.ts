@@ -29,6 +29,15 @@ Deno.test("parses a message event and strips mention tokens", () => {
   });
 });
 
+Deno.test("parses app mentions while retaining owner and delivery identifiers", () => {
+  const r = parseSlackEvent({ type: "event_callback", event_id: "Ev123", event: {
+    type: "app_mention", channel: "C123", user: "U123", text: "<@BOT> Show invoices",
+  } });
+  assertEquals(r?.body, "Show invoices");
+  assertEquals(r?.userId, "U123");
+  assertEquals(r?.msgId, "Ev123");
+});
+
 Deno.test("ignores bot messages and every subtype", () => {
   const base = { type: "event_callback", event: { type: "message", channel: "C1", user: "U1", text: "hi" } };
   // bot_id present

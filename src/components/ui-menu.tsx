@@ -35,6 +35,7 @@ export function MenuPopover({
   side = "bottom",
   align = "start",
   closeOnScroll = false,
+  role = "menu",
   className,
   style,
   children,
@@ -48,6 +49,7 @@ export function MenuPopover({
   align?: "end" | "start";
   /** Tables scroll under their menus — close instead of following. */
   closeOnScroll?: boolean;
+  role?: "menu" | "presentation";
   className?: string;
   /** Extra inline styles merged over the computed position (e.g. minWidth). */
   style?: CSSProperties;
@@ -69,7 +71,11 @@ export function MenuPopover({
       }
     };
     const esc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeRef.current();
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeRef.current();
+      anchorRef.current?.focus({ preventScroll: true });
     };
     document.addEventListener("mousedown", away);
     document.addEventListener("keydown", esc);
@@ -133,7 +139,7 @@ export function MenuPopover({
   return createPortal(
     <div
       ref={panelRef}
-      role="menu"
+      role={role}
       style={{ ...pos, ...style }}
       className={cn(
         // Every menu scrolls within the viewport and keeps its wheel events to
@@ -245,8 +251,8 @@ export function SelectMenu({
           setOpen((v) => !v);
         }}
         className={cn(
-          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-md border border-border bg-background px-3 text-[13px] text-foreground transition-colors",
-          size === "sm" ? "h-8 px-2 text-xs" : "h-9",
+          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-[8px] border border-border bg-card px-3 text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          size === "sm" ? "h-8 px-2 text-xs" : "h-10",
           disabled ? "cursor-not-allowed opacity-40" : "hover:bg-hover",
           className
         )}

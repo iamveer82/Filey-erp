@@ -1,18 +1,23 @@
-// Desktop (Lite) license: one-time purchase, verified OFFLINE forever.
+// Desktop (Freedom) license: one-time purchase, verified OFFLINE forever.
 //
-// The stripe edge function signs a small JSON payload with a server-only
+// The dodo edge function signs a small JSON payload with a server-only
 // ECDSA P-256 private key at activation time; this module verifies it with
 // the embedded public key below on every launch — no network call. The
 // cloud (Pro) tier is the opposite: a live org-plan check (subscription.ts).
 //
-// Enforcement is ON (ENFORCE_LICENSING, below): offline mode requires a Lite
-// license. The header used to say the paywall was still off, which stopped
-// being true when the flag flipped for the v2.3.0 licensing launch.
+// Dodo Payments sells the licence and its webhook records the entitlement, so
+// buying is all the buyer does: claimPurchasedLicense() waits for the webhook
+// to land and activates this device by itself.
+//
+// Licensing preserves paid benefits. Core local storage and local invoicing
+// are free; hosted service quotas remain separately enforced.
 
 import { invoke } from "@tauri-apps/api/core";
-import { supabase, invokeFn } from "./supabase";
+import { supabase } from "./supabase";
+import { billingRequest, openBilling } from "./billingService";
 import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
+import { PUSH_TABLES } from "./syncTables";
 
 /** Gates desktop features behind the four-tier plan model. Flipped on for the
  *  v2.3.0 licensing launch — the matching server-side cap (supabase/
@@ -122,12 +127,7 @@ export async function verifyStoredLicense(): Promise<LicenseState> {
 }
 
 /** Collections whose presence proves this device has been used offline. */
-const LOCAL_DATA_KEYS = [
-  "localdb:company_profile",
-  "localdb:invoice_docs",
-  "localdb:crm_customers",
-  "localdb:products",
-];
+const LOCAL_DATA_KEYS = PUSH_TABLES.map(table => `localdb:${table}`);
 
 /** True when this device already holds offline data. */
 /** True when this device already holds offline records. Exported so the mode
@@ -140,16 +140,9 @@ export async function hasLocalData(): Promise<boolean> {
   return false;
 }
 
-/** Offline/local mode is the paid Lite feature: cloud is the free default,
- *  keeping data on-device needs a desktop license (buy it, or claim a free
- *  seat with a voucher — see redeemVoucher). Always true if
- *  ENFORCE_LICENSING is ever turned back off, and always true when this device
- *  already has offline data — a licence check must never lock someone out of
- *  data that is already on their own machine. */
+/** Core local ERP/CRM is free. Paid licenses still unlock paid entitlements. */
 export async function canUseLocalMode(): Promise<boolean> {
-  if (!ENFORCE_LICENSING) return true;
-  if ((await verifyStoredLicense()).valid) return true;
-  return hasLocalData();
+  return true;
 }
 
 /** Activate this device against the signed-in account's license (one server
@@ -160,12 +153,8 @@ export async function activateThisDevice(): Promise<LicenseState> {
   const device_name =
     (hasTauri ? "Desktop" : "Browser") +
     (typeof navigator !== "undefined" ? ` · ${navigator.platform}` : "");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
-    body: { action: "license_activate", fingerprint, device_name },
-  })) as { data: { token?: string; error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.token) throw new Error("Activation failed — no token returned.");
+  const data = await billingRequest<{ token?: string }>({ action: "license_activate", fingerprint, device_name });
+  if (!data?.token) throw new Error("We couldn’t activate your plan on this device. Please try again shortly.");
   await kvSet(TOKEN_KEY, data.token as string);
   return verifyStoredLicense();
 }
@@ -195,11 +184,7 @@ export async function redeemVoucher(code: string): Promise<LicenseState> {
  *  The freed machine keeps working offline until it next re-activates. */
 export async function deactivateDevice(fingerprint: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
-    body: { action: "license_deactivate", fingerprint },
-  })) as { data: { error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
+  await billingRequest({ action: "license_deactivate", fingerprint });
   if (fingerprint === (await deviceId())) await kvSet(TOKEN_KEY, "");
 }
 
@@ -257,16 +242,49 @@ export async function releaseOrgDevice(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-/** Buy the one-time Lite license (Stripe Checkout; invoice emailed). */
-export async function startLiteCheckout(): Promise<void> {
+/** Buy the one-time Freedom licence (Dodo Payments hosted checkout — Dodo is
+ *  the merchant of record, so it handles tax and invoicing).
+ *
+ *  On desktop the checkout opens in the system browser: sending the Tauri
+ *  webview to Dodo would navigate the app itself away, and its return URL
+ *  lands on the website, not back inside the app. The caller polls with
+ *  claimPurchasedLicense() while the buyer pays in that browser window. */
+export async function startFreedomCheckout(): Promise<"redirected" | "browser"> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = (await invokeFn(supabase, "stripe", {
-    body: { action: "checkout_lite" },
-  })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.url) throw new Error("Checkout failed — no URL returned.");
-  window.location.href = data.url;
+  const data = await billingRequest<{ url?: string }>({ action: "checkout", from: "app" });
+  return openBilling(data?.url);
+}
+
+/** Has the Dodo webhook recorded this account's purchase yet? */
+export async function licensePurchased(): Promise<boolean> {
+  if (!supabase) return false;
+  const data = await billingRequest<{ licensed?: boolean }>({ action: "license_status" });
+  return !!data?.licensed;
+}
+
+/** Turn a completed payment into a working Freedom install, with no code to
+ *  paste and no button to find. The buyer comes back from Dodo's checkout and
+ *  this waits for the webhook — which usually lands first, but a card that
+ *  needs a bank prompt can take a few seconds — then activates this device.
+ *
+ *  Returns null when the payment never showed up, so the caller can tell the
+ *  buyer to reopen the page rather than silently leaving them on Free. */
+export async function claimPurchasedLicense(
+  attempts = 10,
+  delayMs = 3000
+): Promise<LicenseState | null> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (await licensePurchased()) {
+      const state = await activateThisDevice();
+      // The cached tier still says "free" until this is dropped, so the caps
+      // would keep firing for someone who just paid.
+      clearEntitlementCache();
+      if (state.valid) window.dispatchEvent(new Event("filey:entitlement"));
+      return state;
+    }
+    if (attempt < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
 }
 
 /* ---------------- tiers: free < lite (one-time) < pro (cloud) ---------------- */
@@ -276,7 +294,7 @@ export type Tier = "free" | "lite" | "pro";
 /** Free tier caps. Volume + branding only — never compliance/correctness.
  *  Cloud is included on Free; the paid tier is about volume and owning it
  *  outright, not about where the data lives. Mirror any change in
- *  supabase/2026-07-29-free-invoice-cap-5.sql or the server cap disagrees. */
+ *  supabase/2026-09-19-basic-web-access.sql or the server cap disagrees. */
 export const FREE_LIMITS = { invoicesPerMonth: 5 };
 
 /** Desktop (Lite) license device slots. */
@@ -299,20 +317,26 @@ export function resolveTier(
 }
 
 let cachedTier: Tier | null = null;
+let entitlementRevision = 0;
 
 /** Resolve (and cache) the current tier. Offline license check is local;
- *  the pro check reads the org's plan when in cloud mode. */
+ *  the pro check reads the org's plan whenever there is a session — local
+ *  mode included, since Pro promises no monthly cap wherever you work.
+ *  ponytail: offline + local, a Pro user reads as Basic until back online. */
 export async function entitlement(force = false): Promise<Tier> {
   if (cachedTier && !force) return cachedTier;
+  const revision = entitlementRevision;
   const lic = await verifyStoredLicense();
   let plan: string | null = null;
   let status: string | null = null;
-  if (!isLocalMode() && supabase) {
+  if (supabase) {
     try {
+      const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+      if (orgError) throw orgError;
       const { data } = await supabase
         .from("organizations")
         .select("plan, plan_status")
-        .limit(1)
+        .eq("id", orgId)
         .maybeSingle();
       plan = (data?.plan as string) ?? null;
       status = (data?.plan_status as string) ?? null;
@@ -320,8 +344,9 @@ export async function entitlement(force = false): Promise<Tier> {
       /* offline / not signed in → fall through */
     }
   }
-  cachedTier = resolveTier(lic.valid, plan, status);
-  return cachedTier;
+  const tier = resolveTier(lic.valid, plan, status);
+  if (revision === entitlementRevision) cachedTier = tier;
+  return tier;
 }
 
 /** Last resolved tier, synchronously (for render paths). Defaults to "free"
@@ -330,19 +355,155 @@ export function currentTier(): Tier {
   return cachedTier ?? "free";
 }
 
-/** Free-tier invoice cap: throws a friendly error when a NEW invoice would
+/* ---------------- who may use the cloud ---------------- */
+
+/** All plans include cloud access. Paid workspaces have unlimited invoicing. */
+export type CloudReason = "unenforced" | "paid" | "basic";
+export interface CloudAccess {
+  allowed: boolean;
+  reason: CloudReason;
+}
+
+/** Plan access only; authentication and workspace permissions remain server
+ *  enforced. Invoice exemptions match 2026-09-19-basic-web-access.sql. */
+export function resolveCloudAccess(
+  plan: string | null | undefined,
+  planStatus: string | null | undefined,
+  enforced: boolean = ENFORCE_LICENSING
+): CloudAccess {
+  if (!enforced) return { allowed: true, reason: "unenforced" };
+  if (
+    plan &&
+    plan !== "free" &&
+    (planStatus === "active" || planStatus === "trialing" || planStatus === "past_due")
+  )
+    return { allowed: true, reason: "paid" };
+  return { allowed: true, reason: "basic" };
+}
+
+let cachedCloud: CloudAccess | null = null;
+/** The signed-in org's cloud entitlement. Unknown (offline, signed out) is
+ *  treated as allowed: refusing to sync because we could not read the plan
+ *  would strand someone who is paying. The database is the real gate. */
+export async function cloudAccess(force = false): Promise<CloudAccess> {
+  if (cachedCloud && !force) return cachedCloud;
+  if (!ENFORCE_LICENSING) return (cachedCloud = { allowed: true, reason: "unenforced" });
+  if (!supabase) return { allowed: true, reason: "unenforced" };
+  const revision = entitlementRevision;
+  try {
+    const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+    if (orgError) throw orgError;
+    const { data } = await supabase
+      .from("organizations")
+      .select("plan, plan_status")
+      .eq("id", orgId)
+      .maybeSingle();
+    if (!data) return { allowed: true, reason: "unenforced" };
+    let access = resolveCloudAccess(
+      data.plan as string | null,
+      data.plan_status as string | null
+    );
+    // Basic can use the web too. Only the owner's Ultra licence lifts its cap.
+    if (access.reason === "basic") {
+      const { data: licensed } = await supabase.rpc("filey_org_owner_licensed", { p_org: orgId });
+      if (licensed === true) access = { allowed: true, reason: "paid" };
+    }
+    if (revision === entitlementRevision) cachedCloud = access;
+    return access;
+  } catch {
+    return { allowed: true, reason: "unenforced" };
+  }
+}
+
+/** Drop the cached plan/tier answers — call after a purchase lands. */
+export function clearEntitlementCache(): void {
+  entitlementRevision++;
+  cachedTier = null;
+  cachedCloud = null;
+}
+
+/** Turn a purchase made on the website into real access on this account.
+ *
+ *  Someone can buy from gofiley.com before Filey exists on their machine. That
+ *  payment is parked against the email they typed; this is what collects it,
+ *  once they have signed in and Supabase has verified that address. Safe to
+ *  call on every sign-in: it claims nothing when there is nothing to claim.
+ *
+ *  Returns true when something was claimed, so the caller can refresh the UI
+ *  rather than leaving a paying customer looking at the Free plan. */
+export async function claimWebsitePurchases(): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { data, error } = await supabase.rpc("filey_claim_entitlements");
+    if (error) return false;
+    const claimed = !!(data as { claimed?: boolean } | null)?.claimed;
+    if (claimed) clearEntitlementCache();
+    return claimed;
+  } catch {
+    // Offline, or the migration has not been applied yet. Nothing to do — the
+    // purchase stays parked and the next sign-in tries again.
+    return false;
+  }
+}
+
+/** Turn any payment made elsewhere into access on this machine. Safe to run on
+ *  every sign-in, app start and window focus: it collects website purchases,
+ *  then activates a new device when Ultra has an available slot. A deliberately
+ *  removed device never takes its slot back automatically. */
+export async function collectPurchases(): Promise<boolean> {
+  const claimed = await claimWebsitePurchases();
+  let activated = false;
+  try {
+    if (!(await verifyStoredLicense()).valid) {
+      const owned = await licenseOverview();
+      const fingerprint = await deviceId();
+      const previous = owned?.devices.find(d => d.fingerprint === fingerprint);
+      if (owned && !previous?.deactivated_at && (previous || owned.devices.filter(d => !d.deactivated_at).length < LITE_DEVICE_LIMIT)) {
+        activated = (await activateThisDevice()).valid;
+      }
+    }
+  } catch {
+    /* offline, or signed out — the next sign-in tries again */
+  }
+  if (claimed || activated) clearEntitlementCache();
+  return claimed || activated;
+}
+
+/** Ask the app to show the upgrade dialog (UpgradeDialog listens). Fired
+ *  alongside the throw, so a caller that only knows how to toast still puts
+ *  the way out on screen. */
+export function offerUpgrade(reason: "invoices" | "emails" = "invoices"): void {
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent("filey:upgrade", { detail: { reason } }));
+}
+
+/** Matches both this file's cap errors and the database trigger's. */
+export const isPlanLimitError = (e: unknown) =>
+  /plan limit reached/i.test(e instanceof Error ? e.message : String(e));
+
+/** Basic-tier invoice cap: throws a friendly error when a NEW invoice would
  *  exceed this month's allowance. No-op unless licensing is enforced. */
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
   if (!ENFORCE_LICENSING) return;
+  // Basic has the same creation cap locally and on the web. Edits never call this.
   if ((await entitlement()) !== "free") return;
+  // Pro and Ultra-owner workspaces are uncapped. Historic free-cloud access
+  // does not lift Basic's creation limit now that every plan includes the web.
+  // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
+  if (!isLocalMode()) {
+    const { reason } = await cloudAccess();
+    if (reason === "paid") return;
+  }
   const used = await countThisMonth();
-  if (used >= FREE_LIMITS.invoicesPerMonth)
+  if (used >= FREE_LIMITS.invoicesPerMonth) {
+    offerUpgrade("invoices");
     throw new Error(
-      `Free plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
-        `Upgrade to Filey Freedom (one-time) or Pro in Settings → Billing.`
+      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
+        `Editing existing invoices is unlimited. Pro is $5/month, or buy Ultra once for unlimited invoicing — Settings → Billing.`
     );
+  }
 }
 
 /* ---------------- email daily cap (per tier) ---------------- */
@@ -379,11 +540,13 @@ export async function checkEmailDailyCap(): Promise<void> {
   if (!ENFORCE_LICENSING) return;
   const limit = EMAIL_DAILY_LIMIT[await entitlement()];
   if (!Number.isFinite(limit)) return;
-  if ((await emailCountToday()) >= limit)
+  if ((await emailCountToday()) >= limit) {
+    offerUpgrade("emails");
     throw new Error(
       `Daily email limit reached (${limit} today). ` +
         `Upgrade in Settings → Billing to send more.`
     );
+  }
 }
 
 /** Record one successful send against today's local counter. */

@@ -9,7 +9,10 @@
 // brain, memory and tools all live in this app — nothing is sent to a server.
 import { invoke } from "@tauri-apps/api/core";
 import { log } from "./log";
+import { requireModuleAccess } from "./moduleAccess";
 import { listen } from "@tauri-apps/api/event";
+import { getCacheScope } from "./api";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 
 export const hasDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -22,10 +25,40 @@ export interface BridgeState {
   error?: string | null;
   /** The paired JID once connected (owner's own chat in self-chat mode). */
   me?: string | null;
+  /** Native supervisor generation; never reused after a restart or re-pair. */
+  sessionId?: string | null;
 }
 
 const AUTO_KEY = "filey.wa_bridge.auto";
 const OWNER_KEY = "filey.wa_bridge.owner";
+const ACCOUNT_KEY = "filey.wa_bridge.account";
+
+/** Pairing belongs to an account and organization across its storage modes. */
+function accountScope(): string | null {
+  return agentStorageScope() ? getCacheScope() : null;
+}
+
+function boundAccount(): string {
+  const account = accountScope();
+  if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
+  const bound = localStorage.getItem(ACCOUNT_KEY);
+  if (bound !== account)
+    throw new Error(
+      bound
+        ? "WhatsApp belongs to another Filey account. Use Re-pair in Integrations to connect your own phone."
+        : "Connect WhatsApp once in Integrations to link the existing pairing to this Filey account."
+    );
+  return account;
+}
+
+function visibleState(state: BridgeState): BridgeState {
+  try {
+    boundAccount();
+    return state;
+  } catch (e) {
+    return { state: "stopped", error: e instanceof Error ? e.message : String(e) };
+  }
+}
 
 export interface BridgeConfig {
   /** Start with the app, so WhatsApp is simply live after launch. */
@@ -37,38 +70,79 @@ export interface BridgeConfig {
 }
 
 export function getBridgeConfig(): BridgeConfig {
+  const account = accountScope();
+  const suffix = account ? `:${encodeURIComponent(account)}` : "";
   return {
-    // Default ON: WhatsApp should simply be live after launch. Opt out with "0".
-    autoStart: localStorage.getItem(AUTO_KEY) !== "0",
-    ownerNumber: localStorage.getItem(OWNER_KEY) ?? "",
+    autoStart:
+      !!account &&
+      localStorage.getItem(ACCOUNT_KEY) === account &&
+      (localStorage.getItem(AUTO_KEY + suffix) ?? localStorage.getItem(AUTO_KEY)) !== "0",
+    ownerNumber: account ? (localStorage.getItem(OWNER_KEY + suffix) ?? "") : "",
   };
 }
 
 export function setBridgeConfig(c: Partial<BridgeConfig>): BridgeConfig {
-  if (c.autoStart !== undefined) localStorage.setItem(AUTO_KEY, c.autoStart ? "1" : "0");
-  if (c.ownerNumber !== undefined) localStorage.setItem(OWNER_KEY, c.ownerNumber.trim());
+  const account = accountScope();
+  if (!account) throw new Error("Sign in to Filey before changing WhatsApp preferences.");
+  const owner = c.ownerNumber?.trim();
+  if (owner && (!/^\+?[\d ()-]+$/.test(owner) || !/^\d{7,15}$/.test(owner.replace(/\D/g, ""))))
+    throw new Error("Enter your full phone number, including the country code.");
+  const suffix = `:${encodeURIComponent(account)}`;
+  if (c.autoStart !== undefined)
+    localStorage.setItem(AUTO_KEY + suffix, c.autoStart ? "1" : "0");
+  if (c.ownerNumber !== undefined)
+    localStorage.setItem(OWNER_KEY + suffix, (owner ?? "").replace(/\D/g, ""));
   return getBridgeConfig();
 }
 
 export async function bridgeState(): Promise<BridgeState> {
   if (!hasDesktop) return { state: "stopped" };
   try {
-    return await invoke<BridgeState>("wa_bridge_state");
-  } catch {
-    return { state: "stopped" };
+    return visibleState(await invoke<BridgeState>("wa_bridge_state"));
+  } catch (e) {
+    return {
+      state: "error",
+      error: `Could not read WhatsApp connection status: ${e instanceof Error ? e.message : String(e)}`,
+    };
   }
 }
 
 export async function startBridge(): Promise<BridgeState> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
-  return invoke<BridgeState>("wa_bridge_start");
+  const account = accountScope();
+  if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
+  await requireModuleAccess("integrations");
+  if (account !== accountScope()) throw new Error("Workspace changed before connecting WhatsApp.");
+  const previous = localStorage.getItem(ACCOUNT_KEY);
+  if (previous && previous !== account) boundAccount();
+  const state = await invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
+  if (account !== accountScope()) {
+    await stopBridge();
+    throw new Error(
+      "Your Filey account changed while connecting WhatsApp. Connect again in Integrations."
+    );
+  }
+  localStorage.setItem(ACCOUNT_KEY, account);
+  return state;
 }
 
 /** Wipe the pairing and start again (next start shows a QR). The way out of a
  *  session the phone can no longer decrypt — see wa_bridge_reset. */
 export async function resetBridge(): Promise<BridgeState> {
   if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
-  return invoke<BridgeState>("wa_bridge_reset");
+  const account = accountScope();
+  if (!account) throw new Error("Sign in to Filey before connecting WhatsApp.");
+  await requireModuleAccess("integrations");
+  if (account !== accountScope()) throw new Error("Workspace changed before pairing WhatsApp.");
+  const state = await invoke<BridgeState>("wa_bridge_reset", { ownerNumber: getBridgeConfig().ownerNumber });
+  if (account !== accountScope()) {
+    await stopBridge();
+    throw new Error(
+      "Your Filey account changed while pairing WhatsApp. Connect again in Integrations."
+    );
+  }
+  localStorage.setItem(ACCOUNT_KEY, account);
+  return state;
 }
 
 export async function stopBridge(): Promise<void> {
@@ -79,16 +153,19 @@ export async function stopBridge(): Promise<void> {
 /** Live state pushed from the supervisor (QR arriving, connection opening). */
 export function onBridgeState(cb: (s: BridgeState) => void): () => void {
   if (!hasDesktop) return () => {};
-  const un = listen<BridgeState>("wa-bridge", (e) => cb(e.payload));
+  const un = listen<BridgeState>("wa-bridge", (e) => cb(visibleState(e.payload)));
   return () => void un.then((f) => f()).catch(() => {});
 }
 
 /** Incoming WhatsApp message (routed from the sidecar through Rust). */
 export interface WaMessage {
   id: string;
+  bridgeSession: string;
   from: string;
   text: string;
   fromName?: string;
+  chatJid?: string;
+  attachment?: { name: string; mimetype: string; b64: string };
 }
 
 export function onWaMessage(cb: (m: WaMessage) => void): () => void {
@@ -101,9 +178,11 @@ export function onWaMessage(cb: (m: WaMessage) => void): () => void {
  *  and feeds the words to the agent exactly like a typed message. */
 export interface WaVoice {
   id: string;
+  bridgeSession: string;
   from: string;
   text: string; // unused for voice (kept for shape parity)
   fromName?: string;
+  chatJid?: string;
   b64: string;
   mimetype?: string;
 }
@@ -115,15 +194,32 @@ export function onWaVoice(cb: (v: WaVoice) => void): () => void {
 }
 
 /** Answer an incoming message — this is the local agent's reply channel. */
-export async function replyWa(id: string, text: string): Promise<void> {
-  if (!hasDesktop) return;
-  await invoke("wa_bridge_reply", { id, text });
+export async function replyWa(id: string, text: string, sessionId: string): Promise<void> {
+  if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
+  if (!sessionId) throw new Error("This WhatsApp request has expired. Send it again after reconnecting.");
+  const account = boundAccount();
+  const scope = agentStorageScope();
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
+  await invoke("wa_bridge_reply", { id, text, sessionId });
+}
+
+async function connectedSession(expected?: string): Promise<string> {
+  const state = await bridgeState();
+  if (state.state !== "connected" || !state.sessionId || (expected && expected !== state.sessionId))
+    throw new Error("WhatsApp disconnected or restarted. Reconnect before sending.");
+  return state.sessionId;
 }
 
 /** Send a proactive message to a specific JID (owner notifications). */
-export async function sendWa(to: string, text: string): Promise<void> {
-  if (!hasDesktop) return;
-  await invoke("wa_bridge_send", { to, text });
+export async function sendWa(to: string, text: string, expectedSessionId?: string): Promise<string> {
+  if (!hasDesktop) throw new Error("The WhatsApp bridge runs in the desktop app only.");
+  const account = boundAccount();
+  const scope = agentStorageScope();
+  const sessionId = await connectedSession(expectedSessionId);
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
+  return await invoke<string>("wa_bridge_send", { to, text, sessionId });
 }
 
 /** Send a file (PDF, photo, document) to a JID. The desktop sidecar reads it
@@ -131,29 +227,61 @@ export async function sendWa(to: string, text: string): Promise<void> {
  *  documents. Throws when the bridge is down or the file is missing. */
 export async function sendWaFile(
   to: string,
-  file: { path: string; filename: string; mimetype?: string; caption?: string }
-): Promise<void> {
+  file: { path: string; filename: string; mimetype?: string; caption?: string },
+  expectedSessionId?: string
+): Promise<string> {
   if (!hasDesktop)
     throw new Error("Sending files over WhatsApp runs in the desktop app only.");
-  await invoke("wa_bridge_send_file", {
+  const account = boundAccount();
+  const scope = agentStorageScope();
+  const sessionId = await connectedSession(expectedSessionId);
+  await requireModuleAccess("integrations");
+  if (account !== boundAccount() || scope !== agentStorageScope()) throw new Error("Workspace changed before sending WhatsApp.");
+  return await invoke<string>("wa_bridge_send_file", {
     to,
     path: file.path,
     filename: file.filename,
     mimetype: file.mimetype ?? "",
     caption: file.caption ?? "",
+    sessionId,
   });
 }
 
 /** Called once at boot: if the owner asked for it, bring WhatsApp up in the
  *  background so the app simply has a live channel after launch. Silent by
  *  design — a failure here must never block startup. */
+let watchingAccount = false;
+let lastAccount: string | null | undefined;
+let autoQueue = Promise.resolve();
+
 export async function autoStartBridge(): Promise<void> {
   if (!hasDesktop) return;
-  const { autoStart } = getBridgeConfig();
-  if (!autoStart) return;
-  try {
-    await startBridge();
-  } catch (e) {
-    log.warn("whatsapp", "bridge auto-start failed", e);
+  if (!watchingAccount) {
+    watchingAccount = true;
+    window.addEventListener(AGENT_STORAGE_EVENT, () => void autoStartBridge());
+    window.addEventListener("storage", () => void autoStartBridge());
   }
+  const account = accountScope();
+  if (account === lastAccount) return autoQueue;
+  const previous = lastAccount;
+  lastAccount = account;
+  autoQueue = autoQueue
+    .then(async () => {
+      if (account !== accountScope()) return;
+      if (
+        (previous && previous !== account) ||
+        (localStorage.getItem(ACCOUNT_KEY) &&
+          localStorage.getItem(ACCOUNT_KEY) !== account)
+      )
+        await stopBridge();
+      if (!account || !getBridgeConfig().autoStart || account !== accountScope()) return;
+      // Auto-start resumes a binding; it never claims an unbound pairing.
+      boundAccount();
+      await requireModuleAccess("integrations");
+      if (account !== accountScope()) return;
+      await invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
+      if (account !== accountScope()) await stopBridge();
+    })
+    .catch((e) => log.warn("whatsapp", "bridge auto-start failed", e));
+  return autoQueue;
 }

@@ -1218,7 +1218,7 @@ dependencies = [
 
 [[package]]
 name = "filey-erp"
-version = "2.10.2"
+version = "3.0.7"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -1230,6 +1230,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

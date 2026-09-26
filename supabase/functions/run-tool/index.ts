@@ -55,11 +55,11 @@ serve(async (req) => {
     );
     const allowed = await rateLimit(adminClient, user.id, "run_tool", 15, 3600);
     if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
-    await logAction(adminClient, user.id, "run_tool", { jobId: jobId ?? "" });
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}) as { jobId?: string });
     jobId = body?.jobId ?? null;
     if (!jobId) return json({ error: "jobId is required" }, 400);
+    await logAction(adminClient, user.id, "run_tool", { jobId });
 
     // RLS ensures the job belongs to the caller.
     const { data: job, error: jErr } = await client
@@ -103,13 +103,12 @@ serve(async (req) => {
           upsert: true,
           contentType: "application/pdf",
         });
-      if (!up.error) {
-        paths.push(path);
-        total += o.bytes.byteLength;
-      }
+      if (up.error) throw new Error(`Could not save ${o.name}: ${up.error.message}`);
+      paths.push(path);
+      total += o.bytes.byteLength;
     }
 
-    await client
+    const { error: completionError } = await client
       .from("tool_jobs")
       .update({
         status: "done",
@@ -118,6 +117,7 @@ serve(async (req) => {
         updated_at: new Date().toISOString(),
       })
       .eq("id", jobId);
+    if (completionError) throw completionError;
 
     return json({ ok: true, outputPaths: paths });
   } catch (e) {

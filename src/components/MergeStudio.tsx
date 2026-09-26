@@ -1,12 +1,10 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Upload, Loader2, GripVertical, X, Combine } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
+import { Upload, GripVertical, X, Combine, ArrowLeft, ArrowRight } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { mergePdfs, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Interactive merge: each PDF shows as a card with a page-1 thumbnail. Drag
  * cards to set the order, remove or add more, then merge — no comma-separated
@@ -17,22 +15,26 @@ interface Item {
   file: File;
   thumb: string;
   pages: number;
+  error?: string;
 }
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-const fileKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
 
 async function toItem(file: File): Promise<Item> {
+  let task: ReturnType<typeof safePdf.getDocument> | undefined;
+  const c = document.createElement("canvas");
   try {
     const data = new Uint8Array(await file.arrayBuffer());
-    const pdf = await safePdf.getDocument({ data }).promise;
+    task = safePdf.getDocument({ data });
+    const pdf = await task.promise;
     const p = await pdf.getPage(1);
-    const vp = p.getViewport({ scale: 0.4 });
-    const c = document.createElement("canvas");
+    const size = p.getViewport({ scale: 1 });
+    const vp = p.getViewport({ scale: Math.min(0.4, 400 / Math.max(size.width, size.height)) });
     c.width = vp.width;
     c.height = vp.height;
     const ctx = c.getContext("2d");
-    if (ctx) await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
+    if (!ctx) throw new Error("Preview is unavailable. Try reopening this tool.");
+    await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
     return {
       id: uid(),
       file,
@@ -41,61 +43,61 @@ async function toItem(file: File): Promise<Item> {
     };
   } catch (e) {
     console.warn("Failed to load PDF:", e);
-    return { id: uid(), file, thumb: "", pages: 0 };
+    return { id: uid(), file, thumb: "", pages: 0, error: e instanceof Error ? e.message : "Could not read this PDF." };
+  } finally {
+    c.width = c.height = 0;
+    await task?.destroy();
   }
 }
 
 export default function MergeStudio({
   files,
+  onFilesChange,
   onApply,
 }: {
   files: File[];
+  onFilesChange: (files: File[]) => void;
   onApply: (out: OutFile) => void;
 }) {
   const { toast } = useUI();
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const dragId = useRef<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
 
-  // Add any incoming file that isn't already in the list (preserve order).
+  // The workspace owns the file order, so adding a file preserves prior rearrangements.
   useEffect(() => {
     let dead = false;
-    (async () => {
-      const have = new Set(items.map((i) => fileKey(i.file)));
-      const add = files.filter((f) => !have.has(fileKey(f)));
-      if (!add.length) return;
-      const built: Item[] = [];
-      for (const f of add) built.push(await toItem(f));
-      if (!dead) setItems((prev) => [...prev, ...built]);
-    })();
-    return () => {
-      dead = true;
-    };
+    setLoading(true);
+    Promise.all(files.map(file => items.find(item => item.file === file) || toItem(file)))
+      .then(next => { if (!dead) setItems(next); })
+      .finally(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+    // Preview cache is read only when the selected files change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
   const addMore = async (list: FileList | null) => {
-    if (!list) return;
-    const built: Item[] = [];
-    for (const f of Array.from(list)) built.push(await toItem(f));
-    setItems((prev) => [...prev, ...built]);
+    if (!list || busy || loading) return;
+    const incoming = Array.from(list);
+    if (incoming.some(file => !file.size || (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)))) {
+      toast.error("Choose PDF files with content."); return;
+    }
+    onFilesChange([...files, ...incoming]);
   };
-
   const reorder = (from: string, to: string) => {
-    if (from === to) return;
-    setItems((prev) => {
-      const a = [...prev];
-      const fi = a.findIndex((x) => x.id === from);
-      const ti = a.findIndex((x) => x.id === to);
-      if (fi < 0 || ti < 0) return prev;
-      const [moved] = a.splice(fi, 1);
-      a.splice(ti, 0, moved);
-      return a;
-    });
+    if (busy || loading || from === to) return;
+    const next = [...items];
+    const source = next.findIndex(item => item.id === from), target = next.findIndex(item => item.id === to);
+    if (source < 0 || target < 0) return;
+    next.splice(target, 0, next.splice(source, 1)[0]);
+    onFilesChange(next.map(item => item.file));
   };
 
   const merge = async () => {
+    if (busy || loading) return;
+    if (items.some(item => item.error)) { toast.error("Remove unreadable PDFs before merging."); return; }
     if (!items.length) {
       toast.error("Add at least one PDF.");
       return;
@@ -104,7 +106,6 @@ export default function MergeStudio({
     try {
       const out = await mergePdfs(items.map((i) => i.file));
       onApply(out);
-      toast.success(`Merged ${items.length} files & downloaded.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -121,7 +122,7 @@ export default function MergeStudio({
           {items.length} file{items.length === 1 ? "" : "s"} · {totalPages} page
           {totalPages === 1 ? "" : "s"} - drag to reorder
         </p>
-        <label className="btn-ghost h-8 cursor-pointer text-xs" aria-label="Add PDFs">
+        <label className="btn-ghost cursor-pointer" aria-label="Add PDFs">
           <Upload size={13} /> Add PDFs
           <input
             type="file"
@@ -160,7 +161,7 @@ export default function MergeStudio({
               dragId.current = null;
               setOverId(null);
             }}
-            className={`group relative cursor-grab rounded-xl border bg-white p-2 active:cursor-grabbing ${
+            className={`group relative cursor-grab rounded-xl border bg-card p-2 active:cursor-grabbing ${
               overId === it.id
                 ? "border-primary-400 ring-2 ring-primary-400/40"
                 : "border-brand-200"
@@ -170,10 +171,11 @@ export default function MergeStudio({
               {i + 1}
             </span>
             <button
-              aria-label="Remove"
-              onClick={() => setItems((prev) => prev.filter((x) => x.id !== it.id))}
+              aria-label={"Remove " + it.file.name}
+              onClick={() => onFilesChange(items.filter(x => x.id !== it.id).map(x => x.file))}
+              disabled={busy || loading}
               title="Remove"
-              className="absolute right-1.5 top-1.5 z-10 hidden h-5 w-5 place-items-center rounded-full bg-danger text-white group-hover:grid"
+              className="absolute right-1.5 top-1.5 z-10 grid h-10 w-10 place-items-center rounded-full bg-danger text-white"
             >
               <X size={11} />
             </button>
@@ -185,7 +187,7 @@ export default function MergeStudio({
                   className="max-h-full max-w-full object-contain"
                 />
               ) : (
-                <Loader2 size={16} className="animate-spin text-brand-400" />
+                <span className="p-2 text-xs text-danger" role="alert">{it.error || "Preview unavailable"}</span>
               )}
             </div>
             <div className="mt-1.5 flex items-center gap-1">
@@ -197,7 +199,7 @@ export default function MergeStudio({
                 {it.file.name}
               </span>
             </div>
-            <span className="text-[10px] text-brand-400">{it.pages || "?"} pages</span>
+            <div className="mt-2 flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{it.pages || "?"} pages</span><div className="flex gap-1"><button type="button" className="btn-ghost h-10 w-10 p-0" aria-label={"Move " + it.file.name + " earlier"} disabled={busy || loading || i === 0} onClick={() => reorder(it.id, items[i - 1].id)}><ArrowLeft size={14} /></button><button type="button" className="btn-ghost h-10 w-10 p-0" aria-label={"Move " + it.file.name + " later"} disabled={busy || loading || i === items.length - 1} onClick={() => reorder(it.id, items[i + 1].id)}><ArrowRight size={14} /></button></div></div>
           </div>
         ))}
         {!items.length && (
@@ -221,12 +223,12 @@ export default function MergeStudio({
 
       <button
         onClick={merge}
-        disabled={busy || items.length < 1}
+        disabled={busy || loading || items.length < 1 || items.some(item => !!item.error)}
         className="btn-primary mt-4 w-full"
-        aria-label="Merge and download PDF"
+        aria-label="Merge PDF"
       >
         {busy ? <Loader2 size={15} className="animate-spin" /> : <Combine size={15} />}
-        Merge {items.length} file{items.length === 1 ? "" : "s"} & download
+        {loading ? "Preparing files…" : `Merge ${items.length} file${items.length === 1 ? "" : "s"}`}
       </button>
     </div>
   );

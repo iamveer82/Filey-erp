@@ -9,10 +9,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { cleanRowForPush, pushCollection } from "./sync";
+import { prepareSyncRows, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
+import {
+  loadColl,
+  replaceColl,
+  clearLocalCache,
+  journalSnapshot,
+  journalCommit,
+  journalVersion,
+  journalMark,
+} from "./localdb";
 
-const hasTauri =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
+import { pendingProfile, syncProfile } from "./profileSync";
+
+const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
 // profiles, invitations…) is harmless — the local shim just stores them.
@@ -29,6 +40,7 @@ const TABLES = [
   "order_items",
   "invoice_docs",
   "invoice_doc_items",
+  "work_items",
   "invoice_payments",
   "invoice_recurrence",
   "quotations",
@@ -62,8 +74,6 @@ const TABLES = [
   "email_optouts",
   "campaigns",
 ];
-
-const FILES_BUCKET = "files";
 
 async function localSet(key: string, value: string): Promise<void> {
   if (hasTauri) await invoke("cache_set", { key, value });
@@ -111,22 +121,11 @@ export async function normalizeLocalEmirates(): Promise<number> {
     }
     if (dirty) await localSet("localdb:" + coll, JSON.stringify(rows));
   }
+  // Written straight to the key, so anything already holding a parsed copy of
+  // these collections is now behind. Cheaper than routing a one-off repair
+  // through the query layer.
+  if (changed) clearLocalCache();
   return changed;
-}
-
-function bytesToB64(bytes: Uint8Array): string {
-  let bin = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk)
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  return btoa(bin);
-}
-
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
 }
 
 export interface MigrateResult {
@@ -138,9 +137,9 @@ export interface MigrateResult {
 /** Push all local on-device data into the signed-in cloud account, so the web
  *  version shows the same data. Rows keep their local ids (FK relationships
  *  survive); user/org ownership is re-stamped by the cloud's defaults and
- *  triggers. Rows UPSERT by id — a cloud row with the same id is replaced by
- *  this device's copy (the caller's confirm dialog says so). File bytes stored
- *  locally are uploaded to the files bucket. */
+ *  triggers. Existing cloud rows are updated only when their revision matches
+ *  this device's last copy. Conflicts stay pending for review. File bytes are
+ *  uploaded before their metadata, through the same path as automatic sync. */
 export async function migrateLocalToCloud(
   onProgress?: (msg: string) => void
 ): Promise<MigrateResult[]> {
@@ -154,29 +153,41 @@ export async function migrateLocalToCloud(
         "“Cloud sync (automatic)” above; in cloud mode, log in — then push again."
     );
 
+  assertLocalAccount(uid);
+  await inRealOrg(supabase, uid, true);
   const out: MigrateResult[] = [];
+  if (Object.keys(pendingProfile(uid)).length) {
+    try {
+      await syncProfile(supabase, uid);
+      out.push({ table: "profiles", rows: 1 });
+    } catch (error) {
+      out.push({ table: "profiles", rows: 0, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   for (const t of PUSH_TABLES) {
-    const raw = await localGet("localdb:" + t);
-    let rows: any[] = [];
-    try {
-      rows = raw ? JSON.parse(raw) : [];
-    } catch {
-      rows = [];
+    await journalMark(t, { all: true, silent: true });
+    const pending = await journalSnapshot();
+    // Through loadColl, not the raw key: oversized fields (the logo a doc was
+    // issued with) are stored as {__blob} markers pointing at a shared payload,
+    // and the cloud must receive the real value, not the marker.
+    const rows = await loadColl(t);
+    if (rows.length === 0) {
+      await journalCommit(pending.v, [t], { [t]: pending.tables[t]?.deleted ?? [] });
+      continue;
     }
-    if (!Array.isArray(rows) || rows.length === 0) continue;
-
     onProgress?.(`Pushing ${t}…`);
-    const cleaned = rows.map((r) => cleanRowForPush(r as Record<string, any>, uid));
-    // Same resilient upsert the continuous sync uses: chunked, per-row
-    // fallback, dangling FKs stripped on retry. Upserting (not inserting) is
-    // what makes this work against an account that already has rows — the old
-    // "skip any table with cloud data" rule silently pushed nothing at all.
-    const failed = await pushCollection(supabase, t, cleaned);
+    const failures: SyncFailure[] = [];
+    const report = (failure: SyncFailure) => failures.push(failure);
+    const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report) : { rows, failed: [] };
+    const prepared = prepareSyncRows(uploaded.rows, uid, t, report);
+    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report, uid)];
+    // This upload does not execute queued deletions; automatic sync owns them.
+    await journalCommit(pending.v, [t], { [t]: [...failed, ...(pending.tables[t]?.deleted ?? [])] });
     out.push({
       table: t,
-      rows: cleaned.length - failed.length,
-      error: failed.length ? `${failed.length} row(s) failed` : undefined,
+      rows: rows.length - failed.length,
+      error: failed.length ? `${failed.length} row(s) failed. ${[...new Set(failures.map(f => f.message))].join(" ")}` : undefined,
     });
   }
 
@@ -187,39 +198,6 @@ export async function migrateLocalToCloud(
     await supabase.rpc("sync_bump_sequences");
   } catch {
     /* older cloud DBs without the fn: next insert may need a retry */
-  }
-
-  // Upload locally-stored file bytes so My Files works on the web too.
-  const rawFiles = await localGet("localdb:user_files");
-  let fileRows: { storage_path?: string }[] = [];
-  try {
-    fileRows = rawFiles ? JSON.parse(rawFiles) : [];
-  } catch {
-    fileRows = [];
-  }
-  if (fileRows.length) {
-    onProgress?.(`Uploading ${fileRows.length} files…`);
-    let ok = 0;
-    for (const f of fileRows) {
-      const localPath = f.storage_path;
-      if (!localPath) continue;
-      try {
-        const blobRaw = await localGet("fileblob:" + localPath);
-        if (!blobRaw) continue;
-        const { mime, b64 } = JSON.parse(blobRaw) as { mime: string; b64: string };
-        const cloudPath = localPath.replace(/^local-user\//, `${uid}/`);
-        const { error } = await supabase.storage
-          .from(FILES_BUCKET)
-          .upload(cloudPath, new Blob([b64ToBytes(b64).slice()], { type: mime }), {
-            contentType: mime,
-            upsert: true,
-          });
-        if (!error) ok++;
-      } catch {
-        /* skip individual file failures */
-      }
-    }
-    out.push({ table: "files (blobs)", rows: ok });
   }
 
   return out;
@@ -238,50 +216,62 @@ export async function migrateCloudToLocal(
       "Sign in to your cloud account first: switch to Cloud mode, log in, then import."
     );
 
+  const uid = sess.session.user.id;
+  assertLocalAccount(uid);
+  const before = await journalSnapshot();
+  const staged = new Map<string, Record<string, any>[]>();
+  const originals = new Map<string, Record<string, any>[]>();
   const out: MigrateResult[] = [];
-  let fileRows: { storage_path?: string }[] = [];
 
+  // Read the complete source first. No record is replaced on a failed cloud read.
   for (const t of TABLES) {
-    onProgress?.(`Copying ${t}…`);
-    try {
-      const { data, error } = await supabase.from(t).select("*");
-      if (error) {
-        out.push({ table: t, rows: 0, error: error.message });
-        continue;
-      }
-      const rows = data ?? [];
-      await localSet("localdb:" + t, JSON.stringify(rows));
-      if (t === "user_files") fileRows = rows as { storage_path?: string }[];
-      out.push({ table: t, rows: rows.length });
-    } catch (e: any) {
-      out.push({ table: t, rows: 0, error: e?.message ?? String(e) });
-    }
+    onProgress?.(`Reading ${t}…`);
+    staged.set(t, await pullPaged(supabase, t, "*"));
+    originals.set(t, await loadColl(t));
+    out.push({ table: t, rows: staged.get(t)!.length });
   }
 
-  // Pull file bytes for My Files so they open offline. Best-effort.
-  if (fileRows.length) {
-    onProgress?.(`Downloading ${fileRows.length} files…`);
-    let ok = 0;
-    for (const f of fileRows) {
-      const path = f.storage_path;
-      if (!path) continue;
+  const cloudProfile = staged.get("profiles")?.find((row) => row.id === uid);
+  if (cloudProfile) assertLocalAccount(uid, cloudProfile.org_id ?? null);
+  const fileRows = staged.get("user_files") ?? [];
+  onProgress?.(`Downloading ${fileRows.length} files…`);
+  await pullFileBlobs(supabase, fileRows);
+  if (fileRows.length) out.push({ table: "files (blobs)", rows: fileRows.length });
+  if ((await journalVersion()) !== before.v)
+    throw new Error("Local records changed during the copy. Finish editing and retry.");
+  const current = await supabase.auth.getSession();
+  if (current.data.session?.user.id !== uid)
+    throw new Error(
+      "The cloud account changed during the copy. Local records have not been replaced."
+    );
+
+  const committed: string[] = [];
+  try {
+    // ponytail: compensation handles write errors; process-crash atomicity needs a SQLite transaction.
+    for (const [table, rows] of staged) {
+      committed.push(table);
+      await replaceColl(table, rows);
+    }
+    claimLocalWorkspace(uid);
+    await journalCommit(before.v, TABLES);
+    // An imported snapshot must not be re-uploaded as legacy local data.
+    localStorage.setItem("filey_cloud_seeded", "1");
+  } catch (error) {
+    const failures: string[] = [];
+    for (const table of committed.reverse()) {
       try {
-        const { data, error } = await supabase.storage
-          .from(FILES_BUCKET)
-          .download(path);
-        if (error || !data) continue;
-        const bytes = new Uint8Array(await data.arrayBuffer());
-        await localSet(
-          "fileblob:" + path,
-          JSON.stringify({ mime: data.type || "application/octet-stream", b64: bytesToB64(bytes) })
-        );
-        ok++;
+        await replaceColl(table, originals.get(table)!);
       } catch {
-        /* skip individual file failures */
+        failures.push(table);
       }
     }
-    out.push({ table: "files (blobs)", rows: ok });
+    if (failures.length)
+      throw new Error(
+        `Local storage failed; restore your backup for: ${failures.join(", ")}.`
+      );
+    throw error;
   }
-
+  clearLocalCache();
+  window.dispatchEvent(new Event("filey:remote-update"));
   return out;
 }

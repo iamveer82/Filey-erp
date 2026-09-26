@@ -1,7 +1,7 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import {
   Upload,
-  Loader2,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -12,15 +12,13 @@ import {
   PenLine,
   Eraser,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { placeStamp, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
-import { useAssets } from "../lib/assets";
+import { legacyAssets, useAssets } from "../lib/assets";
+import { errMsg } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Interactive stamp / signature placer. Renders the page, lets the user drop
  * a stamp of any raster format (normalised to PNG so transparency survives),
@@ -98,7 +96,8 @@ export default function StampStudio({
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const pwdRef = useRef<string | undefined>(undefined);
-  const { assets, save, remove } = useAssets();
+  const { assets, error: libraryError, refresh: refreshLibrary, save, remove } = useAssets();
+  const [recovery, setRecovery] = useState<ReturnType<typeof legacyAssets> | null>(null);
   const isWatermark = variant === "watermark";
   const isBackground = variant === "background";
   const isLogo = variant === "logo";
@@ -339,11 +338,10 @@ export default function StampStudio({
         placeholder: isWatermark ? "My watermark" : "My signature",
       });
       if (name == null) return;
-      save(name, stamp.src, stamp.ratio);
+      await save(name, stamp.src, stamp.ratio);
       toastRef.current.success("Saved to your library.");
     } catch (e) {
-      // prompt cancelled or errored — silently ignore
-      console.warn("Save to library failed:", e);
+      toastRef.current.error(`Could not save image: ${errMsg(e)}`);
     }
   };
 
@@ -420,9 +418,6 @@ export default function StampStudio({
         behind: isBackground,
       });
       onApply(out);
-      toastRef.current.success(
-        allPages ? "Stamp applied to all pages." : `Stamp applied to page ${page + 1}.`
-      );
     } catch (e) {
       toastRef.current.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -433,7 +428,7 @@ export default function StampStudio({
   return (
     <div>
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
+      <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-border bg-card pb-4">
         {mode === "text" ? (
           <>
             <SelectMenu
@@ -451,24 +446,25 @@ export default function StampStudio({
               type="color"
               value={badgeColor}
               onChange={(e) => setBadgeColor(e.target.value)}
-              className="h-7 w-7 cursor-pointer rounded border border-brand-200"
+              className="h-10 w-10 cursor-pointer rounded-full border border-border bg-card p-1"
               title="Badge colour"
+              aria-label="Badge colour"
             />
           </>
         ) : (
           <>
             {allowDraw && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={() => setPadOpen((v) => !v)}
                 title="Draw your signature"
-                aria-label="Draw mode"
+                aria-label="Draw signature"
               >
-                <PenLine size={13} /> Draw
+                <PenLine size={16} /> Draw signature
               </button>
             )}
             <label
-              className="btn-ghost h-8 cursor-pointer text-xs"
+              className="btn-ghost cursor-pointer"
               aria-label="Upload stamp image"
             >
               <Upload size={13} /> {stamp ? "Change" : `Upload ${noun}`}
@@ -484,17 +480,17 @@ export default function StampStudio({
             </label>
             {stamp && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={saveCurrent}
                 title="Save to your library"
                 aria-label="Save stamp to library"
               >
-                <Save size={13} /> Save
+                <Save size={16} /> Save to library
               </button>
             )}
             {stamp && (
               <button
-                className="btn-ghost h-8 text-xs"
+                className="btn-ghost"
                 onClick={() => setStamp(null)}
                 title="Remove from canvas"
                 aria-label="Remove stamp from canvas"
@@ -513,6 +509,7 @@ export default function StampStudio({
           min={0.05}
           max={1}
           step={0.05}
+          aria-label="Stamp opacity"
           value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
           className="w-24 accent-primary-500"
@@ -536,7 +533,7 @@ export default function StampStudio({
 
         <button
           aria-label="Previous page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.max(0, p - 1))}
           disabled={page <= 0}
         >
@@ -547,7 +544,7 @@ export default function StampStudio({
         </span>
         <button
           aria-label="Next page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
           disabled={page >= pages - 1}
         >
@@ -556,17 +553,17 @@ export default function StampStudio({
         <button
           onClick={apply}
           disabled={saving || !stamp}
-          className="btn-primary h-7 text-xs"
-          aria-label="Apply stamps and download"
+          className="btn-primary"
+          aria-label="Create PDF"
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
-          Apply
+          Create PDF
         </button>
       </div>
 
       {/* ── Signature draw pad ─────────────────────────────────────────────── */}
       {padOpen && (
-        <div className="mb-2 rounded-xl border border-brand-200 bg-white p-2">
+        <div className="mb-4 rounded-xl border border-border bg-card p-4">
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <span className="text-[11px] font-medium text-brand-500">Signature</span>
             {/* Pen / eraser */}
@@ -575,7 +572,7 @@ export default function StampStudio({
                 onClick={() => setPenMode("draw")}
                 title="Pen"
                 aria-label="Pen tool"
-                className={`grid h-7 w-8 place-items-center ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+                className={`grid h-10 w-10 place-items-center rounded-full ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
               >
                 <PenLine size={13} />
               </button>
@@ -594,7 +591,8 @@ export default function StampStudio({
                 value={penColor}
                 onChange={(e) => setPenColor(e.target.value)}
                 title="Ink colour"
-                className="h-7 w-7 cursor-pointer rounded border border-brand-200"
+                aria-label="Ink colour"
+                className="h-10 w-10 cursor-pointer rounded-full border border-border bg-card p-1"
               />
             )}
             <span className="text-[11px] text-brand-400">
@@ -605,6 +603,7 @@ export default function StampStudio({
               min={1}
               max={14}
               step={1}
+              aria-label="Brush size"
               value={penWidth}
               onChange={(e) => setPenWidth(Number(e.target.value))}
               className="w-24 accent-primary-500"
@@ -612,18 +611,18 @@ export default function StampStudio({
             />
             <span className="ml-auto flex gap-1.5">
               <button
-                className="btn-ghost h-7 text-xs"
+                className="btn-ghost"
                 onClick={clearPad}
                 aria-label="Clear signature pad"
               >
                 Clear
               </button>
               <button
-                className="btn-primary h-7 text-xs"
+                className="btn-primary"
                 onClick={usePad}
                 aria-label="Use signature"
               >
-                <Check size={12} /> Use
+                <Check size={16} /> Use signature
               </button>
             </span>
           </div>
@@ -635,13 +634,36 @@ export default function StampStudio({
             onPointerMove={padMove}
             onPointerUp={padUp}
             onPointerLeave={padUp}
-            className={`w-full rounded-lg border border-dashed border-brand-300 bg-[repeating-linear-gradient(transparent,transparent_39px,#e5e7eb_40px)] ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
+            className={`w-full rounded-lg border border-dashed border-brand-300 bg-white ${penMode === "erase" ? "cursor-cell" : "cursor-crosshair"}`}
             style={{ touchAction: "none", aspectRatio: "3 / 1" }}
           />
         </div>
       )}
 
       {/* ── Saved-asset library strip ─────────────────────────────────────── */}
+      {mode === "image" && libraryError && (
+        <p role="alert" className="mb-2 text-sm text-danger">
+          Could not load your image library: {libraryError}{" "}
+          <button className="underline" onClick={() => void refreshLibrary()}>Retry</button>
+        </p>
+      )}
+      {mode === "image" && localStorage.getItem("filey.assets.v1") && (
+        <details className="mb-3 text-sm text-brand-600" onToggle={e => {
+          if (e.currentTarget.open) setRecovery(legacyAssets());
+        }}>
+          <summary className="cursor-pointer">Recover images saved by an older version</summary>
+          <p className="my-2">Choose your image, then save it to your library to include it in sync.</p>
+          <div className="flex gap-2 overflow-x-auto">
+            {recovery?.map(a => (
+              <button key={a.id} title={a.name} aria-label={`Recover ${a.name}`}
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-brand-200 bg-white p-1"
+                onClick={() => setStamp({ src: a.dataUrl, ratio: a.ratio })}>
+                <img src={a.dataUrl} alt={a.name} className="max-h-full max-w-full object-contain" />
+              </button>
+            ))}
+          </div>
+        </details>
+      )}
       {mode === "image" && assets.length > 0 && (
         <div className="mb-2 flex items-center gap-2 overflow-x-auto pb-1">
           <span className="shrink-0 text-[11px] font-medium text-brand-500">Saved</span>
@@ -660,7 +682,7 @@ export default function StampStudio({
                 />
               </button>
               <button
-                onClick={() => remove(a.id)}
+                onClick={() => void remove(a.id).catch(e => toastRef.current.error(`Could not delete image: ${errMsg(e)}`))}
                 title={`Delete “${a.name}”`}
                 className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-danger text-white shadow group-hover:grid"
               >
@@ -740,7 +762,7 @@ export default function StampStudio({
         {mode === "text"
           ? "Pick a badge, drag to place and resize, then "
           : `Upload or pick a saved ${noun}, drag to place and resize, then `}
-        <strong>Apply</strong>. Toggle “All pages” to apply to the whole document.
+        <strong>Create PDF</strong>. Toggle “All pages” to apply to the whole document.
       </p>
     </div>
   );

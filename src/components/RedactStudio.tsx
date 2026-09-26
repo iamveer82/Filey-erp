@@ -1,12 +1,10 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
+import { Check, ChevronLeft, ChevronRight, Eraser } from "lucide-react";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { redactBoxes, type RedactBox, type OutFile } from "../lib/pdfTools";
 import { useUI } from "../lib/ui";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Draw opaque redaction boxes over a page and bake them in. Multiple boxes,
  * across pages, free width/height (unlike the aspect-locked image stamps).
@@ -138,9 +136,6 @@ export default function RedactStudio({
         }))
       );
       onApply(out);
-      toast.success(
-        `${boxes.length} area${boxes.length > 1 ? "s" : ""} redacted & downloaded.`
-      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -150,13 +145,13 @@ export default function RedactStudio({
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-white px-2 py-1.5">
+      <div className="mb-4 flex flex-wrap items-center gap-3 border-b border-border bg-card pb-4">
         <span className="flex items-center gap-1 text-xs font-medium text-brand-500">
           <Eraser size={13} /> Drag to cover · {boxes.length} box
           {boxes.length === 1 ? "" : "es"}
         </span>
         <button
-          className="btn-ghost h-7 text-xs"
+          className="btn-ghost"
           onClick={() => setBoxes((b) => b.filter((x) => x.page !== page))}
           disabled={!pageBoxes.length}
           aria-label="Clear all redactions on this page"
@@ -166,7 +161,7 @@ export default function RedactStudio({
         <span className="flex-1" />
         <button
           aria-label="Previous page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.max(0, p - 1))}
           disabled={page <= 0}
         >
@@ -177,7 +172,7 @@ export default function RedactStudio({
         </span>
         <button
           aria-label="Next page"
-          className="btn-ghost h-7 !px-1.5"
+          className="btn-ghost h-10 w-10 p-0"
           onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
           disabled={page >= pages - 1}
         >
@@ -186,11 +181,11 @@ export default function RedactStudio({
         <button
           onClick={apply}
           disabled={saving || !boxes.length}
-          className="btn-primary h-7 text-xs"
-          aria-label="Apply redactions and download"
+          className="btn-primary"
+          aria-label="Redact PDF"
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{" "}
-          Apply
+          Redact PDF
         </button>
       </div>
 
@@ -247,7 +242,8 @@ export default function RedactStudio({
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
         Drag to draw black boxes over anything to hide. Double-click a box to remove it,
-        then <strong>Apply</strong>.
+        then <strong>Redact PDF</strong>. The result contains page images only, so covered text
+        cannot be copied or recovered. Search and editable forms are removed.
       </p>
     </div>
   );

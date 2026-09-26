@@ -7,7 +7,8 @@ beforeEach(() => localStorage.clear());
 describe("localdb query shim", () => {
   it("inserts with an id and reads it back", async () => {
     const { data: ins } = await c.from("widgets").insert({ name: "A" }).select().single();
-    expect(ins.id).toBe(1);
+    expect(Number.isSafeInteger(ins.id)).toBe(true);
+    expect(ins.id).toBeGreaterThanOrEqual(2 ** 52);
     expect(ins.created_at).toBeTruthy();
     const { data: rows } = await c.from("widgets").select();
     expect(rows).toHaveLength(1);
@@ -17,7 +18,7 @@ describe("localdb query shim", () => {
     await c.from("widgets").insert([{ name: "A" }, { name: "B" }]);
     const { data } = await c.from("widgets").select().eq("name", "B").single();
     expect(data.name).toBe("B");
-    expect(data.id).toBe(2);
+    expect(Number.isSafeInteger(data.id)).toBe(true);
   });
 
   it("eq matches a string param against a numeric stored id (PostgREST coercion)", async () => {
@@ -76,7 +77,7 @@ describe("localdb query shim", () => {
   });
 
   it("upsert replaces on id conflict", async () => {
-    await c.from("w").insert({ name: "A" });
+    await c.from("w").insert({ id: 1, name: "A" });
     await c.from("w").upsert({ id: 1, name: "A2" });
     const { data } = await c.from("w").select();
     expect(data).toHaveLength(1);

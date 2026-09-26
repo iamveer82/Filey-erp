@@ -117,7 +117,38 @@ export default function StatementModal({
       }),
     [docs, partyType]
   );
-  const docKey = ledgerDocs.map((d) => d.id).join(",");
+  /** Party currency: the dominant currency across its documents, falling
+   *  back to the company default. */
+  const currency = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const d of ledgerDocs) {
+      const c = (d.currency || "").trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return top || company?.currency || "AED";
+  }, [ledgerDocs, company]);
+
+  const statementDocs = useMemo(
+    () =>
+      ledgerDocs.filter((d) => {
+        const c = (d.currency || "").trim();
+        return !c || c === currency;
+      }),
+    [ledgerDocs, currency]
+  );
+  const excludedCurrencies = useMemo(
+    () =>
+      [
+        ...new Set(
+          ledgerDocs
+            .map((d) => (d.currency || "").trim())
+            .filter((c) => c && c !== currency)
+        ),
+      ].sort(),
+    [ledgerDocs, currency]
+  );
+  const docKey = statementDocs.map((d) => d.id).join(",");
 
   useEffect(() => {
     if (!open) return;
@@ -142,7 +173,7 @@ export default function StatementModal({
     const perDocPayments: Promise<StatementPaymentEntry[]> =
       partyType === "customer"
         ? Promise.all(
-            ledgerDocs.map((d) =>
+            statementDocs.map((d) =>
               note(
                 "payments",
                 billing.payments(d.id).then((ps) => ps.map(mapPay(d.number))),
@@ -151,7 +182,7 @@ export default function StatementModal({
             )
           ).then((all) => all.flat())
         : Promise.all(
-            ledgerDocs.map((d) =>
+            statementDocs.map((d) =>
               note(
                 "payments",
                 pos.payments(d.id).then((ps) => ps.map(mapPay(d.number))),
@@ -178,6 +209,7 @@ export default function StatementModal({
             .filter(
               (r) =>
                 (r.status || "").toLowerCase() !== "draft" &&
+                (r.currency || co?.currency || "AED") === currency &&
                 partyNames.includes(r.customer_name)
             )
             .map((r) => ({
@@ -187,7 +219,7 @@ export default function StatementModal({
             }))
         );
         setAdvRows(
-          advs
+          (currency === "AED" ? advs : [])
             // Negative rows are advance consumptions tied to invoices
             // (`applied:inv#…`) — internal allocations, not new money.
             .filter((a) => Number(a.amount) > 0)
@@ -206,22 +238,11 @@ export default function StatementModal({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, partyType, party.id, docKey]);
+  }, [open, partyType, party.id, docKey, currency]);
 
-  /** Party currency: the dominant currency across its documents, falling
-   *  back to the company default. */
-  const currency = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const d of ledgerDocs) {
-      const c = (d.currency || "").trim();
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    return top || company?.currency || "AED";
-  }, [ledgerDocs, company]);
 
   const built = useMemo(() => {
-    const docEntries: StatementDocEntry[] = ledgerDocs.map((d) => ({
+    const docEntries: StatementDocEntry[] = statementDocs.map((d) => ({
       number: d.number,
       date: d.date,
       total: d.total,
@@ -243,7 +264,7 @@ export default function StatementModal({
         trn: party.trn,
         email: party.email,
         address: party.address,
-        openingBalance: party.opening_balance ?? 0,
+        openingBalance: currency === "AED" ? party.opening_balance ?? 0 : 0,
       },
       currency,
       period: { from: periodFrom(period), to: todayYmd() },
@@ -253,7 +274,7 @@ export default function StatementModal({
       advances: advRows,
     });
   }, [
-    ledgerDocs,
+    statementDocs,
     company,
     party,
     partyType,
@@ -307,6 +328,13 @@ export default function StatementModal({
       title={`Statement of account — ${party.name}`}
       size="full"
     >
+      {(excludedCurrencies.length > 0 || currency !== "AED") && (
+        <p role="status" className="no-print mb-4 rounded-lg bg-muted p-3 text-sm">
+          This statement contains {currency} transactions only.
+          {excludedCurrencies.length > 0 && ` Documents in ${excludedCurrencies.join(", ")} are excluded.`}
+          {currency !== "AED" && " AED opening balances and advances are excluded; they are not converted to this currency."}
+        </p>
+      )}
       {missing.length > 0 && !loading && (
         <div
           role="alert"

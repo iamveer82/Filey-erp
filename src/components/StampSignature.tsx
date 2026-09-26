@@ -1,12 +1,10 @@
-import { useRef, useState, type ReactNode } from "react";
-import { Upload, X } from "lucide-react";
+import { useRef, useId, type ReactNode } from "react";
 import { CompanyAssetImage } from "./CompanyAssetImage";
-import { uploadCompanyAsset } from "../lib/files";
 
 /* Shared stamp & signature widgets used by every document builder
  * (Invoicing, Quoting, Purchase Orders, Declaration Letter, …).
  * - StampSig: the stored shape ({data, position %, opacity, crop}).
- * - StampSigCard: the upload / opacity / crop config panel.
+ * - StampSigAdjust: the shared appearance controls.
  * - StampSignatureLayer: the draggable overlay rendered on the A4 sheet.
  *
  * Positioning is expressed as 0–100 % of the sheet (center anchored), so it
@@ -35,7 +33,7 @@ export const STAMP_DEFAULT: StampSig = {
   data: "",
   x: 75,
   y: 70,
-  opacity: 30,
+  opacity: 100,
   color: "#cc0000",
   cropTop: 0,
   cropRight: 0,
@@ -48,7 +46,7 @@ export const SIGN_DEFAULT: StampSig = {
   data: "",
   x: 75,
   y: 85,
-  opacity: 35,
+  opacity: 100,
   color: "#0000cc",
   cropTop: 0,
   cropRight: 0,
@@ -77,247 +75,46 @@ export function normStampSig(
   };
 }
 
-/* ---------------- Config card (upload / opacity / crop) ---------------- */
-
-export function StampSigCard({
-  label,
-  icon,
-  value,
-  onChange,
-  defaults,
-}: {
-  label: string;
-  icon: ReactNode;
-  value?: StampSig;
-  onChange: (v: StampSig | undefined) => void;
-  defaults: StampSig;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [err, setErr] = useState("");
-  return (
-    <div className="rounded-xl border border-brand-200 p-4">
-      <div className="flex items-center gap-2 text-ink font-medium text-sm">
-        {icon} {label}
-      </div>
-      <div className="mt-3">
-        {value?.data ? (
-          <div className="space-y-3">
-            {/* preview with inline remove */}
-            <div className="relative flex items-center justify-center py-4 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
-              <CompanyAssetImage
-                src={value.data}
-                alt={label}
-                className="object-contain rounded"
-                style={{
-                  width: `${(180 * (value.scale ?? 100)) / 100}px`,
-                  maxHeight: `${(80 * (value.scale ?? 100)) / 100}px`,
-                  clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`,
-                  opacity: value.opacity / 100,
-                }}
-              />
-              <button
-                title={`Remove ${label.toLowerCase()}`}
-                aria-label={`Remove ${label.toLowerCase()}`}
-                className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
-                onClick={() => onChange(undefined)}
-              >
-                <X size={13} />
-              </button>
-            </div>
-            {/* opacity */}
-            <label className="block">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-medium text-brand-500">Opacity</span>
-                <span className="text-[11px] font-mono tabular-nums text-brand-600">
-                  {value.opacity}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min={5}
-                max={100}
-                value={value.opacity}
-                className="w-full h-1.5 accent-brand-500 cursor-pointer"
-                onChange={(e) => onChange({ ...value, opacity: Number(e.target.value) })}
-              />
-            </label>
-            {/* size / scale */}
-            <label className="block">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] font-medium text-brand-500">Size</span>
-                <span className="text-[11px] font-mono tabular-nums text-brand-600">
-                  {value.scale}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min={20}
-                max={200}
-                value={value.scale}
-                className="w-full h-1.5 accent-brand-500 cursor-pointer"
-                onChange={(e) => onChange({ ...value, scale: Number(e.target.value) })}
-              />
-            </label>
-            {/* crop edges */}
-            <div>
-              <p className="text-[11px] font-medium text-brand-400 mb-1.5">Crop edges</p>
-              <div className="grid grid-cols-4 gap-1.5">
-                {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map(
-                  (k, i) => (
-                    <div
-                      key={k}
-                      className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
-                    >
-                      <span className="text-[10px] font-mono font-medium text-brand-400">
-                        {["T", "R", "B", "L"][i]}
-                      </span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={90}
-                        value={value[k]}
-                        className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none"
-                        onChange={(e) =>
-                          onChange({
-                            ...value,
-                            [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)),
-                          })
-                        }
-                      />
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-            <p className="text-[11px] text-brand-400">
-              Drag it directly on the preview to position it on the page.
-            </p>
-          </div>
-        ) : (
-          <label className="flex flex-col items-center justify-center gap-2 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all min-h-[100px] disabled:opacity-60">
-            <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-medium text-brand-600">
-              {uploading ? "Uploading…" : `Upload ${label}`}
-            </span>
-            <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              disabled={uploading}
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
-                // uploadCompanyAsset already forks on data mode: a data: URL
-                // offline, a Storage path in the cloud. Either way what is
-                // stored is durable — a raw FileReader result was not, in the
-                // cloud, because nothing ever uploaded the bytes.
-                setUploading(true);
-                setErr("");
-                try {
-                  const { path } = await uploadCompanyAsset(f);
-                  onChange({ ...defaults, data: path });
-                } catch (e2) {
-                  setErr(
-                    e2 instanceof Error ? e2.message : `Could not upload that ${label.toLowerCase()}.`
-                  );
-                } finally {
-                  setUploading(false);
-                }
-              }}
-            />
-          </label>
-        )}
-        {/* A failed upload used to be a console warning: the card went back to
-            "Upload", which reads as "nothing happened", not "it didn't save". */}
-        {err && <p className="mt-2 text-[11px] text-danger">{err}</p>}
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- Compact per-document adjuster (opacity + crop) ----------------
- * Rendered on a document editor when the stamp/signature toggle is ON. Edits a
- * per-document copy of the StampSig (image inherited from company settings) so
- * each document can tune opacity and crop without changing the saved company
- * asset. Position is set by dragging the watermark directly on the sheet. */
-export function StampSigAdjust({
-  label,
-  icon,
-  value,
-  onChange,
-}: {
+/** Shared per-document controls. Changes never replace the company asset. */
+export function StampSigAdjust({ label, icon, value, onChange }: {
   label: string;
   icon?: ReactNode;
   value: StampSig;
   onChange: (v: StampSig) => void;
 }) {
-  const s = (value.scale ?? 100) / 100;
+  const id = useId();
   return (
-    <div className="rounded-xl border border-brand-200 p-3">
-      <div className="flex items-center gap-2 text-ink font-medium text-xs">
-        {icon} {label}
+    <section aria-labelledby={`${id}-title`} className="min-w-0 space-y-3 text-foreground">
+      <div className="flex items-center justify-between gap-2">
+        <h3 id={`${id}-title`} className="flex items-center gap-2 text-sm font-medium">{icon}{label}</h3>
+        <button type="button" className="btn-ghost text-xs" aria-label={`Reset ${label.toLowerCase()} adjustments`}
+          onClick={() => onChange({ ...value, opacity: 100, scale: 100, cropTop: 0, cropRight: 0, cropBottom: 0, cropLeft: 0 })}>Reset</button>
       </div>
-      {/* live preview - mirrors the on-page watermark blend */}
-      <div className="relative mt-2 flex items-center justify-center py-3 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[72px]">
-        <CompanyAssetImage
-          src={value.data}
-          alt={label}
-          className="object-contain"
-          style={{
-            width: `${140 * s}px`,
-            maxHeight: `${64 * s}px`,
-            clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`,
-            opacity: value.opacity / 100,
-            mixBlendMode: "multiply",
-          }}
-        />
+      <div className="flex h-32 items-center justify-center overflow-hidden rounded-lg border border-border bg-white p-3">
+        <CompanyAssetImage src={value.data} alt={`${label} preview`} className="max-w-full object-contain"
+          style={{ width: 140 * (value.scale ?? 100) / 100, maxHeight: 96,
+            clipPath: `inset(${value.cropTop}% ${value.cropRight}% ${value.cropBottom}% ${value.cropLeft}%)`, opacity: (value.opacity ?? 100) / 100 }} />
       </div>
-      {/* opacity */}
-      <label className="block mt-3">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] font-medium text-brand-500">Opacity</span>
-          <span className="text-[11px] tabular-nums text-brand-600">{value.opacity}%</span>
-        </div>
-        <input
-          type="range"
-          min={5}
-          max={100}
-          value={value.opacity}
-          className="w-full h-1.5 accent-brand-500 cursor-pointer"
-          onChange={(e) => onChange({ ...value, opacity: Number(e.target.value) })}
-        />
-      </label>
-      {/* crop edges */}
-      <div className="mt-3">
-        <p className="text-[11px] font-medium text-brand-400 mb-1.5">Crop edges (%)</p>
-        <div className="grid grid-cols-4 gap-1.5">
-          {(["cropTop", "cropRight", "cropBottom", "cropLeft"] as const).map((k, i) => (
-            <div
-              key={k}
-              className="flex items-center gap-1 rounded-xl border border-brand-200 bg-white px-2 py-1.5 focus-within:border-brand-400 focus-within:ring-1 focus-within:ring-brand-200"
-            >
-              <span className="text-[10px] tabular-nums font-medium text-brand-400">
-                {["T", "R", "B", "L"][i]}
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={90}
-                value={value[k]}
-                className="w-full min-w-0 border-0 bg-transparent text-[11px] text-brand-700 focus:outline-none"
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    [k]: Math.min(90, Math.max(0, Number(e.target.value) || 0)),
-                  })
-                }
-              />
-            </div>
+      {([['opacity', 'Opacity', 5, 100], ['scale', 'Size', 20, 200]] as const).map(([key, title, min, max]) => (
+        <label key={key} className="block text-xs" htmlFor={`${id}-${key}`}>
+          <span className="flex justify-between gap-3"><span>{title}</span><output className="tabular-nums text-muted-foreground">{value[key] ?? 100}%</output></span>
+          <input id={`${id}-${key}`} aria-label={`${label} ${title.toLowerCase()}`} type="range" min={min} max={max} value={value[key] ?? 100}
+            className="h-10 w-full cursor-pointer accent-brand-500" onChange={e => onChange({ ...value, [key]: Number(e.target.value) })} />
+        </label>
+      ))}
+      <details className="border-t border-border pt-2">
+        <summary className="cursor-pointer py-2 text-xs text-muted-foreground">Crop edges</summary>
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          {(['cropTop', 'cropRight', 'cropBottom', 'cropLeft'] as const).map((key, i) => (
+            <label key={key} className="space-y-1 text-xs text-muted-foreground">
+              <span>{['Top', 'Right', 'Bottom', 'Left'][i]} (%)</span>
+              <input aria-label={`${label} crop ${['top', 'right', 'bottom', 'left'][i]}`} type="number" min={0} max={90} value={value[key]}
+                className="input w-full" onChange={e => onChange({ ...value, [key]: Math.min(90, Math.max(0, Number(e.target.value) || 0)) })} />
+            </label>
           ))}
         </div>
-      </div>
-    </div>
+      </details>
+    </section>
   );
 }
 
@@ -374,6 +171,11 @@ function DraggableMark({
         }
       }}
       title={`Drag to position ${alt.toLowerCase()}`}
+      // Marks are composited onto the PDF canvas by hand (see pdfTools): iOS
+      // WebKit drops <img> inside the SVG foreignObject that html-to-image
+      // builds, so a stamp captured that way is simply missing from the file.
+      // This attribute is how the export finds exactly these, and only these.
+      data-doc-mark={alt}
       style={{
         position: "absolute",
         left: `${mark.x}%`,
@@ -481,6 +283,8 @@ export function StampSignatureLayer({
   onStampMove: (x: number, y: number) => void;
   onSignatureMove: (x: number, y: number) => void;
 }) {
+  stamp = normStampSig(stamp, STAMP_DEFAULT);
+  signature = normStampSig(signature, SIGN_DEFAULT);
   return (
     <>
       {stamp?.data && (

@@ -1,4 +1,6 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useId, useRef, useState, type KeyboardEvent } from "react";
+
+import { MenuPopover } from "./ui-menu";
 
 export interface MentionMember {
   id: string;
@@ -27,7 +29,7 @@ const handle = (name: string) =>
   name
     .trim()
     .split(/\s+/)[0]
-    ?.replace(/[^\w.\-]/g, "") || "user";
+    ?.replace(/[^\p{L}\p{N}_.-]/gu, "") || "user";
 
 /** Text input with @mention autocomplete — a member picker (avatar + name)
  * appears while typing "@". Picking inserts "@Handle ". */
@@ -37,6 +39,7 @@ export default function MentionInput({
   onEnter,
   members,
   placeholder,
+  label = "Message",
   small,
 }: {
   value: string;
@@ -44,8 +47,10 @@ export default function MentionInput({
   onEnter?: () => void;
   members: MentionMember[];
   placeholder?: string;
+  label?: string;
   small?: boolean;
 }) {
+  const listId = useId();
   const ref = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -57,9 +62,12 @@ export default function MentionInput({
         .slice(0, 6)
     : [];
 
+  const activeIndex = Math.min(active, Math.max(0, matches.length - 1));
+  const expanded = open && matches.length > 0;
+
   const refresh = (text: string, caret: number) => {
     const before = text.slice(0, caret);
-    const m = /@([\w.\-]*)$/.exec(before);
+    const m = /@([\p{L}\p{N}_.-]*)$/u.exec(before);
     if (m) {
       setQuery(m[1]);
       setActive(0);
@@ -72,15 +80,17 @@ export default function MentionInput({
   const pick = (member: MentionMember) => {
     const el = ref.current;
     const caret = el?.selectionStart ?? value.length;
-    const before = value.slice(0, caret).replace(/@([\w.\-]*)$/, "");
+    const before = value.slice(0, caret).replace(/@([\p{L}\p{N}_.-]*)$/u, "");
     const after = value.slice(caret);
     const next = `${before}@${handle(member.name)} ${after}`;
     onChange(next);
     setOpen(false);
-    setTimeout(() => el?.focus(), 0);
+    setTimeout(() => { el?.focus(); const position = before.length + handle(member.name).length + 2; el?.setSelectionRange(position, position); }, 0);
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Escape" && open) { e.preventDefault(); setOpen(false); return; }
     if (open && matches.length) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -94,7 +104,7 @@ export default function MentionInput({
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        pick(matches[active]);
+        pick(matches[activeIndex]);
         return;
       }
       if (e.key === "Escape") {
@@ -113,6 +123,12 @@ export default function MentionInput({
       <input
         ref={ref}
         className={small ? "input !py-1.5 text-sm" : "input"}
+        aria-label={label}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={expanded}
+        aria-controls={expanded ? listId : undefined}
+        aria-activedescendant={expanded ? `${listId}-${matches[activeIndex].id}` : undefined}
         placeholder={placeholder}
         value={value}
         maxLength={500}
@@ -121,22 +137,27 @@ export default function MentionInput({
           refresh(e.target.value, e.target.selectionStart ?? e.target.value.length);
         }}
         onKeyDown={onKey}
-        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        onBlur={() => setOpen(false)}
       />
       {open && matches.length > 0 && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-64 rounded-xl border border-brand-200 bg-white p-1.5">
+        <MenuPopover open={expanded} onClose={() => setOpen(false)} anchorRef={ref} side="top" role="presentation" className="w-64 max-w-[calc(100vw-1rem)]">
+        <div id={listId} role="listbox" aria-label="Mention a team member" className="text-foreground">
           {matches.map((m, i) => (
             <button
               key={m.id}
               type="button"
+              role="option"
+              id={`${listId}-${m.id}`}
+              aria-selected={i === activeIndex}
+              tabIndex={-1}
+              onClick={() => pick(m)}
               onMouseDown={(e) => {
                 e.preventDefault();
-                pick(m);
               }}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left cursor-pointer transition-colors ${
-                i === active
-                  ? "bg-primary-100 dark:bg-primary-400/15"
-                  : "hover:bg-brand-50 dark:hover:bg-white/5"
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-start cursor-pointer transition-colors ${
+                i === activeIndex
+                  ? "bg-muted"
+                  : "hover:bg-muted"
               }`}
             >
               <span
@@ -157,6 +178,7 @@ export default function MentionInput({
             </button>
           ))}
         </div>
+        </MenuPopover>
       )}
     </div>
   );

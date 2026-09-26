@@ -1,5 +1,5 @@
+import { FileySpinner } from "../components/FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   Plus,
   ArrowLeft,
@@ -12,7 +12,6 @@ import {
   Pencil,
   Maximize2,
   Monitor,
-  X,
 } from "lucide-react";
 import {
   receipts,
@@ -38,12 +37,9 @@ import { autoSaveDocument } from "../lib/files";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import { startingTemplate } from "../components/DocPresetBar";
 import CompanyModal from "../components/CompanyModal";
-import TemplateDesigner, {
-  loadCustomTemplates,
-  syncCustomTemplates,
-  type CustomTemplate,
-} from "../components/TemplateDesigner";
-import { StampSignatureLayer, type StampSig } from "../components/StampSignature";
+import TemplateDesigner from "../components/TemplateDesigner";
+import { useCustomTemplates } from "../lib/customTemplates";
+import { StampSignatureLayer, StampSigAdjust, type StampSig } from "../components/StampSignature";
 import { loadCompanyStampSig, type CompanyStampSig } from "../components/StampSignatureSettings";
 import FitPreview from "../components/FitPreview";
 import ReceiptVoucher from "../components/ReceiptVoucher";
@@ -69,6 +65,7 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { sendShareEmail } from "../lib/email";
+import { useLiveSync } from "../lib/realtime";
 
 const today = () => todayYmd();
 
@@ -96,6 +93,7 @@ function blankForm(
     currency: getDisplayCurrency() || c.currency || "AED",
     logo: c.logo,
     seller_name: c.name,
+    tax_country_code: c.country_code,
     seller_address: c.address,
     seller_trn: c.trn,
     seller_email: c.email,
@@ -137,6 +135,7 @@ const docViewForm = (form: Form | null): DocViewForm => {
     number: form.number,
     logo: form.logo || null,
     seller_name: form.seller_name || null,
+    tax_country_code: form.tax_country_code,
     seller_address: form.seller_address || null,
     seller_trn: form.seller_trn || null,
     seller_email: form.seller_email || null,
@@ -185,11 +184,12 @@ export default function PaymentReceipt() {
   const [saving, setSaving] = useState(false);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
-  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>(loadCustomTemplates());
+  const { templates: customTemplates, error: templateError } = useCustomTemplates();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [quickView, setQuickView] = useState<{ d: ReceiptSummary; doc: ReceiptDoc | null } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [printRequested, setPrintRequested] = useState<number | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [zoom] = useState(100);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>({});
@@ -197,18 +197,20 @@ export default function PaymentReceipt() {
   const [docsLoading, setDocsLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = () => {
     Promise.all([billing.getCompany(), receipts.list()])
       .then(([c, d]) => {
         setCompany(c);
         setDocs(d);
+        setLoadErr(null);
       })
       .catch((e) => setLoadErr(errMsg(e)))
       .finally(() => setDocsLoading(false));
     crm.customers().then(setCustomers).catch(() => {});
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
-    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
-  }, []);
+  };
+  useEffect(reload, []);
+  useLiveSync(reload);
 
   const refreshList = async () => {
     const d = await receipts.list();
@@ -233,15 +235,19 @@ export default function PaymentReceipt() {
     try {
       const d = await receipts.get(id);
       const stampSig = await loadCompanyStampSig();
+      // Prefer the document's own saved overlays; fall back to company defaults.
+      const savedStamp = (d.stamp as Form["stamp"] | null | undefined) ?? undefined;
+      const savedSignature = (d.signature as Form["signature"] | null | undefined) ?? undefined;
       setForm({
         ...d,
-        stamp: stampSig.stamp,
-        signature: stampSig.signature,
+        stamp: savedStamp?.data ? savedStamp : stampSig.stamp && { ...stampSig.stamp, opacity: 100 },
+        signature: savedSignature?.data ? savedSignature : stampSig.signature && { ...stampSig.signature, opacity: 100 },
         show_stamp: d.show_stamp || false,
         show_signature: d.show_signature || false,
       });
       setView("edit");
       window.scrollTo({ top: 0, behavior: "smooth" });
+      return d.id;
     } catch (e) {
       toast.error("Failed to load receipt: " + errMsg(e));
     }
@@ -249,13 +255,14 @@ export default function PaymentReceipt() {
 
   const validate = () => {
     if (!form) return "No form";
-    if (!form.customer_name) return "Received from is required.";
-    if (!form.amount || form.amount <= 0) return "Amount must be greater than 0.";
+    if (!form.customer_name.trim()) return "Received from is required.";
+    if (!Number.isFinite(form.amount) || form.amount <= 0) return "Amount must be greater than 0.";
     if (!form.issue_date) return "Payment date is required.";
     return null;
   };
 
   const save = async (): Promise<number | null> => {
+    if (saving) return null;
     const error = validate();
     if (error) {
       toast.error(error);
@@ -263,8 +270,14 @@ export default function PaymentReceipt() {
     }
     setSaving(true);
     try {
-      const { stamp, signature, ...payload } = form!;
-      const id = await receipts.save(payload as any);
+      // Stamp/signature are real columns on payment_receipts — keep positions
+      // (StampSig x/y + data) so a reloaded receipt restores the overlays.
+      const payload = {
+        ...form!,
+        stamp: form!.stamp ?? null,
+        signature: form!.signature ?? null,
+      } as ReceiptDoc;
+      const id = await receipts.save(payload);
       await refreshList();
       toast.success(`Receipt ${form!.number} saved.`);
       if (!form!.id) setForm((f) => f && { ...f, id });
@@ -286,21 +299,29 @@ export default function PaymentReceipt() {
   };
 
   const markStatus = async (status: string, idOverride?: number) => {
+    if (saving) return;
     const id = idOverride ?? form?.id;
     if (!id) {
       toast.error("Save the receipt first.");
       return;
     }
-    await receipts.setStatus(id, status);
-    update({ status });
-    await refreshList();
-    toast.success(`Receipt marked ${status}.`);
+    setSaving(true);
+    try {
+      await receipts.setStatus(id, status);
+      update({ status });
+      await refreshList();
+      toast.success(`Receipt marked ${status}.`);
+    } catch (e) {
+      toast.error(`Could not update receipt status: ${errMsg(e)}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  /** Finalize: save first when the receipt is still unsaved, then mark paid —
-   *  the editor's primary action, same flow as invoicing's "Mark as done". */
+  /** Persist current edits before finalizing, including previously saved receipts. */
   const finalize = async () => {
-    const id = form?.id ?? (await save());
+    if (saving) return;
+    const id = await save();
     if (!id) return;
     await markStatus("paid", id);
   };
@@ -326,10 +347,14 @@ export default function PaymentReceipt() {
       toast.error("Save the receipt before sharing.");
       return;
     }
-    await receipts.shareDoc(form.id, shared);
-    update({ shared });
-    await refreshList();
-    toast.success(shared ? "Public link enabled." : "Public link disabled.");
+    try {
+      await receipts.shareDoc(form.id, shared);
+      update({ shared });
+      await refreshList();
+      toast.success(shared ? "Public link enabled." : "Public link disabled.");
+    } catch (e) {
+      toast.error(`Could not change receipt sharing: ${errMsg(e)}`);
+    }
   };
 
   const copyPublicLink = async () => {
@@ -356,7 +381,7 @@ export default function PaymentReceipt() {
    *  produced cropped, odd-size PDFs. */
   const withA4Sheet = async (fn: (el: HTMLElement) => Promise<void>) => {
     const src = previewRef.current;
-    if (!src) return;
+    if (!src) throw new Error("The receipt preview is not ready. Try again once it has loaded.");
     const holder = document.createElement("div");
     holder.setAttribute("aria-hidden", "true");
     holder.style.cssText =
@@ -378,10 +403,24 @@ export default function PaymentReceipt() {
   };
 
   const downloadPdf = async () => {
-    await withA4Sheet(async (el) => {
-      await downloadElementAsPdf(el, `Receipt-${form?.number || "draft"}`);
-    });
+    try {
+      await withA4Sheet(async (el) => {
+        await downloadElementAsPdf(el, `Receipt-${form?.number || "draft"}`);
+      });
+    } catch (e) {
+      toast.error(`Could not export receipt: ${errMsg(e)}`);
+    }
   };
+
+  // Wait for the requested receipt's editor to mount; a timer captured the
+  // previous form and could export the wrong receipt after a failed load.
+  useEffect(() => {
+    if (printRequested === null || form?.id !== printRequested || view !== "edit") return;
+    setPrintRequested(null);
+    void downloadPdf();
+    // The matching receipt render supplies the current preview and filename.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printRequested, form?.id, view]);
 
   // Same shortcuts as the invoice editor: Ctrl+S save, Ctrl+P PDF.
   useEffect(() => {
@@ -443,7 +482,7 @@ export default function PaymentReceipt() {
 
   const shareReceipt = async (kind: ShareKind, d: ReceiptSummary) => {
     const cust = findCustomer(d.customer_name);
-    const ccy = company?.currency || "AED";
+    const ccy = d.currency || company?.currency || "AED";
     let url = `${location.origin}${location.pathname}#/payment-receipts`;
     try {
       const token = await receipts.publicLink(d.id);
@@ -475,9 +514,10 @@ export default function PaymentReceipt() {
     try {
       const d = await receipts.get(id);
       const numbers = docs.map((x) => x.number);
+      const { stamp, signature, ...rest } = d;
       setForm({
         ...blankForm(company || ({} as any), numbers, docFmts),
-        ...d,
+        ...rest,
         id: undefined,
         number: pickDocNumber("payment_receipt", numbers, docFmts),
         status: "draft",
@@ -487,6 +527,8 @@ export default function PaymentReceipt() {
         due_date: today(),
         show_stamp: d.show_stamp || false,
         show_signature: d.show_signature || false,
+        stamp: stamp as Form["stamp"],
+        signature: signature as Form["signature"],
       });
       setView("edit");
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -498,9 +540,7 @@ export default function PaymentReceipt() {
 
   /** Open the receipt in the editor and reuse the existing real PDF export. */
   const printReceipt = async (id: number) => {
-    await loadDoc(id);
-    // allow the editor preview to mount before rasterizing
-    window.setTimeout(() => void downloadPdf(), 400);
+    if (await loadDoc(id)) setPrintRequested(id);
   };
 
   const filtered = docs.filter((d) => {
@@ -521,7 +561,8 @@ export default function PaymentReceipt() {
         number: d.number,
         customer_name: d.customer_name,
         date: fmtDate(d.payment_date),
-        amount: money(d.amount, company?.currency || "AED"),
+        amount: d.amount,
+        currency: d.currency || company?.currency || "AED",
         status: d.status,
       })),
       [
@@ -529,22 +570,27 @@ export default function PaymentReceipt() {
         { key: "customer_name", label: "Received From" },
         { key: "date", label: "Date" },
         { key: "amount", label: "Amount" },
+        { key: "currency", label: "Currency" },
         { key: "status", label: "Status" },
       ]
-    );
+    ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
 
   const statuses = Array.from(new Set(docs.map((d) => d.status || "draft"))).sort();
 
   const stats = {
-    total: docs.length,
-    amount: docs.reduce((s, d) => s + (d.amount || 0), 0),
     sent: docs.filter((d) => d.status === "sent").length,
     paid: docs.filter((d) => d.status === "paid").length,
-    thisMonth: docs
-      .filter((d) => (d.payment_date || "").slice(0, 7) === today().slice(0, 7))
-      .reduce((s, d) => s + (d.amount || 0), 0),
   };
-  const ccy = company?.currency || "AED";
+  const currencyTotals = new Map<string, { amount: number; thisMonth: number; count: number }>();
+  for (const receipt of docs) {
+    const currency = receipt.currency || company?.currency || "AED";
+    const group = currencyTotals.get(currency) || { amount: 0, thisMonth: 0, count: 0 };
+    group.amount += Number(receipt.amount) || 0;
+    group.count += 1;
+    if ((receipt.payment_date || "").slice(0, 7) === today().slice(0, 7)) group.thisMonth += Number(receipt.amount) || 0;
+    currencyTotals.set(currency, group);
+  }
+  if (!currencyTotals.size) currencyTotals.set(company?.currency || "AED", { amount: 0, thisMonth: 0, count: 0 });
 
   /** The rendered document (voucher layout or DocView) + stamp/signature
    *  overlay — shared by the live preview and the full-screen View modal. */
@@ -555,6 +601,7 @@ export default function PaymentReceipt() {
           sellerName={f.seller_name}
           sellerAddress={f.seller_address}
           sellerTrn={f.seller_trn}
+          taxCountry={f.tax_country_code}
           customerName={f.customer_name}
           customerAddress={f.customer_address}
           date={f.issue_date}
@@ -608,7 +655,8 @@ export default function PaymentReceipt() {
 
   return (
     <div>
-      <PageHeader
+      {templateError && <p role="alert" className="mb-3 text-sm text-danger">Could not load saved templates: {templateError}</p>}
+      {view === "list" && <PageHeader
         title="Payment Receipts"
         subtitle="Payments received against invoices"
         action={
@@ -621,7 +669,7 @@ export default function PaymentReceipt() {
             </button>
           </div>
         }
-      />
+      />}
 
       {view === "list" ? (
         <>
@@ -631,18 +679,10 @@ export default function PaymentReceipt() {
             </div>
           )}
           <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
-            <MetricCard
-              label="Total received"
-              value={money(stats.amount, ccy)}
-              change={`${num(stats.total)} receipts`}
-              changeTone="up"
-            />
-            <MetricCard
-              label="This month"
-              value={money(stats.thisMonth, ccy)}
-              change="Current period"
-              changeTone="up"
-            />
+            {[...currencyTotals].flatMap(([currency, total]) => [
+              <MetricCard key={`${currency}-total`} label={`Total received (${currency})`} value={money(total.amount, currency)} change={`${num(total.count)} receipts`} changeTone="up" />,
+              <MetricCard key={`${currency}-month`} label={`This month (${currency})`} value={money(total.thisMonth, currency)} change="Current period" changeTone="up" />,
+            ])}
             <MetricCard
               label="Sent"
               value={String(stats.sent)}
@@ -694,7 +734,7 @@ export default function PaymentReceipt() {
                 {
                   key: "amount",
                   label: "Amount",
-                  render: (d) => money(d.amount, company?.currency || "AED"),
+                  render: (d) => money(d.amount, d.currency || company?.currency || "AED"),
                 },
                 {
                   key: "status",
@@ -774,7 +814,7 @@ export default function PaymentReceipt() {
                       { label: "Reference", value: quickView.doc?.ref_number || "—" },
                       {
                         label: "Currency",
-                        value: quickView.doc?.currency || company?.currency || "AED",
+                        value: quickView.doc?.currency || quickView.d.currency || company?.currency || "AED",
                       },
                     ],
                     items: [
@@ -787,7 +827,7 @@ export default function PaymentReceipt() {
                       },
                     ],
                     total: Number(quickView.doc?.amount ?? quickView.d.amount) || 0,
-                    currency: quickView.doc?.currency || company?.currency || "AED",
+                    currency: quickView.doc?.currency || quickView.d.currency || company?.currency || "AED",
                     notes: quickView.doc?.notes || undefined,
                   }
                 : null
@@ -798,54 +838,46 @@ export default function PaymentReceipt() {
         <>
           {!form ? (
             <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-foreground" />
+              <FileySpinner size={16} />
               Loading editor…
             </div>
           ) : (
             <>
               {/* Header bar — same layout as the invoice editor: back arrow,
                   title, then status + actions right-aligned. */}
-              <div className="no-print flex items-start justify-between mb-6 gap-4 flex-wrap">
-                <div className="flex items-start gap-3">
+              <PageHeader
+                title={form.id ? "Edit Receipt" : "Record Payment"}
+                subtitle="Money received — a receipt the payer can file"
+                action={<div className="no-print flex items-center gap-2 flex-wrap">
                   <button
-                    className="rounded-xl p-2.5 text-brand-500 hover:bg-brand-50 transition-colors cursor-pointer mt-0.5"
+                    className="btn-ghost shrink-0"
                     onClick={() => {
                       setForm(null);
                       setView("list");
                     }}
                     aria-label="Back"
                   >
-                    <ArrowLeft size={18} />
+                    <ArrowLeft size={15} /> Back
                   </button>
-                  <div>
-                    <h1 className="text-[22px] font-semibold text-foreground tracking-tight">
-                      {form.id ? "Edit Receipt" : "Record Payment"}
-                    </h1>
-                    <p className="text-sm text-brand-500 mt-0.5">
-                      Money received — a receipt the payer can file
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
                   <Badge tone={statusTone(form.status)}>{form.status}</Badge>
                   {!form.id && (
                     <span className="text-xs font-medium text-brand-400">Unsaved</span>
                   )}
                   <button className="btn-ghost" onClick={() => setViewOpen(true)}>
-                    <Maximize2 size={15} /> View
+                    <Maximize2 size={15} /> Preview
                   </button>
                   <button
                     className="btn-ghost"
                     onClick={downloadPdf}
                     title="Download PDF (Ctrl+P)"
                   >
-                    <Download size={15} /> PDF
+                    <Download size={15} /> Download PDF
                   </button>
                   <button className="btn-ghost" onClick={duplicate} title="Duplicate as a new draft">
                     <Copy size={15} /> Duplicate
                   </button>
                   <button
-                    className="btn-ghost"
+                    className="btn-primary"
                     onClick={() => void save()}
                     disabled={saving}
                     title="Save (Ctrl+S)"
@@ -870,7 +902,7 @@ export default function PaymentReceipt() {
                     </button>
                   ) : (
                     <button
-                      className="btn-primary"
+                      className="btn-ghost"
                       onClick={finalize}
                       disabled={saving}
                       title={form.id ? "Mark this receipt as paid" : "Save and mark paid"}
@@ -886,8 +918,8 @@ export default function PaymentReceipt() {
                     {shareCopied ? <Check size={15} /> : <Monitor size={15} />} Copy link
                   </button>
                   <ShareToggle shared={!!form.shared} onToggle={share} />
-                </div>
-              </div>
+                </div>}
+              />
 
               <ResizablePanels
                 left={
@@ -907,9 +939,10 @@ export default function PaymentReceipt() {
                         <div className="flex items-center gap-2">
                           <ColorPicker value={form.accent || "#222222"} onChange={(v) => update({ accent: v })} />
                           <button
-                            className="btn-ghost"
+                            className="btn-ghost !h-10 !w-10 !p-0"
                             onClick={() => setCompanyOpen(true)}
                             title="Company profile"
+                            aria-label="Company profile"
                           >
                             <Building2 size={16} />
                           </button>
@@ -1060,7 +1093,8 @@ export default function PaymentReceipt() {
                         <input
                           type="checkbox"
                           checked={!!form.show_stamp}
-                          onChange={(e) => update({ show_stamp: e.target.checked })}
+                          disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
+                          onChange={(e) => update({ show_stamp: e.target.checked, stamp: form.stamp?.data ? form.stamp : companyStampSig.stamp && { ...companyStampSig.stamp, opacity: 100 } })}
                         />
                         Show company stamp
                       </label>
@@ -1068,10 +1102,15 @@ export default function PaymentReceipt() {
                         <input
                           type="checkbox"
                           checked={!!form.show_signature}
-                          onChange={(e) => update({ show_signature: e.target.checked })}
+                          disabled={!form.signature?.data && !companyStampSig.signature?.data}
+                          onChange={(e) => update({ show_signature: e.target.checked, signature: form.signature?.data ? form.signature : companyStampSig.signature && { ...companyStampSig.signature, opacity: 100 } })}
                         />
                         Show authorised signature
                       </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {form.show_stamp && (form.stamp || companyStampSig.stamp) && <StampSigAdjust label="Stamp" value={(form.stamp || companyStampSig.stamp)!} onChange={stamp => update({ stamp })} />}
+                        {form.show_signature && (form.signature || companyStampSig.signature) && <StampSigAdjust label="Signature" value={(form.signature || companyStampSig.signature)!} onChange={signature => update({ signature })} />}
+                      </div>
                     </div>
                   </div>
                 }
@@ -1104,60 +1143,22 @@ export default function PaymentReceipt() {
                   Portaled out of <main>'s scrolling subtree: WebView2
                   half-paints a `fixed` overlay that stays inside it. */}
               {viewOpen &&
-                createPortal(
-                  <div
-                    className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4"
-                    onClick={() => setViewOpen(false)}
-                  >
-                    <div
-                      className="flex max-h-[95vh] w-full max-w-7xl flex-col rounded-xl bg-card border border-border outline-none shadow-lg"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-between border-b border-brand-100 px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <h2 className="text-lg font-semibold text-ink">
-                            {form.number || "Receipt preview"}
-                          </h2>
-                          <span className="text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-white/10 dark:text-brand-500 px-2.5 py-1 rounded-full">
-                            Receipt
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button className="btn-ghost h-9 text-xs" onClick={() => void downloadPdf()}>
-                            <Download size={14} /> PDF
-                          </button>
-                          <button
-                            onClick={() => setViewOpen(false)}
-                            className="grid h-9 w-9 place-items-center rounded-xl text-brand-500 hover:bg-brand-50 hover:text-ink cursor-pointer transition-colors"
-                            aria-label="Close"
-                          >
-                            <X size={18} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex-1 overflow-auto p-6">
-                        <div className="mx-auto max-w-5xl">
-                          <div
-                            data-no-i18n
-                            dir="ltr"
-                            className="paper-texture rounded-xl border border-brand-200 p-8 shadow-sm dark:bg-white min-h-[1123px]"
-                          >
-                            <div style={{ position: "relative", minHeight: 1059 }}>
+                <Modal open onClose={() => setViewOpen(false)} title={form.number || "Receipt preview"} size="document">
+            <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
+
+              <button className="btn-ghost ml-auto" onClick={downloadPdf}><Download size={15} /> Download PDF</button>
+            </div>
+            <FitPreview baseWidth={794} zoom={100} padding={0} zoomable>
+                            <div data-no-i18n dir="ltr" style={{ position: "relative", minHeight: 1027 }}>
                               {docContent(form!)}
                             </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>,
-                  document.body
-                )}
+            </FitPreview>
+          </Modal>}
 
               <Modal
                 open={templateOpen}
                 onClose={() => {
                   setTemplateOpen(false);
-                  syncCustomTemplates().then(setCustomTemplates).catch(() => {});
                 }}
                 title="Template designer"
                 size="xl"
@@ -1166,11 +1167,9 @@ export default function PaymentReceipt() {
                   onSave={(tpl) => {
                     update({ template: tpl.id });
                     setTemplateOpen(false);
-                    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
                   }}
                   onClose={() => {
                     setTemplateOpen(false);
-                    syncCustomTemplates().then(setCustomTemplates).catch(() => {});
                   }}
                 />
               </Modal>

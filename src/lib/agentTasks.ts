@@ -8,6 +8,8 @@
  * and a real cron expression.
  */
 
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+
 export type Schedule =
   | { type: "interval"; minutes: number }
   | { type: "daily"; time: string } // "HH:MM" 24h, local
@@ -29,7 +31,7 @@ const KEY = "filey.agent.tasks";
 
 export function loadTasks(): AgentTask[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = readAgentStorage(KEY);
     const v = raw ? JSON.parse(raw) : [];
     return Array.isArray(v) ? (v as AgentTask[]) : [];
   } catch {
@@ -39,7 +41,7 @@ export function loadTasks(): AgentTask[] {
 }
 
 export function saveTasks(tasks: AgentTask[]): void {
-  localStorage.setItem(KEY, JSON.stringify(tasks));
+  writeAgentStorage(KEY, JSON.stringify(tasks));
 }
 
 export function addTask(
@@ -57,8 +59,16 @@ export function addTask(
   return task;
 }
 
-export function updateTask(id: string, patch: Partial<AgentTask>): void {
-  saveTasks(loadTasks().map((t) => (t.id === id ? { ...t, ...patch } : t)));
+export function updateTask(
+  id: string,
+  patch: Partial<AgentTask>,
+  expectedScope?: string
+): void {
+  writeAgentStorage(
+    KEY,
+    JSON.stringify(loadTasks().map((t) => (t.id === id ? { ...t, ...patch } : t))),
+    expectedScope
+  );
 }
 
 export function removeTask(id: string): void {
@@ -82,9 +92,7 @@ export function isDue(task: AgentTask, now = Date.now()): boolean {
   }
   // weekly: only on the chosen weekday, after the target time, once that day
   return (
-    new Date(now).getDay() === s.day &&
-    now >= targetTs &&
-    (task.lastRun ?? 0) < targetTs
+    new Date(now).getDay() === s.day && now >= targetTs && (task.lastRun ?? 0) < targetTs
   );
 }
 

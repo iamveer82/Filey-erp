@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const sendEmail = vi.fn();
-const optOuts = vi.fn();
+const optOutsStrict = vi.fn();
 vi.mock("../email", () => ({
   sendEmail,
   emailShell: (_t: string, body: string) => `<html>${body}</html>`,
@@ -11,7 +11,7 @@ vi.mock("../email", () => ({
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;"),
 }));
-vi.mock("../api", () => ({ crm: { optOuts } }));
+vi.mock("../api", () => ({ crm: { optOutsStrict } }));
 
 const {
   buildRecipients,
@@ -51,7 +51,7 @@ const campaign = (recipients: CampaignRecipient[]): Campaign =>
 
 beforeEach(() => {
   sendEmail.mockReset().mockResolvedValue(undefined);
-  optOuts.mockReset().mockResolvedValue([]);
+  optOutsStrict.mockReset().mockResolvedValue([]);
 });
 
 describe("renderTemplate", () => {
@@ -142,7 +142,7 @@ describe("sendCampaign", () => {
   });
 
   it("never sends to an address that opted out after the campaign was drafted", async () => {
-    optOuts.mockResolvedValue([{ email: "B@X.ae", reason: "unsubscribed" }]);
+    optOutsStrict.mockResolvedValue([{ email: "B@X.ae", reason: "unsubscribed" }]);
     const { recipients, progress } = await sendCampaign({
       ...opts,
       campaign: campaign([
@@ -154,6 +154,19 @@ describe("sendCampaign", () => {
     expect(sendEmail.mock.calls[0][0].to).toBe("a@x.ae");
     expect(recipients[1].status).toBe("skipped");
     expect(progress.sent).toBe(1);
+  });
+
+  it("sends nothing at all when the opt-out list cannot be read", async () => {
+    optOutsStrict.mockRejectedValue(new Error("network down"));
+    await expect(
+      sendCampaign({
+        ...opts,
+        campaign: campaign([
+          { customer_id: 1, name: "A", email: "a@x.ae", status: "pending" },
+        ]),
+      })
+    ).rejects.toThrow(/unsubscribe list/i);
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("does not re-send to anyone already marked sent", async () => {

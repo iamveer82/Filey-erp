@@ -41,12 +41,29 @@ export const CURRENCIES: { code: string; name: string }[] = [
   { code: "GBP", name: "British Pound" },
   { code: "INR", name: "Indian Rupee" },
   { code: "SAR", name: "Saudi Riyal" },
+  { code: "CZK", name: "Czech Koruna" },
+  { code: "DKK", name: "Danish Krone" },
+  { code: "HUF", name: "Hungarian Forint" },
+  { code: "PLN", name: "Polish Zloty" },
+  { code: "RON", name: "Romanian Leu" },
+  { code: "SEK", name: "Swedish Krona" },
+  { code: "CHF", name: "Swiss Franc" },
+  { code: "CAD", name: "Canadian Dollar" },
+  { code: "AUD", name: "Australian Dollar" },
+  { code: "NZD", name: "New Zealand Dollar" },
+  { code: "SGD", name: "Singapore Dollar" },
 ];
 
 /** Format an AED-denominated value in the org's display currency, converting
  *  on the way. Name kept for history; it is no longer AED-only. */
 export function aed(value: number): string {
   return money((value || 0) / displayRate, displayCurrency);
+}
+
+/** Compact axis values in the display currency; chart headings give the unit. */
+export function chartAmount(value: number): string {
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
+    .format((value || 0) / displayRate);
 }
 
 export function num(value: number): string {
@@ -97,7 +114,9 @@ export function todayYmd(): string {
 
 export function fmtDate(d?: string | null): string {
   if (!d) return "—";
-  const date = new Date(d);
+  // Database DATE values are calendar dates, not UTC timestamps. Local noon
+  // avoids shifting an invoice back one day west of UTC (and DST midnight gaps).
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d);
   if (isNaN(date.getTime())) return d;
   return date.toLocaleDateString("en-AE", {
     day: "2-digit",
@@ -110,12 +129,22 @@ export function fmtDate(d?: string | null): string {
  * Handles Error, Supabase PostgrestError ({message, details, hint}),
  * and plain objects without producing [object Object]. */
 export function errMsg(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const obj = e as Record<string, unknown>;
-    return String(obj.message ?? obj.details ?? obj.hint ?? JSON.stringify(e));
-  }
-  return String(e);
+  const msg =
+    e instanceof Error
+      ? e.message
+      : e && typeof e === "object"
+        ? String(
+            (e as Record<string, unknown>).message ??
+              (e as Record<string, unknown>).details ??
+              (e as Record<string, unknown>).hint ??
+              JSON.stringify(e)
+          )
+        : String(e);
+  // The database's refusal reads like a crash. On a cloud workspace it almost
+  // always means the plan does not include cloud saves.
+  if (/row-level security/i.test(msg))
+    return "This workspace can't save that. Cloud saves need Filey Pro (Settings → Billing), or switch to this device for free in Settings → Data & Storage.";
+  return msg;
 }
 
 /**

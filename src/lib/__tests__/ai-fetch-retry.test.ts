@@ -51,4 +51,21 @@ describe("aiFetch retry", () => {
     await expect(aiFetch("http://x", {}, { baseDelayMs: 1 })).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  // A `Retry-After: 60` used to mean Stop did nothing for a minute: the wait
+  // ran to completion and only the attempt after it noticed the abort.
+  it("aborts during the backoff wait instead of sleeping it out", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response("{}", { status: 429, headers: { "retry-after": "30" } })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const ctl = new AbortController();
+    const p = aiFetch("http://x", { signal: ctl.signal }, { baseDelayMs: 1 });
+    await Promise.resolve(); // let the first attempt reach the backoff
+    ctl.abort();
+    await expect(p).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no second attempt
+  });
 });

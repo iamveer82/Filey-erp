@@ -1,0 +1,706 @@
+[
+  {
+    "id": "merge",
+    "name": "Merge PDF",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/merge.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Merge PDF\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Two separate neat cream paper stacks approach from left and right along two broad curved yellow tracks and unite into ONE thicker precisely aligned stack at center. A chunky yellow binder clip closes around the unified stack. Tiny smiley folder watches from back right. Clearly multiple documents becoming one, not a folder filling with loose sheets. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless butter yellow studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "split",
+    "name": "Split PDF",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/split.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Split PDF\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A large cream multi-page document is separating into two distinct smaller paper packets, with chunky yellow scissors open exactly between them. Packets fan outward on either side of the cut, retaining intact whole pages. Small yellow smiley folder at back. Clear split-into-separate-documents metaphor. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless sky blue studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "split-at",
+    "name": "Split at Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/split-at.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Split at Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A thick cream book-like paper block lies horizontal, with three bright yellow separator tabs inserted at specific boundaries. The block pulls apart into THREE separate page bundles along those tabbed boundaries. A small yellow ruler and tiny smiley folder support the scene. This is boundary-based document splitting, no scissors. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless lavender studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "extract",
+    "name": "Extract Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/extract.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Extract Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: From a neatly fanned cream paper stack, two selected individual pages lift straight upward with warm yellow outline edges, then move toward a separate slim output stack. The unselected pages remain flat below. A small yellow smiley folder assists from the side. Extraction of selected pages, not deleting. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless mint green studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "delete",
+    "name": "Delete Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/delete.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Delete Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: An intact cream paper stack stands center left, while one unwanted loose page peels away into an open pale terracotta wastebasket at center right. A chunky yellow minus symbol near the removed sheet; other document pages remain carefully aligned. Small yellow smiley folder at back. Focus on removing a page. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless soft coral studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "reorder",
+    "name": "Reorder Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/reorder.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Reorder Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Four cream paper tiles with distinct simple geometric marks (circle, triangle, square, star) lie along a curved editing rail; two middle tiles trade places via gently crossing yellow arrow tracks at different heights. Precise intentional reordering, no merging or scissors. Small smiley folder low center. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless warm peach studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "rotate",
+    "name": "Rotate PDF",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/rotate.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Rotate PDF. Specific scene: Sky blue seamless background. One large cream document caught halfway through a clean quarter turn from portrait into landscape, floating above a small circular platform. A single thick golden curved arrow wraps around the page edge. No pens, no stamps. The rotation is the unmistakable main action."
+  },
+  {
+    "id": "img2pdf",
+    "name": "Images → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/img2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Sage backdrop. Three separate small landscape photo prints showing mountains, a flower and ocean on the LEFT glide along a single curved gold track and combine into one larger upright folded-corner cream document on the RIGHT, the three pictures now neatly arranged on its page. Clearly multiple photographs becoming one document; keep the photos colorful and the folder tiny."
+  },
+  {
+    "id": "pdf2img",
+    "name": "PDF → Images",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2img.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Powder sky-blue backdrop. On the LEFT one upright folded-corner cream document contains a colorful mountain and sun illustration; the entire document page passes through a slim rounded gold rectangular aperture in the CENTER and emerges on the RIGHT as three borderless flat full-page raster picture tiles, each depicting the same page including the small gray paragraph bars. Emphasize whole pages becoming images, not pulling pictures out of a page."
+  },
+  {
+    "id": "extract-images",
+    "name": "Extract Images",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/extract-images.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Warm lilac backdrop. One large upright cream document in the CENTER with subtle gray paragraph bars has two rectangular image windows. Small rounded brass tweezers delicately lift a colorful mountain photograph directly out of one window toward the RIGHT; the empty rectangular recess stays visible in the paper. A flower photo tile already extracted rests below. Document stays intact otherwise, a tiny folder observes. This is embedded image extraction, not whole-page conversion."
+  },
+  {
+    "id": "svg2img",
+    "name": "SVG Converter",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/svg2img.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: convert vector artwork into a raster image. On a soft sky-blue backdrop, show a cream art card on left holding a smooth coral mountain-and-sun emblem with visible yellow Bezier control nodes and handles around its outline. A short thick yellow arrow points right toward a second cream photo card holding the identical coral mountain-and-sun picture made from a clearly visible fine square pixel mosaic. Use large elegant tactile shapes; vector path to raster image must be unmistakable. Tiny smiley folder tucked behind the arrow."
+  },
+  {
+    "id": "img2svg",
+    "name": "Image → SVG (Vectorize)",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/img2svg.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: vectorize a raster image. On a soft lavender backdrop, a small cream picture card on left contains a distinctly pixelated coral leaf made of square blocks. A short sculptural yellow arrow points right toward a larger cream art card with the same coral leaf now perfectly smooth; sparse visible yellow Bezier control nodes and two tangent handles show its editable vector outline. Preserve leaf identity across the conversion, no separate mountain scene. Tiny smiley folder stands beside left card."
+  },
+  {
+    "id": "img-compress",
+    "name": "Image Compressor",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/img-compress.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: compress and resize image files in bulk. On soft coral background, show three large thick cream photo cards with simple sage-hill and golden-sun pictures entering a pair of rounded lavender squeeze rollers, and three much smaller thin photo cards with identical intact pictures emerging neatly on the right. A subtle broad inward yellow arrow molded above the rollers reinforces reducing image size. Three-quarter studio angle, physical delightful miniature press, no destruction or torn images. Tiny smiley folder beside the compact outputs."
+  },
+  {
+    "id": "pdf2txt",
+    "name": "PDF → Text",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2txt.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Peach apricot backdrop. LEFT: a structured upright cream document with a colorful header picture and six embossed dark-gray paragraph bars. ONLY the paragraph bars detach, travel on a narrow golden ribbon through the CENTER, and land as orderly identical gray text lines on a long plain continuous white paper strip on the RIGHT. The picture remains in the original document. Clear text-only extraction, physical tactile objects, no actual characters."
+  },
+  {
+    "id": "txt2pdf",
+    "name": "Text → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/txt2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Buttery pale-yellow backdrop. A long plain thin white paper roll on the LEFT bears evenly spaced simple gray paragraph bars and unrolls through a small elegant golden paper guide in the CENTER; on the RIGHT the roll is cut and neatly typeset as one substantial portrait cream document with folded corner, clear margins, and evenly aligned gray text bars. Plain text becomes a clean paginated document, no photographs or colorful grid."
+  },
+  {
+    "id": "csv2pdf",
+    "name": "CSV → PDF Table",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/csv2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Pale sage backdrop. On the LEFT three horizontal strings of small separate coral, mint and blue rectangular data tokens have little round gold separator beads between the tokens. The rows travel through a golden table-shaped frame and align on the RIGHT into a precisely ruled 4-column by 5-row table printed on a substantial upright cream folded-corner document. Delimited rows become a printable table, no screen or writing."
+  },
+  {
+    "id": "pdf-flatten",
+    "name": "Flatten PDF",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/pdf-flatten.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: flatten a PDF by merging all visible document layers into one flat page. On soft sage-green seamless backdrop, show one cream document in an exploded layered stack: base page, lifted translucent panel with abstract coral highlight bars, lifted thin cream overlay with a blue circle, all aligned just above each other. A broad rounded yellow platen is gently pressing those suspended layers down at a slight angle; to the right lies the final single wafer-thin cream sheet with the same colored marks visibly fused flush into its surface. Tiny smiley folder behind the press. Do not show photo cards or shrinking page dimensions."
+  },
+  {
+    "id": "pdf-meta",
+    "name": "Edit PDF Info",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/pdf-meta.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Edit PDF Info. Specific scene: Soft apricot seamless background. A cream document stands upright with a small removable information card attached to its top corner. A golden pencil is touching the information card, which carries only three abstract embossed grey rules and a tiny simple person silhouette, no text. The information card is highlighted while the rest of the document remains unchanged."
+  },
+  {
+    "id": "numbers",
+    "name": "Page Numbers",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/numbers.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Page Numbers. Specific scene: Soft lavender seamless background. Three cream pages fan across the scene in a neat ascending staircase, with a golden circular marker being placed at the bottom of each page. The footer markers show one, two and three tiny embossed dots respectively, never digits or letters. Main metaphor is giving sequential footer markers to each page."
+  },
+  {
+    "id": "watermark",
+    "name": "Watermark",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/watermark.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Watermark. Specific scene: Warm coral seamless background. A large cream document lies on a slight incline. A frosted translucent diagonal printing ribbon passes gently across the middle of the page and leaves the same faint repeated diagonal abstract grey rule motif on the paper, no letters. A small golden roller hovers above the ribbon. The existing document rules remain visible through the translucent mark."
+  },
+  {
+    "id": "img-watermark",
+    "name": "Image Watermark",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/img-watermark.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Image Watermark. Specific scene: Pale sage seamless background. One cream document stands at a gentle angle, with a translucent miniature picture tile showing a simple mountain and sun icon being lowered onto its centre. The mountain picture appears faintly through the paper content after placement. A second tiny matching picture tile floats just above to make image overlay obvious. No pen, no stamp, no text."
+  },
+  {
+    "id": "compress",
+    "name": "Compress PDF",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/compress.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: compress a PDF file while preserving all of its pages. On soft butter-yellow backdrop, show an upright thick cream document bundle with a coral horizontal header strip and three beige content bars, encircled by a broad blue belt being tightened around its thickness. Beside it, a much thinner neatly compressed bundle retains the same full page height, full width and visible document content. Two chunky inward blue arrows indicate squeezing file bulk, never cutting or deleting pages. No photo imagery, no rollers. Tiny yellow folder peeks from behind thin bundle."
+  },
+  {
+    "id": "reverse",
+    "name": "Reverse Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/reverse.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Reverse Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Two small parallel paper fans, one left and one right, show three easily distinguishable page colours in exactly reversed order: left peach sage blue, right blue sage peach. A bold curved yellow U-turn arrow connects them. Tiny smiley yellow folder below. Strong reverse-sequence metaphor, no numerals/text. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless powder blue studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "blank",
+    "name": "Add Blank Page",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/blank.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Add Blank Page\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A crisp completely blank cream page slides into the end of an existing document stack with embossed text-line marks. Large rounded yellow plus symbol beside the pristine page. Blank sheet visibly has no lines. Small friendly yellow folder nearby. Calm minimal composition demonstrating adding an empty page. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless sage green studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "nup",
+    "name": "Booklet (N-up)",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/nup.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Booklet (N-up)\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Four miniature cream document pages with simple embossed paragraphs float down into four equal quadrants on ONE large landscape sheet, becoming a precise 2-by-2 print layout. Small yellow downward guide arrows. Yellow smiley folder at the far back, main action is four pages fitting one printed sheet. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless pale apricot studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "pdf-info",
+    "name": "PDF Info",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf-info.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Powder blue backdrop. A thick neat stack of three cream documents of subtly different sizes stands in the center, with a magnifying glass hovering over the curled corner and paper layers. Beside it on the RIGHT lies one small inspection report card containing a tidy vertical arrangement of abstract icon-like shapes: stacked-page silhouette, empty horizontal size bars, a tiny clock shape with no digits. Small colored index tabs connect via thin gold lines to the inspected document. Metadata inspection, not extraction of pictures."
+  },
+  {
+    "id": "compare",
+    "name": "Compare PDFs",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/compare.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: compare two document versions and identify different lines. On a pastel lavender backdrop, two upright cream paper documents stand close side by side at equal scale; both contain five raised beige abstract line strips. On the left one line is coral, on the right corresponding line is sage, and a large handheld yellow magnifying glass between them enlarges those two different line segments through its glass. A very fine dashed connector aligns their matching rows. This is a thoughtful document comparison, not merging. Tiny yellow smiley folder behind left document."
+  },
+  {
+    "id": "csv2json",
+    "name": "CSV → JSON",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/csv2json.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: convert flat tabular CSV data into structured JSON objects. On pastel sky-blue background, a cream paper card at left displays a tactile table of three columns and three rows, with coral, yellow and sage cells. A single chunky yellow arrow points RIGHT toward a cream card at right displaying sculptural curly brace symbols surrounding three stacked little grouped rows of coral, yellow and sage blocks, with smaller nested braces around one group. Curly braces are permitted sculptural data symbols, no letters or numbers. The exact source table and structured output must be visually different. Tiny smiley yellow folder sits behind center arrow."
+  },
+  {
+    "id": "json2csv",
+    "name": "JSON → CSV",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/json2csv.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: convert structured JSON objects into flat CSV table data. On pastel peach-coral backdrop, a cream card on left carries large sculptural blue curly braces surrounding three nested groups of blue, yellow and sage tiny rounded blocks. A short curved sculptural yellow arrow points RIGHT toward a wide cream card on right with those same colors rearranged into an orderly clear rectangular grid with a yellow header row, three columns and three rows. Curly braces are permitted sculptural data symbols, no letters or numbers. Table is output on right, grouped braces input on left. Tiny smiley folder peeks from behind table's lower side."
+  },
+  {
+    "id": "divide",
+    "name": "Divide Pages",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/divide.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Divide Pages\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: ONE oversized cream page is cleanly separated horizontally across its center into two equal half-page pieces, one hovering slightly above the other. A clear yellow dashed cutting guideline and small yellow arrow separating the halves. Tiny smiley folder at lower side. Divide within a single page, not split a document stack. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless pastel lilac studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "combine-single",
+    "name": "Combine to Single Page",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/combine-single.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Combine to Single Page\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Three cream document page sections stitch end-to-end into one long seamless scroll, unfurling in an elegant vertical S ribbon through the center. Yellow connector seams subtly disappear into continuous paper. Small smiley yellow folder supports the scroll at its base. One continuous tall page, clearly distinguish from a stacked document. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless butter cream studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "alternate",
+    "name": "Alternate Merge",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/alternate.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Alternate Merge\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Two distinct small stacks of pages, one with peach edges and one with blue edges, feed alternating sheets into a central bound stack whose edge stripes are peach-blue-peach-blue. Curved yellow weaving guide arrows clarify interleaving. Small yellow smiley folder nearby. Large readable interleaved construction. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless seafoam green studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "posterize",
+    "name": "Posterize",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/posterize.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Posterize\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: One miniature landscape picture of a simple sun and hills is expanded into a large 3-by-3 tiled paper poster standing behind it, with visible clean gaps between nine paper tiles. A small yellow roller/ruler and tiny smiley folder at base. All tiles form the same continuous enlarged picture, no text. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless peach coral studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "booklet",
+    "name": "PDF Booklet",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/booklet.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"PDF Booklet\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A cream landscape sheet is folding down its center into a small saddle-stitched booklet, with a second sheet nesting into the folded spine and two visible tiny metallic staples. Yellow curved fold arrow over the center crease. Smiley yellow folder at back left. Clear physical booklet imposition and folding. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless powder mint studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "crop",
+    "name": "Crop PDF",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/crop.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Crop PDF. Specific scene: Warm apricot seamless background. Four bold golden L-shaped crop corners tightly frame the useful central rectangle of a cream document. Thin outer paper margin strips are peeling away cleanly on all four sides, leaving a precise smaller sheet inside. A golden cutting guide sits beside it. Clearly show trimming margins, not splitting into multiple pages."
+  },
+  {
+    "id": "header-footer",
+    "name": "Header & Footer",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/header-footer.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Header & Footer. Specific scene: Pale sky seamless background. Two slim golden paper bands are being fitted to the very top and very bottom edges of a tall cream page on a miniature easel. The document middle has quiet grey abstract rules and remains untouched. Two more matching pages behind it show the same top and bottom bands. No letters, no page numbers."
+  },
+  {
+    "id": "stamp",
+    "name": "Add Stamp",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/stamp.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Add Stamp. Specific scene: Soft lavender seamless background. A handsome tactile golden wooden rubber stamp with a short rounded handle presses a clear raised circular checkmark seal onto the centre of a cream document. Show the stamp slightly lifted just after contact, with one crisp golden round seal below. The stamped mark is a simple check symbol only, never wording."
+  },
+  {
+    "id": "remove-annots",
+    "name": "Remove Annotations",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/remove-annots.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Remove Annotations. Specific scene: Soft peach seamless background. A large golden magnet gently lifts two blank speech-bubble comment tabs and a translucent coral highlight strip away from a cream document. Underneath, the document is clean with the same untouched grey abstract rules. The removed comments float visibly above the paper. No erased body content, no text."
+  },
+  {
+    "id": "remove-blank",
+    "name": "Remove Blank Pages",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/remove-blank.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Remove Blank Pages. Specific scene: Pale mint seamless background. Five upright cream document pages travel through a simple golden sorting arch. Two completely blank sheets peel off to the side into a low tray, while three pages with abstract grey content rules continue together as a tidy useful stack. Visually distinguish empty pages from filled pages, no words or digits."
+  },
+  {
+    "id": "greyscale",
+    "name": "PDF → Greyscale",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/greyscale.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: PDF to Greyscale. Specific scene: Soft apricot seamless background. A cream page with a simple colourful sun-and-mountains picture moves through a silver and gold filter frame. Its emerging half shows the exact same sun-and-mountains picture entirely in beautiful charcoal, mid grey and white. The left colourful and right monochrome halves align perfectly. Background stays pastel and the small folder remains yellow."
+  },
+  {
+    "id": "invert",
+    "name": "Invert Colors",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/invert.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Invert Colors. Specific scene: Pale lavender seamless background. Two matching document sheets hover side by side linked by one golden turning arrow. The first sheet is cream with charcoal rules and a dark simple circular graphic; the second is deep charcoal with ivory rules and a bright ivory circular graphic in identical positions. Show a crisp positive-to-negative colour inversion, no ordinary grayscale filter."
+  },
+  {
+    "id": "json2pdf",
+    "name": "JSON → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/json2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Lavender backdrop. LEFT: a floating structured object tree made of three nested open rounded geometric frames with small coral, blue and mint cuboids linked by thin golden branches, no code symbols. This hierarchical data structure passes toward RIGHT into a single upright cream folded-corner document where the same hierarchy is represented by neatly indented short embossed paragraph bars and tiny colored dots. Clear nested structured data becomes a printed document."
+  },
+  {
+    "id": "md2pdf",
+    "name": "Markdown → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/md2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Apricot backdrop. LEFT: a loose lightweight source-paper ribbon bearing a bold horizontal bar, a group of three round bullet dots with short bars, and two slim parallel bars; all abstract, no actual characters. In the CENTER a small golden typographic comb aligns these elements. RIGHT: a polished portrait cream document with a strong heading block, a shorter subheading, a spacious list of three dot bullets and an indented quotation block, clearly typeset hierarchy. Minimal physically modeled markdown-to-formatted-document transformation."
+  },
+  {
+    "id": "pdf2json",
+    "name": "PDF → JSON",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2json.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Pale mint backdrop. LEFT: one cream folded-corner document with two separated paragraphs and small top metadata dots. Gray bars and dots leave the page through a narrow golden aperture and reorganize on the RIGHT into a three-dimensional nested object tree: a large open rounded cuboid frame contains two smaller colored open frames with coral/mint/blue little cubes and branching thin connectors. The physical hierarchy must be the hero, showing document contents becoming structured nested data; no code characters."
+  },
+  {
+    "id": "page-dims",
+    "name": "Page Dimensions",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/page-dims.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Butter backdrop. Two cream folded-corner pages, one portrait and one landscape, stand side by side at center. An oversized elegant gold measuring caliper hugs the height of the portrait sheet while a simple blue ruler with engraved tick marks but NO numerals lies across its width. Two thin gold measurement guides end at the page edges; one small plain report slip with two gray horizontal bars lies on the right. The tool is measuring page width and height, not cropping or cutting."
+  },
+  {
+    "id": "fix-a4",
+    "name": "Fix Page Size (A4)",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/fix-a4.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: normalize mismatched PDF page dimensions to one consistent portrait paper size. On pastel sage backdrop, three cream source sheets of visibly different proportions, one narrow, one square and one broad landscape, float on left toward a sculptural yellow rectangular sizing frame at center. On right, three identical portrait cream sheets line up as a neat stack, all exactly the same size, with matching coral header strips. A small yellow arrow directs the sheets through the sizing frame. No ruler numbers or A4 letters. Tiny smiley folder beside uniform sheets."
+  },
+  {
+    "id": "linearize",
+    "name": "Compatibility PDF",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/linearize.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: make a document compatible with older PDF readers by simplifying its complex internal structure. On soft lavender backdrop, a cream upright document at left has an intricate little tangle of interlinked coral geometric blocks visible in a cutaway window. The paper passes across a chunky yellow bridge-shaped adapter in the center, emerging on right as a clean cream document whose cutaway shows three simple orderly blue blocks in one straight line. A small cream vintage desktop printer, completely unbranded and without text or screen, accepts the simple document. Emphasize compatibility with older physical equipment and simplifying structure, not repairing damage. Tiny yellow smiley folder behind bridge."
+  },
+  {
+    "id": "sanitize",
+    "name": "Sanitize PDF",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/sanitize.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: sanitize a PDF by stripping hidden contents and preserving its visible page as a clean image. On soft sky backdrop, one cream document with a simple coral circle and beige content strips passes through a large rounded sage filter arch. On the input side, behind the document, translucent ghost layers hold tiny purple code-brace symbols and blank hanging metadata tags; these hidden layers separate downward into a small neutral catch tray. On output side a clean identical cream page retains only the circle and strips, with a small golden clean sparkle. No locks or keys. Tiny smiley yellow folder watches beside the output page."
+  },
+  {
+    "id": "remove-meta",
+    "name": "Remove Metadata",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/remove-meta.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: remove document metadata such as author, date and title without changing visible document pages. On a soft blush-coral backdrop, one large upright cream document with three beige content strips remains intact. A large yellow-and-cream eraser at an angle is rubbing away THREE small detachable cream metadata tags dangling behind its upper edge; the tags carry only simple embossed pictograms: person silhouette, tiny calendar grid with no numbers, and a blank horizontal label strip. The tags and their small blue connecting strings crumble into soft eraser crumbs; visible main document strips remain untouched. Tiny yellow smiley folder behind bottom of document. No washing filter or padlock."
+  },
+  {
+    "id": "rotate-custom",
+    "name": "Rotate Custom Degrees",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/rotate-custom.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Rotate Custom Degrees. Specific scene: Soft coral seamless background. A cream document rests on a golden circular protractor-like dial, tilted to a deliberately unusual diagonal angle around thirty degrees. The dial has simple tick marks but absolutely no numerals or letters. A little golden adjustment handle points to the chosen angle; a light dotted corner guide shows the upright starting position."
+  },
+  {
+    "id": "add-attach",
+    "name": "Add Attachments",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/add-attach.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Add Attachments\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A large upright cream document has a neat pocket opening in its edge. A small image card, a tiny spreadsheet card, and a compact text card slide INTO the pocket along a yellow inward arrow, held by one oversized yellow paperclip. Small smiley folder at side. Visible embedding attachments into document. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless pale sky studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "extract-attach",
+    "name": "Extract Attachments",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/extract-attach.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Extract Attachments\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A cream document with an open side pocket RELEASES three miniature attachments outward: a photo tile with hills, a sheet with cells, and a small envelope. Yellow outward arrows lead to the separated pieces on the tabletop. A small smiley folder waits beside them. Clear direction out of document, no paperclip enclosing it. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless light lavender studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "grid",
+    "name": "Grid Combine",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/grid.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"Grid Combine\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: Six separate cream miniature pages click into a custom rectangular two-row three-column layout on one large landscape board. The grid has narrow even gutters with yellow alignment guides and one empty slot receiving the last tile. Small yellow smiley folder in background. Crisp modular six-up grid layout. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless butter yellow studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "pdf2zip",
+    "name": "PDF → ZIP",
+    "category": "Organize",
+    "asset": "public/tool-covers/tools/pdf2zip.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Create ONE original landscape tool-card cover for GoFiley ERP, tool \"PDF → ZIP\". The supplied image is STYLE REFERENCE ONLY; do not copy its arrangement or generic paper fan. New unique subject/action: A cream PDF-like paper stack breaks into individual tiny image cards with mountains, and the cards slide into a small bright yellow pouch with a prominent closing ZIPPER. A friendly smiley folder sits farther back. Action must show pages becoming images then entering zipper archive, zipper is the central motif. Premium tactile 3D clay and cream paper miniature sculpture, warm yellow GoFiley folder mascot with two black eyes and small curved smile; mascot is secondary to the tool operation. Seamless soft periwinkle studio background, gentle directional daylight and soft contact shadows, crisp silhouettes, restrained colours. Wide 3:2 landscape composition with central subject within the middle 75%, leave extreme top-left and bottom-right corners quiet for UI badges; final displayed card crops to16:9. Simple legible at240px, one clear action. No text, letters, numerals, company logos, UI, watermarks, extraneous decorations, human hands, borders or collage. Final production cover image, not a mockup."
+  },
+  {
+    "id": "bg-color",
+    "name": "Background Color",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/bg-color.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: unique tool cover illustration in the GoFiley document app. Create ONE finished wide landscape 3D illustration, 3:2 aspect ratio, at least 1536x1024. Consistent premium friendly tactile clay-and-paper studio style, soft daylight from upper left, lovely grounded contact shadows, smooth softly rounded solid objects, thick cream paper, restrained golden yellow details. Main operation centred and completely readable at thumbnail size, generous clean seamless pastel background, all four corners quiet for UI badges. A small supporting GoFiley mascot may stand off to one side: glossy golden yellow folder with upper-left tab, two shiny black round eyes and simple curved black smile, one cream sheet inside. Mascot occupies no more than fifteen percent of image width; tools/documents are the hero. Do not make a collage or a category overview. No typography, no text, no letters, no numerals, no words, no brand names or real logos, no watermark, no screens, no interface, no large surrounding frame, no decorative clutter. Paper content is represented only by abstract muted grey rules and simple geometric picture shapes. Make the exact requested operation unmistakable with its own composition. Tool: Background Color. Specific scene: Pale sage seamless background. A small golden paint roller is laying a smooth warm lavender solid colour across the background of a cream document. The dark abstract content rules stay visibly on top of both the cream and painted portions, demonstrating changing only the paper background. A small open paint tray with lavender paint sits beside it."
+  },
+  {
+    "id": "extract-tables",
+    "name": "Extract Tables",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/extract-tables.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Powder sky-blue backdrop. LEFT: an upright cream document contains abstract paragraph bars above and below a small colored empty-cell table. ONLY the table rises out from the page as a flexible lattice in the CENTER, leaving its precise grid-shaped recess. On the RIGHT the lattice separates into straight horizontal rows of pastel data blocks with small gold separator beads on a thin paper strip. Clearly extracting a table into delimited rows, leaving other document text in place."
+  },
+  {
+    "id": "repair",
+    "name": "Repair PDF",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/repair.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: repair a damaged PDF's structure. On a warm butter-yellow backdrop, one large cream document with a folded corner and three coral abstract content strips has a jagged crack through its lower half. A small rounded blue spanner and soft cream adhesive patch are actively joining the two matching document pieces perfectly back together. The intact upper lines show it is a document being repaired, with a smooth sealed section along part of the former crack and just a few repair crumbs on ground. Tiny smiley yellow folder holds the end of the patch from behind. Keep the repaired document central, no new file output scene, no lock."
+  },
+  {
+    "id": "rasterize",
+    "name": "Rasterize PDF",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/rasterize.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: rasterize a PDF page to a fixed-resolution image. On soft lavender background, show one upright cream document with a coral circular chart and two beige abstract line strips. A wide glowing yellow scan beam moves horizontally down the page: above the beam the marks are perfectly smooth vector shapes; below it the SAME circle and lines have transformed into tightly aligned visible square blue/coral pixel tiles. A small magnifying lens at lower right enlarges the pixel grid. Tiny smiley yellow folder to one side. Must show single-page smooth graphics turning into a pixel image, no compressing, squeezing, shrinking or stacks."
+  },
+  {
+    "id": "remove-restrictions",
+    "name": "Remove Restrictions",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/remove-restrictions.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: remove PDF printing, copying and editing permission restrictions. On pastel sage background, a cream document with beige content strips stands behind three chunky small physical blue pictograms on a low cream plinth: a desktop printer, two overlapping paper sheets for copy, and a pencil. A single broken-open yellow chain lies across their front, with its separated ends clearly lifted away from the three icons. Each icon is now free and unobscured. A small smiley folder sits tucked behind document. This is freeing allowed operations, not decrypting a password: NO key and NO padlock. Large clear central broken chain, document and three operation objects."
+  },
+  {
+    "id": "word2pdf",
+    "name": "Word → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/word2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Periwinkle lilac backdrop. LEFT: an editable blue-backed manuscript pad with a simple graphite pencil resting against it, heading and paragraph embossed bars, tiny margin editing marks represented only by colored dots. Its loose manuscript sheets slide under a smooth golden bookbinding arch and become a single orderly upright folded-corner cream document on the RIGHT with the same heading/paragraph hierarchy fixed into clean margins. Word-processing manuscript to portable document, no letters or software logos."
+  },
+  {
+    "id": "excel2pdf",
+    "name": "Excel → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/excel2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Soft apricot backdrop. LEFT: an open green physical spreadsheet ledger with a long pale empty-cell grid stretching across a gently folded sheet, a few mint and orange cells. A golden roller flattens a segment of the grid in the CENTER; RIGHT: the grid is neatly fitted inside the margins of one upright cream portrait document with folded corner and tidy repeated table headings shown as darker blank cells. Spreadsheet becomes a printable document."
+  },
+  {
+    "id": "ppt2pdf",
+    "name": "PowerPoint → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/ppt2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Pale sage backdrop. LEFT: three small wide orange-backed presentation cards on a miniature easel, decorated with a simple pie-slice relief, three bar shapes, and a heading rectangle plus paragraph bars. Short gray slide-text bars move along a gold track to the RIGHT, where two portrait cream folded-corner pages collect the heading and paragraph bars. This tool exports slide text into a document, so the pie and bar diagrams stay on the source easel. Professional tactile clear presentation-to-document story."
+  },
+  {
+    "id": "pdf2docx",
+    "name": "PDF → Word",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2docx.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Powder blue backdrop. LEFT: a fixed upright cream folded-corner document with tidy gray heading and paragraph bars, its lower edge gripped by a tiny gold clasp. To the RIGHT the same content opens into a blue-backed editable writing pad with lifted loose lines and a graphite pencil actively poised over one line, a small eraser beside it. A short curved gold connector shows movement left to right. The editable writing pad is the visual hero, no software logos or letters."
+  },
+  {
+    "id": "pdf2xlsx",
+    "name": "PDF → Excel",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2xlsx.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Warm lilac backdrop. LEFT: an upright cream folded-corner document has a compact empty-cell financial table with mint and coral highlights. The grid lifts and expands along a golden rail toward the RIGHT into a large green physical spreadsheet ledger with separate tabbed sheets, precise rows/columns and a tiny gold calculation bead rail along the edge. The spreadsheet is wider than the source table and looks editable. No numerals or text, distinct document-table-to-workbook conversion."
+  },
+  {
+    "id": "pdf2pptx",
+    "name": "PDF → PowerPoint",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2pptx.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Soft butter backdrop. LEFT: a short stack of three portrait cream folded-corner document pages with different graphic layouts using mountain relief, pie-disc and bars. Each whole page pivots along a golden arc toward RIGHT and becomes a wide orange-backed slide card, preserving the entire page illustration including bars, fanned neatly on a small presentation easel. Emphasize one full-page image per slide, not text extraction. Corners stay empty."
+  },
+  {
+    "id": "cbz2pdf",
+    "name": "CBZ → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/cbz2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Comic archive to PDF tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel lavender backdrop. A small open golden zip archive tray releases three distinct colourful cream comic pages with abstract picture panels into one neat bound paper document. Comic panels becoming a book is the main action. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "rtf2pdf",
+    "name": "RTF → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/rtf2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Rich text to PDF tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel mint backdrop. A cream manuscript with beautifully varied bold and slanted abstract gray text bars passes through a small golden roller into a clean finished document with matching formatting. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "tiff2pdf",
+    "name": "TIFF → PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/tiff2pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Light lilac backdrop. LEFT: four high-resolution scan transparencies, cream-edged translucent picture plates stacked slightly apart and showing the same blue botanical specimen through finely detailed raster tile texture. The multi-page image plates move along a compact golden arch toward the RIGHT and become a tidy cream bound document stack with the botanical image on each separated page. Emphasize multiple high-detail scanned raster pages assembled into a PDF document; no film sprockets, text or logo. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "pdf2tiff",
+    "name": "PDF → TIFF",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/pdf2tiff.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Sage backdrop. LEFT: a cream document page with abstract paragraph bars and a fine blue botanical relief hovers over a low elegant gold scanning bed, no screen. On the RIGHT emerge three flat translucent high-detail raster plates, each preserving the whole document layout and fine botanical detail, with a tiny raised regular pixel tessellation visible on the closest corner. Clear entire document pages rendered to image plates. Keep all main objects central and mascot tiny. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "ocr-pdf",
+    "name": "OCR PDF",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/ocr-pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Searchable PDF tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel peach backdrop. A golden scanning beam crosses a cream scanned page with fuzzy grey rules; behind it the same rules become crisp floating tiny charcoal letter shapes. A small magnifying glass searches the restored page. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "ocr-text",
+    "name": "OCR → Text",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/ocr-text.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Powder sky-blue backdrop. LEFT: a slightly skewed cream scanned-paper image with fuzzy pixelated dark gray paragraph bars sits under a large round gold optical lens. Through the lens a narrow mint scanning beam transforms the fuzzy bars into crisp raised individual gray strips; on the RIGHT these strips settle as evenly aligned clean text rows on a plain paper roll. Emphasize visual recognition from a grainy scanned picture to editable text, not ordinary extraction, no readable characters. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "encrypt",
+    "name": "Encrypt PDF",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/encrypt.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: password-protect and encrypt a PDF. On pastel sky-blue backdrop, a central thick cream document with folded corner and abstract beige content strips is encircled snugly by a protective lavender band. A large solid yellow padlock hangs securely CLOSED across its front, with the shackle visibly inserted into both sides of the lock body. Behind the closed lock, the document's visible lower cutaway holds small scrambled blue square tiles suggesting encryption. Tiny yellow smiley folder stands discreetly to side. No keys, no open shackle, no broken chain; clear calm protection action, strong readable locked state."
+  },
+  {
+    "id": "decrypt",
+    "name": "Decrypt PDF",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/decrypt.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: unlock an encrypted PDF using its password. On pastel peach-coral seamless backdrop, a cream document with abstract beige content lines slides freely out of an OPEN yellow padlock; the shackle is clearly lifted and rotated away from one side, leaving a large unmistakable gap. A chunky blue key is inserted in the lock's keyhole at a turned angle. The document rises gently upward with two short soft motion strokes. Tiny smiley yellow folder stands behind the released paper. The key and fully OPEN lock dominate the readable center; no chains, no printing/copy icons and no closed lock."
+  },
+  {
+    "id": "permissions",
+    "name": "Change Permissions",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/permissions.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: choose separate PDF permissions for printing, copying and editing. On pastel lavender backdrop, a cream upright document stands behind three separate small rounded platforms, each holding one clear physical object: blue desktop printer, coral pair of overlapping paper sheets, and sage pencil. Two platforms have small yellow CLOSED padlocks in front; the pencil platform instead has a small raised cream check mark in a sage circle, showing selective permissions rather than globally locking the whole file. A tiny yellow smiley folder stands beside the document. No keys or broken chains, no UI switches, no text. Make the selective locks on distinct operation objects obvious."
+  },
+  {
+    "id": "bookmarks",
+    "name": "Add Bookmarks",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/bookmarks.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Add bookmarks tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel sky blue backdrop. A thick cream document with five stepped coloured paper tabs along its right edge. A neat golden branching outline connects to the matching pages. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "extract-bookmarks",
+    "name": "Extract Bookmarks",
+    "category": "From PDF",
+    "asset": "public/tool-covers/tools/extract-bookmarks.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Apricot backdrop. A substantial upright cream document stack on the LEFT has five slim colored ribbon bookmarks at different page levels. The bookmarks stretch out toward the RIGHT and become a clear hierarchical outline of small cream index slips arranged like a branching staircase, connected by thin gold lines, with short gray bars indented progressively. Original document remains whole. Emphasize navigation outline extraction from tabs into an editable outline, not removing pages. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "list-fields",
+    "name": "List Form Fields",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/list-fields.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: inspect and list the interactive fields contained in a PDF form. On pastel sky backdrop, an upright cream form sheet at left has three types of tactile outlined empty fields: a long rectangular textbox, a square checkbox, and three small radio circles. Fine curved blue connector wires lead from each field to a corresponding small cream inventory card stacked vertically on right; each inventory card carries only an embossed matching shape and one beige abstract description strip. A yellow magnifier hovers near the form, suggesting extraction and inspection. Tiny yellow smiley folder at base. No pencil filling anything, no typed text, no interface."
+  },
+  {
+    "id": "fill-form",
+    "name": "Fill Form",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/fill-form.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: fill in a PDF's existing form fields. On soft butter-yellow backdrop, a central cream paper form rests at a gentle diagonal, containing three clear inset rounded rectangular fields and two inset square checkboxes. A large beautiful blue pencil writes a short blue abstract wavy stroke INSIDE the middle outlined field, while the top field already contains short coral abstract data strokes and one checkbox bears a blue tick. The empty third field remains visible so the action is clearly filling a form. A tiny yellow smiley folder supports the lower edge. No real letters, digits, signature, labels, screens or form UI; physical paper and pencil."
+  },
+  {
+    "id": "flatten-form",
+    "name": "Flatten Form",
+    "category": "Data",
+    "asset": "public/tool-covers/tools/flatten-form.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: flatten completed PDF form fields permanently into a page. On pastel peach backdrop, a cream form sheet lies on the studio surface at an oblique angle. Three raised filled field inserts, thin blue rectangular frames with blue abstract wavy data strokes and a little checkbox containing a tick, hover only a little above matching recesses. A broad yellow rubber brayer roller is rolling across the page and pressing the inserts down: ahead of the roller the frames remain raised, behind the roller those same completed field shapes and marks are completely FLUSH with the paper. Tiny smiley folder beside the page. No text, no signatures, no general document-layer exploded stack; specifically completed form fields being sealed into paper."
+  },
+  {
+    "id": "esign",
+    "name": "E-Sign Document",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/esign.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Sign a document tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel powder lilac backdrop. A beautiful golden fountain pen writing an elegant navy ink flourish in the signature space at the bottom of a cream document. Small yellow Filey folder watches beside the page. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "logo",
+    "name": "Add Logo / Header",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/logo.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Add a logo or header tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel sage backdrop. Golden tweezers position a small abstract blue geometric brand badge at the top of a cream business document, with a matching blue thin header rule below it. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "letterhead",
+    "name": "Letterhead / Background",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/letterhead.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Letterhead or background tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel rose backdrop. Two hovering sheets align: a translucent cream content sheet with grey rules above a pale blue stationery sheet with tasteful corner motifs and small golden header shapes, creating one professional letterhead. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "redact",
+    "name": "Redact PDF",
+    "category": "Secure",
+    "asset": "public/tool-covers/tools/redact.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Asset type: one unique GoFiley document-tool cover. Create ONE polished landscape 3:2 image, premium friendly 3D clay-and-paper studio illustration. Cream softly rounded paper cards with subtle tactile grain, saturated yellow accents, restrained glossy highlights, soft daylight from upper left, convincing contact shadows, seamless pastel studio ground/backdrop. A tiny yellow folder mascot with two black eyes and a simple curved smile plays a supporting role only, under 15% of scene width. Main tool action fills the readable center 65% of composition; keep all four corners generously clear for future UI badges. No text, letters, numbers, words, logos, watermarks, screens or UI. No collage. Any graphic lines are abstract raised strips, never writing. Specific operation: permanently redact sensitive areas of a PDF. On soft lavender seamless background, one large cream document has five short beige abstract content lines and a small neutral person silhouette near top. A chunky blue privacy marker is drawing a thick MATTE CHARCOAL BLACK rectangular bar over the center portion of one content line; two other opaque black redaction bars already conceal part of another line and the person silhouette. The remaining beige lines remain visible, showing selective permanent concealment. Tiny yellow smiley folder near lower side of document. Black bars must be opaque and unmistakable; no eraser, no faded translucent highlights, no real words or letters, no padlock."
+  },
+  {
+    "id": "place-stamp",
+    "name": "Stamp & Sign",
+    "category": "Edit",
+    "asset": "public/tool-covers/tools/place-stamp.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Stamp and sign tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel blue backdrop. A chunky golden rubber stamp tilts above a cream document bearing a fresh circular navy stamp impression made of abstract rings, beside an elegant blue signature flourish. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "heic-to-pdf",
+    "name": "HEIC to PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/heic-to-pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Butter backdrop. LEFT: a small premium ivory camera module with three round dark lenses, no phone screen and no branding, rests beside a tightly nested fan of compact square photo tiles with vivid coral flower, blue sea and green leaf pictures. These phone-photo tiles glide along a thin gold path toward RIGHT where they become large clean photographic pages in a cream folded-corner document album. Modern compact phone photos to PDF; no computer, logos, text or other filetype symbols. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "psd-to-pdf",
+    "name": "PSD to PDF",
+    "category": "To PDF",
+    "asset": "public/tool-covers/tools/psd-to-pdf.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Create one original premium GoFiley tool-cover illustration. Wide landscape 3:2 composition, sophisticated friendly 3D clay and tactile cream paper, soft daylight from upper left, believable soft contact shadows, rounded physical objects with refined materials. Seamless colored studio floor and background. The exact transformation is the main subject in the central 75% of the frame. A tiny glossy golden-yellow folder with two black eyes and a small curved smile is a supporting mascot, less than 12% of image width, tucked near the base of the action. Leave all four corners and uppermost strip clear for interface badges. No words, letters, numerals, brand logos, PDF logos, watermark, screens or user-interface elements. Paragraphs must be abstract short embossed gray bars, pictures must be tactile colorful landscapes, grids made from empty cells. One coherent scene, not a collage. Pale lavender backdrop. LEFT: an exploded layered artwork made from four separate hovering transparent square sheets: one sky-blue base, one green mountain silhouette, one coral sun circle, one cream foreground shape, each sheet visibly spaced in depth with a tiny colored layer tab. A smooth golden flattening press in the CENTER gently brings the layers together. RIGHT: the combined complete colorful scene appears on one flat cream folded-corner document page. Layered design becomes flattened PDF, unmistakable layers-to-single-composite story. Supplied image is STYLE REFERENCE ONLY. Render this entirely new specific scene; do not copy the supplied paper fan composition."
+  },
+  {
+    "id": "deskew",
+    "name": "Deskew Scan",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/deskew.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Straighten scans tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel aqua backdrop. A crooked scanned cream document on the left rotates into a perfectly upright aligned document on the right, guided by a golden right-angle set square and one clean curved arrow. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  },
+  {
+    "id": "pdf-to-pdfa",
+    "name": "Archival Metadata",
+    "category": "Optimize",
+    "asset": "public/tool-covers/tools/pdf-to-pdfa.webp",
+    "generation": "built-in imagegen",
+    "prompt": "Use case: stylized-concept. Make one finished wide 1536x1024 cover illustration for the GoFiley Archival metadata tool. Premium friendly tactile 3D clay and thick cream paper, golden yellow accents, soft studio daylight and grounded shadows. Pastel lavender backdrop. A pristine cream document receives a small golden metadata tag with abstract grey lines, then rests inside a sturdy cream archive box. A simple clock disk suggests careful long-term filing. Main operation centered and understandable at thumbnail size. Keep important objects in central 70% for a 16:9 crop. A small glossy golden-yellow folder mascot with two black eyes and curved smile may appear off to the side, no more than 15% of composition. No headings, readable text, watermarks, interface or external logos. No collage."
+  }
+]

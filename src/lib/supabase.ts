@@ -1,24 +1,12 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { isLocalMode } from "./dataMode";
+import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { localClient } from "./localdb";
+import { localWorkspaceOwner, isLocalSignedIn } from "./localAuth";
+import { sessionFetch } from "./cloudSession";
+import { supabaseUrl as url, supabaseAnonKey as anonKey, cloudConfigured } from "./supabaseConfig";
 
-// Filey's hosted cloud — baked in so every packaged build is cloud-ready out
-// of the box (accounts, team sharing, auto-sync all point here). Env vars
-// still override for dev/self-hosting against another project. The
-// publishable key is a client-side key by design; RLS guards the data.
-const DEFAULT_URL = "https://voyrjqgaypiylwskkwpr.supabase.co";
-const DEFAULT_ANON_KEY = "sb_publishable_seG6PypmkIEN9FYKY9Of6w_UGNTGAgv";
-
-const url =
-  (import.meta.env.VITE_SUPABASE_URL as string | undefined) || DEFAULT_URL;
-const anonKey =
-  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || DEFAULT_ANON_KEY;
-
-export const cloudConfigured =
-  !!url &&
-  !!anonKey &&
-  !url.includes("your-project") &&
-  !anonKey.includes("your-anon-key");
+// Re-exported: this module is where the rest of the app has always imported it.
+export { cloudConfigured };
 
 // Local mode is always "configured" — the offline data layer is the storage.
 // Read once at load; switching mode requires a reload (the setup screen does it).
@@ -26,6 +14,7 @@ export const isConfigured = isLocalMode() || cloudConfigured;
 
 export const supabase: SupabaseClient | null = cloudConfigured
   ? createClient(url!, anonKey!, {
+      global: { fetch: sessionFetch(url, () => supabase) },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -34,9 +23,40 @@ export const supabase: SupabaseClient | null = cloudConfigured
     })
   : null;
 
+/** Recovery must not sign into the app or replace its persisted session. */
+export function createRecoveryClient(): SupabaseClient {
+  if (!cloudConfigured) throw new Error("Password recovery is not configured.");
+  return createClient(url, anonKey, {
+    auth: {
+      storageKey: "filey-password-recovery",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
+/** Supabase Auth owns recovery tokens/rate limits; Resend supplies its SMTP. */
+export async function requestPasswordResetEmail(email: string): Promise<void> {
+  const address = email.trim().toLowerCase();
+  if (address.length > 320 || !/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address))
+    throw new Error("Enter your account's email address.");
+  // An expired app session must not prevent a signed-out recovery request.
+  // Do not auto-retry sends: a retry can supersede a link already in transit.
+  const { error } = await createRecoveryClient().auth.resetPasswordForEmail(address);
+  if (error?.status === 429)
+    throw new Error("Too many reset requests. Please wait before trying again.");
+  if (error) throw new Error("Could not send the reset email. Please try again shortly.");
+}
+
 /** Returns the active client (local shim or cloud), or throws a clear error. */
 export function sb(): SupabaseClient {
-  if (isLocalMode()) return localClient as unknown as SupabaseClient;
+  assertWorkspaceCurrent();
+  if (isLocalMode()) {
+    if (localWorkspaceOwner() && !isLocalSignedIn())
+      throw new Error("Sign in to the device workspace before accessing its records.");
+    return localClient as unknown as SupabaseClient;
+  }
   if (!supabase) {
     throw new Error(
       "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY " +

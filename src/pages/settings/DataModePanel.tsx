@@ -1,22 +1,19 @@
-import { useEffect, useState } from "react";
-import { Cloud, HardDrive, Check, Download, Upload, FolderOpen, RefreshCw } from "lucide-react";
-import { getDataMode, setDataMode, type DataMode } from "../../lib/dataMode";
+import { FileySpinner } from "../../components/FileySpinner";
+import { useCallback, useEffect, useState } from "react";
+import { Cloud, Check, Download, Upload, FolderOpen, ShieldCheck } from "lucide-react";
+import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
-import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
-import {
-  adoptLocalProfile,
-  getLocalProfile,
-  isProfileStub,
-  type Profile,
-} from "../../lib/auth";
+import { CLOUD_RECONNECT_MESSAGE } from "../../lib/cloudSession";
+import { switchWorkspace } from "../../lib/switchWorkspace";
+import { useAuth } from "../../lib/auth";
 import {
   autoSyncEnabled,
   setAutoSyncEnabled,
   getSyncStatus,
+  syncStatusMessage,
   syncNow,
   syncCycle,
   markAllForSync,
-  cloudSessionEmail,
   cloudSignIn,
   cloudSignUp,
   cloudSignOut,
@@ -28,79 +25,30 @@ import {
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
-import { setMigrating } from "../../lib/sync";
-import { canUseLocalMode, hasLocalData, ENFORCE_LICENSING } from "../../lib/license";
+import { setMigrating, isMigrating } from "../../lib/sync";
+import { hasLocalData } from "../../lib/license";
 import {
   hasTauri,
   pickFolder,
   getDataDir,
   setDataDir,
   restartApp,
+  storageRecoveryStatus,
+  cancelPendingStorage,
   getExportDir,
   setExportDir,
   clearExportDir,
   openFolder,
   backupAll,
   restoreAll,
+  type FullBackupResult,
 } from "../../lib/localPaths";
 import { todayYmd } from "../../lib/format";
-
-/** The one control most people should ever need: sync on, or everything here. */
-function SyncSwitch({
-  on,
-  busy,
-  onChange,
-}: {
-  on: boolean;
-  busy: boolean;
-  onChange: (want: boolean) => void;
-}) {
-  return (
-    <div className="rounded-xl border border-brand-200 p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="font-medium text-ink flex items-center gap-2">
-            {on ? <Cloud size={16} /> : <HardDrive size={16} />}
-            Sync with your Filey account
-          </p>
-          <p className="text-sm text-brand-500 mt-0.5">
-            {on
-              ? "Your data is in your account, so you can sign in on another device and pick up where you left off."
-              : "Your data lives on this computer and is not being sent anywhere. Turn this on to use it on another device."}
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={on}
-          aria-label="Sync with your Filey account"
-          disabled={busy}
-          onClick={() => onChange(!on)}
-          className={`relative w-11 h-6 rounded-full shrink-0 cursor-pointer transition-colors disabled:opacity-50 ${
-            on ? "bg-primary-400" : "bg-brand-200"
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
-              on ? "left-[22px]" : "left-0.5"
-            }`}
-          />
-        </button>
-      </div>
-      {busy && (
-        <div className="mt-3" role="status" aria-label="Syncing">
-          <div
-            className="h-5 w-5 rounded-full animate-spin"
-            style={{
-              border: "2px solid hsl(var(--brand-200))",
-              borderTopColor: "hsl(var(--ink))",
-            }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
+import { pendingCloudWrites } from "../../lib/api";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import SyncConflictReview from "../../components/SyncConflictReview";
+import { Modal, Switch } from "../../components/ui";
+import { useUI } from "../../lib/ui";
 
 // Cloud sync card (local mode only): connect a cloud account and this device
 // syncs both ways — local changes upload within a second, and edits from your
@@ -117,15 +65,21 @@ function CloudSyncCard() {
   const [info, setInfo] = useState("");
   /** Sign-in failed in the way that usually means "no cloud account yet". */
   const [offerSignup, setOfferSignup] = useState(false);
-
   useEffect(() => {
-    cloudSessionEmail().then(setConnected).catch(() => {});
+    // Includes the initial session and renewal failure/sign-out, so an expired
+    // connection offers sign-in immediately instead of a stale Connected label.
+    const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
+      setConnected(session?.user.email ?? null);
+    });
     const onStatus = () => {
       setSync(getSyncStatus());
       setEnabled(autoSyncEnabled());
     };
     window.addEventListener("filey:sync-status", onStatus);
-    return () => window.removeEventListener("filey:sync-status", onStatus);
+    return () => {
+      subscription?.data.subscription.unsubscribe();
+      window.removeEventListener("filey:sync-status", onStatus);
+    };
   }, []);
 
   const connect = async () => {
@@ -156,7 +110,7 @@ function CloudSyncCard() {
       // instead of leaving them on a dead end.
       if (!signup && /invalid login credentials|invalid email or password/i.test(msg)) {
         setErr(
-          "That email and password didn't match a Filey Cloud account. If you've been using Filey offline, this email has no cloud account yet - creating one takes a moment and your on-device data stays exactly where it is."
+          "That email and password didn't match a Filey account. If you've been using Filey offline, this email has no cloud account yet - creating one takes a moment and your on-device data stays exactly where it is."
         );
         setOfferSignup(true);
       } else {
@@ -175,7 +129,7 @@ function CloudSyncCard() {
   const uploadAll = async () => {
     if (
       !window.confirm(
-        "Upload ALL local data to the cloud now? Cloud copies of the same records are overwritten - this device wins."
+        "Upload all device data now? If both sides have changed, you can choose which version to keep."
       )
     )
       return;
@@ -190,7 +144,7 @@ function CloudSyncCard() {
     } catch (e) {
       // Without this the whole thing failed in silence: setErr("") above, no
       // catch, and the rejection vanished into an unhandled promise.
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr("Couldn't finish uploading. Your saved data is safe. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -200,31 +154,32 @@ function CloudSyncCard() {
     sync.state === "syncing"
       ? "Syncing…"
       : sync.state === "error"
-        ? `Sync failed: ${sync.error}`
+        ? sync.error?.includes(CLOUD_RECONNECT_MESSAGE)
+          ? CLOUD_RECONNECT_MESSAGE
+          : syncStatusMessage(sync)
         : sync.at
           ? `Last synced ${new Date(sync.at).toLocaleString()}`
           : "Waiting for changes to sync.";
 
   return (
-    <div className="border-t border-brand-100 pt-4 space-y-3">
-      <div>
-        <p className="font-medium text-ink flex items-center gap-2">
-          <RefreshCw size={16} /> Cloud sync (automatic)
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5">
-          Keep working offline on this device; changes upload to your cloud
-          account within seconds, and edits from your other devices or
-          teammates download automatically. Unpushed local edits always win.
-        </p>
-      </div>
+    <SettingsSection
+      title="Cloud sync (automatic)"
+      description="Keep this device and your cloud account up to date."
+    >
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        Keep working offline on this device; changes upload to your cloud account within
+        seconds, and edits from your other devices or teammates download automatically.
+        If both sides change the same record, choose which version to keep and Filey will merge and sync it.
+      </p>
 
       {connected ? (
         <>
           <div className="flex items-center gap-2 flex-wrap text-sm">
-            <span className="inline-flex items-center gap-1 text-success">
-              <Check size={14} /> Connected as {connected}
+            <span className="inline-flex min-w-0 items-start gap-1 text-success">
+              <Check size={14} className="mt-0.5 shrink-0" />{" "}
+              <span className="min-w-0 break-words">Connected as {connected}</span>
             </span>
-            <button className="btn-ghost shrink-0" onClick={disconnect}>
+            <button className="btn-ghost shrink-0" disabled={busy || sync.state === "syncing"} onClick={disconnect}>
               Disconnect
             </button>
           </div>
@@ -245,27 +200,29 @@ function CloudSyncCard() {
               disabled={busy || sync.state === "syncing"}
               onClick={() => {
                 setErr("");
-                void syncCycle(null, { manual: true }).catch((e) =>
-                  setErr(e instanceof Error ? e.message : String(e))
+                void syncCycle(null, { manual: true }).catch(() =>
+                  setErr("Couldn't finish syncing. Your saved data is safe. Check your connection and try again.")
                 );
               }}
             >
               Sync now
             </button>
-            <button className="btn-ghost" disabled={busy} onClick={uploadAll}>
+            <button className="btn-ghost" disabled={busy || sync.state === "syncing"} onClick={uploadAll}>
               Upload all local data
             </button>
           </div>
           <p
-            className={`text-xs ${sync.state === "error" ? "text-danger" : "text-brand-500"}`}
+            role="status"
+            className="text-xs text-muted-foreground"
           >
             {statusLine}
           </p>
+          <SyncConflictReview />
         </>
       ) : (
         <>
-          <div className="flex items-end gap-2 flex-wrap">
-            <label className="text-sm text-ink">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="min-w-0 text-sm text-foreground">
               <span className="block text-xs text-brand-500 mb-1">Email</span>
               <input
                 className="input"
@@ -275,7 +232,7 @@ function CloudSyncCard() {
                 autoComplete="email"
               />
             </label>
-            <label className="text-sm text-ink">
+            <label className="min-w-0 text-sm text-foreground">
               <span className="block text-xs text-brand-500 mb-1">Password</span>
               <input
                 className="input"
@@ -285,35 +242,47 @@ function CloudSyncCard() {
                 autoComplete={signup ? "new-password" : "current-password"}
               />
             </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              className="btn-primary"
               disabled={busy || !email || !password}
               onClick={connect}
             >
               {busy ? "Working…" : signup ? "Create account" : "Connect"}
             </button>
+            <button
+              className="text-xs text-brand-500 underline cursor-pointer"
+              onClick={() => {
+                setSignup((s) => !s);
+                setErr("");
+                setOfferSignup(false);
+              }}
+            >
+              {signup
+                ? "Have an account? Sign in"
+                : "New to Filey Cloud? Create an account"}
+            </button>
           </div>
-          <button
-            className="text-xs text-brand-500 underline cursor-pointer"
-            onClick={() => {
-              setSignup((s) => !s);
-              setErr("");
-              setOfferSignup(false);
-            }}
-          >
-            {signup ? "Have an account? Sign in" : "New to Filey Cloud? Create an account"}
-          </button>
         </>
       )}
       {info && (
-        <p className="text-sm text-ink bg-primary-50 rounded-lg px-3 py-2">{info}</p>
+        <p
+          role="status"
+          className="text-sm text-foreground bg-hover rounded-lg px-3 py-2"
+        >
+          {info}
+        </p>
       )}
       {err && (
-        <div className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 space-y-2">
+        <div
+          role="alert"
+          className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 space-y-2"
+        >
           <p>{err}</p>
           {offerSignup && (
             <button
-              className="rounded-lg bg-ink text-white px-3 py-1.5 text-xs font-medium hover:opacity-90 transition"
+              className="btn-ghost"
               onClick={() => {
                 setSignup(true);
                 setErr("");
@@ -325,39 +294,60 @@ function CloudSyncCard() {
           )}
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 }
 
-// Switch where data lives. Changing mode reloads the app; it does NOT migrate
-// data — local data stays on this device, cloud data stays in your account.
+// Where the user's records live. One switch: off keeps everything on this
+// device, on puts it in their Filey account so it follows them between devices.
+// Turning it ON is the upload, so it asks first; turning it OFF never uploads.
 export default function DataModePanel() {
-  const mode: DataMode = getDataMode() ?? (cloudConfigured ? "cloud" : "local");
+  const mode: DataMode = effectiveDataMode();
+  const { confirm, toast } = useUI();
   const [busy, setBusy] = useState(false);
-    const [result, setResult] = useState<MigrateResult[] | null>(null);
+  const [result, setResult] = useState<MigrateResult[] | null>(null);
   const [err, setErr] = useState("");
   const [dataDir, setDataDirState] = useState("");
   const [exportDir, setExportDirState] = useState(getExportDir());
+  const [pendingWrites, setPendingWrites] = useState(0);
+  const [progress, setProgress] = useState("");
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  /** Live cloud session, independent of which store is currently open. In local
+   *  mode the app user is the DEVICE account, so only Supabase can say whether
+   *  there is an account to upload to. */
+  const [cloudSession, setCloudSession] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hasTauri) getDataDir().then(setDataDirState).catch(() => {});
+    let active = true;
+    if (hasTauri)
+      void Promise.all([getDataDir(), storageRecoveryStatus()])
+        .then(([directory, recovery]) => { if (active) { setDataDirState(directory); setRecoveryError(recovery); } })
+        .catch(error => { if (active) setErr(String(error?.message ?? error)); });
+    void pendingCloudWrites()
+      .then((rows) => { if (active) setPendingWrites(rows.length); })
+      .catch(() => {});
+    if (supabase) {
+      void supabase.auth.getSession()
+        .then(({ data }) => { if (active) setCloudSession(data.session?.user.email ?? null); })
+        .catch(() => {});
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (active) setCloudSession(session?.user.email ?? null);
+      });
+      return () => { active = false; sub.subscription.unsubscribe(); };
+    }
+    return () => { active = false; };
   }, []);
 
   const changeDataDir = async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    if (
-      !window.confirm(
-        `Move the Filey database to:\n${dir}\n\nThe app will restart. Your current data is copied to the new location.`
-      )
-    )
-      return;
+    if (storageBusy) return;
+    setStorageBusy(true); setErr("");
     try {
+      const dir = await pickFolder();
+      if (!dir || !window.confirm(`Copy the Filey database and saved files to:\n${dir}\n\nChoose an empty folder. Filey will verify the copy and restart. The original folder is preserved.`)) return;
       await setDataDir(dir);
       await restartApp();
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-    }
+    } catch (error) { setErr(error instanceof Error ? error.message : String(error)); }
+    finally { setStorageBusy(false); }
   };
 
   const changeExportDir = async () => {
@@ -368,6 +358,11 @@ export default function DataModePanel() {
   };
 
   const [backupMsg, setBackupMsg] = useState("");
+  const [backupResult, setBackupResult] = useState<FullBackupResult | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [restoreSource, setRestoreSource] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [storageBusy, setStorageBusy] = useState(false);
   const [emirateMsg, setEmirateMsg] = useState("");
 
   const runEmirateFix = async () => {
@@ -385,139 +380,149 @@ export default function DataModePanel() {
   };
 
   const runBackup = async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    const dest = `${dir}/filey-backup-${todayYmd()}`;
-    setBackupMsg("");
+    if (storageBusy) return;
+    setStorageBusy(true);
     try {
-      const path = await backupAll(dest);
-      setBackupMsg(`Full backup saved (database + files): ${path}`);
+      const dir = await pickFolder();
+      if (!dir) return;
+      const dest = `${dir}/filey-backup-${todayYmd()}-${Date.now().toString(36)}`;
+      setBackupMsg("");
+      const result = await backupAll(dest);
+      setBackupResult(result);
+      setShowRecovery(false);
+      setBackupMsg(`Verified backup saved (database + files): ${result.path}`);
     } catch (e: any) {
       setBackupMsg(`Backup failed: ${e?.message ?? e}`);
-    }
+    } finally { setStorageBusy(false); }
   };
 
   const runRestore = async () => {
-    const src = await pickFolder();
-    if (!src) return;
-    if (
-      !window.confirm(
-        `Restore the full backup in:\n${src}\n\nThis REPLACES all data AND files on this device. The app will restart. Make a backup first if unsure.`
-      )
-    )
-      return;
+    if (storageBusy) return;
+    setStorageBusy(true);
     try {
-      await restoreAll(src);
+      const src = await pickFolder();
+      if (!src) return;
+      setRestoreSource(src);
+      setRecoveryCode("");
+      setBackupMsg("");
+    } catch (error) { setBackupMsg(String(error)); }
+    finally { setStorageBusy(false); }
+  };
+  const confirmRestore = async () => {
+    if (!restoreSource || storageBusy) return;
+    setStorageBusy(true);
+    try {
+      await restoreAll(restoreSource, recoveryCode);
+      setRecoveryCode("");
       await restartApp();
     } catch (e: any) {
       setBackupMsg(`Restore failed: ${e?.message ?? e}`);
-    }
+    } finally { setStorageBusy(false); }
   };
 
-  /** Changing where data is stored must not sign anyone out. The live cloud
-   *  session is proof of who owns this device, so carry that identity across —
-   *  offline mode keeps its own signed-in flag, and nothing ever set it while
-   *  the user was in cloud mode. Password-less by design: a code sign-in never
-   *  had one either, and the server stays the authority when online. */
-  const keepSignedInLocally = async () => {
-    if (!supabase) return;
-    const { data } = await supabase.auth.getSession();
-    const u = data.session?.user;
-    if (!u?.email) return;
-    rememberLocalIdentity(u.email, u.id);
-    setLocalSignedIn(true);
-    // Bring the profile down with the identity. Offline mode keeps its own
-    // copy, and an empty one means first-run setup runs a second time for
-    // somebody who filled it in months ago.
-    try {
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", u.id)
-        .maybeSingle();
-      if (prof) adoptLocalProfile({ ...(prof as Partial<Profile>), email: u.email });
-    } catch {
-      /* the identity is the part that matters; a name can be re-typed */
-    }
-  };
+  const { user } = useAuth();
+  const [localExists, setLocalExists] = useState<boolean | null>(null);
+  useEffect(() => {
+    void hasLocalData()
+      .then(setLocalExists)
+      .catch(() =>
+        setErr("Could not check the device workspace. Reload before switching.")
+      );
+  }, []);
 
-  /** The mirror of the above, going the other way: someone who set their name
-   *  and company up offline should not be walked through first-run setup again
-   *  the first time they turn sync on. Only fills a cloud profile that is still
-   *  the untouched signup stub — real cloud values are never overwritten. */
-  const keepProfileInCloud = async () => {
-    if (!supabase) return;
-    try {
-      const { data } = await supabase.auth.getSession();
-      const u = data.session?.user;
-      const mine = getLocalProfile();
-      if (!u || (!mine.name?.trim() && !mine.company?.trim())) return;
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", u.id)
-        .maybeSingle();
-      if (prof && !isProfileStub(prof as Profile)) return;
-      await supabase.from("profiles").upsert({
-        id: u.id,
-        email: u.email ?? mine.email ?? "",
-        name: mine.name,
-        company: mine.company,
-      });
-    } catch {
-      /* first-run setup can still ask; not worth blocking the switch */
-    }
-  };
+  /** Reload into the destination store. Only reached once the user has agreed
+   *  (cloud) or the move is purely local, so the reload itself is unconditional. */
+  const openStore = useCallback(
+    async (target: DataMode) => {
+      await switchWorkspace(target, false);
+      window.location.reload();
+    },
+    []
+  );
 
-  const switchTo = async (m: DataMode) => {
-    if (m === mode) return;
-    if (m === "cloud" && !cloudConfigured) return;
-    // Offline/local mode is the licensed tier; cloud is the free default.
-    if (m === "local" && !(await canUseLocalMode())) {
+  /** The whole local <-> cloud switch. One click, one pass.
+   *
+   *  ON  = upload. Consent first, then one batched push of the tables that
+   *        actually hold rows, then reopen on the cloud. Nothing is pulled
+   *        back down and nothing is polled afterwards: cloud mode reads and
+   *        writes the account directly, so the transfer is the only billable
+   *        work this causes.
+   *  OFF = private. No upload, no consent, one profile read to check the
+   *        device is allowed to hold this account's copy. */
+  const toggleStorage = async (next: boolean) => {
+    const target: DataMode = next ? "cloud" : "local";
+    if (target === mode || busy) return;
+    if (isMigrating()) {
+      setErr("Wait for the current transfer to finish before switching.");
+      return;
+    }
+    setErr("");
+    setResult(null);
+    if (!next) {
+      setBusy(true);
+      try {
+        await openStore("local");
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (!cloudConfigured) {
+      setErr("Cloud storage isn't available in this build.");
+      return;
+    }
+    // The device account is not the cloud account. Without a live session there
+    // is nowhere to upload to, so send them to the connect card rather than
+    // half-switching into an empty store.
+    if (!cloudSession) {
       setErr(
-        "Offline mode comes with Filey Freedom (AED 1,499, one-time). Get it under Settings → Desktop License, then switch."
+        mode === "local"
+          ? "Connect your Filey account below first, then flip this switch to upload."
+          : "Sign in to your Filey account, then flip this switch to upload."
       );
       return;
     }
-    // Offline and cloud are separate stores. Switching to offline on a device
-    // that has never held local records opened an empty workspace — no company
-    // details, no customers — which reads as though the app threw your data
-    // away. Copying it down was a separate button you had to know to press
-    // first, so offer it here, where the need actually arises.
-    if (m === "local" && !(await hasLocalData())) {
-      const bring = window.confirm(
-        "Bring your cloud data to this device first?\n\n" +
-          "Offline mode keeps its own copy, separate from the cloud, and this device has none yet. Switching without copying opens an empty workspace - your cloud records are not deleted either way.\n\n" +
-          "OK - copy it down now, then switch.\n" +
-          "Cancel - switch to an empty offline workspace."
-      );
-      if (bring) {
-        setBusy(true);
-        setErr("");
-        setResult(null);
-        try {
-          setResult(await migrateCloudToLocal());
-        } catch (e) {
-          // Switching anyway would drop them into the empty workspace this was
-          // meant to prevent, so stay put and explain.
-          setErr(
-            `Could not copy your cloud data, so this device is still on cloud mode: ${
-              e instanceof Error ? e.message : String(e)
-            }`
+    const hasDeviceData = localExists === true;
+    if (
+      !(await confirm({
+        title: "Store your data in your Filey account?",
+        message: hasDeviceData
+          ? `Turning this on uploads the records saved on this device — invoices, customers, products and files — to ${cloudSession}, and Filey then works from your account on every device you sign in to. Your device keeps its own copy. You can switch back at any time; turning it off does not delete anything from your account.`
+          : `Turning this on stores your records in your Filey account (${cloudSession}) so they follow you to every device you sign in to. You can switch back to this device at any time.`,
+        confirmLabel: "Upload and turn on",
+      }))
+    )
+      return;
+    setBusy(true);
+    setMigrating(true);
+    try {
+      if (hasDeviceData) {
+        const res = await migrateLocalToCloud(setProgress);
+        setResult(res);
+        const failed = res.filter((r) => r.error);
+        if (failed.length)
+          throw new Error(
+            `Upload incomplete for: ${failed.map((r) => r.table).join(", ")}. Nothing was switched — your records are still on this device.`
           );
-          return;
-        } finally {
-      setBusy(false);
-    }
       }
+      await openStore("cloud");
+      toast.success("Your data is now in your Filey account.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setMigrating(false);
+      setProgress("");
     }
-    if (m === "local") await keepSignedInLocally();
-    else await keepProfileInCloud();
-    setDataMode(m);
-    window.location.reload();
   };
 
   const runImport = async () => {
+    if (isMigrating()) {
+      setErr("Wait for the active transfer to finish before importing.");
+      return;
+    }
     if (
       !window.confirm(
         "Copy your cloud data onto this device? This replaces any existing local data. You must be signed in to your cloud account."
@@ -529,17 +534,22 @@ export default function DataModePanel() {
     setResult(null);
     setMigrating(true);
     try {
-      const res = await migrateCloudToLocal();
+      const res = await migrateCloudToLocal(setProgress);
       setResult(res);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
       setBusy(false);
       setMigrating(false);
+      setProgress("");
     }
   };
 
   const runPush = async () => {
+    if (isMigrating()) {
+      setErr("Wait for the active transfer to finish before uploading.");
+      return;
+    }
     if (
       !window.confirm(
         "Upload this device's local data to your cloud account? The web version will then show the same data. Cloud records with the same id are OVERWRITTEN - this device wins. You must be signed in."
@@ -551,208 +561,126 @@ export default function DataModePanel() {
     setResult(null);
     setMigrating(true);
     try {
-      const res = await migrateLocalToCloud();
+      const res = await migrateLocalToCloud(setProgress);
       setResult(res);
     } catch (e: any) {
       setErr(e?.message ?? String(e));
     } finally {
       setBusy(false);
       setMigrating(false);
+      setProgress("");
     }
   };
 
-  /**
-   * The whole storage question as one switch.
-   *
-   * ON  — data lives in the account and reaches every device you sign in to.
-   * OFF — copy everything to this computer FIRST, then stop sending. The copy
-   *       is the point: flipping storage without it is what made the app look
-   *       like it had thrown the user's data away.
-   *
-   * Nothing is deleted from the cloud either way, so turning sync back on
-   * reunites the device with the account rather than starting over.
-   */
-  const setSync = async (want: boolean) => {
-    setErr("");
-    setResult(null);
-    if (want) {
-      // Back on: keep this device's copy and push it up, rather than pulling
-      // the cloud down over the top of local work that was done while off.
-      setBusy(true);
-      try {
-        setAutoSyncEnabled(true);
-        if (getDataMode() === "local") {
-          // Deliberately NOT markAllForSync(). The journal already recorded
-          // every local write made while sync was off, so a normal cycle
-          // pushes exactly those and leaves untouched rows alone. Marking
-          // everything dirty would re-upload this device's stale copies over a
-          // teammate's newer ones — the precise thing row-level push exists to
-          // prevent. "Upload all local data" below is still there for when
-          // someone really does mean "this device wins".
-          const ok = await syncCycle(null, { manual: true });
-          if (!ok && getSyncStatus().state !== "error")
-            setErr("Sync is on, but nothing moved yet - check you're signed in.");
-        }
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
-
-    if (
-      !window.confirm(
-        "Stop syncing to the cloud?\n\n" +
-          "Filey will copy everything to this computer first, then keep it here and send nothing further. Your cloud copy is left as it is - turning sync back on reconnects this device to it.\n\n" +
-          "You will need sync on again to use the same data on another device."
-      )
-    )
-      return;
-
-    // Same licensing gate the Advanced → Local path uses. Without this, any
-    // free-tier user gets the paid offline mode by toggling one switch.
-    const localAllowed = await canUseLocalMode();
-    if (!localAllowed) {
-      setErr(
-        "Offline mode needs a Freedom license (one-time purchase) or an existing offline workspace. Upgrade in Settings → Billing, or use the Advanced → Local path below."
-      );
-      return;
-    }
-
-    setBusy(true);
-    try {
-      // Copy down BEFORE switching, and abort the switch if it fails —
-      // otherwise the user lands in an empty workspace, which is the exact
-      // failure this flow exists to prevent.
-      if (getDataMode() !== "local") {
-        setResult(await migrateCloudToLocal());
-      }
-      await keepSignedInLocally();
-      setAutoSyncEnabled(false);
-      setDataMode("local");
-      window.location.reload();
-    } catch (e) {
-      setErr(
-        `Could not copy your data to this device, so sync is still on and nothing changed: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const Card = ({
-    m,
-    icon: Icon,
-    title,
-    desc,
-    disabled,
-  }: {
-    m: DataMode;
-    icon: typeof Cloud;
-    title: string;
-    desc: string;
-    disabled?: boolean;
-  }) => {
-    const active = mode === m;
-    return (
-      <button
-        onClick={() => void switchTo(m)}
-        disabled={disabled}
-        className={`w-full text-left rounded-xl border p-4 transition ${
-          active
-            ? "border-primary-400 bg-primary-50"
-            : "border-brand-200 hover:border-brand-300"
-        } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-      >
-        <div className="flex items-center gap-3">
-          <div className="rounded-full bg-ink p-2.5 text-white">
-            <Icon size={20} />
-          </div>
-          <div className="flex-1">
-            <p className="font-medium text-ink flex items-center gap-2">
-              {title}
-              {active && (
-                <span className="inline-flex items-center gap-1 text-xs text-primary-600">
-                  <Check size={14} /> Active
-                </span>
-              )}
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5">{desc}</p>
-          </div>
-        </div>
-      </button>
-    );
-  };
+  const cloudOn = mode === "cloud";
 
   return (
-    <div className="card space-y-4">
-      <div>
-        <h2 className="text-lg font-medium text-ink">Data &amp; Storage</h2>
-        <p className="text-sm text-brand-500 mt-1">
-          Your data syncs to your Filey account so you can use it on more than
-          one device. Turn sync off and Filey copies everything to this computer
-          first, then keeps it here and stops sending anything to the cloud.
-        </p>
-      </div>
-
-      <SyncSwitch
-        on={mode === "cloud" || autoSyncEnabled()}
-        busy={busy}
-       
-        onChange={(want) => void setSync(want)}
-      />
-      <details className="rounded-xl border border-brand-200 p-3">
-        <summary className="text-sm text-brand-500 cursor-pointer">
-          Advanced - choose storage manually
-        </summary>
-        <div className="space-y-3 mt-3">
-          <Card
-            m="cloud"
-            icon={Cloud}
-            title="Filey Cloud"
-            desc={
-              cloudConfigured
-                ? "Stored in your account and available on every device you sign in to."
-                : "Not available - Supabase isn't configured in this build."
-            }
-            disabled={!cloudConfigured}
-          />
-          <Card
-            m="local"
-            icon={HardDrive}
-            title="This device only"
-            desc={
-              "Everything stored on this computer. No internet needed, nothing leaves the machine." +
-              (ENFORCE_LICENSING ? " Requires a Filey Freedom license." : "")
-            }
+    <SettingsPanel>
+      <SettingsSection
+        title="Data and storage"
+        description="Keep your records private on this device, or store them in your Filey account to use them on every device."
+      >
+        <div className="flex items-start gap-3 rounded-xl border border-border p-4">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-muted-foreground"
+          >
+            {cloudOn ? <Cloud size={18} /> : <ShieldCheck size={18} />}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-foreground">Store in my Filey account</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {cloudOn ? (
+                <>
+                  On. Your records live in {cloudSession || user?.email || "your Filey account"} and
+                  follow you to every device you sign in to. Needs internet to make changes.
+                </>
+              ) : (
+                <>
+                  Off. Your records stay on this device only — nothing is uploaded, and Filey
+                  works with no internet. Basic is free: the whole ERP and CRM, 5 invoices a month.
+                </>
+              )}
+            </p>
+          </div>
+          <Switch
+            checked={cloudOn}
+            busy={busy}
+            disabled={!cloudConfigured || localExists === null}
+            onChange={(next) => void toggleStorage(next)}
+            label="Store my data in my Filey account"
+            className="mt-1"
           />
         </div>
-      </details>
-      {err && (
-        <p className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2">{err}</p>
-      )}
+        <p className="text-sm text-muted-foreground">
+          {cloudOn
+            ? "Turning this off switches back to the records saved on this device. It does not delete anything from your account."
+            : "Turning this on uploads this device's records to your account, once. You can turn it off again at any time."}
+        </p>
+        {err && (
+          <p
+            role="alert"
+            className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2"
+          >
+            {err}
+          </p>
+        )}
 
+        {busy && (
+          <p role="status" className="text-sm text-muted-foreground">
+            {progress || "Switching…"}
+          </p>
+        )}
+        {pendingWrites > 0 && (
+          <div role="status" className="border-t border-border pt-4 text-sm space-y-2">
+            <h3 className="font-medium">Older offline saves need review</h3>
+            <p className="text-muted-foreground">
+              {pendingWrites} queued changes remain on this device. Changes without a
+              verified source account are preserved and will not be sent automatically.
+              Keep a device backup and contact support before clearing storage.
+            </p>
+          </div>
+        )}
+        {result && (
+          <details
+            open={result.some((r) => r.error)}
+            className="text-sm border-t border-border pt-4"
+          >
+            <summary className="font-medium cursor-pointer">
+              {result.some((r) => r.error)
+                ? "Transfer needs attention"
+                : "Transfer complete — view details"}
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {result.map((r) => (
+                <li
+                  key={r.table}
+                  className={r.error ? "text-danger" : "text-muted-foreground"}
+                >
+                  {r.table}: {r.error || `${r.rows} records copied`}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </SettingsSection>
       {mode === "local" && cloudConfigured && <CloudSyncCard />}
 
       {hasTauri && (
-        <div className="border-t border-brand-100 pt-4 space-y-4">
+        <>
           {/* Database location */}
-          <div>
-            <p className="font-medium text-ink flex items-center gap-2">
-              <HardDrive size={16} /> Data location
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Where the Filey database (all data &amp; files) is stored on this
-              computer. Move it to your Desktop, a USB drive, or any folder.
+          <SettingsSection
+            title="Data location"
+            description="Where the local database and saved files live on this computer."
+          >
+            <p className="text-sm text-muted-foreground">
+              Move it to your Desktop, a USB drive, or any folder.
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <code className="text-xs bg-brand-100 dark:bg-white/12 px-2 py-1.5 rounded flex-1 min-w-0 truncate">
+              <code className="w-full rounded-lg bg-hover p-3 text-xs text-muted-foreground break-all">
                 {dataDir || "…"}
               </code>
-              <button className="btn-ghost shrink-0" onClick={changeDataDir}>
+              <button className="btn-ghost shrink-0" onClick={changeDataDir} disabled={storageBusy}>
                 Change folder
               </button>
               {dataDir && (
@@ -764,19 +692,19 @@ export default function DataModePanel() {
                 </button>
               )}
             </div>
-          </div>
+          </SettingsSection>
 
           {/* Documents export folder */}
-          <div>
-            <p className="font-medium text-ink flex items-center gap-2">
-              <FolderOpen size={16} /> Documents folder
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Save generated documents (invoices, quotes…) as real PDF files
-              here, in addition to keeping them in the app.
+          <SettingsSection
+            title="Documents folder"
+            description="Choose a folder for exported PDFs."
+          >
+            <p className="text-sm text-muted-foreground">
+              Save generated documents (invoices, quotes…) as real PDF files here, in
+              addition to keeping them in the app.
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <code className="text-xs bg-brand-100 dark:bg-white/12 px-2 py-1.5 rounded flex-1 min-w-0 truncate">
+              <code className="w-full rounded-lg bg-hover p-3 text-xs text-muted-foreground break-all">
                 {exportDir || "Not set - documents stay in the app only"}
               </code>
               <button className="btn-ghost shrink-0" onClick={changeExportDir}>
@@ -802,39 +730,45 @@ export default function DataModePanel() {
                 </>
               )}
             </div>
-          </div>
+          </SettingsSection>
 
           {/* Backup & restore */}
-          <div>
-            <p className="font-medium text-ink flex items-center gap-2">
-              <Download size={16} /> Backup &amp; restore
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Save a full copy - database <em>and</em> your files - into a backup
-              folder, or restore from one. Your offline safety net; keep it
-              somewhere safe (USB drive, synced folder).
+          <SettingsSection
+            title="Backup & restore"
+            description="Protect your local workspace with a complete backup."
+          >
+            {recoveryError && <div className="space-y-3 rounded-xl border border-warning/40 p-4" role="alert">
+              <p className="text-sm font-medium">The pending storage change could not finish</p>
+              <p className="text-sm break-words">{recoveryError}</p>
+              <p className="text-xs text-muted-foreground">Your existing workspace is open. You can cancel the pending change; its copied files will be preserved.</p>
+              <button className="btn-ghost" onClick={() => void cancelPendingStorage().then(() => setRecoveryError(null)).catch(error => setBackupMsg(String(error)))}>Cancel pending change</button>
+            </div>}
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Save a full copy - database <em>and</em> your files - into a backup folder,
+              or restore from one. Your offline safety net; keep it somewhere safe (USB
+              drive, synced folder).
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <button className="btn-ghost" onClick={runBackup}>
+              <button className="btn-ghost" onClick={runBackup} disabled={storageBusy}>
                 Export backup
               </button>
-              <button className="btn-ghost" onClick={runRestore}>
+              <button className="btn-ghost" onClick={runRestore} disabled={storageBusy}>
                 Restore backup
               </button>
             </div>
             {backupMsg && (
               <p className="text-xs text-brand-500 mt-2 break-all">{backupMsg}</p>
             )}
-          </div>
+          </SettingsSection>
 
           {/* Data fixes */}
-          <div>
-            <p className="font-medium text-ink flex items-center gap-2">
-              <Check size={16} /> Fix emirate codes
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5 mb-2">
-              Rewrite older records to the UAE e-invoice emirate codes
-              (AUH/DXB/SHJ…). Safe to run anytime.
+          <SettingsSection
+            title="Fix emirate codes"
+            description="Update legacy UAE location codes."
+          >
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Rewrite older records to the UAE e-invoice emirate codes (AUH/DXB/SHJ…).
+              Safe to run anytime.
             </p>
             <button className="btn-ghost" onClick={runEmirateFix}>
               Normalize emirate codes
@@ -842,25 +776,26 @@ export default function DataModePanel() {
             {emirateMsg && (
               <p className="text-xs text-brand-500 mt-2 break-all">{emirateMsg}</p>
             )}
-          </div>
-        </div>
+          </SettingsSection>
+        </>
       )}
 
       {cloudConfigured && (
-        <div className="border-t border-brand-100 pt-4 space-y-3">
+        <SettingsSection
+          title="Transfer data"
+          description="Copy records between this device and your cloud account. Review replacement details before starting."
+        >
           {/* While a transfer runs, the card becomes ONE spinning circle —
               no per-table narration, no counts. People don't act on which of
               fourteen tables is uploading; they just need to know it's working
               and that it finished. */}
           {busy ? (
-            <div className="grid place-items-center py-10" role="status" aria-label="Syncing">
-              <div
-                className="h-10 w-10 rounded-full animate-spin"
-                style={{
-                  border: "3px solid hsl(var(--brand-200))",
-                  borderTopColor: "hsl(var(--ink))",
-                }}
-              />
+            <div
+              className="grid place-items-center py-10"
+              role="status"
+              aria-label="Syncing"
+            >
+              <FileySpinner size={40} className="text-foreground" />
             </div>
           ) : (
             <>
@@ -870,45 +805,74 @@ export default function DataModePanel() {
                 </p>
                 <p className="text-sm text-brand-500 mt-0.5">
                   Copies everything from your cloud account (invoices, customers,
-                  products, files…) into local storage. Sign in to Cloud mode
-                  first. Replaces existing local data.
+                  products, files…) into local storage. Sign in to Cloud mode first.
+                  Replaces existing local data.
                 </p>
               </div>
-              <button
-                onClick={runImport}
-                disabled={busy}
-                className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-              >
+              <button onClick={runImport} disabled={busy} className="btn-ghost">
                 Import cloud data
               </button>
 
-              <div className="pt-2">
+              <div className="border-t border-border pt-4">
                 <p className="font-medium text-ink flex items-center gap-2">
                   <Upload size={16} /> Push local data to the cloud
                 </p>
                 <p className="text-sm text-brand-500 mt-0.5">
-                  Uploads everything on this device (invoices, customers,
-                  products, files…) to your cloud account, so the web version
-                  shows the same data. Cloud records sharing an id are
-                  overwritten by this device's copy.
+                  Uploads everything on this device (invoices, customers, products,
+                  files…) to your cloud account, so the web version shows the same data.
+                  Newer cloud edits are preserved as conflicts for you to review.
                 </p>
               </div>
-              <button
-                onClick={runPush}
-                disabled={busy}
-                className="rounded-xl bg-ink text-white px-4 py-2.5 text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-              >
+              <button onClick={runPush} disabled={busy} className="btn-ghost">
                 Push local data to cloud
               </button>
               {result && (
-                <p className="text-sm text-success font-medium">
-                  Done — everything is in sync.
+                <p
+                  className={`text-sm font-medium ${result.some((r) => r.error) ? "text-danger" : "text-success"}`}
+                >
+                  {result.some((r) => r.error)
+                    ? "Transfer incomplete. Review the transfer details above."
+                    : "Transfer completed. Storage mode has not changed."}
                 </p>
               )}
             </>
           )}
-        </div>
+        </SettingsSection>
       )}
-    </div>
+      <Modal open={!!backupResult} onClose={() => { setBackupResult(null); setShowRecovery(false); }} title="Save your recovery code">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Your database and files have been backed up. Keep this code in your password manager, separately from the backup folder. You will need it after reinstalling your operating system or moving to another account.</p>
+          <label className="block text-sm font-medium">
+            Recovery code
+            <input className="input mt-2 w-full font-mono text-xs" readOnly type={showRecovery ? "text" : "password"} value={backupResult?.recoveryCode ?? ""} autoComplete="off" />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-ghost" onClick={() => setShowRecovery(value => !value)}>{showRecovery ? "Hide code" : "Show code"}</button>
+            <button className="btn-ghost" onClick={() => {
+              if (backupResult) void navigator.clipboard.writeText(backupResult.recoveryCode)
+                .then(() => setBackupMsg("Recovery code copied. Save it separately from the backup."))
+                .catch(() => setBackupMsg("Could not copy the code. Show it and copy it manually."));
+            }}>Copy code</button>
+          </div>
+          <p className="text-xs text-muted-foreground">The code protects recovery of encrypted files. The backup database itself contains readable business data; keep the folder private.</p>
+          <div className="flex justify-end"><button className="btn-primary" onClick={() => { setBackupResult(null); setShowRecovery(false); }}>Done</button></div>
+        </div>
+      </Modal>
+      <Modal open={!!restoreSource} onClose={() => { if (!storageBusy) { setRestoreSource(""); setRecoveryCode(""); } }} title="Restore a backup">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">Filey will verify this backup and restart into the restored workspace. Your current data folder and the backup are preserved.</p>
+          <p className="rounded-xl bg-muted p-3 text-xs break-all">{restoreSource}</p>
+          <label className="block text-sm font-medium">Recovery code
+            <input className="input mt-2 w-full font-mono" type="password" value={recoveryCode} onChange={event => setRecoveryCode(event.target.value)} autoComplete="off" disabled={storageBusy} placeholder="Paste the code saved with your backup" />
+          </label>
+          <p className="text-xs text-muted-foreground">Optional on the original OS account. Older backups require the original device encryption key and cannot use a recovery code.</p>
+          {backupMsg && <p role="status" className="text-sm break-words">{backupMsg}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <button className="btn-ghost" disabled={storageBusy} onClick={() => { setRestoreSource(""); setRecoveryCode(""); }}>Cancel</button>
+            <button className="btn-primary" disabled={storageBusy} onClick={() => void confirmRestore()}>{storageBusy ? "Verifying backup…" : "Restore and restart"}</button>
+          </div>
+        </div>
+      </Modal>
+    </SettingsPanel>
   );
 }

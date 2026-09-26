@@ -384,6 +384,7 @@ export const CONFIRM_TOOLS: ToolDef[] = [
           type: "string",
           description: "Slack only: the app's signing secret.",
         },
+        app_secret: { type: "string", description: "WhatsApp only: Meta app secret, required to verify incoming webhook signatures." },
       },
       required: ["provider", "token"],
       additionalProperties: false,
@@ -407,6 +408,7 @@ export const MEMORY_TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         text: { type: "string", description: "The fact to remember (max 500 chars)." },
+        replace_id: { type: "string", description: "When the user corrects a saved fact, use its id from recall to replace the outdated memory." },
         tag: {
           type: "string",
           description: "Optional short category, e.g. 'preference', 'customer', 'instruction' (max 40 chars).",
@@ -420,7 +422,7 @@ export const MEMORY_TOOLS: ToolDef[] = [
     name: "recall",
     description:
       "Search long-term memory. Without a query, returns the 8 most recent " +
-      "memories; with a query, the 8 most recent whose text or tag matches. " +
+      "memories; with a query, the 8 most relevant whose text or tag matches. " +
       "Use for older context that may have fallen out of the conversation.",
     input_schema: {
       type: "object",

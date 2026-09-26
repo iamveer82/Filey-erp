@@ -1,0 +1,21 @@
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import PdfCanvas from "../PdfCanvas";
+import { getDocument } from "../../lib/pdfjsSafe";
+import { fileBytes } from "../../lib/files";
+vi.mock("../../lib/files", () => ({ fileBytes: vi.fn() }));
+vi.mock("../../lib/pdfjsSafe", () => ({ getDocument: vi.fn() }));
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it("renders every page from the exact attachment bytes and releases the PDF when closed", async () => {
+  const bytes = new Uint8Array([37, 80, 68, 70]), destroy = vi.fn(async () => {});
+  const getPage = vi.fn(async () => ({ getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: 800 * scale }), render: () => ({ promise: Promise.resolve() }) }));
+  vi.mocked(getDocument).mockReturnValue({ promise: Promise.resolve({ numPages: 2, getPage }), destroy } as never);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+  const file = new File([bytes], "Invoice.pdf", { type: "application/pdf" });
+  Object.defineProperty(file, "arrayBuffer", { value: async () => bytes.buffer });
+  const rendered = render(<div style={{ height: 420 }}><PdfCanvas file={file}/></div>);
+  await waitFor(() => expect(rendered.container.querySelectorAll("canvas")).toHaveLength(2));
+  expect(getDocument).toHaveBeenCalledWith({ data: bytes }); expect(fileBytes).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Zoom in" })).toBeEnabled();
+  rendered.unmount(); expect(destroy).toHaveBeenCalledOnce();
+});

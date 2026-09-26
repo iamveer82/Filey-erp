@@ -30,7 +30,7 @@ const APPS: Record<
 > = {
   "web-research": {
     title: "Web research",
-    subtitle: "Let the Filey AI read and search the public web",
+    subtitle: "Read public pages, with optional setup for web search",
     icon: Globe,
     tools: ["read_web_page", "search_web"],
   },
@@ -138,22 +138,27 @@ export default function IntegrationConnect() {
                 Allow Filey AI to read the public web
               </span>
               <span className="block text-xs text-brand-500 mt-0.5">
-                Off by default. Pages are fetched only when the assistant needs one to
-                answer you - nothing is crawled in the background.
+                Pages are fetched on request when you or the assistant use a web tool.
+                Nothing is crawled in the background.
               </span>
             </span>
           </label>
 
-          <Field label="Jina API key (optional)">
+          <Field label="Jina API key (required for search)">
             <input
               className="input"
               type="password"
               autoComplete="off"
-              placeholder="Raises the rate limit. Reading works without one"
+              placeholder="Enter your own Jina key"
               value={cfg.apiKey}
               onChange={(e) => save({ apiKey: e.target.value })}
             />
           </Field>
+          <p className="text-xs text-brand-500">
+            Reading a page URL works without a key within Jina's limits. Search needs
+            your own key; provider allowances and charges apply. {" "}
+            <a href="https://jina.ai/reader/" target="_blank" rel="noreferrer" className="underline underline-offset-2">Jina keys and limits</a>
+          </p>
           <p className="text-xs text-brand-500">
             Stored on this device only, like your AI model key - it never syncs to the
             cloud.
@@ -181,7 +186,7 @@ export default function IntegrationConnect() {
             disabled={!cfg.enabled || !probe.trim() || busy}
             onClick={runProbe}
           >
-            {busy ? "Reading…" : "Test"}
+            {busy ? "Reading…" : "Read page"}
           </button>
           {!cfg.enabled && (
             <p className="mt-2 text-xs text-brand-500">Turn the connection on first.</p>

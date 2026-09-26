@@ -5,6 +5,8 @@
  * shadcn default: brand-200 border, no glow, plain
  * progress bar. */
 import { Toaster as SonnerToaster } from "sonner";
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import { FileySpinner } from "./FileySpinner";
 import { cn } from "../lib/format";
 
 type ToasterProps = React.ComponentProps<typeof SonnerToaster>;
@@ -14,10 +16,18 @@ export function Toaster({ className, ...props }: ToasterProps) {
     <SonnerToaster
       className={cn("toaster group", className)}
       position="bottom-right"
+      icons={{
+        success: <CircleCheck size={18} aria-hidden="true" />,
+        info: <Info size={18} aria-hidden="true" />,
+        warning: <TriangleAlert size={18} aria-hidden="true" />,
+        error: <CircleAlert size={18} aria-hidden="true" />,
+        loading: <FileySpinner size={18} />,
+        close: <X size={16} aria-hidden="true" />,
+      }}
       toastOptions={{
         classNames: {
           toast:
-            "group toast group-[.toaster]:bg-white group-[.toaster]:text-ink group-[.toaster]:border-brand-200 group-[.toaster]:border group-[.toaster]: group-[.toaster]:rounded-xl group-[.toaster]:px-4 group-[.toaster]:py-3 group-[.toaster]:text-sm group-[.toaster]:font-medium",
+            "group toast group-[.toaster]:bg-card group-[.toaster]:text-ink group-[.toaster]:border-brand-200 group-[.toaster]:border group-[.toaster]: group-[.toaster]:rounded-xl group-[.toaster]:px-4 group-[.toaster]:py-3 group-[.toaster]:text-sm group-[.toaster]:font-medium",
           description: "group-[.toast]:text-brand-500 group-[.toast]:text-xs",
           actionButton:
             "group-[.toast]:bg-primary-500 group-[.toast]:text-white group-[.toast]:rounded-md group-[.toast]:text-xs group-[.toast]:font-semibold",

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Building2, Bookmark, ChevronDown } from "lucide-react";
 import CompanyModal from "./CompanyModal";
 import { templatesForDocType, type DocType } from "./DocTemplates";
-import { loadCustomTemplates } from "./TemplateDesigner";
+import { useCustomTemplates } from "../lib/customTemplates";
 import {
   loadDocPresets,
   saveDocPreset,
@@ -36,6 +36,7 @@ export default function DocPresetBar({
   onPresetChange?: (template: string) => void;
 }) {
   const { toast } = useUI();
+  const { templates: customTemplates, error: templateError } = useCustomTemplates();
   const [presets, setPresets] = useState<DocPresets>({});
   const [companyOpen, setCompanyOpen] = useState(false);
   const [tplOpen, setTplOpen] = useState(false);
@@ -48,7 +49,7 @@ export default function DocPresetBar({
   const options = docType
     ? [
         ...templatesForDocType(docType),
-        ...loadCustomTemplates().map((t) => ({ id: t.id, name: t.name })),
+        ...customTemplates.map((t) => ({ id: t.id, name: t.name })),
       ]
     : [];
   const current = docType
@@ -74,6 +75,7 @@ export default function DocPresetBar({
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5">
+      {templateError && <p role="alert" className="w-full text-xs text-danger">Could not load saved templates: {templateError}</p>}
       <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground">
         <Bookmark size={14} /> Preset
       </div>
@@ -145,6 +147,7 @@ export default function DocPresetBar({
  *  store as the per-section bars, so changing it either way agrees. */
 export function DocPresetsPanel() {
   const { toast } = useUI();
+  const { templates: customTemplates, error: templateError } = useCustomTemplates();
   const [presets, setPresets] = useState<DocPresets>({});
   const [company, setCompany] = useState<CompanyProfile | null>(null);
 
@@ -156,7 +159,7 @@ export function DocPresetsPanel() {
       .catch(() => {});
   }, []);
 
-  const custom = loadCustomTemplates().map((t) => ({ id: t.id, name: t.name }));
+  const custom = customTemplates.map((t) => ({ id: t.id, name: t.name }));
 
   const pick = async (docType: DocType, id: string) => {
     setPresets((p) => ({ ...p, [docType]: id }));
@@ -170,6 +173,7 @@ export function DocPresetsPanel() {
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {templateError && <p role="alert" className="col-span-full text-xs text-danger">Could not load saved templates: {templateError}</p>}
       {DOC_TYPES.map((docType) => {
         const options = [...templatesForDocType(docType), ...custom];
         return (

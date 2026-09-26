@@ -1,13 +1,11 @@
+import { Link } from "react-router-dom";
 import { useState } from "react";
-import { Download, Info, Upload } from "lucide-react";
+import { Download } from "lucide-react";
 import { billing, erp, crm, fin, hr, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
-import { cn, errMsg, todayYmd } from "../../lib/format";
+import { errMsg, todayYmd } from "../../lib/format";
 import { hasTauri, saveBytes } from "../../lib/localPaths";
-
-/* ---------------- Backup & Restore ----------------
-   Reference two-card layout. Export is the real API snapshot; in-app
-   restore is honestly marked as roadmap (source of truth = Supabase). */
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 export default function BackupPanel() {
   const [busy, setBusy] = useState(false);
@@ -47,7 +45,18 @@ export default function BackupPanel() {
           `Could not read ${failed.join(", ")}. Nothing was downloaded - a backup missing data is worse than none.`
         );
       const values = settled.map((r) => (r as PromiseFulfilledResult<unknown>).value);
-      const [company, products, orders, invoices, quotations, customers, expenses, accounts, transactions, employees] = values;
+      const [
+        company,
+        products,
+        orders,
+        invoices,
+        quotations,
+        customers,
+        expenses,
+        accounts,
+        transactions,
+        employees,
+      ] = values;
       const json = JSON.stringify(
         {
           version: 2,
@@ -77,10 +86,7 @@ export default function BackupPanel() {
       // Desktop: a blob `<a download>` click silently fails in the Tauri
       // WebView2 — the backup must go through the native save dialog.
       if (hasTauri) {
-        const saved = await saveBytes(
-          name,
-          new TextEncoder().encode(json)
-        );
+        const saved = await saveBytes(name, new TextEncoder().encode(json));
         if (!saved) return; // user cancelled the dialog
       } else {
         const blob = new Blob([json], { type: "application/json" });
@@ -100,78 +106,52 @@ export default function BackupPanel() {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="px-6 pt-5 pb-4 border-b border-border">
-        <div className="text-[15px] font-semibold text-ink">
-          Backup &amp; Restore
-        </div>
-        <div className="text-[13px] text-muted-foreground mt-1">
-          Export a complete snapshot of your workspace as a single JSON file.
-        </div>
-      </div>
-      <div className="p-6 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="rounded-lg border border-border p-4 flex items-start gap-3">
-            <div className="h-9 w-9 rounded-md bg-hover grid place-items-center text-foreground shrink-0">
-              <Download className="h-4 w-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[14px] font-semibold text-foreground">
-                Download backup
-              </div>
-              <div className="text-[12.5px] text-muted-foreground">
-                Company, products, orders, invoices, quotations, customers,
-                expenses, accounts, transactions and employees — the full
-                ledger and books.
-              </div>
-              <button
-                onClick={exportData}
-                disabled={busy}
-                className="mt-3 h-8 px-3 rounded-md text-[12.5px] font-medium bg-foreground text-background hover:opacity-90 cursor-pointer disabled:opacity-60 transition-opacity"
-              >
-                {busy ? "Preparing…" : "Export now"}
-              </button>
-              {done && !busy && (
-                <span className="ml-2 text-[12px] font-medium text-success">
-                  Downloaded
-                </span>
-              )}
-              {err && !busy && (
-                <p className="mt-2 text-[12.5px] font-medium text-danger">{err}</p>
-              )}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border p-4 flex items-start gap-3">
-            <div className="h-9 w-9 rounded-md bg-hover grid place-items-center text-foreground shrink-0">
-              <Upload className="h-4 w-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[14px] font-semibold text-foreground">
-                Restore from backup
-              </div>
-              <div className="text-[12.5px] text-muted-foreground">
-                Your source of truth is your Supabase project - restore from a
-                Supabase backup (Dashboard → Database → Backups), or contact the
-                owner to re-import an exported file. In-app restore is on the
-                roadmap.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className={cn(
-            "rounded-lg border border-dashed border-border p-3 text-[12px] text-muted-foreground",
-            "flex items-center gap-2"
+    <SettingsPanel>
+      <SettingsSection
+        title="Export summaries"
+        description="Download selected business data as a JSON file."
+      >
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Includes company, products, orders, invoice and quotation summaries, customers,
+          expenses, accounts, transactions and employees. This export does not include
+          every module, document line or file attachment.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={exportData} disabled={busy} className="btn-primary">
+            <Download size={16} /> {busy ? "Preparing…" : "Export now"}
+          </button>
+          {done && !busy && (
+            <span role="status" className="text-sm text-success">
+              Downloaded
+            </span>
           )}
-        >
-          <Info className="h-3.5 w-3.5 shrink-0" />
-          Last export:{" "}
-          {ready && lastExportAt
-            ? new Date(lastExportAt).toLocaleString()
-            : "never"}
         </div>
-      </div>
-    </div>
+        {err && !busy && (
+          <p role="alert" className="text-sm text-danger">
+            {err}
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Last export:{" "}
+          {ready && lastExportAt ? new Date(lastExportAt).toLocaleString() : "never"}
+        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Full backup & restore"
+        description="Keep a complete copy of your local workspace."
+      >
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          Desktop full backups include the local database and saved files. Create and
+          restore them in Data & Storage. For cloud disaster recovery, use your Supabase
+          database and Storage backups.
+        </p>
+        <Link
+          className="btn-ghost max-w-full whitespace-normal text-center"
+          to="/settings?section=datamode"
+        >
+          Open full desktop backup & restore
+        </Link>
+      </SettingsSection>
+    </SettingsPanel>
   );
 }

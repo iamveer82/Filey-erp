@@ -13,6 +13,7 @@
 // their automation metered by us.
 
 import { supabase, invokeFn } from "./supabase";
+import { requireAgentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 
 export type KeySource = "platform" | "own" | "none";
 
@@ -23,18 +24,47 @@ export class IntegrationError extends Error {}
 export async function platformCall<T>(
   provider: "composio" | "zernio",
   action: string,
-  payload: Record<string, unknown> = {}
+  payload: Record<string, unknown> = {},
+  expectedScope?: string
 ): Promise<T> {
+  const assertCurrent = () => { if (expectedScope) requireAgentStorageScope(expectedScope); };
+  assertCurrent();
   if (!supabase)
     throw new IntegrationError("Cloud isn't configured in this build.");
   const { data: sess } = await supabase.auth.getSession();
+  assertCurrent();
   if (!sess.session)
     throw new IntegrationError(
       "Sign in to use the built-in integrations, or add your own key on the Integrations page."
     );
-  const { data, error } = await invokeFn(supabase, "integrations", {
+  const controller = expectedScope ? new AbortController() : undefined;
+  const abortStale = () => {
+    try { assertCurrent(); }
+    catch { controller?.abort(); }
+  };
+  const scopeEvents = [AGENT_STORAGE_EVENT, "filey:workspace-changed", "storage"];
+  if (controller) for (const event of scopeEvents) window.addEventListener(event, abortStale);
+  const request = {
     body: { provider, action, payload },
-  });
+    // Bind this invocation to the session checked above, including if the SDK
+    // would otherwise resolve a different active session before its fetch.
+    ...(expectedScope ? { headers: { Authorization: `Bearer ${sess.session.access_token}` } } : {}),
+    ...(controller ? { signal: controller.signal } : {}),
+  };
+  const writesSocial = provider === "zernio" && (action === "create_post" || action === "delete_post");
+  // A failed response is ambiguous after a publication. Never publish again
+  // merely because the function's response was lost.
+  let response: Awaited<ReturnType<typeof invokeFn>>;
+  try {
+    response = await invokeFn(supabase, "integrations", request, writesSocial ? 0 : 2);
+  } catch (error) {
+    assertCurrent();
+    throw error;
+  } finally {
+    if (controller) for (const event of scopeEvents) window.removeEventListener(event, abortStale);
+  }
+  assertCurrent();
+  const { data, error } = response;
   if (error) {
     // A non-2xx from the function arrives as a FunctionsHttpError whose real
     // message is in the response body — surface that, not "Edge Function
@@ -47,6 +77,7 @@ export async function platformCall<T>(
     } catch {
       /* keep the transport message */
     }
+    assertCurrent();
     throw new IntegrationError(msg);
   }
   const body = data as { error?: string } | null;
@@ -55,10 +86,14 @@ export async function platformCall<T>(
 }
 
 /** Whether the platform path is even available (cloud build + signed in). */
-export async function platformAvailable(): Promise<boolean> {
+export async function platformAvailable(provider: "composio" | "zernio"): Promise<boolean> {
   if (!supabase) return false;
   const { data } = await supabase.auth.getSession();
-  return !!data.session;
+  if (!data.session) return false;
+  try {
+    const status = await platformCall<{ configured: boolean }>(provider, "status");
+    return status.configured === true;
+  } catch { return false; }
 }
 
 /* ---------------- bring-your-own key, for cloud users ----------------

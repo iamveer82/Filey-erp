@@ -1,3 +1,5 @@
+import { lowStockRows } from "./reportExports";
+import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
   BarChart,
@@ -5,10 +7,9 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { aed, num, cn } from "../../lib/format";
+import { aed, chartAmount, num, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useCategoryBars } from "./useReportsData";
 
@@ -41,11 +42,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
   }, [data.products]);
 
   /* Low stock rows: qty <= reorder_level, sorted most-depleted first. */
-  const lowStock = useMemo(() => {
-    return data.products
-      .filter((p) => (Number(p.quantity) || 0) <= (Number(p.reorder_level) || 0))
-      .sort((a, b) => (Number(a.quantity) || 0) - (Number(b.quantity) || 0));
-  }, [data.products]);
+  const lowStock = useMemo(() => lowStockRows(data.products),[data.products]);
 
   /* Category distribution for the horizontal bar list. */
   const categoryDist = useMemo(() => {
@@ -95,7 +92,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
             Inventory Value by Category
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Stock on hand × unit price
+            Stock on hand × acquisition cost
           </div>
           {categoryBars.length === 0 ? (
             <div className="h-[280px] mt-3 grid place-items-center text-[12.5px] text-muted-foreground">
@@ -103,7 +100,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartFrame height={280}>
                 <BarChart
                   data={categoryBars}
                   margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
@@ -121,6 +118,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
                   />
                   <YAxis
                     {...cs.axisProps}
+                    tickFormatter={(v) => chartAmount(Number(v))}
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
@@ -133,7 +131,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
                     radius={[6, 6, 0, 0]}
                    maxBarSize={32} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartFrame>
             </div>
           )}
         </div>
@@ -211,7 +209,7 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
                 const status =
                   qty <= 0
                     ? { label: "Out", cls: "bg-red-500/10 text-red-600 ring-1 ring-red-500/30" }
-                    : { label: "Low", cls: "bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/30" };
+                    : { label: "Low", cls: "bg-warning/10 text-warning ring-1 ring-warning/30" };
                 return (
                   <tr
                     key={p.id}

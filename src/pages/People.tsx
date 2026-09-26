@@ -6,6 +6,7 @@ import {
   Sliders,
   FileText,
   Banknote,
+  UsersRound,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
@@ -34,6 +35,7 @@ import {
   ErrorBanner,
   FilterChip,
   SearchInput,
+  EmptyState,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import { RowActions, QuickViewModal, shareVia } from "../components/RowActions";
@@ -66,7 +68,7 @@ export default function People() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["employees", "attendance", "payroll"]);
 
   const statuses = useMemo(
     () => Array.from(new Set(emps.map((e) => e.status || "active"))).sort(),
@@ -181,8 +183,8 @@ export default function People() {
         <MetricCard
           label="On Leave"
           value={num(sum?.on_leave ?? 0)}
-          change={sum?.on_leave ? "Absent" : "All present"}
-          changeTone={sum?.on_leave ? "warn" : "up"}
+          change={emps.length === 0 ? "No employees yet" : sum?.on_leave ? "Leave recorded today" : "No leave recorded today"}
+          changeTone={sum?.on_leave ? "warn" : "neutral"}
         />
         <MetricCard
           label="Monthly Payroll"
@@ -193,73 +195,7 @@ export default function People() {
       </div>
 
       {!loading && emps.length === 0 && (
-        <div className="empty-gradient rounded-xl p-10 mb-4 flex flex-col items-center gap-4 text-center">
-          <svg
-            width="100"
-            height="80"
-            viewBox="0 0 100 80"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="opacity-70"
-          >
-            <circle
-              cx="36"
-              cy="28"
-              r="12"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <circle cx="34" cy="26" r="3" fill="#f59e0b" />
-            <path
-              d="M18 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H18v-2z"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <circle
-              cx="64"
-              cy="28"
-              r="12"
-              fill="#71717a"
-              fillOpacity="0.12"
-              stroke="#71717a"
-              strokeWidth="1.5"
-            />
-            <circle cx="62" cy="26" r="3" fill="#3f3f46" />
-            <path
-              d="M46 52c0-6.6 5.4-12 12-12h8c6.6 0 12 5.4 12 12v2H46v-2z"
-              fill="#71717a"
-              fillOpacity="0.12"
-              stroke="#71717a"
-              strokeWidth="1.5"
-            />
-            <circle
-              cx="50"
-              cy="68"
-              r="7"
-              fill="#f59e0b"
-              fillOpacity="0.12"
-              stroke="#f59e0b"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="#f59e0b"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <div>
-            <p className="text-sm font-medium text-brand-700">No employees yet</p>
-            <p className="text-xs text-brand-500 mt-1">
-              Add your first team member to start tracking attendance and payroll.
-            </p>
-          </div>
-        </div>
+        <EmptyState icon={UsersRound} title="No employees yet" description="Add your first team member to start tracking attendance and payroll." />
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -451,7 +387,7 @@ export default function People() {
                 footer: (
                   <div className="mt-4 pt-4 border-t border-border flex flex-wrap justify-end gap-2">
                     <button
-                      className="btn-secondary"
+                      className="btn-ghost"
                       onClick={() => {
                         const emp = quickViewFor;
                         setQuickViewFor(null);
@@ -461,7 +397,7 @@ export default function People() {
                       <CalendarOff size={14} /> Mark leave days
                     </button>
                     <button
-                      className="btn-secondary"
+                      className="btn-ghost"
                       onClick={() => {
                         const emp = quickViewFor;
                         setQuickViewFor(null);
@@ -510,8 +446,10 @@ function EmployeeModal({
   const { toast } = useUI();
   const [f, setF] = useState(blankEmployeeForm);
   const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
   useEffect(() => {
     if (!open) return;
+    setTouched(false);
     setF(
       employee
         ? {
@@ -533,10 +471,11 @@ function EmployeeModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={() => { if (!saving) onClose(); }}
       title={employee ? `Edit ${employee.name}` : "Add person"}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Employee Code">
           <input
             className="input"
@@ -544,18 +483,23 @@ function EmployeeModal({
             onChange={(e) => setF({ ...f, employee_code: e.target.value })}
           />
         </Field>
-        <Field label="Full Name *">
+        <Field label="Full name *">
           <input
-            className={cn("input", !f.name.trim() && "border-danger")}
+            required
+            onBlur={() => setTouched(true)}
+            aria-invalid={touched && !f.name.trim()}
+            aria-describedby={touched && !f.name.trim() ? "employee-name-error" : undefined}
+            className={cn("input", touched && !f.name.trim() && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
-          {!f.name.trim() && (
-            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+          {touched && !f.name.trim() && (
+            <p id="employee-name-error" className="text-xs text-danger mt-1">Name is required.</p>
           )}
         </Field>
         <Field label="Email">
           <input
+            type="email"
             className="input"
             value={f.email}
             onChange={(e) => setF({ ...f, email: e.target.value })}
@@ -563,6 +507,7 @@ function EmployeeModal({
         </Field>
         <Field label="Phone">
           <input
+            type="tel"
             className="input"
             value={f.phone}
             onChange={(e) => setF({ ...f, phone: e.target.value })}
@@ -606,7 +551,7 @@ function EmployeeModal({
         <summary className="cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground">
           Payroll (WPS) details - optional
         </summary>
-        <div className="grid grid-cols-2 gap-3 mt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Labour card no. (14 digits)">
             <input
               className="input"
@@ -625,7 +570,7 @@ function EmployeeModal({
               onChange={(e) => setF({ ...f, bank_routing_code: e.target.value })}
             />
           </Field>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Salary IBAN">
               <input
                 className="input"
@@ -637,7 +582,7 @@ function EmployeeModal({
           </div>
         </div>
       </details>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -645,6 +590,7 @@ function EmployeeModal({
           className="btn-primary"
           disabled={!f.name.trim() || saving}
           onClick={async () => {
+            if (saving) return;
             setSaving(true);
             try {
               const fields = {
@@ -672,9 +618,10 @@ function EmployeeModal({
             }
           }}
         >
-          {saving ? "Saving…" : employee ? "Save Changes" : "Save Employee"}
+          {saving ? "Saving…" : employee ? "Save changes" : "Create employee"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -696,6 +643,8 @@ function LeaveModal({
   }, [employee]);
   if (!employee) return null;
   const save = async () => {
+    if (busy) return;
+    if (!dates.length) return;
     setBusy(true);
     try {
       for (const d of dates) {
@@ -711,7 +660,8 @@ function LeaveModal({
     }
   };
   return (
-    <Modal open={!!employee} onClose={onClose} title={`Mark leave - ${employee.name}`}>
+    <Modal open={!!employee} onClose={() => { if (!busy) onClose(); }} title={`Mark leave - ${employee.name}`}>
+      <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>
       <MultiDatePicker value={dates} onChange={setDates} onConfirm={save} />
       <p className="text-xs text-brand-400 mt-3">
         {dates.length === 0
@@ -721,6 +671,10 @@ function LeaveModal({
       {busy && (
         <p className="text-xs font-medium text-brand-500 mt-2">Saving attendance…</p>
       )}
+      <div className="mt-5 flex justify-end border-t border-border pt-4">
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+      </fieldset>
     </Modal>
   );
 }

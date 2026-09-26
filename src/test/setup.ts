@@ -19,3 +19,20 @@ if (typeof HTMLCanvasElement !== "undefined")
 if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
+
+// No test may reach the network. Saving an invoice or recording a payment calls
+// getExchangeRates(), which fetches api.frankfurter.app — so the suite was
+// making real HTTPS requests from dozens of tests that have nothing to do with
+// FX. Under load those exceeded vitest's 5s timeout and failed unrelated tests,
+// which is the intermittent red this suite has had for months. It also meant a
+// green run depended on someone else's uptime.
+//
+// Rejecting immediately is safe: every getExchangeRates caller already handles a
+// failed fetch, falling back to the hardcoded rates. A test that genuinely needs
+// fetch stubs its own with vi.stubGlobal, which takes precedence over this.
+g.fetch = () =>
+  Promise.reject(
+    new Error(
+      "Network access is disabled in tests. Use vi.stubGlobal('fetch', …) if this test needs it."
+    )
+  );

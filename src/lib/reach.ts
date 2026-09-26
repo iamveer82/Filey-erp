@@ -2,17 +2,15 @@
 // answer questions about a supplier, a tender, or a customer's own site instead
 // of only what is already in the books.
 //
-// Everything goes through Jina's reader/search endpoints (r.jina.ai, s.jina.ai),
-// which return clean text and send permissive CORS headers — so the same code
-// path works in the browser and on desktop, with no key required. A key only
-// raises the rate limit.
+// Jina's Reader supports limited keyless reads; Search requires the user's
+// own API key. Both return text usable in the browser and on desktop.
 
 import { aiFetch } from "./ai";
 
 const STORE_KEY = "filey_reach_config";
 
 export interface ReachConfig {
-  /** Optional Jina key — raises rate limits; reading works without one. */
+  /** Required for Search; optional for Reader's limited keyless access. */
   apiKey: string;
   /** Master switch for the web tools. On by default: an agent that cannot look
    *  anything up is a worse agent, and this only ever reads the public web —
@@ -167,6 +165,28 @@ function clip(text: string): { text: string; truncated: boolean } {
     : { text: t, truncated: false };
 }
 
+/** Bound both connection retries and body reads, while keeping Stop responsive. */
+async function jinaText(url: string, requestHeaders: Record<string, string>, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) throw new DOMException("Request cancelled", "AbortError");
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+  try {
+    const response = await aiFetch(url, { method: "GET", headers: requestHeaders, signal: controller.signal });
+    const body = await response.text();
+    if (controller.signal.aborted) throw new DOMException("Request cancelled", "AbortError");
+    return body;
+  } catch (error) {
+    if (timedOut && !signal?.aborted) throw new ReachError("Web research timed out. Try again or choose another public page.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 /** Read one page as text. */
 export async function readUrl(
   url: string,
@@ -176,12 +196,7 @@ export async function readUrl(
   if (!reachReady(cfg))
     throw new ReachError("Web access is off. Turn it on in Integrations → Web research.");
   const target = publicHttpUrl(url);
-  const res = await aiFetch(`https://r.jina.ai/${target}`, {
-    method: "GET",
-    headers: headers(cfg, { "x-return-format": "markdown" }),
-    signal: opts.signal,
-  });
-  const body = await res.text();
+  const body = await jinaText(`https://r.jina.ai/${target}`, headers(cfg, { "x-return-format": "markdown" }), opts.signal);
   // The reader puts "Title: …" on the first line; keep it as the page title.
   const title = /^Title:\s*(.+)$/m.exec(body)?.[1]?.trim() || target;
   const { text, truncated } = clip(body);
@@ -234,12 +249,9 @@ export async function searchWeb(
     throw new ReachError("Web access is off. Turn it on in Integrations → Web research.");
   const q = query.trim();
   if (!q) throw new ReachError("Search needs a query.");
-  const res = await aiFetch(`https://s.jina.ai/${encodeURIComponent(q)}`, {
-    method: "GET",
-    headers: headers(cfg),
-    signal: opts.signal,
-  });
-  const body = await res.text();
+  if (!cfg.apiKey.trim())
+    throw new ReachError("Web search requires your own Jina API key. Add it in Integrations → Web research. Reading a known public URL still works without a key, within Jina's limits.");
+  const body = await jinaText(`https://s.jina.ai/${encodeURIComponent(q)}`, headers(cfg), opts.signal);
   return { hits: parseHits(body).slice(0, opts.limit ?? 5), text: clip(body).text };
 }
 

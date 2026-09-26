@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   Plus,
   Check,
   Paperclip,
 } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { log } from "../lib/log";
+import { nextLocalId } from "../lib/recordId";
 import { aed, fmtDate, numInput, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
@@ -24,7 +24,9 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
-import { tools } from "../lib/api";
+import { tools, getCacheScope } from "../lib/api";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
+import { useLiveSync } from "../lib/realtime";
 import { saveOutput, listFiles, fileObjectUrl } from "../lib/files";
 import { SelectMenu } from "../components/ui-menu";
 
@@ -34,6 +36,11 @@ import { SelectMenu } from "../components/ui-menu";
 
 const CHEQUE_KEY = "filey_cheques"; // device-local cache
 const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings - synced + backed up
+const cacheKey = () => {
+  try { assertWorkspaceCurrent(); } catch { return null; }
+  const scope = getCacheScope();
+  return scope ? `${CHEQUE_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
+};
 
 interface Cheque {
   id: number;
@@ -56,36 +63,34 @@ interface Cheque {
 
 function loadCheques(): Cheque[] {
   try {
-    try { return JSON.parse(localStorage.getItem(CHEQUE_KEY) || "[]"); } catch { return []; }
+    const key = cacheKey();
+    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load cheques", e);
     return [];
   }
 }
-function saveCheques(c: Cheque[]) {
-  try {
-    localStorage.setItem(CHEQUE_KEY, JSON.stringify(c));
-  } catch (e) {
-    console.warn("Failed to save cheques", e);
-  }
-  // Write-through to app_settings: bare localStorage never syncs across
-  // devices and the desktop backup doesn't include it (same as challans).
-  void tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(c)).catch((e) =>
-    // Local storage already holds it, so nothing is lost here — but a failed
-    // write-through means other devices never see it. Surface that in
-    // Settings -> Diagnostics instead of dropping it on the floor.
-    log.warn("sync", "cheques did not reach app_settings", e)
-  );
+async function saveCheques(rows: Cheque[], expectedKey: string | null) {
+  if (!expectedKey || cacheKey() !== expectedKey) throw new Error("Workspace changed. Reopen this section before saving.");
+  await tools.setSetting(CHEQUE_SETTING_KEY, JSON.stringify(rows));
+  if (cacheKey() !== expectedKey) throw new Error("Workspace changed while saving. Reopen this section to review the result.");
+  // The durable store is authoritative. Failure of its disposable mirror does
+  // not turn a completed write into a failed save.
+  try { localStorage.setItem(expectedKey, JSON.stringify(rows)); }
+  catch { /* Rebuilt from app_settings on the next load. */ }
 }
 
 /** Pull cheques saved on the user's other devices; remote wins when present. */
 async function syncCheques(): Promise<Cheque[]> {
+  const key = cacheKey();
+  if (!key) return [];
   try {
     const settings = await tools.settings();
+    if (cacheKey() !== key) return [];
     const row = settings.find((s) => s.key === CHEQUE_SETTING_KEY);
     if (row?.value) {
       const remote: Cheque[] = JSON.parse(row.value);
-      localStorage.setItem(CHEQUE_KEY, JSON.stringify(remote));
+      localStorage.setItem(key, JSON.stringify(remote));
       return remote;
     }
   } catch (e) {
@@ -104,6 +109,18 @@ const statusTone = (s: string) => {
 export default function ChequeRegister() {
   const { toast, confirm } = useUI();
   const [cheques, setCheques] = useState<Cheque[]>([]);
+  const [screenScope] = useState(cacheKey);
+  const writing = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const persist = async (next: Cheque[], message: string): Promise<boolean> => {
+    if (writing.current) return false;
+    writing.current = true; setSaving(true);
+    try {
+      await saveCheques(next, screenScope);
+      setCheques(next); toast.success(message); return true;
+    } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); return false; }
+    finally { writing.current = false; setSaving(false); }
+  };
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Cheque | null>(null);
   const [q, setQ] = useState("");
@@ -114,6 +131,7 @@ export default function ChequeRegister() {
     setCheques(loadCheques()); // instant paint from the local cache…
     syncCheques().then(setCheques); // …then reconcile with other devices
   }, []);
+  useLiveSync(() => { void syncCheques().then(setCheques); });
 
   const filtered = useMemo(
     () =>
@@ -151,18 +169,14 @@ export default function ChequeRegister() {
     });
     if (!ok) return;
     const next = cheques.filter((x) => x.id !== c.id);
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Deleted.");
+    void persist(next, "Deleted.");
   };
 
   const markCleared = (c: Cheque) => {
     const next = cheques.map((x) =>
       x.id === c.id ? { ...x, status: "cleared" as const } : x
     );
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Marked as cleared.");
+    void persist(next, "Marked as cleared.");
   };
 
   const editCheque = (c: Cheque) => {
@@ -173,13 +187,11 @@ export default function ChequeRegister() {
   const duplicate = (c: Cheque) => {
     const copy: Cheque = {
       ...c,
-      id: Date.now(),
+      id: nextLocalId(cheques),
       created_at: new Date().toISOString(),
     };
     const next = [...cheques, copy];
-    setCheques(next);
-    saveCheques(next);
-    toast.success("Cheque duplicated.");
+    void persist(next, "Cheque duplicated.");
   };
 
   // Cheques are device-local records with no public link or stored contact,
@@ -330,7 +342,7 @@ export default function ChequeRegister() {
                   <button
                     aria-label={`Mark cheque ${c.cheque_no} cleared`}
                     title="Mark cleared"
-                    className="h-7 w-7 grid place-items-center rounded-md text-success hover:bg-success/10 cursor-pointer transition-colors duration-200"
+                    className="btn-ghost w-10 p-0 text-success hover:bg-success/10"
                     onClick={() => markCleared(c)}
                   >
                     <Check size={15} />
@@ -356,18 +368,16 @@ export default function ChequeRegister() {
         <ChequeModal
           open={open}
           edit={edit}
-          onClose={() => setOpen(false)}
-          onSaved={(c) => {
+          saving={saving}
+          onClose={() => { if (!saving) setOpen(false); }}
+          onSaved={async (c) => {
             const next = edit
               ? cheques.map((x) => (x.id === c.id ? c : x))
               : [
                   ...cheques,
-                  { ...c, id: Date.now(), created_at: new Date().toISOString() },
+                  { ...c, id: nextLocalId(cheques), created_at: new Date().toISOString() },
                 ];
-            setCheques(next);
-            saveCheques(next);
-            setOpen(false);
-            toast.success(edit ? "Updated." : "Cheque added.");
+            if (await persist(next, edit ? "Updated." : "Cheque added.")) setOpen(false);
           }}
         />
       )}
@@ -424,10 +434,12 @@ function ChequeModal({
   edit,
   onClose,
   onSaved,
+  saving,
 }: {
   open: boolean;
   edit: Cheque | null;
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
+  saving: boolean;
   onSaved: (c: Cheque) => void;
 }) {
   const [f, setF] = useState<Omit<Cheque, "id" | "created_at">>(
@@ -446,7 +458,7 @@ function ChequeModal({
   const valid = f.cheque_no.trim() && f.party.trim() && f.amount > 0;
   return (
     <Modal open={open} onClose={onClose} title={edit ? "Edit Cheque" : "New cheque"}>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Cheque Number *">
           <input
             className="input"
@@ -531,16 +543,16 @@ function ChequeModal({
         chequeNo={f.cheque_no}
         onChange={(attachment) => setF({ ...f, attachment })}
       />
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn-primary"
-          disabled={!valid}
-          onClick={() => onSaved(f as Cheque)}
+          disabled={!valid || saving}
+          onClick={() => void onSaved(f as Cheque)}
         >
-          {edit ? "Update" : "Add Cheque"}
+          {saving ? "Saving…" : edit ? "Save changes" : "Create cheque"}
         </button>
       </div>
     </Modal>
@@ -606,9 +618,9 @@ function ChequeAttachment({
     <div className="mt-3">
       <span className="label">Cheque scan (image or PDF)</span>
       {value ? (
-        <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
           {preview ? (
-            <a href={preview} target="_blank" rel="noreferrer" className="shrink-0">
+            <a href={preview} target="_blank" rel="noreferrer" aria-label="View cheque scan" className="shrink-0">
               <img
                 src={preview}
                 alt=""
@@ -622,25 +634,26 @@ function ChequeAttachment({
             {value.name}
           </span>
           {preview && (
-            <a href={preview} target="_blank" rel="noreferrer" className="btn-ghost h-8 px-3 text-xs">
+            <a href={preview} target="_blank" rel="noreferrer" className="btn-ghost">
               View
             </a>
           )}
           <button
-            className="h-8 px-3 text-xs font-medium text-danger hover:underline"
+            className="btn-ghost text-danger"
             onClick={() => onChange(undefined)}
           >
             Remove
           </button>
         </div>
       ) : (
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground hover:border-brand-300 hover:text-foreground">
+        <label className="relative flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-4 py-3 text-[13px] text-muted-foreground hover:border-brand-300 hover:text-foreground focus-within:ring-2 focus-within:ring-ring">
           <Paperclip size={15} />
           {busy ? "Uploading…" : "Attach a photo or PDF of the cheque"}
           <input
             type="file"
             accept="image/*,application/pdf"
-            className="hidden"
+            className="sr-only"
+            aria-label="Attach cheque scan"
             disabled={busy}
             onChange={(e) => {
               const file = e.target.files?.[0];

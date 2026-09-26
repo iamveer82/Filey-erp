@@ -1,9 +1,13 @@
+import { setCacheOrg } from "../api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiAgentStream, setAiConfig } from "../ai";
-import type { AgentEvent } from "../agentHarness";
+import { runAgentStream, type AgentEvent } from "../agentHarness";
+import * as desktop from "../desktopBrowser";
 import { setDataMode } from "../dataMode";
 import { runTool } from "../aiTools";
 import { headroomReset } from "../headroom";
+import { priorAgentProgress } from "../agentRunState";
+import { setAgentMode } from "../agentMode";
 
 /* The loop is written once and shared by every provider. These tests pin the
  * two things that regressed when there were two copies of it:
@@ -14,8 +18,8 @@ import { headroomReset } from "../headroom";
  *     other, and nothing failed until a user noticed the agent giving up early.
  */
 
-beforeEach(() => localStorage.clear());
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => { localStorage.clear(); setDataMode("local"); setCacheOrg(null); setCacheOrg("test-org", "test-user"); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 /** A big enough result that headroom engages (>1500 chars on the wire). */
 async function seedManyCustomers() {
@@ -64,6 +68,113 @@ async function collect(stream: AsyncGenerator<AgentEvent, string, void>) {
   }
 }
 
+it("persists the call before dispatch and restores its record reference on follow-up", async () => {
+  setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "test" });
+  setAgentMode("accept_edits");
+  stubResponses([
+    oa("", [{ id: "create", type: "function", function: { name: "create_customer", arguments: '{"name":"Harness fixture"}' } }]),
+    oa("Created"),
+  ]);
+  const stream = aiAgentStream([{ role: "user", text: "Create fixture" }], { isOwner: true, agentId: "checkpoint-chat" });
+  expect((await stream.next()).value).toMatchObject({ type: "tool_call" });
+  expect(priorAgentProgress("checkpoint-chat")).toContain('"status":"started"');
+  expect(JSON.stringify(await runTool("find_customers", { query: "Harness fixture" }))).not.toContain("Harness fixture");
+  await collect(stream);
+  expect(priorAgentProgress("checkpoint-chat")).toContain('"status":"completed"');
+  expect(priorAgentProgress("checkpoint-chat")).toContain('"id":');
+  await collect(aiAgentStream([{ role: "user", text: "Continue" }], { isOwner: true, agentId: "checkpoint-chat" }));
+  const calls = vi.mocked(fetch).mock.calls;
+  const init = calls[calls.length - 1][1]!;
+  expect(String(init.body)).toContain("Recorded actions from this conversation");
+});
+
+it("searches and loads specialist tools while respecting access mode", async () => {
+  const bodies: { tools: { function: { name: string } }[] }[] = [];
+  const run = async () => {
+    let round = 0;
+    return collect(runAgentStream([{ role: "user", text: "Search payroll tools" }], { isOwner: true }, {
+      cfg: { provider: "openai", baseUrl: "https://example.test", model: "test", apiKey: "test" },
+      fetchFn: async (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        return new Response(JSON.stringify(round++ === 0 ? oa("", [{ id: "search", type: "function", function: { name: "search_tools", arguments: '{"query":"payroll"}' } }]) : oa("Found")));
+      },
+    }));
+  };
+  setAgentMode("auto");
+  await run();
+  expect(bodies[0].tools.some(t => t.function.name === "run_payroll")).toBe(false);
+  expect(bodies[1].tools.some(t => t.function.name === "run_payroll")).toBe(true);
+  setAgentMode("plan");
+  const result = await run();
+  expect(JSON.stringify(result.events)).not.toContain('"name":"run_payroll"');
+});
+
+it("refuses invalid business arguments before requesting approval or writing", async () => {
+  const confirm = vi.fn(async () => true);
+  const result = await runTool("create_customer", { name: 123 }, confirm, true);
+  expect(result).toMatchObject({ code: "invalid_arguments", retry_safe: true });
+  expect(confirm).not.toHaveBeenCalled();
+});
+
+it("grounds desktop browser availability on the first request without exposing it to remote runs", async () => {
+  vi.spyOn(desktop, "desktopBrowserSupported").mockReturnValue(true);
+  vi.spyOn(desktop, "getBrowserPanelState").mockReturnValue({
+    open: true, paused: false, agentId: null, activeId: "tab-1",
+    tabs: [{ id: "tab-1", window_id: "window-1", url: "https://www.instagram.com/", title: "Untrusted page title", loading: false, canGoBack: false, canGoForward: false }],
+  });
+  const bodies: { messages: { content: string }[]; tools: { function: { name: string } }[] }[] = [];
+  const deps = {
+    cfg: { provider: "openai" as const, baseUrl: "https://example.com/v1", model: "fixture", apiKey: "test" },
+    fetchFn: async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify(oa("Ready.")));
+    },
+  };
+  await collect(runAgentStream([{ role: "user", text: "Open Instagram" }], { isOwner: true, computerSession: async () => 1 }, deps));
+  const prompt = bodies[0].messages.map(m => m.content).join("\n");
+  expect(prompt).toContain("panel is open, with 1 known tabs");
+  expect(prompt).toContain("Use workspace_browser list");
+  expect(prompt).toContain("Opening URLs and listing tabs work even with a text-only model");
+  expect(prompt).toContain("Never ask for a password in chat");
+  expect(prompt).not.toContain("Untrusted page title");
+  expect(bodies[0].tools.some(t => t.function.name === "workspace_browser")).toBe(true);
+  await collect(runAgentStream([{ role: "user", text: "Open Instagram" }], { isOwner: true }, deps));
+  expect(bodies[1].messages.map(m => m.content).join("\n")).not.toContain("panel is open");
+});
+
+it("executes a requested website open in the built-in browser with a text-only model", async () => {
+  vi.spyOn(desktop, "desktopBrowserSupported").mockReturnValue(true);
+  vi.spyOn(desktop, "getBrowserPanelState").mockReturnValue({ open: false, paused: false, agentId: null, activeId: null, tabs: [] });
+  const open = vi.spyOn(desktop, "desktopBrowserCommand").mockResolvedValue({ tabs: [], tab: {
+    id: "filey-browser-fixture", title: "Instagram", url: "https://www.instagram.com/", loading: false,
+    window_id: "123", canGoBack: false, canGoForward: false,
+  } });
+  setAgentMode("auto");
+  const replies = [oa("", [{ id: "open-site", type: "function", function: {
+    name: "workspace_browser", arguments: '{"action":"open","url":"https://www.instagram.com/"}',
+  } }]), oa("Instagram is open. Sign in in the browser.")];
+  const session = vi.fn(async () => 1);
+  const result = await collect(runAgentStream([{ role: "user", text: "Open Instagram" }], {
+    isOwner: true, computerSession: session,
+  }, { cfg: { provider: "openai", baseUrl: "https://example.test", model: "text-only-fixture", apiKey: "test" },
+    fetchFn: async () => new Response(JSON.stringify(replies.shift())),
+  }));
+  expect(open).toHaveBeenCalledWith({ action: "open", url: "https://www.instagram.com/" }, undefined);
+  expect(session).not.toHaveBeenCalled();
+  expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "workspace_browser", result: expect.objectContaining({ tab: expect.objectContaining({ title: "Instagram" }) }) }));
+});
+
+it("shares the request allowance with delegates instead of multiplying it per child", async () => {
+  setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "k" });
+  stubResponses([
+    oa("", [{ id: "delegate", type: "function", function: { name: "spawn_subtask", arguments: JSON.stringify({ goal: "Look up my preferences" }) } }]),
+    oa("", [{ id: "read", type: "function", function: { name: "recall", arguments: "{}" } }]),
+  ]);
+  const result = await collect(aiAgentStream([{ role: "user", text: "Review my preferences" }], { maxRounds: 2 }));
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "exhausted" });
+});
+
 describe("agent harness", () => {
   it("streams text, the tool call, its result, then done", async () => {
     setAiConfig({
@@ -93,6 +204,28 @@ describe("agent harness", () => {
     const call = events.find((e) => e.type === "tool_call");
     expect(call).toMatchObject({ name: "recall" });
     expect(final).toBe("Nothing on file.");
+  });
+
+  // The Stop button in both chats keys off the throw. The loop used to treat an
+  // abort as a provider hiccup, so pressing Stop answered "the model call
+  // failed (Aborted)" and threw away the partial reply instead of keeping it.
+  it("lets a user abort out rather than reporting it as a failed model call", async () => {
+    setAiConfig({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+      apiKey: "k",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      })
+    );
+
+    await expect(
+      collect(aiAgentStream([{ role: "user", text: "hi" }]))
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("reports the same steps whichever provider ran them", async () => {
@@ -192,7 +325,7 @@ describe("agent harness", () => {
     expect(http.final).toMatch(/model call failed/);
   });
 
-  it("sends temperature to Anthropic and stops re-sending old images", async () => {
+  it("omits unsupported temperature for current Claude and stops re-sending old images", async () => {
     setAiConfig({
       provider: "anthropic",
       baseUrl: "https://api.anthropic.com/v1",
@@ -227,7 +360,7 @@ describe("agent harness", () => {
     );
 
     const first = JSON.parse(String(calls[0].body));
-    expect(first.temperature).toBe(0.3);
+    expect(first).not.toHaveProperty("temperature");
     expect(JSON.stringify(first.messages)).toContain("AAAA");
     // Round two must not carry the base64 payload again — the text survives.
     const second = JSON.parse(String(calls[1].body));

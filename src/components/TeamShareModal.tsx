@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Modal, Badge } from "./ui";
 import { Check } from "lucide-react";
 import { supabase, cloudConfigured } from "../lib/supabase";
-import { org, type OrgMember } from "../lib/api";
+import { billing, org, type OrgMember } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
@@ -53,17 +53,7 @@ export default function TeamShareModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const doShare =
-    shareFn ??
-    (async (id: number, all: boolean, userIds: string[]) => {
-      if (!supabase) throw new Error("Cloud isn't configured.");
-      const { error } = await supabase.rpc("share_invoice", {
-        p_id: id,
-        p_all: all,
-        p_user_ids: userIds,
-      });
-      if (error) throw error;
-    });
+  const doShare = shareFn ?? billing.shareWithMembers;
 
   const loadState =
     stateFn ??

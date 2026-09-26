@@ -1,3 +1,4 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getImageConfig,
@@ -12,7 +13,7 @@ import { setAiConfig } from "../ai";
 // worth pinning are: which credential it decides to use, and that it never
 // hands back a "saved" file it didn't actually receive.
 beforeEach(() => {
-  localStorage.clear();
+  localStorage.clear(); setCacheOrg(null); setCacheOrg("test-org", "test-user");
   vi.restoreAllMocks();
 });
 

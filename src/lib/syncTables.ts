@@ -13,6 +13,7 @@ export const PUSH_TABLES = [
   "order_items",
   "invoice_docs",
   "invoice_doc_items",
+  "work_items",
   "invoice_payments",
   "invoice_recurrence",
   "quotations",

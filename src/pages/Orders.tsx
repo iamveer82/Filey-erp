@@ -94,7 +94,7 @@ export default function Orders() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["orders", "order_items", "products", "crm_customers"]);
 
   const stats = useMemo(() => {
     // localdb is schemaless — propagated/imported rows may lack fields.
@@ -613,6 +613,7 @@ function EditOrderModal({
   };
 
   const save = async () => {
+    if (busy) return;
     if (orderId == null) return;
     if (!customer.trim()) {
       setErr("Customer name is required.");
@@ -651,7 +652,8 @@ function EditOrderModal({
   );
 
   return (
-    <Modal open={orderId != null} onClose={onClose} title="Edit order" size="2xl">
+    <Modal open={orderId != null} onClose={() => { if (!busy) onClose(); }} title="Edit order" size="2xl">
+      <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>
       {loading ? (
         <p className="py-10 text-center text-sm text-brand-400">Loading…</p>
       ) : (
@@ -677,7 +679,7 @@ function EditOrderModal({
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-medium text-ink">Line items</p>
               <button
-                className="btn-ghost text-xs"
+                className="btn-ghost"
                 onClick={() => setPickOpen((v) => !v)}
               >
                 <Plus size={13} /> Add product
@@ -694,7 +696,8 @@ function EditOrderModal({
                   <input
                     autoFocus
                     className="input pl-9"
-                    placeholder="Search products…"
+                    aria-label="Search products"
+              placeholder="Search products…"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
                   />
@@ -774,6 +777,7 @@ function EditOrderModal({
                           <input
                             type="number"
                             className="input text-right !px-2"
+                            aria-label={`Quantity for ${l.name}`}
                             value={l.quantity || ""}
                             placeholder="0"
                             onChange={(e) =>
@@ -785,6 +789,7 @@ function EditOrderModal({
                           <input
                             type="number"
                             className="input text-right !px-2"
+                            aria-label={`Unit price for ${l.name}`}
                             value={l.unit_price || ""}
                             placeholder="0"
                             onChange={(e) =>
@@ -799,8 +804,8 @@ function EditOrderModal({
                         </td>
                         <td className="py-1.5">
                           <button
-                            aria-label="Remove line"
-                            className="text-danger hover:bg-danger/10 rounded p-1.5 cursor-pointer"
+                            aria-label={`Remove ${l.name}`}
+                            className="btn-ghost w-10 !px-0 text-danger"
                             onClick={() => delLine(i)}
                           >
                             <X size={14} />
@@ -815,7 +820,7 @@ function EditOrderModal({
           </div>
 
           {err && (
-            <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2">
+            <p role="alert" className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2">
               {err}
             </p>
           )}
@@ -827,7 +832,7 @@ function EditOrderModal({
             </span>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <button className="btn-ghost" onClick={onClose}>
               Cancel
             </button>
@@ -841,6 +846,7 @@ function EditOrderModal({
           </div>
         </div>
       )}
+      </fieldset>
     </Modal>
   );
 }
@@ -870,6 +876,7 @@ function BuildOrderModal({
   }, [open]);
 
   const checkout = async (lines: CartLine[], total: number) => {
+    if (busy) return;
     if (!customer.trim()) {
       setErr("Enter a customer name first.");
       return;
@@ -896,10 +903,12 @@ function BuildOrderModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Build sales order" size="2xl">
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="Build sales order" size="2xl">
+      <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>
       <div className="mb-4">
-        <Field label="Customer">
+        <Field label="Customer *">
           <input
+            required
             className="input"
             placeholder="e.g. Gulf Line Trading"
             value={customer}
@@ -907,12 +916,16 @@ function BuildOrderModal({
           />
         </Field>
         {err && (
-          <p className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2 mt-2">
+          <p role="alert" className="text-xs font-medium text-danger bg-danger/10 rounded-xl px-3 py-2 mt-2">
             {err}
           </p>
         )}
       </div>
       <ProductPicker products={products} onCheckout={checkout} busy={busy} />
+      <div className="flex justify-end border-t border-border pt-4 mt-5">
+        <button className="btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -935,16 +948,19 @@ function OrderModal({
     total: 0,
   });
   const [saving, setSaving] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     if (open) {
       setF({ order_number: "", customer_name: "", total: 0 });
       setSaving(false);
+      setTouched(false);
     }
   }, [open]);
 
   return (
-    <Modal open={open} onClose={onClose} title="New Sales Order">
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="New sales order">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
       <div className="space-y-3">
         <Field label="Order Number">
           <input
@@ -954,14 +970,18 @@ function OrderModal({
             placeholder={suggestedNumber}
           />
         </Field>
-        <Field label="Customer Name *">
+        <Field label="Customer name *">
           <input
-            className={cn("input", !f.customer_name.trim() && "border-danger")}
+            required
+            onBlur={() => setTouched(true)}
+            aria-invalid={touched && !f.customer_name.trim()}
+            aria-describedby={touched && !f.customer_name.trim() ? "order-customer-error" : undefined}
+            className={cn("input", touched && !f.customer_name.trim() && "border-danger")}
             value={f.customer_name}
             onChange={(e) => setF({ ...f, customer_name: e.target.value })}
           />
-          {!f.customer_name.trim() && (
-            <p className="text-[11px] text-danger mt-1">Customer name is required.</p>
+          {touched && !f.customer_name.trim() && (
+            <p id="order-customer-error" className="text-xs text-danger mt-1">Customer name is required.</p>
           )}
         </Field>
         <Field label={`Total (${getDisplayCurrency()})`}>
@@ -974,7 +994,7 @@ function OrderModal({
           />
         </Field>
       </div>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -982,6 +1002,7 @@ function OrderModal({
           className="btn-primary"
           disabled={!f.customer_name.trim() || saving}
           onClick={async () => {
+            if (saving) return;
             setSaving(true);
             try {
               await erp.createOrder(
@@ -999,9 +1020,10 @@ function OrderModal({
             }
           }}
         >
-          {saving ? "Saving…" : "Save Order"}
+          {saving ? "Saving…" : "Create order"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }

@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
+import FreeConnections from "../components/FreeConnections";
+import WorkServices from "../components/WorkServices";
+import EmailConnection from "../components/EmailConnection";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Calculator,
   Check,
@@ -10,11 +14,11 @@ import {
   FileText,
   Globe,
   Landmark,
-  Loader2,
   Megaphone,
-  MessageCircle,
   Plug,
   RefreshCw,
+  Search,
+  ShieldCheck,
   Share2,
   ShoppingBag,
   Sparkles,
@@ -23,9 +27,10 @@ import {
   Zap,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { PageHeader, Badge, FilterChip, MetricCard } from "../components/ui";
+import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
-import { cn, num } from "../lib/format";
+import AppIcon from "../components/AppIcon";
+import { cn } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { cloudConfigured } from "../lib/supabase";
 import {
@@ -35,7 +40,7 @@ import {
   composioStatus,
   composioKeySource,
   composioSearchToolkits,
-  getComposioKey,
+  hasOwnComposioKey,
   setComposioKey,
   clearComposioKey,
   COMPOSIO_TOOLKITS,
@@ -47,7 +52,6 @@ import {
   setZernioConfig,
   usingOwnZernioKey,
   zernioKeySource,
-  zernioReady,
   listAccounts,
   type ZernioConfig,
 } from "../lib/zernio";
@@ -65,6 +69,7 @@ import {
   type BridgeConfig,
   type BridgeState,
 } from "../lib/waBridge";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "../lib/agentStorage";
 import { waLogList } from "../lib/waLog";
 
 /* ── Integrations ──────────────────────────────────────────────────────────
@@ -94,6 +99,7 @@ type Integration = {
   to?: string;
   action?: string;
   connected?: boolean;
+  available?: boolean;
   builtin?: boolean;
   soon?: boolean;
   note?: string;
@@ -120,6 +126,20 @@ const TOOLKIT_CATEGORY: Record<string, string> = {
 
 export default function Integrations() {
   const { notice } = useUI();
+  const [params, setParams] = useSearchParams();
+  const requestedTab = params.get("tab") || "available";
+  const tab = ["available", "free", "services", "providers"].includes(requestedTab)
+    ? requestedTab
+    : "available";
+  const setTab = (next: string) =>
+    setParams(
+      (current) => {
+        const copy = new URLSearchParams(current);
+        copy.set("tab", next);
+        return copy;
+      },
+      { replace: true }
+    );
   const [cat, setCat] = useState("All");
   const [active, setActive] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<KeySource>("none");
@@ -128,46 +148,85 @@ export default function Integrations() {
   const [search, setSearch] = useState("");
   const [found, setFound] = useState<ToolkitInfo[]>([]);
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(true);
   const reachOn = reachReady();
-  const socialOn = zernioReady();
+  const [socialOn, setSocialOn] = useState(false);
 
+  const requestGeneration = useRef(0);
+  const current = (scope: string | null) => scope === agentStorageScope();
   const refresh = useCallback(async () => {
+    const scope = agentStorageScope();
+    const generation = ++requestGeneration.current;
+    const valid = () => generation === requestGeneration.current && scope === agentStorageScope();
+    setRefreshing(true);
     try {
-      const list = await composioList();
-      const on = new Set<string>();
-      for (const c of list.items ?? [])
-        if ((c.status ?? "").toUpperCase() === "ACTIVE" && c.toolkit?.slug)
-          on.add(c.toolkit.slug);
-      setActive(on);
-    } catch {
-      /* no key yet — the cards simply show as not connected */
+      const keySource = await composioKeySource();
+      if (!valid()) return;
+      setSource(keySource);
+      if (keySource === "none") {
+        setActive(new Set());
+        setMsg("");
+      } else {
+        const list = await composioList();
+        if (!valid()) return;
+        setActive(new Set((list.items ?? []).filter(c => c.status?.toUpperCase() === "ACTIVE" && c.toolkit?.slug).map(c => c.toolkit!.slug!)));
+        setMsg("");
+      }
+      const accounts = await listAccounts().catch(() => []);
+      if (valid()) setSocialOn(accounts.length > 0);
+    } catch (e) {
+      if (!valid()) return;
+      setActive(new Set()); setSocialOn(false);
+      setMsg("Could not verify connected apps: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      if (valid()) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    void composioKeySource().then(setSource);
+    let scope = agentStorageScope();
+    const changed = () => {
+      if (scope === agentStorageScope()) return;
+      scope = agentStorageScope();
+      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setConnecting(null); setSearching(false);
+      void refresh();
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, changed);
     void refresh();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { ++requestGeneration.current; window.removeEventListener(AGENT_STORAGE_EVENT, changed); };
   }, [refresh]);
 
   const runSearch = async () => {
+    const scope = agentStorageScope();
     const q = search.trim();
     if (!q) return setFound([]);
+    if (source === "none") {
+      setMsg(
+        "Showing matching built-in apps. Configure a provider to search its full catalogue."
+      );
+      return;
+    }
     setSearching(true);
     setMsg("");
     try {
-      setFound(await composioSearchToolkits(q, 12));
+      const results = await composioSearchToolkits(q, 12);
+      if (current(scope)) setFound(results);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
     } finally {
-      setSearching(false);
+      if (current(scope)) setSearching(false);
     }
   };
 
   const connect = async (slug: string) => {
+    const scope = agentStorageScope();
     setConnecting(slug);
     setMsg("");
     try {
       const link = await composioConnect(slug);
+      if (!current(scope)) return;
       if (link.error) throw new Error(link.error.message);
       if (!link.redirect_url || !link.connected_account_id)
         throw new Error("Composio did not return a connection link.");
@@ -175,11 +234,15 @@ export default function Integrations() {
       // there is no opener plugin, and a new tab is the same thing.
       if (hasDesktop) await openUrl(link.redirect_url);
       else window.open(link.redirect_url, "_blank", "noopener");
-      setMsg(`Authorize ${slug} in the browser window - this flips to Connected when you're done.`);
+      setMsg(
+        `Authorize ${slug} in the browser window - this flips to Connected when you're done.`
+      );
       const id = link.connected_account_id;
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000));
-        const st = await composioStatus(id).catch(() => null);
+        if (!current(scope)) return;
+        const st = await composioStatus(id);
+        if (!current(scope)) return;
         if ((st?.status ?? "").toUpperCase() === "ACTIVE") {
           setActive((prev) => new Set(prev).add(slug));
           setMsg(`${slug} connected ✓ - the Filey AI agent can now use it.`);
@@ -187,9 +250,9 @@ export default function Integrations() {
         }
       }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
     } finally {
-      setConnecting(null);
+      if (current(scope)) setConnecting(null);
     }
   };
 
@@ -197,7 +260,7 @@ export default function Integrations() {
     const apps: Integration[] = COMPOSIO_TOOLKITS.map((tk) => ({
       key: `composio:${tk.slug}`,
       slug: tk.slug,
-      name: tk.name,
+      name: tk.slug === "whatsapp" ? "WhatsApp via Composio" : tk.name,
       desc: tk.desc,
       category: TOOLKIT_CATEGORY[tk.slug] ?? "Apps",
       connected: active.has(tk.slug),
@@ -215,6 +278,16 @@ export default function Integrations() {
       }));
     const own: Integration[] = [
       {
+        key: "whatsapp-qr",
+        name: "WhatsApp (QR)",
+        desc: "Pair WhatsApp in the desktop app to send messages and PDF attachments. No API key required.",
+        category: "Messaging",
+        icon: <BrandIcon name="whatsapp" className="h-5 w-5" />,
+        builtin: true,
+        to: "/integrations?tab=free",
+        action: "Set up WhatsApp",
+      },
+      {
         key: "social",
         name: "Social publishing",
         desc: "Post and schedule to Instagram, LinkedIn, X, TikTok and more through Zernio.",
@@ -231,7 +304,7 @@ export default function Integrations() {
         category: "Messaging",
         icon: <BrandIcon name="whatsapp" className="h-5 w-5" />,
         builtin: true,
-        note: "No setup - use Send → WhatsApp.",
+        note: "Opens a text draft. Use Share PDF or paired desktop WhatsApp for attachments.",
       },
       {
         key: "templates",
@@ -246,7 +319,7 @@ export default function Integrations() {
       {
         key: "ai",
         name: "Filey AI",
-        desc: "Connect an AI provider to power the agent and the smart features.",
+        desc: "Run Ollama or LM Studio on your device, or bring your own provider key. Hosted free tiers have provider limits.",
         category: "AI",
         icon: <Sparkles className="h-5 w-5" />,
         to: "/settings?section=ai",
@@ -255,12 +328,12 @@ export default function Integrations() {
       {
         key: "reach",
         name: "Web research",
-        desc: "Let the Filey AI read and search public web pages to answer questions the books can't.",
+        desc: "Read public pages without a key; add your Jina key for web search.",
         category: "AI",
         icon: <Globe className="h-5 w-5" />,
         to: "/integrations/web-research",
         action: reachOn ? "Manage" : "Set up",
-        connected: reachOn,
+        available: reachOn,
       },
       {
         key: "leads",
@@ -270,14 +343,14 @@ export default function Integrations() {
         icon: <UserSearch className="h-5 w-5" />,
         to: "/integrations/lead-enrichment",
         action: reachOn ? "Manage" : "Set up",
-        connected: reachOn,
+        available: reachOn,
       },
       {
         key: "pdf",
         name: "PDF Tools",
         desc: "Merge, split, compress and convert PDFs on-device - no network needed.",
         category: "Documents",
-        icon: <BrandIcon name="pdf" className="h-5 w-5" />,
+        icon: <AppIcon name="tools" className="h-5 w-5" />,
         to: "/tools",
         action: "Open",
         builtin: true,
@@ -290,7 +363,7 @@ export default function Integrations() {
         icon: <BrandIcon name="supabase" className="h-5 w-5" />,
         to: "/settings?section=datamode",
         action: "Configure",
-        connected: cloudConfigured,
+        available: cloudConfigured,
       },
       /* No real backend for these yet — disabled, never a fake toggle. */
       {
@@ -350,173 +423,235 @@ export default function Integrations() {
         soon: true,
       },
     ];
-    // Connectable apps lead: they are the ones that do something new today.
-    return [...results, ...apps, ...own];
+    return [...own, ...results, ...apps].filter((item) => !item.soon);
   }, [active, found, reachOn, socialOn]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(integrations.map((i) => i.category)))],
     [integrations]
   );
-  const filtered =
-    cat === "All" ? integrations : integrations.filter((i) => i.category === cat);
+  const filtered = integrations.filter(
+    (i) =>
+      (cat === "All" || i.category === cat) &&
+      (!search.trim() ||
+        `${i.name} ${i.desc} ${i.category}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase()))
+  );
 
-  const connectedCount = integrations.filter((i) => i.connected).length;
-  const builtinCount = integrations.filter((i) => i.builtin).length;
-  const soonCount = integrations.filter((i) => i.soon).length;
 
   return (
-    <div className="pb-10">
+    <div className="mx-auto max-w-6xl pb-10">
       <PageHeader
         title="Integrations"
-        subtitle="Connect Filey with the tools you already use, and let the AI agent work in them"
+        subtitle="Your apps, connected to your workspace."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link className="btn-ghost" to="/docs?article=integrations">Setup guide</Link>
+            <Link className="btn-ghost" to="/browser"><Globe size={16} /> Open browser</Link>
+          </div>
+        }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
-        <MetricCard
-          label="Connected"
-          value={num(connectedCount)}
-          change={connectedCount > 0 ? "Live integrations" : "Nothing connected yet"}
-          changeTone={connectedCount > 0 ? "up" : "warn"}
-        />
-        <MetricCard
-          label="Built in"
-          value={num(builtinCount)}
-          change="Ready to open"
-          changeTone="up"
-        />
-        <MetricCard
-          label="Coming soon"
-          value={num(soonCount)}
-          change="On the roadmap"
-          changeTone="up"
-        />
-      </div>
-
-      <div className="mb-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
-        <ComposioProvider source={source} onSourceChange={setSource} onSaved={refresh} />
-        <ZernioProvider />
-        <WhatsAppBridgeProvider />
-      </div>
-
-      <div className="mb-4 flex gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Search every app: Instagram, Zoho, Xero, Shopify…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void runSearch()}
-        />
-        <button className="btn-secondary" onClick={runSearch} disabled={searching}>
-          {searching ? <Loader2 size={15} className="animate-spin" /> : "Search"}
-        </button>
-        <button
-          className="btn-ghost"
-          onClick={refresh}
-          title="Refresh connected apps"
-          aria-label="Refresh connected apps"
-        >
-          <RefreshCw size={14} />
-        </button>
-      </div>
-
-      {msg && (
-        <p className="mb-4 rounded-xl bg-hover px-3 py-2 text-[12.5px] font-medium text-muted-foreground">
-          {msg}
-        </p>
-      )}
-
-      <div className="mb-4 flex items-center gap-1.5 flex-wrap">
-        {categories.map((c) => (
-          <FilterChip key={c} active={cat === c} onClick={() => setCat(c)}>
-            {c}
-          </FilterChip>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px overflow-hidden rounded-xl border border-border bg-border">
-        {filtered.map((i) => (
-          <div
-            key={i.key}
-            className={cn("bg-card p-5 flex flex-col", i.soon && "opacity-60")}
+      <nav aria-label="Integration sections" className="mb-6 flex items-center gap-2 overflow-x-auto border-b border-border pb-3">
+        {[
+          ["available", "App directory"],
+          ["services", "Free work tools"],
+          ["free", "Built-in connections"],
+          ["providers", "Provider setup"],
+        ].map(([key, title]) => (
+          <button
+            key={key}
+            className={cn("chip min-h-11 shrink-0 whitespace-nowrap md:min-h-10", tab === key && "chip-active")}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
           >
-            <div className="flex items-start gap-3">
-              <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0 overflow-hidden">
-                {i.slug ? <AppLogo slug={i.slug} logo={i.logo} /> : i.icon}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="text-[14px] font-semibold text-foreground">
-                    {i.name}
-                  </div>
-                  {i.soon ? (
-                    <Badge tone="neutral">Coming soon</Badge>
-                  ) : i.connected ? (
-                    <Badge tone="success">
-                      <Check size={11} /> Connected
-                    </Badge>
-                  ) : i.builtin ? (
-                    <Badge tone="info">Built in</Badge>
-                  ) : null}
-                </div>
-                <div className="text-[12px] text-muted-foreground mt-0.5">
-                  {i.category}
-                </div>
-              </div>
-            </div>
-
-            <p className="text-[13px] text-muted-foreground mt-3 leading-relaxed flex-1 line-clamp-3">
-              {i.desc}
-            </p>
-
-            <div className="mt-4 flex items-center gap-2 flex-wrap">
-              {i.soon ? (
-                <button
-                  className="btn-secondary"
-                  onClick={() =>
-                    void notice({
-                      message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
-                    })
-                  }
-                >
-                  Not available yet
-                </button>
-              ) : i.slug ? (
-                <>
-                  <button
-                    className="btn-secondary"
-                    onClick={() => connect(i.slug!)}
-                    disabled={source === "none" || connecting === i.slug}
-                  >
-                    {connecting === i.slug ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <ExternalLink size={14} />
-                    )}
-                    {i.connected ? "Reconnect" : "Connect"}
-                  </button>
-                  {source === "none" && (
-                    <span className="text-[12px] text-muted-foreground">
-                      Sign in to connect
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  {i.to && (
-                    <Link to={i.to} className="btn-secondary">
-                      {i.connected ? "Manage" : (i.action ?? "Configure")}
-                    </Link>
-                  )}
-                  {i.note && (
-                    <span className="text-[12px] text-muted-foreground">{i.note}</span>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+            {title}
+          </button>
         ))}
-      </div>
+      </nav>
+      {tab === "services" && <WorkServices />}
+      {tab === "free" && (
+        <>
+          <WhatsAppBridgeProvider key={agentStorageScope() ?? "signed-out"} />
+          <EmailConnection />
+          <FreeConnections />
+        </>
+      )}
+      {tab === "providers" && (
+        <>
+          <section className="mb-5 flex flex-wrap items-center gap-4 border-b border-border pb-5">
+            <Sparkles size={20} className="shrink-0" />
+            <div className="flex-1 min-w-48">
+              <h2 className="font-semibold text-sm">AI models</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Set up local Ollama or LM Studio, OpenRouter free models, or another
+                compatible provider.
+              </p>
+            </div>
+            <Link className="btn-secondary" to="/settings?section=ai">
+              Configure AI
+            </Link>
+            <Link className="btn-ghost" to="/docs?article=ai-setup">
+              Setup guide
+            </Link>
+          </section>
+          <div key={agentStorageScope() ?? "signed-out"} className="mb-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+            <ComposioProvider
+              source={source}
+              onSourceChange={setSource}
+              onSaved={refresh}
+            />
+            <ZernioProvider />
+          </div>
+          <Link className="btn-secondary mb-4" to="/integrations?tab=free">
+            Set up WhatsApp (QR)
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            Your own keys use your provider account. Provider charges, quotas and app
+            authorization still apply; Filey does not supply unlimited third-party access.
+          </p>
+        </>
+      )}
+      {tab === "available" && (
+        <>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <div className="relative min-w-48 flex-1">
+            <Search size={16} className="pointer-events-none absolute start-3 top-3 text-muted-foreground" aria-hidden="true" />
+            <input
+              className="input ps-10"
+              aria-label="Search integrations"
+              placeholder="Search apps and connections"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void runSearch()}
+            />
+            </div>
+            <button className="btn-secondary" onClick={runSearch} disabled={searching}>
+              {searching ? "Searching…" : "Search"}
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={refresh}
+              title="Refresh connected apps"
+              aria-label="Refresh connected apps"
+              disabled={refreshing}
+            >
+              {refreshing ? <Loader2 size={16} /> : <RefreshCw size={16} />}
+            </button>
+          </div>
+
+          {msg && (
+            <p role="status" className="mb-4 rounded-[8px] bg-hover px-3 py-3 text-[13px] text-muted-foreground">
+              {msg}
+            </p>
+          )}
+
+          <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1 [&>button]:min-h-11 [&>button]:shrink-0 md:[&>button]:min-h-10" aria-label="Filter integrations">
+            {categories.map((c) => (
+              <FilterChip key={c} active={cat === c} onClick={() => setCat(c)}>
+                {c}
+              </FilterChip>
+            ))}
+          </div>
+
+          {source === "none" && !refreshing && (
+            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl bg-hover px-4 py-3">
+              <Plug size={18} className="shrink-0 text-muted-foreground" />
+              <p className="min-w-48 flex-1 text-[13px] text-muted-foreground">Built-in connections work independently. Add a provider to link other apps.</p>
+              <button className="btn-ghost" onClick={() => setTab("providers")}>Provider setup</button>
+            </div>
+          )}
+          {[
+            { title: "In Filey", items: filtered.filter(i => !i.slug) },
+            { title: "Connected apps", items: filtered.filter(i => i.slug && i.connected) },
+            { title: "More apps", items: filtered.filter(i => i.slug && !i.connected) },
+          ].filter(group => group.items.length).map(group => (
+          <section key={group.title} aria-label={group.title} className="mb-6">
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="text-sm font-semibold">{group.title}</h2>
+              {group.title === "Connected apps" && <span className="text-xs text-muted-foreground">{group.items.length}</span>}
+            </div>
+            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+            {group.items.map((i) => (
+              <div
+                key={i.key}
+                className="grid grid-cols-[40px_minmax(0,1fr)] gap-x-3 gap-y-3 p-4 sm:grid-cols-[40px_minmax(0,1fr)_auto] sm:items-center"
+              >
+                  <div className="h-10 w-10 rounded-[8px] bg-muted text-foreground grid place-items-center shrink-0 overflow-hidden">
+                    {i.slug ? <AppLogo slug={i.slug} logo={i.logo} /> : i.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-[14px] font-semibold text-foreground">
+                        {i.name}
+                      </div>
+                      {i.soon ? (
+                        <Badge tone="neutral">Coming soon</Badge>
+                      ) : i.connected ? (
+                        <Badge tone="success">
+                          <Check size={11} /> Connected
+                        </Badge>
+                      ) : i.available ? (
+                        <Badge tone="neutral">Available</Badge>
+                      ) : i.builtin ? (
+                        <Badge tone="neutral">Built in</Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">{i.desc}</p>
+                    {i.note && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{i.note}</p>}
+                  </div>
+                <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:justify-end">
+                  {i.soon ? (
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        void notice({
+                          message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
+                        })
+                      }
+                    >
+                      Not available yet
+                    </button>
+                  ) : i.slug ? (
+                    <>
+                      {source === "none" ? <button className="btn-ghost" onClick={() => setTab("providers")}>Set up</button> : <button
+                        className="btn-ghost"
+                        onClick={() => connect(i.slug!)}
+                        disabled={connecting === i.slug}
+                      >
+                        {connecting === i.slug ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <ExternalLink size={14} />
+                        )}
+                        {i.connected ? "Reconnect" : "Connect"}
+                      </button>}
+                    </>
+                  ) : (
+                    <>
+                      {i.to && (
+                        <Link to={i.to} className={i.key === "whatsapp-qr" ? "btn-primary" : "btn-ghost"}>
+                          {i.connected ? "Manage" : (i.action ?? "Configure")}
+                        </Link>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+            </div>
+          </section>
+          ))}
+          {filtered.length === 0 && (
+            <div className="rounded-xl border border-border bg-card p-8 text-center">
+              <p className="text-sm font-medium">No matching integrations</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">Try a different app name or category.</p>
+              <button className="btn-ghost mt-4" onClick={() => { setSearch(""); setCat("All"); setFound([]); }}>Clear filters</button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -569,10 +704,7 @@ function ComposioProvider({
   useEffect(() => {
     // Desktop keeps the key on the device; the browser's lives in the cloud,
     // where it can be seen to exist but never read back.
-    (hasDesktop
-      ? getComposioKey().then((k) => !!k.trim())
-      : hasCloudKey("composio")
-    )
+    (hasDesktop ? hasOwnComposioKey() : hasCloudKey("composio"))
       .then(setHasKey)
       .catch(() => setHasKey(false));
   }, []);
@@ -624,14 +756,14 @@ function ComposioProvider({
             <p className="text-[14px] font-semibold text-foreground">Connected apps</p>
             <KeyBadge source={source} own={hasKey} />
           </div>
-          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-            Powers every app below — connect once and the agent can work in it.
+          <p className="text-[13px] text-muted-foreground mt-1">
+            Composio links your app accounts so Filey AI can work with them.
           </p>
         </div>
       </div>
 
       <details className="mt-3 group">
-        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-1">
+        <summary className="min-h-10 cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-2">
           <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
           {hasKey ? "Manage your key" : "Use my own Composio key"}
         </summary>
@@ -647,23 +779,29 @@ function ComposioProvider({
                 : "Kept in your workspace — replaceable, never readable; calls spend your key, not your plan."}
             </p>
             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="field flex-1">
+              <label className="field flex-1">
                 <span className="label">Composio API key</span>
                 <input
                   type="password"
+                  autoComplete="new-password"
+                  disabled={busy}
                   className="input"
                   placeholder={hasKey ? "•••••••• (saved - paste to replace)" : "ak_…"}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
                 />
-              </div>
-              <button className="btn-primary" onClick={save} disabled={busy || !key.trim()}>
-                {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+              </label>
+              <button
+                className="btn-primary"
+                onClick={save}
+                disabled={busy || !key.trim()}
+              >
+                {busy ? "Checking…" : "Save & check"}
               </button>
             </div>
             {hasKey && (
               <button
-                className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
+                className="btn-ghost mt-2 text-danger"
                 onClick={removeKey}
                 disabled={busy}
               >
@@ -674,7 +812,11 @@ function ComposioProvider({
         )}
       </details>
 
-      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && (
+        <p role="status" className="mt-2 text-[12px] font-medium text-muted-foreground">
+          {msg}
+        </p>
+      )}
     </div>
   );
 }
@@ -682,8 +824,8 @@ function ComposioProvider({
 /** Compact one-line key status — the full sentences live in the key panel. */
 function KeyBadge({ source, own }: { source: KeySource; own: boolean }) {
   if (own) return <Badge tone="info">Own key</Badge>;
-  if (source === "platform") return <Badge tone="success">Included</Badge>;
-  return <Badge tone="neutral">Sign in</Badge>;
+  if (source === "platform") return <Badge tone="success">Filey provider</Badge>;
+  return <Badge tone="neutral">Not configured</Badge>;
 }
 
 /* ── Zernio: social publishing ──────────────────────────────────────────── */
@@ -748,8 +890,8 @@ function ZernioProvider() {
             <p className="text-[14px] font-semibold text-foreground">Social publishing</p>
             <KeyBadge source={source} own={own} />
           </div>
-          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-            Post and schedule to Instagram, LinkedIn, X and more — link accounts at zernio.com.
+          <p className="text-[13px] text-muted-foreground mt-1">
+            Post and schedule to Instagram, LinkedIn, X and more through Zernio.
           </p>
         </div>
       </div>
@@ -759,35 +901,45 @@ function ZernioProvider() {
           Open publisher
         </Link>
         <button className="btn-ghost" onClick={check} disabled={busy}>
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={13} />}
+          {busy ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <RefreshCw size={13} />
+          )}
           Check
         </button>
       </div>
 
       <details className="mt-3 group">
-        <summary className="cursor-pointer text-[12px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-1">
+        <summary className="min-h-10 cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-2">
           <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
           {own ? "Manage your key" : "Use my own Zernio key"}
         </summary>
         <div className="mt-2">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-            <div className="field flex-1">
+            <label className="field flex-1">
               <span className="label">Zernio API key</span>
               <input
                 type="password"
+                autoComplete="new-password"
+                disabled={busy}
                 className="input"
                 placeholder={own ? "•••••••• (saved - paste to replace)" : "sk_…"}
                 value={key}
                 onChange={(e) => setKey(e.target.value)}
               />
-            </div>
-            <button className="btn-primary" onClick={saveOwn} disabled={busy || !key.trim()}>
-              {busy ? <Loader2 size={15} className="animate-spin" /> : "Save & check"}
+            </label>
+            <button
+              className="btn-primary"
+              onClick={saveOwn}
+              disabled={busy || !key.trim()}
+            >
+              {busy ? "Checking…" : "Save & check"}
             </button>
           </div>
           {own && (
             <button
-              className="mt-1.5 h-7 px-2 text-[12px] font-medium text-danger hover:underline"
+              className="btn-ghost mt-2 text-danger"
               onClick={removeOwn}
               disabled={busy}
             >
@@ -797,7 +949,11 @@ function ZernioProvider() {
         </div>
       </details>
 
-      {msg && <p className="mt-2 text-[12px] font-medium text-muted-foreground">{msg}</p>}
+      {msg && (
+        <p role="status" className="mt-2 text-[12px] font-medium text-muted-foreground">
+          {msg}
+        </p>
+      )}
     </div>
   );
 }
@@ -810,19 +966,34 @@ function WhatsAppBridgeProvider() {
   );
   const [st, setSt] = useState<BridgeState>({ state: "stopped" });
   const [msg, setMsg] = useState("");
+  const [ownerNumber, setOwnerNumber] = useState(cfg.ownerNumber);
   // What the bridge actually saw, newest first — "is it receiving my
   // messages, is it answering" answered by evidence instead of guesswork.
   const [activity, setActivity] = useState(() => waLogList({ limit: 4 }).reverse());
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
 
   useEffect(() => {
     if (!desktop) return;
-    void bridgeState().then(setSt);
-    return onBridgeState(setSt); // QR + connection changes arrive from Rust
+    let current = true;
+    let receivedEvent = false;
+    const unlisten = onBridgeState((state) => {
+      receivedEvent = true;
+      if (current) setSt(state);
+    });
+    void bridgeState().then((state) => {
+      if (current && !receivedEvent) setSt(state);
+    });
+    return () => { current = false; unlisten(); };
   }, [desktop]);
 
-  // Refresh the activity trail whenever the bridge speaks or the card mounts.
+  // Replies don't change connection status: refresh when the conversation is
+  // saved as well, so a live connection never shows a stale activity trail.
   useEffect(() => {
-    setActivity(waLogList({ limit: 4 }).reverse());
+    const refresh = () => setActivity(waLogList({ limit: 4 }).reverse());
+    refresh();
+    window.addEventListener(AGENT_STORAGE_EVENT, refresh);
+    return () => window.removeEventListener(AGENT_STORAGE_EVENT, refresh);
   }, [st.state]);
 
   // The browser build has no WhatsApp bridge to drive — the card still shows
@@ -831,36 +1002,49 @@ function WhatsAppBridgeProvider() {
   const locked = !desktop;
 
   const run = async (fn: () => Promise<unknown>) => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
     setMsg("");
     try {
       await fn();
+      setSt(await bridgeState());
+      const next = getBridgeConfig();
+      setCfg(next);
+      setOwnerNumber(next.ownerNumber);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      pending.current = false;
+      setBusy(false);
     }
   };
 
   const connected = st.state === "connected";
+  const pairedPhone = st.me?.split("@")[0].split(":")[0] ?? "";
+  const separateOwner = !!cfg.ownerNumber && cfg.ownerNumber !== pairedPhone;
   const pairing = st.state === "starting" || st.state === "connecting";
   const label: Record<string, string> = locked
     ? { stopped: "Needs desktop app" }
     : {
         stopped: "Not running",
         starting: "Starting…",
-        connecting: "Waiting for QR scan",
+        connecting: st.qr ? "Waiting for QR scan" : "Connecting…",
         connected: "Connected",
         reconnecting: "Reconnecting…",
-        logged_out: "Logged out — re-pair",
+        logged_out: "Pair again",
+        error: "Connection problem",
       };
 
   return (
-    <div className="bg-card p-5 flex flex-col">
-      <div className="flex items-start gap-3">
-        <div className="h-10 w-10 rounded-lg bg-muted text-foreground grid place-items-center shrink-0">
-          <MessageCircle size={17} className="text-primary-500" />
+    <section aria-label="WhatsApp connection" className="mb-6 overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-start gap-3 p-5">
+        <div className="h-10 w-10 rounded-[8px] bg-muted text-foreground grid place-items-center shrink-0">
+          <BrandIcon name="whatsapp" className="h-5 w-5" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-[14px] font-semibold text-foreground">WhatsApp (QR)</p>
+            <h2 className="text-sm font-semibold text-foreground">WhatsApp</h2>
             <span
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
@@ -877,103 +1061,71 @@ function WhatsAppBridgeProvider() {
                   connected
                     ? "bg-success"
                     : pairing
-                      ? "bg-info animate-pulse"
+                      ? "bg-info"
                       : "bg-muted-foreground/50"
                 )}
               />
               {label[st.state] ?? st.state}
             </span>
           </div>
-          <p className="text-[12px] text-muted-foreground mt-0.5 line-clamp-2">
-            Pair your own number — chatting with your agent costs nothing per message.
+          <p className="mt-1 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">
+            Ask Filey AI for help, documents and PDFs from your WhatsApp chat.
           </p>
         </div>
       </div>
 
-      {locked && (
-        <p className="mt-3 rounded-lg bg-hover px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground">
-          QR pairing runs in the Filey desktop app — open Integrations there and
-          press Connect to generate the QR.
-        </p>
-      )}
-
-      {connected && st.me && (
-        <p className="mt-3 text-[11.5px] text-muted-foreground">
-          Paired as <b className="text-foreground">+{st.me.split("@")[0].split(":")[0]}</b>
-          {cfg.ownerNumber ? (
+      <div className="grid gap-5 border-t border-border p-5 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.7fr)]">
+        <div className="min-w-0">
+          {locked ? (
             <>
-              {" "}· takes orders from{" "}
-              <b className="text-foreground">+{cfg.ownerNumber.replace(/\D/g, "")}</b>
+              <h3 className="text-sm font-medium">Connect from the desktop app</h3>
+              <p className="mt-2 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">
+                This browser cannot pair a WhatsApp account. Open the installed Filey app, then go to Integrations → Built-in connections → Connect WhatsApp.
+              </p>
+            </>
+          ) : connected ? (
+            <>
+              <h3 className="text-sm font-medium">Send a task from your phone</h3>
+              <p className="mt-2 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">
+                {separateOwner ? "From your owner number, send a message to the paired number." : "On your phone, open your own WhatsApp chat (Message yourself) and send a task."}
+                {" "}Keep Filey open and signed in.
+              </p>
+              <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">Send <code className="font-mono text-foreground">/status</code> to check that the agent is ready. A paired connection alone does not confirm an AI reply.</p>
             </>
           ) : (
-            " · self-chat only"
+            <>
+              <h3 className="text-sm font-medium">Link your phone</h3>
+              <ol className="mt-2 list-decimal space-y-2 ps-4 text-[13px] leading-relaxed text-muted-foreground">
+                <li>Select Connect WhatsApp to show a QR code.</li>
+                <li>On your phone, open WhatsApp → Settings → <b className="font-medium text-foreground">Linked devices</b> → Link a device.</li>
+                <li>Scan the code, then send <code className="font-mono text-foreground">/status</code> in your own chat.</li>
+              </ol>
+            </>
           )}
-        </p>
-      )}
-
-      {/* Delivery trail — whether messages are arriving and whether the agent
-          answered, from the bridge's own log. An in with no out after it is
-          the owner-number gate, not a dead bridge. */}
-      {!locked && activity.length > 0 && (
-        <div className="mt-3">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-            Recent activity
-          </p>
-          <div className="mt-1.5 space-y-1">
-            {activity.map((e, i) => (
-              <div key={i} className="flex items-start gap-2 text-[11.5px]">
-                <span
-                  className={cn(
-                    "mt-0.5 shrink-0 rounded px-1 py-px text-[10px] font-semibold",
-                    e.dir === "in"
-                      ? "bg-info/10 text-info"
-                      : "bg-success/10 text-success"
-                  )}
-                >
-                  {e.dir === "in" ? "IN" : "OUT"}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                  {e.dir === "in" ? e.name || `+${e.from}` : "Filey Agent"} · {e.text}
-                </span>
-                <span className="shrink-0 text-muted-foreground/70">
-                  {new Date(e.at).toLocaleTimeString(undefined, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {st.qr && (
-        <div className="mt-3 flex items-start gap-3 rounded-xl border border-border p-3">
-          <img src={st.qr} alt="WhatsApp pairing QR code" className="h-32 w-32" />
-          <p className="text-[12px] text-muted-foreground">
-            On your phone: WhatsApp → Settings → <b>Linked devices</b> → Link a
-            device, then scan.
-          </p>
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+          {st.qr && !connected && (
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <img src={st.qr} alt="WhatsApp pairing QR code" width={192} height={192} className="h-48 w-48 shrink-0 rounded-[8px] bg-white p-2" />
+              <p className="max-w-48 text-xs leading-relaxed text-muted-foreground">Keep this code private. It links your WhatsApp account to Filey on this computer.</p>
+            </div>
+          )}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
-          className="btn-secondary"
-          disabled={locked}
+          className="btn-primary"
+          disabled={locked || busy || pairing || connected || st.state === "reconnecting"}
           title={locked ? "Needs the desktop app" : undefined}
           onClick={() => run(startBridge)}
         >
-          {st.state === "stopped" ? "Connect" : "Restart"}
+          {busy || pairing ? <Loader2 size={14} className="animate-spin" /> : null}
+          {connected ? "WhatsApp connected" : pairing || busy ? "Connecting…" : st.state === "reconnecting" ? "Reconnecting…" : "Connect WhatsApp"}
         </button>
         {st.state !== "stopped" && (
-          <button className="btn-ghost" disabled={locked} onClick={() => run(stopBridge)}>
+          <button className="btn-ghost" disabled={locked || busy} onClick={() => run(stopBridge)}>
             Stop
           </button>
         )}
         <button
           className="btn-ghost"
-          disabled={locked}
+          disabled={locked || busy}
           title={
             locked
               ? "Needs the desktop app"
@@ -990,35 +1142,88 @@ function WhatsAppBridgeProvider() {
         >
           Re-pair
         </button>
-        <label className="ml-auto flex items-center gap-2 text-[12px] text-muted-foreground">
-          <input
-            type="checkbox"
-            disabled={locked}
-            checked={cfg.autoStart}
-            onChange={(e) => setCfg(setBridgeConfig({ autoStart: e.target.checked }))}
-          />
-          Start with Filey
-        </label>
+          </div>
+          {(msg || st.error) && (
+            <p role="status" className="mt-3 text-[13px] leading-relaxed text-danger">{whatsAppError(msg || st.error || "")}</p>
+          )}
+        </div>
+        <aside className="min-w-0 text-[13px] leading-relaxed">
+          <div className="flex items-center gap-2 font-medium"><ShieldCheck size={16} /> Your private connection</div>
+          <p className="mt-2 text-muted-foreground">The agent answers your own chat or the owner number you choose. Messages to other people require your approval.</p>
+          {connected && st.me && (
+            <dl className="mt-3 space-y-2">
+              <div><dt className="text-xs text-muted-foreground">Paired phone</dt><dd className="font-medium tabular-nums">+{pairedPhone}</dd></div>
+              <div><dt className="text-xs text-muted-foreground">Who can send tasks</dt><dd>{separateOwner ? `+${cfg.ownerNumber}` : "Your own chat only"}</dd></div>
+            </dl>
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">No API key or per-message bridge fee. Your AI provider may charge for model usage.</p>
+        </aside>
       </div>
-
-      <label className="mt-3 block">
-        <span className="label">My WhatsApp number</span>
-        <input
-          className="input mt-1"
-          placeholder="971501234567"
-          inputMode="tel"
-          disabled={locked}
-          defaultValue={cfg.ownerNumber}
-          onBlur={(e) => setCfg(setBridgeConfig({ ownerNumber: e.target.value }))}
-        />
-        <span className="mt-1 block text-[11.5px] text-muted-foreground">
-          The agent answers you and nobody else. Empty is right when you paired
-          your own phone. This drives a real account through an unofficial
-          connection — use a number you can afford to lose.
-        </span>
-      </label>
-
-      {msg && <p className="mt-2 text-[12px] font-medium text-danger">{msg}</p>}
-    </div>
+      <div className="grid gap-4 border-t border-border p-5 md:grid-cols-[200px_minmax(0,1fr)]">
+        <div><h3 className="text-[13px] font-medium">Connection preferences</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Choose who can reach your agent.</p></div>
+        <div className="min-w-0 space-y-4">
+          <label className="flex min-h-10 items-center gap-2 text-[13px]">
+            <input type="checkbox" disabled={locked || busy} checked={cfg.autoStart} onChange={(e) => {
+              try { setCfg(setBridgeConfig({ autoStart: e.target.checked })); setMsg(""); }
+              catch (error) { setMsg(error instanceof Error ? error.message : String(error)); }
+            }} />
+            Start with Filey
+          </label>
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (locked || busy || ownerNumber.trim() === cfg.ownerNumber) return;
+            void run(async () => {
+              setCfg(setBridgeConfig({ ownerNumber: ownerNumber.trim() }));
+              if (connected || pairing || st.state === "reconnecting") await startBridge();
+            });
+          }}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <label className="min-w-0 flex-1"><span className="label">My WhatsApp number</span><input className="input mt-1" placeholder="Country code + phone number" inputMode="tel" type="tel" disabled={locked || busy} value={ownerNumber} onChange={e => setOwnerNumber(e.target.value)} aria-describedby="whatsapp-owner-help" /></label>
+              <button className="btn-ghost" disabled={locked || busy || ownerNumber.trim() === cfg.ownerNumber}>Save number</button>
+            </div>
+            <p id="whatsapp-owner-help" className="mt-2 text-xs leading-relaxed text-muted-foreground">Leave empty when you paired your own phone. Only set a number when you want to send tasks from a different phone.</p>
+          </form>
+        </div>
+      </div>
+      {!locked && activity.length > 0 && (
+        <details className="group border-t border-border px-5">
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 text-[13px] font-medium">Recent activity <ChevronDown size={16} className="transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" /></summary>
+          <ul className="space-y-3 pb-5">
+            {activity.map((e, i) => <li key={i} className="flex items-start gap-3 text-xs">
+              <span className="shrink-0 font-medium">{e.dir === "in" ? "Received" : "Sent"}</span>
+              <span className="min-w-0 flex-1 break-words text-muted-foreground">{e.text}</span>
+              <time className="shrink-0 text-muted-foreground" dateTime={new Date(e.at).toISOString()}>{new Date(e.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</time>
+            </li>)}
+          </ul>
+        </details>
+      )}
+      <details className="group border-t border-border px-5">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 text-[13px] font-medium">Using WhatsApp with Filey <ChevronDown size={16} className="transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" /></summary>
+        <div className="max-w-[75ch] space-y-2 pb-5 text-xs leading-relaxed text-muted-foreground">
+          <p>Ask for an invoice PDF, or attach a PDF or image up to 12 MB for Filey to work on. Send /stop to cancel a task.</p>
+          <p>Your pairing is saved on this computer. Filey must remain open and signed in to receive tasks.</p>
+          <p>This is an unofficial linked-device connection; WhatsApp may restrict unsupported clients.</p>
+        </div>
+      </details>
+    </section>
   );
+}
+
+function whatsAppError(error: string) {
+  if (/another Filey account/i.test(error)) return "This phone is linked to another Filey account. Select Re-pair to connect your own phone.";
+  if (/sign in/i.test(error)) return "Sign in to Filey before connecting WhatsApp or changing its preferences.";
+  if (/workspace changed|account changed/i.test(error)) return "Your workspace changed. Connect WhatsApp again in this workspace.";
+  if (/Connect WhatsApp once/i.test(error)) return "Select Connect WhatsApp to link the saved pairing to this Filey account.";
+  if (/already running in another Filey window/i.test(error)) return "WhatsApp is running in another Filey window. Close that window, then connect here.";
+  if (/binary|not installed|sidecar.*missing/i.test(error)) return "This desktop build is missing WhatsApp support. Install the latest Filey update, then try again.";
+  if (/could not read WhatsApp connection status/i.test(error)) return "Filey could not check the WhatsApp connection. Close and reopen Filey, then check again.";
+  if (/could not save its pairing|no space|disk full|ENOSPC|os error 112/i.test(error)) return "WhatsApp could not save its pairing on this computer. Check free disk space and folder permissions, then connect again.";
+  if (/could not clear WhatsApp pairing/i.test(error)) return "Filey could not remove the old WhatsApp pairing. Close other Filey windows, check folder permissions, then select Re-pair again.";
+  if (/could not protect the WhatsApp session|access (?:is )?denied|permission denied|EACCES|EPERM|os error 5\b/i.test(error)) return "Filey cannot access its WhatsApp session files. Close other Filey windows and check your app folder permissions, then try again.";
+  if (/rejected this session|connection.?replaced|session.*replaced|multidevice.?mismatch/i.test(error)) return "WhatsApp rejected or replaced this session. Close other Filey windows and connect again. If it persists, select Re-pair.";
+  if (/could not start bridge|WhatsApp bridge could not start/i.test(error)) return "WhatsApp could not start on this computer. Close and reopen Filey, then connect again. If it persists, install the latest Filey update.";
+  if (/could not reconnect|disconnected|connection dropped/i.test(error)) return "The WhatsApp connection was lost. Check your internet connection, then select Connect WhatsApp to try again.";
+  if (/owner|phone number|country code/i.test(error)) return "Enter a valid phone number with its country code, or leave it empty to use your own chat.";
+  if (/logged.?out|unauthorized|bad session|restart.?required/i.test(error)) return "Your WhatsApp session needs to be linked again. Select Re-pair and scan the new code.";
+  return "WhatsApp could not complete this action. Close and reopen Filey, then try again. If it continues, contact support.";
 }

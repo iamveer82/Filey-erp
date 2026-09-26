@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
 import {
   Plus,
@@ -7,7 +8,6 @@ import {
   CalendarDays,
   CheckSquare,
   Square,
-  Loader2,
 } from "lucide-react";
 import { crm, type Activity } from "../lib/api";
 import { fmtDate } from "../lib/format";

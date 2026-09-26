@@ -11,12 +11,18 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      "output", // disposable local QA artifacts; never shipped
       "node_modules",
       ".agents", // vendored agent-skill scripts, not part of the app
       ".claude", // workflow scripts, not part of the app
       "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
       "src-tauri/target",
+      "mobile/android/**/build/**",
+      "mobile/android/.gradle/**",
+      "mobile/android/app/src/main/assets/public/**",
+      "mobile/ios/**/public/**",
+      "mobile/dist/**",
       "public/sw.js", // service-worker globals, hand-written
       "public/tesseract", // vendored tesseract.js worker + wasm (minified)
       "worker", // separate Cloudflare worker deploy, Node runtime

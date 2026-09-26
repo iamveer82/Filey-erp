@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { FileWarning } from "lucide-react";
-import { supabase, invokeFn } from "../lib/supabase";
-import { money } from "../lib/format";
+import { supabase } from "../lib/supabase";
 import DocView, { type DocViewForm, type DocViewLabels } from "../components/DocView";
-import { splitItemMeta, docTotals } from "../lib/docItems";
-import { applyRoundOff } from "../lib/money";
+import { splitItemMeta } from "../lib/docItems";
 import { Spinner, EmptyState } from "../components/ui";
 
 
 /* Public, unauthenticated document viewer for shared links.
  * Route: #/portal/<share_token>
  * Reads through the SECURITY DEFINER get_shared_doc() RPC, which only returns
- * documents the owner has explicitly shared (shared = true). */
+ * documents the owner has explicitly shared (shared = true).
+ * Invoice settlement is arranged directly with the seller. Filey's own plan
+ * and AI-credit checkout does not collect payments for customer invoices. */
 
 interface SharedDoc {
   doc_type: "invoice" | "quotation" | "purchase_order" | "receipt";
@@ -27,8 +27,6 @@ function tokenFromHash(): string {
 export default function PortalView() {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [shared, setShared] = useState<SharedDoc | null>(null);
-  const [paying, setPaying] = useState(false);
-  const [payErr, setPayErr] = useState<string | null>(null);
   const paid = typeof window !== "undefined" && window.location.hash.includes("paid=1");
 
   useEffect(() => {
@@ -52,24 +50,6 @@ export default function PortalView() {
       }
     })();
   }, []);
-
-  const pay = async () => {
-    if (!supabase || !shared || shared.doc_type !== "invoice") return;
-    setPaying(true);
-    setPayErr(null);
-    try {
-      const { data, error } = (await invokeFn(supabase, "stripe", {
-        body: { action: "pay_invoice", token: tokenFromHash() },
-      })) as { data: { url?: string; error?: string } | null; error: { message: string } | null };
-      const res = data;
-      if (error || !res?.url)
-        throw new Error(res?.error || error?.message || "Payment is not available yet.");
-      window.location.href = res.url;
-    } catch (e) {
-      setPayErr(e instanceof Error ? e.message : String(e));
-      setPaying(false);
-    }
-  };
 
   if (state === "loading")
     return (
@@ -144,18 +124,6 @@ export default function PortalView() {
 
   const labels: DocViewLabels = labelsFor(shared.doc_type);
   const status = String(d.status || "draft");
-  // Same total DocView renders (net of discounts, with VAT, round-off when
-  // enabled) — the Pay label must match the document's Total, not the gross
-  // pre-tax subtotal.
-  const totals = applyRoundOff(
-    docTotals(
-      form.items,
-      form.discount || 0,
-      form.tax_rate || 0,
-      form.unit_price_formula
-    ),
-    !!form.round_off
-  );
 
   return (
     <div className="min-h-screen bg-muted px-4 py-10">
@@ -172,15 +140,8 @@ export default function PortalView() {
         </div>
 
         {shared.doc_type === "invoice" && status !== "paid" && !paid && (
-          <div className="mt-6 text-center">
-            {payErr && <p className="text-sm text-danger mb-2">{payErr}</p>}
-            <button
-              className="btn-primary"
-              disabled={paying}
-              onClick={pay}
-            >
-              {paying ? "Preparing payment…" : `Pay ${money(totals.total, ccy)}`}
-            </button>
+          <div className="mt-6 rounded-xl border border-border bg-muted px-4 py-3 text-center text-sm text-muted-foreground">
+            Contact the seller to arrange payment for this invoice.
           </div>
         )}
       </div>

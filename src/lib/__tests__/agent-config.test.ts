@@ -1,10 +1,29 @@
+import { setCacheOrg } from "../api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isToolAllowed, setCapabilityEnabled } from "../capabilities";
+import { offeredTools } from "../agentHarness";
 import { isDue, type AgentTask } from "../agentTasks";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
 
 describe("capabilities gate", () => {
+  it("requires a separate opt-in for agent computers without changing WhatsApp or normal computer use", () => {
+    const offered = () => offeredTools({ isOwner: true }, new Set(["computer"])).map(t => t.name);
+    expect(isToolAllowed("agent_computer")).toBe(false);
+    expect(offered()).not.toContain("agent_computer");
+    expect(isToolAllowed("computer_use")).toBe(true);
+    expect(isToolAllowed("send_whatsapp_file")).toBe(true);
+    setCapabilityEnabled("computer", true);
+    expect(isToolAllowed("agent_computer")).toBe(false);
+    setCapabilityEnabled("agent_computers", true);
+    expect(isToolAllowed("agent_computer")).toBe(true);
+    expect(offered()).toContain("agent_computer");
+    setCapabilityEnabled("computer", false);
+    expect(isToolAllowed("agent_computer")).toBe(false);
+    setCacheOrg("different-org", "different-user");
+    expect(isToolAllowed("agent_computer")).toBe(false);
+    expect(isToolAllowed("send_whatsapp_file")).toBe(true);
+  });
   it("ungrouped read/nav tools are always allowed", () => {
     expect(isToolAllowed("get_stats")).toBe(true);
     expect(isToolAllowed("find_customers")).toBe(true);

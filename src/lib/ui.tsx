@@ -3,9 +3,11 @@ import {
   useCallback,
   useContext,
   useRef,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { Modal } from "../components/ui";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 
 type ToastKind = "success" | "error" | "info";
@@ -86,7 +88,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
     [dismiss]
   );
 
-  const toast = {
+  const toast = useMemo(() => ({
     success: (m: string) => add({ kind: "success", message: m }),
     error: (m: string) => add({ kind: "error", message: m }),
     info: (m: string) => add({ kind: "info", message: m }),
@@ -101,7 +103,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
         },
         6000
       ),
-  };
+  }), [add]);
 
   const confirm = useCallback(
     (opts: ConfirmOpts) =>
@@ -139,9 +141,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
   };
 
   const TOAST_STYLE: Record<ToastKind, string> = {
-    success: "text-success bg-white border-success/30",
-    error: "text-danger bg-white border-danger/30",
-    info: "text-brand-700 bg-white border-brand-200",
+    success: "text-success bg-card border-success/30",
+    error: "text-danger bg-card border-danger/30",
+    info: "text-foreground bg-card border-border",
   };
   const TOAST_ICON: Record<ToastKind, ReactNode> = {
     success: <CheckCircle2 size={16} className="text-success" />,
@@ -149,8 +151,9 @@ export function UIProvider({ children }: { children: ReactNode }) {
     info: <Info size={16} className="text-brand-500" />,
   };
 
+  const value = useMemo(() => ({toast, confirm, prompt, notice}), [toast, confirm, prompt, notice]);
   return (
-    <Ctx.Provider value={{ toast, confirm, prompt, notice }}>
+    <Ctx.Provider value={value}>
       {children}
 
       {/* toasts */}
@@ -197,76 +200,26 @@ export function UIProvider({ children }: { children: ReactNode }) {
         })}
       </div>
 
-      {/* confirm dialog */}
       {confirmState && (
-        <div
-          className="fixed inset-0 z-[101] bg-ink/40 grid place-items-center p-4"
-          onClick={() => closeConfirm(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl bg-card border border-border p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="font-medium text-ink text-lg">{confirmState.title}</p>
-            {confirmState.message && (
-              <p className="text-sm text-brand-500 mt-1.5">{confirmState.message}</p>
-            )}
-            <div className="flex justify-end gap-2 mt-5">
-              {!confirmState.hideCancel && (
-                <button className="btn-ghost" onClick={() => closeConfirm(false)}>
-                  {confirmState.cancelLabel ?? "Cancel"}
-                </button>
-              )}
-              <button
-                className={confirmState.danger ? "btn-danger" : "btn-primary"}
-                onClick={() => closeConfirm(true)}
-              >
-                {confirmState.confirmLabel ?? "Confirm"}
-              </button>
-            </div>
+        <Modal open title={confirmState.title} onClose={() => closeConfirm(false)}>
+          {confirmState.message && <p className="text-sm text-muted-foreground leading-relaxed">{confirmState.message}</p>}
+          <div className="flex flex-wrap justify-end gap-2 mt-5">
+            {!confirmState.hideCancel && <button className="btn-ghost" onClick={() => closeConfirm(false)}>{confirmState.cancelLabel ?? "Cancel"}</button>}
+            <button className={confirmState.danger ? "btn-danger" : "btn-primary"} onClick={() => closeConfirm(true)}>{confirmState.confirmLabel ?? "Confirm"}</button>
           </div>
-        </div>
+        </Modal>
       )}
-
-      {/* prompt dialog */}
       {promptState && (
-        <div
-          className="fixed inset-0 z-[101] bg-ink/40 grid place-items-center p-4"
-          onClick={() => closePrompt(null)}
-        >
-          <form
-            className="w-full max-w-sm rounded-xl bg-card border border-border p-6"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              closePrompt(promptInput.current?.value ?? "");
-            }}
-          >
-            <p className="font-medium text-ink text-lg">{promptState.title}</p>
-            {promptState.label && (
-              <label className="label mt-3">{promptState.label}</label>
-            )}
-            <input
-              ref={promptInput}
-              autoFocus
-              className="input mt-1"
-              placeholder={promptState.placeholder}
-              defaultValue={promptState.defaultValue}
-            />
+        <Modal open title={promptState.title} onClose={() => closePrompt(null)}>
+          <form onSubmit={(e) => { e.preventDefault(); closePrompt(promptInput.current?.value ?? ""); }}>
+            <label className="label" htmlFor="filey-prompt">{promptState.label || promptState.title}</label>
+            <input id="filey-prompt" ref={promptInput} autoFocus className="input mt-1" placeholder={promptState.placeholder} defaultValue={promptState.defaultValue} />
             <div className="flex justify-end gap-2 mt-5">
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => closePrompt(null)}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn-primary">
-                {promptState.confirmLabel ?? "Save"}
-              </button>
+              <button type="button" className="btn-ghost" onClick={() => closePrompt(null)}>Cancel</button>
+              <button type="submit" className="btn-primary">{promptState.confirmLabel ?? "Save"}</button>
             </div>
           </form>
-        </div>
+        </Modal>
       )}
     </Ctx.Provider>
   );

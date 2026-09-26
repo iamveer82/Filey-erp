@@ -68,8 +68,9 @@ export async function logAgentAction(client: any, ownerId: string, action: strin
 // deno-lint-ignore no-explicit-any
 export async function rememberMemory(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
   try {
-    const text = String(input?.text ?? "").trim().slice(0, 500);
+    const text = String(input?.text ?? "").trim();
     if (!text) return { error: "text is required" };
+    if (text.length > 500) return { error: "Keep each memory within 500 characters." };
     const tag = input?.tag ? String(input.tag).trim().slice(0, 40) || null : null;
 
     // De-dupe: same fact (case/whitespace-insensitive) → refresh, don't duplicate.
@@ -80,14 +81,17 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
     if (se) return { error: se.message }; // e.g. table missing — fail soft
     const key = text.toLowerCase();
     // deno-lint-ignore no-explicit-any
-    const dupe = (existing ?? []).find((r: any) => String(r.text ?? "").trim().toLowerCase() === key);
+    const replaceId = String(input?.replace_id ?? "").trim();
+    const dupe = (existing ?? []).find((r: any) => replaceId ? r.id === replaceId : String(r.text ?? "").trim().toLowerCase() === key);
+    if (replaceId && !dupe) return { error: "Memory not found. Recall it again before correcting it." };
     if (dupe) {
       const { error: ue } = await client
         .from("agent_memories")
-        .update({ updated_at: new Date().toISOString(), ...(tag ? { tag } : {}) })
+        .update({ text, updated_at: new Date().toISOString(), ...(tag ? { tag } : {}) })
+        .eq("user_id", ownerId)
         .eq("id", dupe.id);
       if (ue) return { error: ue.message };
-      return { remembered: true, refreshed: true };
+      return { remembered: true, refreshed: true, id: dupe.id };
     }
 
     const { error: ie } = await client
@@ -103,7 +107,7 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
       .order("updated_at", { ascending: false });
     const stale = (ids ?? []).slice(200).map((r: { id: string }) => r.id);
     if (stale.length) {
-      await client.from("agent_memories").delete().in("id", stale);
+      await client.from("agent_memories").delete().eq("user_id", ownerId).in("id", stale);
     }
     return { remembered: true };
   } catch (e) {
@@ -111,29 +115,36 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
   }
 }
 
-/** recall { query? } — the 8 newest memories, optionally filtered by an ilike
- *  on text/tag ([%,().] stripped so the term can't break the PostgREST or()).
+/** recall { query? } — rank up to 200 owner-scoped memories locally, return 8.
  *  Fails SOFT with { error } if the table doesn't exist yet. */
 // deno-lint-ignore no-explicit-any
 export async function recallMemories(client: any, ownerId: string, input: any): Promise<unknown> {
   try {
-    let q = client
+    const q = client
       .from("agent_memories")
-      .select("text,tag,updated_at")
+      .select("id,text,tag,updated_at")
       .eq("user_id", ownerId)
       .order("updated_at", { ascending: false })
-      .limit(8);
+      .limit(200);
     const term = String(input?.query ?? "").trim();
-    if (term) {
-      const safe = term.replace(/[%,().]/g, " ").trim().slice(0, 80);
-      if (safe) q = q.or(`text.ilike.%${safe}%,tag.ilike.%${safe}%`);
-    }
     const { data, error } = await q;
     if (error) return { error: error.message }; // e.g. table missing — fail soft
-    return data ?? [];
+    return rankMemories(data ?? [], term).slice(0, 8);
   } catch (e) {
     return { error: String(e) };
   }
+}
+
+/** Bounded, multilingual retrieval; no remote embeddings or extra model call. */
+export function rankMemories<T extends { text: string; tag?: string | null }>(rows: T[], query: string): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  const terms = [...new Set(q.match(/[\p{L}\p{N}\p{M}]+/gu) ?? [])].filter((t) => t.length > 2);
+  return rows.map((row, index) => {
+    const text = `${row.text} ${row.tag ?? ""}`.toLowerCase();
+    const score = (text.includes(q) ? 10 : 0) + terms.filter((t) => text.includes(t)).length;
+    return { row, index, score };
+  }).filter((r) => r.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).map((r) => r.row);
 }
 
 /** Create a pending payment-reminder action; the webhook executes it when the
@@ -389,6 +400,10 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
   if (!token) return { error: "token is required" };
   if (provider === "whatsapp" && !String(input?.phone_number_id ?? "").trim())
     return { error: "whatsapp also needs phone_number_id" };
+  if (provider === "whatsapp" && !String(input?.app_secret ?? "").trim())
+    return { error: "whatsapp also needs app_secret to verify incoming messages" };
+  if (provider === "slack" && !String(input?.signing_secret ?? "").trim())
+    return { error: "slack also needs signing_secret to verify incoming messages" };
 
   const res = await insertPendingAction(client, {
     user_id: ownerId,
@@ -399,6 +414,7 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
       token,
       phone_number_id: String(input?.phone_number_id ?? "").trim() || null,
       signing_secret: String(input?.signing_secret ?? "").trim() || null,
+      app_secret: String(input?.app_secret ?? "").trim() || null,
     },
   });
   if (!res.ok) return { error: res.error };

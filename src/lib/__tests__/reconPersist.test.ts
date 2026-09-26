@@ -12,8 +12,8 @@ beforeEach(() => {
 describe("fin.markReconciled", () => {
   it("stamps reconciled_at and journals the table", async () => {
     await localClient.from("transactions").insert([
-      { account_id: 1, txn_type: "debit", amount: 100, txn_date: "2026-07-01" },
-      { account_id: 1, txn_type: "credit", amount: 50, txn_date: "2026-07-02" },
+      { id: 1, account_id: 1, txn_type: "debit", amount: 100, txn_date: "2026-07-01" },
+      { id: 2, account_id: 1, txn_type: "credit", amount: 50, txn_date: "2026-07-02" },
     ]);
 
     await fin.markReconciled([1]);

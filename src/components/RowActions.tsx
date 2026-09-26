@@ -67,7 +67,7 @@ export function RowActions({
   const moreBtn = useRef<HTMLButtonElement>(null);
 
   const btn =
-    "h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
+    "h-7 w-7 grid place-items-center rounded-full text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
 
   return (
     <div
@@ -86,7 +86,7 @@ export function RowActions({
           aria-label="Quick view"
           className={btn}
         >
-          <Eye className="h-3.5 w-3.5" />
+          <Eye className="h-4 w-4" />
         </button>
       )}
       {onEdit && (
@@ -99,7 +99,7 @@ export function RowActions({
           aria-label="Edit"
           className={btn}
         >
-          <Pencil className="h-3.5 w-3.5" />
+          <Pencil className="h-4 w-4" />
         </button>
       )}
       {onCopy && (
@@ -112,7 +112,7 @@ export function RowActions({
           aria-label="Duplicate"
           className={btn}
         >
-          <Copy className="h-3.5 w-3.5" />
+          <Copy className="h-4 w-4" />
         </button>
       )}
       {onShare && (
@@ -125,7 +125,7 @@ export function RowActions({
           aria-label={shareLabel}
           className={btn}
         >
-          <Users className="h-3.5 w-3.5" />
+          <Users className="h-4 w-4" />
         </button>
       )}
       {onSend && (
@@ -141,7 +141,7 @@ export function RowActions({
             aria-expanded={openSend}
             className={btn}
           >
-            <Send className="h-3.5 w-3.5" />
+            <Send className="h-4 w-4" />
           </button>
           <MenuPopover
             open={openSend}
@@ -153,7 +153,7 @@ export function RowActions({
           >
             {onSend.whatsapp && (
               <MenuItemRow
-                icon={<MessageCircle size={14} />}
+                icon={<MessageCircle size={16} />}
                 label="WhatsApp"
                 onClick={() => {
                   setOpenSend(false);
@@ -163,7 +163,7 @@ export function RowActions({
             )}
             {onSend.email && (
               <MenuItemRow
-                icon={<Mail size={14} />}
+                icon={<Mail size={16} />}
                 label="Email"
                 onClick={() => {
                   setOpenSend(false);
@@ -173,7 +173,7 @@ export function RowActions({
             )}
             {onSend.sms && (
               <MenuItemRow
-                icon={<Phone size={14} />}
+                icon={<Phone size={16} />}
                 label="SMS"
                 onClick={() => {
                   setOpenSend(false);
@@ -185,7 +185,7 @@ export function RowActions({
               <>
                 <MenuSep />
                 <MenuItemRow
-                  icon={<Link2 size={14} />}
+                  icon={<Link2 size={16} />}
                   label="Copy link"
                   onClick={() => {
                     setOpenSend(false);
@@ -210,7 +210,7 @@ export function RowActions({
             aria-expanded={openMore}
             className={btn}
           >
-            <MoreHorizontal className="h-3.5 w-3.5" />
+            <MoreHorizontal className="h-4 w-4" />
           </button>
           <MenuPopover
             open={openMore}
@@ -222,7 +222,7 @@ export function RowActions({
           >
             <MenuItemRow
               danger
-              icon={<Trash2 size={14} />}
+              icon={<Trash2 size={16} />}
               label="Delete"
               onClick={() => {
                 setOpenMore(false);
@@ -312,23 +312,23 @@ export function QuickViewModal({
             {onPrint && (
               <button
                 onClick={onPrint}
-                className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+                className="btn-ghost text-[12.5px]"
               >
-                <Printer className="h-3.5 w-3.5" /> Print
+                <Printer className="h-4 w-4" /> Print
               </button>
             )}
             {onEdit && (
               <button
                 onClick={onEdit}
-                className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground inline-flex items-center gap-1.5"
+                className="btn-ghost text-[12.5px]"
               >
-                <Pencil className="h-3.5 w-3.5" /> Edit
+                <Pencil className="h-4 w-4" /> Edit
               </button>
             )}
             <button
               onClick={onClose}
               aria-label="Close"
-              className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-muted-foreground"
+              className="btn-ghost h-10 w-10 p-0"
             >
               <X className="h-4 w-4" />
             </button>

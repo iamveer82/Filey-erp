@@ -7,6 +7,7 @@ import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
 import { ORB_PRESETS, setPersona } from "../../lib/ai";
 import BloubBot, { useBotSkin } from "../../components/BloubBot";
 import { cn } from "../../lib/format";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 /* ---------------- Appearance — theme mode + accent color ----------------
    Reference Settings "Preferences" layout, wired to the real stores:
@@ -32,24 +33,16 @@ export default function AppearancePanel() {
   const smooth = useSyncExternalStore(subscribe, getSmoothScroll);
 
   return (
-    <div className="space-y-4">
+    <SettingsPanel>
       {/* Theme mode */}
-      <div className="rounded-xl border border-border bg-card">
-        <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[15px] font-semibold text-ink">
-            Modes
-          </div>
-          <div className="text-[13px] text-muted-foreground mt-1">
-            Light for daytime, dark for focus.
-          </div>
-        </div>
-        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <SettingsSection title="Theme" description="Choose a light or dark workspace.">
+        <div className="grid max-w-xl grid-cols-2 gap-3">
           <ModeCard
             active={theme === "light"}
             onClick={() => setTheme("light")}
             icon={Sun}
             name="Light"
-            desc="Clean and airy for daytime work"
+            desc="A bright workspace"
             preview="light"
           />
           <ModeCard
@@ -57,47 +50,33 @@ export default function AppearancePanel() {
             onClick={() => setTheme("dark")}
             icon={Moon}
             name="Dark"
-            desc="Easy on the eyes at night"
+            desc="A quieter workspace"
             preview="dark"
           />
         </div>
-      </div>
+      </SettingsSection>
 
       {/* Scrolling */}
-      <div className="rounded-xl border border-border bg-card">
-        <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[15px] font-semibold text-ink">
-            Scrolling
-          </div>
-          <div className="text-[13px] text-muted-foreground mt-1">
-            How the main panel responds to your mouse wheel.
-          </div>
-        </div>
-        <div className="p-6 flex items-start justify-between gap-6">
+      <SettingsSection title="Scrolling" description="Adjust how the workspace moves.">
+        <label className="flex max-w-xl items-start justify-between gap-6">
           <div className="min-w-0">
             <div className="text-[14px] text-foreground">Smooth scrolling</div>
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">
-              Eases the wheel instead of jumping line by line. Tables, menus and
-              the sidebar always scroll normally, and this turns itself off when
-              your system asks for reduced motion.
+            <div className="text-[13px] leading-relaxed text-muted-foreground mt-1.5">
+              Gently ease mouse-wheel scrolling. Your system's reduced-motion preference
+              takes priority.
             </div>
           </div>
           <Toggle on={smooth} onChange={setSmoothScroll} />
-        </div>
-      </div>
+        </label>
+      </SettingsSection>
 
       {/* Accent color */}
-      <div className="rounded-xl border border-border bg-card">
-        <div className="px-6 pt-5 pb-4 border-b border-border">
-          <div className="text-[15px] font-semibold text-ink">
-            Theme colour
-          </div>
-          <div className="text-[13px] text-muted-foreground mt-1">
-            Drives buttons, toggles, highlights and charts across the whole app.
-          </div>
-        </div>
-        <div className="p-6">
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+      <SettingsSection
+        title="Accent colour"
+        description="Used for buttons, selections and charts."
+      >
+        <div>
+          <div className="flex max-w-xl flex-wrap gap-2">
             {(
               Object.entries(accentPalette) as [
                 AccentKey,
@@ -106,25 +85,26 @@ export default function AppearancePanel() {
             ).map(([key, val]) => (
               <button
                 key={key}
+                aria-pressed={accent === key}
                 onClick={() => {
                   setAccent(key);
                   // Selection is instantly visible (ring + check) — no toast needed.
                 }}
                 className={cn(
-                  "p-3 rounded-lg border text-left transition-all cursor-pointer",
+                  "min-h-10 px-3 rounded-full border text-left transition-colors cursor-pointer",
                   accent === key
-                    ? "border-foreground ring-2 ring-foreground/20"
-                    : "border-border hover:border-muted-foreground"
+                    ? "border-foreground bg-hover"
+                    : "border-border hover:bg-hover"
                 )}
               >
                 <div className="flex items-center gap-2">
                   <div
-                    className="h-6 w-6 rounded-full shrink-0 relative shadow-inner"
+                    className="h-4 w-4 rounded-full shrink-0 relative"
                     style={{ background: val.hex }}
                   >
                     {accent === key && (
                       <Check
-                        className="h-3 w-3 text-white absolute inset-0 m-auto"
+                        className="h-3 w-3 rounded-full bg-white text-black absolute inset-0 m-auto"
                         strokeWidth={3}
                       />
                     )}
@@ -137,10 +117,10 @@ export default function AppearancePanel() {
             ))}
           </div>
         </div>
-      </div>
+      </SettingsSection>
 
       <AssistantColor />
-    </div>
+    </SettingsPanel>
   );
 }
 
@@ -159,20 +139,14 @@ function AssistantColor() {
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="px-6 pt-5 pb-4 border-b border-border">
-        <div className="text-[15px] font-semibold text-ink">
-          Filey AI
-        </div>
-        <div className="text-[13px] text-muted-foreground mt-1">
-          The colour the bot is drawn in, wherever it appears. Independent of
-          the theme colour.
-        </div>
-      </div>
-      <div className="p-6 flex flex-col sm:flex-row sm:items-center gap-6">
+    <SettingsSection
+      title="Filey AI"
+      description="Give your animated assistant its own colour."
+    >
+      <div className="flex max-w-xl items-center gap-5">
         {/* A live one, not a swatch: this is exactly what the chat will show. */}
-        <div className="grid h-[128px] w-[128px] shrink-0 place-items-center rounded-xl bg-hover">
-          <BloubBot size={128} state="idle" label="Assistant preview" ambient />
+        <div className="shrink-0">
+          <BloubBot size={64} state="idle" label="Assistant preview" ambient />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-2">
@@ -183,15 +157,18 @@ function AssistantColor() {
                 aria-label={`Use ${hex}`}
                 aria-pressed={color.toLowerCase() === hex.toLowerCase()}
                 className={cn(
-                  "h-9 w-9 rounded-full grid place-items-center transition-all cursor-pointer",
+                  "h-10 w-10 rounded-full grid place-items-center transition-colors cursor-pointer",
                   color.toLowerCase() === hex.toLowerCase()
                     ? "ring-2 ring-foreground ring-offset-2 ring-offset-card"
-                    : "hover:scale-105"
+                    : "hover:ring-2 hover:ring-border"
                 )}
                 style={{ background: hex }}
               >
                 {color.toLowerCase() === hex.toLowerCase() && (
-                  <Check className="h-4 w-4 text-white" strokeWidth={3} />
+                  <Check
+                    className="h-4 w-4 rounded-full bg-white text-black"
+                    strokeWidth={2.5}
+                  />
                 )}
               </button>
             ))}
@@ -201,14 +178,14 @@ function AssistantColor() {
               type="color"
               value={color}
               onChange={(e) => setPersona({ orbColor: e.target.value })}
-              className="h-8 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
+              className="h-10 w-14 cursor-pointer rounded-[8px] border border-border bg-transparent p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Custom assistant colour"
             />
-            Or pick any colour
+            Custom colour
           </label>
         </div>
       </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -238,13 +215,13 @@ function ModeCard({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "text-left rounded-lg border p-3 transition-all cursor-pointer",
+        "min-w-0 text-left rounded-xl border p-3 transition-colors cursor-pointer",
         active
-          ? "border-foreground ring-2 ring-foreground/20"
+          ? "border-foreground bg-hover/50"
           : "border-border hover:border-muted-foreground"
       )}
     >
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="h-8 w-8 rounded-lg bg-hover border border-border grid place-items-center text-foreground">
           <Icon className="h-4 w-4" strokeWidth={1.75} />
         </div>
@@ -253,10 +230,7 @@ function ModeCard({
           <div className="text-[11.5px] text-muted-foreground">{desc}</div>
         </div>
       </div>
-      <div
-        className="rounded-md overflow-hidden border"
-        style={{ borderColor: border }}
-      >
+      <div className="rounded-md overflow-hidden border" style={{ borderColor: border }}>
         <div style={{ background: bg, padding: 8 }}>
           <div
             style={{

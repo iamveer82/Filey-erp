@@ -33,7 +33,7 @@ async function firstOf<T>(
     try {
       return await b.run();
     } catch (e) {
-      console.error("[firstOf]", b.name, e);
+      tried.push(`${b.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   throw new ReachError(
@@ -57,11 +57,14 @@ async function ghFetch(url: string): Promise<string> {
     return (await httpFetch(url)).body;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/\(404\)/.test(msg))
+    // AiError carries the status; the message is provider-flavoured ("Model or
+    // endpoint not found") and must never reach a GitHub user.
+    const status = (e as { status?: number }).status;
+    if (status === 404 || /\(404\)/.test(msg))
       throw new ReachError(
         `Not found — the repo/file does not exist, or it is private (private repos need the gh CLI, which the agent can run on desktop).`
       );
-    if (/\(403\)/.test(msg))
+    if (status === 403 || status === 429 || /\(403\)/.test(msg))
       throw new ReachError(`GitHub API rate limit hit (60/hr unauthenticated). Try again later.`);
     throw e;
   }
@@ -156,9 +159,8 @@ export async function youtubeVideo(input: string): Promise<ChannelResult & { tra
   return {
     via: "youtube",
     transcript,
-    content:
-      wrap(`youtube:${id}`, `YouTube ${id} — ${header}\n\n${body}${note}`) +
-      (transcript ? `\n\nTRANSCRIPT:\n${clip(transcript, 12000)}` : ""),
+    content: wrap(`youtube:${id}`, `YouTube ${id} — ${header}\n\n${body}${note}` +
+      (transcript ? `\n\nTRANSCRIPT:\n${clip(transcript, 12000)}` : "")),
   };
 }
 
@@ -175,13 +177,11 @@ export async function githubRepo(repoInput: string): Promise<ChannelResult> {
   const res = await ghFetch(`https://api.github.com/repos/${slug}`);
   const repo = JSON.parse(res) as Record<string, unknown>;
 
-  const readmeRes = await ghFetch(
-    `https://api.github.com/repos/${slug}/readme`
-  );
   let readme = '';
   try {
+    const readmeRes = await ghFetch(`https://api.github.com/repos/${slug}/readme`);
     const rm = JSON.parse(readmeRes) as { content?: string };
-    if (rm.content) readme = clip(atob(rm.content.replace(/\n/g, '')), 8000);
+    if (rm.content) readme = clip(new TextDecoder().decode(Uint8Array.from(atob(rm.content.replace(/\n/g, '')), (c) => c.charCodeAt(0))), 8000);
   } catch { /* README is optional */ }
 
   const lines = [
@@ -222,7 +222,7 @@ export async function githubSearch(query: string, kind: "repos" | "issues" = "re
     total_count?: number;
     items?: { full_name?: string; title?: string; html_url?: string; description?: string; stargazers_count?: number; state?: string }[];
   };
-  const lines = [`GitHub ${kind}: ${data.total_count ?? 0} results for "${q}"`];
+  const lines = [`GitHub ${kind}: ${data.total_count ?? 0} results for "${q}"`];
   for (const it of data.items ?? []) {
     lines.push(
       kind === "repos"
@@ -296,10 +296,6 @@ function parseFeedXml(xml: string, limit: number): { title: string; link: string
 
 export async function rssFeed(feedUrl: string, limit = 15): Promise<ChannelResult> {
   const target = feedUrl.trim();
-  // Same public-web rule as every other reader: no intranet feeds.
-  await firstOf("feed validation", [
-    { name: "url-check", run: async () => void 0 },
-  ]);
   const xml = await firstOf(`RSS ${target}`, [
     {
       name: "direct",

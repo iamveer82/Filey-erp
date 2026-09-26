@@ -1,11 +1,16 @@
 // Filey — overdue invoice email reminders (Deno edge function).
 //
 // Run on a schedule (Supabase pg_cron, or any external cron hitting this URL)
-// to email customers whose issued invoices are past due. Uses the service
-// role to read across orgs, and Resend to send.
+// to email customers whose issued invoices are past due, using Resend to send.
+//
+// SCOPE: one org — the OWNER_USER_ID org, the same pin agent-jobs uses. The
+// service role can read every tenant's invoices, and an unscoped query here
+// would mail another business's customers from this deployment's FROM address,
+// signed by us. Per-tenant reminders need each org to opt in with its own
+// sender identity; until that exists, this stays pinned to the operator.
 //
 // Secrets to set:  RESEND_API_KEY,  REMINDER_FROM (e.g. "Filey <billing@yourdomain>"),
-//                  SITE_URL (for the portal link),
+//                  SITE_URL (for the portal link),  OWNER_USER_ID (REQUIRED),
 //                  AGENT_JOBS_SECRET (REQUIRED — fail-closed; same secret the
 //                  agent-jobs function uses, sent as x-agent-secret header).
 // Deploy:  supabase functions deploy overdue-reminders --no-verify-jwt
@@ -22,6 +27,7 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("REMINDER_FROM") ?? "Filey <reminders@filey.app>";
 const SITE_URL = Deno.env.get("SITE_URL") ?? "";
 const SECRET = Deno.env.get("AGENT_JOBS_SECRET") ?? "";
+const OWNER = Deno.env.get("OWNER_USER_ID") ?? "";
 
 // Customer names/numbers land in email HTML — escape them.
 const esc = (s: unknown) =>
@@ -39,16 +45,28 @@ Deno.serve(async (req) => {
   if (!RESEND_API_KEY) {
     return Response.json({ error: "RESEND_API_KEY not set" }, { status: 400 });
   }
+  if (!OWNER) {
+    return Response.json({ error: "OWNER_USER_ID not set" }, { status: 400 });
+  }
   const supa = createClient(SUPABASE_URL, SERVICE_ROLE);
   const today = new Date().toISOString().slice(0, 10);
 
+  // Which org this deployment speaks for. No org, no mail — never fall back to
+  // "every org", which is exactly the blast this function must not send.
+  const { data: profile, error: profileError } = await supa
+    .from("profiles").select("org_id").eq("id", OWNER).maybeSingle();
+  if (profileError) return Response.json({ error: profileError.message }, { status: 500 });
+  const org = profile?.org_id ?? null;
+  if (!org) return Response.json({ error: "owner org not found" }, { status: 400 });
+
   // Issued (non-draft, unpaid) invoices past their due date, with an email.
+  // Cancelled/void invoices must never be chased.
   const { data, error } = await supa
     .from("invoice_docs")
     .select("id, number, customer_name, customer_email, due_date, currency, share_token, status")
+    .eq("org_id", org)
     .lt("due_date", today)
-    .neq("status", "paid")
-    .neq("status", "draft");
+    .not("status", "in", "(paid,draft,cancelled,void,voided,deleted)");
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   let sent = 0;

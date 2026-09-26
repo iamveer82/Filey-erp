@@ -236,12 +236,14 @@ Deno.test("connect_channel approval scrubs parked credentials from the row", asy
       org_id: "default",
       status: "pending",
       created_at: new Date().toISOString(),
-      payload: { provider: "whatsapp", token: "EAAG-secret", phone_number_id: "pnid-1", signing_secret: null },
+      payload: { provider: "whatsapp", token: "EAAG-secret", phone_number_id: "pnid-1", app_secret: "meta-secret", signing_secret: null },
     });
     const reply = await handleApproval(f.client, "OWNER", "APPROVE 2345", io);
-    assertEquals(reply?.startsWith("✅ whatsapp is wired up"), true);
+    assertEquals(reply?.startsWith("WhatsApp credentials saved."), true);
+    assertEquals(reply?.includes("subscribe to messages"), true);
     const scrubbed = f.state.scrubPatches.at(-1) as Record<string, string>;
     assertEquals(scrubbed.token, "[scrubbed]");
+    assertEquals(scrubbed.app_secret, "[scrubbed]");
     assertEquals(Object.values(scrubbed).includes("EAAG-secret"), false);
     assertEquals(f.state.upserts.length, 1, "channel must be configured");
   } finally {

@@ -1,6 +1,8 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
+import { SettingsSection } from "./SettingsLayout";
 import {
   checkForUpdateStrict,
   hasDesktop,
@@ -56,9 +58,7 @@ export default function UpdateCard() {
     setState({ k: "installing", pct: 0 });
     try {
       // Relaunches on success, so there is no "done" state to render.
-      await installUpdate(info.handle, (pct) =>
-        setState({ k: "installing", pct })
-      );
+      await installUpdate(info.handle, (pct) => setState({ k: "installing", pct }));
     } catch (e) {
       setState({
         k: "failed",
@@ -70,17 +70,13 @@ export default function UpdateCard() {
   const busy = state.k === "checking" || state.k === "installing";
 
   return (
-    <div className="card">
-      <p className="font-medium text-ink">App version</p>
-      <p className="text-sm text-brand-500 mt-0.5 mb-4">
-        You're running Filey {version ?? "…"}.
-      </p>
-
+    <SettingsSection
+      title="App updates"
+      description={`You're running Filey ${version ?? "…"}. Keep the desktop app up to date.`}
+    >
       {state.k === "found" ? (
         <div className="space-y-3">
-          <p className="text-sm text-ink">
-            Version {state.info.version} is available.
-          </p>
+          <p className="text-sm text-ink">Version {state.info.version} is available.</p>
           {state.info.notes && (
             <p className="text-[13px] text-brand-500 whitespace-pre-line max-h-40 overflow-y-auto">
               {state.info.notes}
@@ -91,7 +87,7 @@ export default function UpdateCard() {
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button className="btn-ghost" onClick={look} disabled={busy}>
             {busy ? (
               <Loader2 size={15} className="animate-spin" />
@@ -108,12 +104,10 @@ export default function UpdateCard() {
             <span className="text-sm text-brand-500">You're up to date.</span>
           )}
           {state.k === "failed" && (
-            <span className="text-sm text-danger">
-              Couldn't check: {state.msg}
-            </span>
+            <span className="text-sm text-danger">Couldn't check: {state.msg}</span>
           )}
         </div>
       )}
-    </div>
+    </SettingsSection>
   );
 }

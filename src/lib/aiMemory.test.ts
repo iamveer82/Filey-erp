@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { addMemory, clearMemories, searchMemories } from "./aiMemory";
+import { setCacheOrg } from "./api";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { addMemory, clearMemories, searchMemories, listMemories, memoryDigest } from "./aiMemory";
 
 describe("searchMemories", () => {
   beforeEach(() => {
+    localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user");
     clearMemories();
   });
 
@@ -52,5 +54,34 @@ describe("searchMemories", () => {
   it("respects the limit", () => {
     for (let i = 0; i < 10; i++) addMemory(`invoice note ${i}`);
     expect(searchMemories("invoice", 3)).toHaveLength(3);
+  });
+
+  it("replaces a corrected fact without losing its identity", () => {
+    const old = addMemory("Bapco gets 5% discount", "customer");
+    const corrected = addMemory("Bapco gets 8% discount", "customer", old.id);
+    expect(corrected.id).toBe(old.id);
+    expect(listMemories().map((m) => m.text)).toEqual(["Bapco gets 8% discount"]);
+    expect(() => addMemory("new fact", undefined, "missing")).toThrow(/no longer exists/);
+  });
+
+  it("refreshes duplicate facts to the front and recalls Arabic terms", () => {
+    addMemory("Bapco gets 5% discount");
+    addMemory("unrelated");
+    addMemory("Bapco gets 5% discount");
+    expect(listMemories()[0].text).toContain("Bapco");
+    addMemory("يرجى إرسال الفواتير كل أسبوع");
+    expect(searchMemories("الفواتير أسبوع")).toHaveLength(1);
+  });
+
+  it("surfaces older relevant facts ahead of recent unrelated facts", () => {
+    addMemory("Bapco gets 5% discount");
+    for (let i = 0; i < 15; i++) addMemory(`unrelated note ${i}`);
+    expect(memoryDigest(3, "Bapco discount")).toContain("Bapco gets 5%");
+  });
+
+  it("never reports a successful save when storage refuses it", () => {
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
+    try { expect(() => addMemory("a fact")).toThrow(/could not be saved/); }
+    finally { spy.mockRestore(); }
   });
 });

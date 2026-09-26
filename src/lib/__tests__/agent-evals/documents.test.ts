@@ -3,7 +3,7 @@ import { aiAgentStream, setAiConfig } from "../../ai";
 import type { AgentEvent } from "../../agentHarness";
 import { setDataMode } from "../../dataMode";
 import { setAgentMode } from "../../agentMode";
-import { billing, quotes } from "../../api";
+import { billing, quotes, setCacheOrg } from "../../api";
 import { TOOLS } from "../../aiTools";
 import { invoiceLineAmount, r2 } from "../../money";
 import { calls, says, scriptModel } from "./scriptedModel";
@@ -19,6 +19,7 @@ import { calls, says, scriptModel } from "./scriptedModel";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg("test-org", "test-user");
   setAgentMode("auto"); // gates get their own cases below
   setAiConfig({
     provider: "openai",

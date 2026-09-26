@@ -1,14 +1,32 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Plus } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
 import { RowActions } from "../components/RowActions";
-import { tools } from "../lib/api";
+import { tools, getCacheScope } from "../lib/api";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
+import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
 
 const TMPL_KEY = "filey_email_templates";
 /** Mirror key in Supabase (app_settings) for cross-device sync. */
 const SETTING_KEY = "email_templates";
+const cacheKey = () => {
+  try { assertWorkspaceCurrent(); } catch { return null; }
+  const scope = getCacheScope();
+  return scope ? `${TMPL_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
+};
+
+function subscribeScope(changed: () => void) {
+  window.addEventListener("filey:agent-storage", changed);
+  window.addEventListener("filey:workspace-changed", changed);
+  window.addEventListener("storage", changed);
+  return () => {
+    window.removeEventListener("filey:agent-storage", changed);
+    window.removeEventListener("filey:workspace-changed", changed);
+    window.removeEventListener("storage", changed);
+  };
+}
 
 interface EmailTemplate {
   id: number;
@@ -19,39 +37,43 @@ interface EmailTemplate {
   created_at: string;
 }
 
-function load(): EmailTemplate[] {
+function load(key: string | null): EmailTemplate[] {
   try {
-    try { return JSON.parse(localStorage.getItem(TMPL_KEY) || "[]"); } catch { return []; }
+    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load email templates", e);
     return [];
   }
 }
-function save(t: EmailTemplate[]) {
+function save(t: EmailTemplate[], key: string | null): boolean {
+  if (!key || cacheKey() !== key) return false;
   try {
-    localStorage.setItem(TMPL_KEY, JSON.stringify(t));
+    localStorage.setItem(key, JSON.stringify(t));
   } catch (e) {
     console.warn("Failed to save email templates", e);
   }
   // Write-through to Supabase so templates follow the user across devices.
   void tools.setSetting(SETTING_KEY, JSON.stringify(t)).catch((e) => console.warn("Failed to sync email templates to server", e));
+  return true;
 }
 
 /** Pull email templates saved on other devices; remote wins when present. */
-async function syncEmailTemplates(): Promise<EmailTemplate[]> {
+async function syncEmailTemplates(key: string | null): Promise<EmailTemplate[] | null> {
+  if (!key || cacheKey() !== key) return null;
   try {
     const settings = await tools.settings();
+    if (cacheKey() !== key) return null;
     const row = settings.find((s) => s.key === SETTING_KEY);
     if (row?.value) {
       const remote: EmailTemplate[] = JSON.parse(row.value);
-      localStorage.setItem(TMPL_KEY, JSON.stringify(remote));
+      localStorage.setItem(key, JSON.stringify(remote));
       return remote;
     }
   } catch (e) {
     console.warn("Failed to sync email templates from server", e);
     /* offline / not configured — fall back to local */
   }
-  return load();
+  return cacheKey() === key ? load(key) : null;
 }
 
 const CATEGORIES = [
@@ -84,28 +106,36 @@ const DEFAULT_TEMPLATES: Omit<EmailTemplate, "id" | "created_at">[] = [
   },
 ];
 
-function seedDefaults(existing: EmailTemplate[]) {
-  if (existing.length > 0) return existing;
-  const seeded = DEFAULT_TEMPLATES.map((t, i) => ({
-    ...t,
-    id: Date.now() + i + 1,
-    created_at: new Date().toISOString(),
-  }));
-  save(seeded);
-  return seeded;
+export default function EmailTemplates() {
+  const scope = useSyncExternalStore(subscribeScope, cacheKey);
+  // An editor from one account or storage mode must never carry into another.
+  return <EmailTemplatesWorkspace key={scope || "signed-out"} scope={scope} />;
 }
 
-export default function EmailTemplates() {
+function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
   const { toast, confirm } = useUI();
-  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [templates, setTemplates] = useState<EmailTemplate[]>(() => load(scope));
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<EmailTemplate | null>(null);
-  useEffect(() => {
-    syncEmailTemplates()
-      .then((t) => setTemplates(seedDefaults(t)))
+  const reload = useCallback(() => {
+    return syncEmailTemplates(scope)
+      .then((t) => { if (t !== null) setTemplates(t); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [scope]);
+  useEffect(() => { void reload(); }, [reload]);
+  useLiveSync(reload);
+
+  const addStarters = () => {
+    const seeded = DEFAULT_TEMPLATES.map((t, i) => ({
+      ...t,
+      id: Date.now() + i + 1,
+      created_at: new Date().toISOString(),
+    }));
+    if (!save(seeded, scope)) return;
+    setTemplates(seeded);
+    toast.success("Starter templates added.");
+  };
 
   const del = async (t: EmailTemplate) => {
     const ok = await confirm({
@@ -116,8 +146,8 @@ export default function EmailTemplates() {
     });
     if (!ok) return;
     const next = templates.filter((x) => x.id !== t.id);
+    if (!save(next, scope)) return;
     setTemplates(next);
-    save(next);
     toast.success("Deleted.");
   };
 
@@ -129,8 +159,8 @@ export default function EmailTemplates() {
       created_at: new Date().toISOString(),
     };
     const next = [...templates, copy];
+    if (!save(next, scope)) return;
     setTemplates(next);
-    save(next);
     toast.success("Duplicated.");
   };
 
@@ -142,8 +172,13 @@ export default function EmailTemplates() {
         title="Email Templates"
         subtitle="Reusable email templates with placeholders"
         action={
+          <div className="flex flex-wrap gap-2">
+          {!loading && templates.length === 0 && (
+            <button className="btn-ghost" disabled={!scope} onClick={addStarters}>Use starter templates</button>
+          )}
           <button
             className="btn-primary"
+            disabled={!scope || loading}
             onClick={() => {
               setEdit(null);
               setOpen(true);
@@ -151,6 +186,7 @@ export default function EmailTemplates() {
           >
             <Plus size={16} /> New template
           </button>
+          </div>
         }
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 joined-kpis mb-6">
@@ -222,8 +258,8 @@ export default function EmailTemplates() {
                   ...templates,
                   { ...t, id: Date.now(), created_at: new Date().toISOString() },
                 ];
+            if (!save(next, scope)) return;
             setTemplates(next);
-            save(next);
             setOpen(false);
             toast.success(edit ? "Updated." : "Template added.");
           }}
@@ -260,7 +296,7 @@ function TemplateModal({
       size="lg"
     >
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Template Name *">
             <input
               className="input"
@@ -297,10 +333,10 @@ function TemplateModal({
         </Field>
         <div className="text-xs text-brand-400 bg-brand-50 rounded-xl p-3">
           <p className="font-medium mb-1">Available placeholders:</p>
-          <code className="text-[11px]">{`{{customer}} {{company}} {{number}} {{amount}} {{date}} {{due_date}} {{items}} {{link}}`}</code>
+          <code className="text-xs break-words">{`{{customer}} {{company}} {{number}} {{amount}} {{date}} {{due_date}} {{items}} {{link}}`}</code>
         </div>
       </div>
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -309,7 +345,7 @@ function TemplateModal({
           disabled={!valid}
           onClick={() => onSaved(f as EmailTemplate)}
         >
-          {edit ? "Update" : "Create template"}
+          {edit ? "Save changes" : "Create template"}
         </button>
       </div>
     </Modal>

@@ -1,32 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Paperclip } from "lucide-react";
+import { Link } from "react-router-dom";
 import { fin, type Expense } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { aed, fmtDate, num, errMsg, todayYmd } from "../lib/format";
-import { PageHeader, Badge, ErrorBanner, Modal, Field, MetricCard } from "../components/ui";
-import { SelectMenu } from "../components/ui-menu";
+import { PageHeader, Badge, ErrorBanner, MetricCard } from "../components/ui";
 import { useUI } from "../lib/ui";
 
-const CATEGORIES = [
-  "Rent", "Utilities", "Salaries", "Office Supplies", "Travel",
-  "Marketing", "Maintenance", "Fuel", "Logistics", "Insurance",
-  "Professional Fees", "Bank Charges", "Miscellaneous",
-];
-
 export default function Purchase() {
-  const { toast } = useUI();
+  const { toast, confirm } = useUI();
+  const [removing, setRemoving] = useState<number | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    category: "Rent",
-    description: "",
-    amount: "",
-    expense_date: todayYmd(),
-  });
-  const [saving, setSaving] = useState(false);
-
   const load = () => {
     setError("");
     return fin
@@ -38,7 +24,7 @@ export default function Purchase() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["expenses"]);
 
   const totalSpend = useMemo(
     () => expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0),
@@ -46,16 +32,9 @@ export default function Purchase() {
   );
 
   const thisMonth = useMemo(() => {
-    const now = new Date();
+    const month = todayYmd().slice(0, 7);
     return expenses
-      .filter((e) => {
-        const d = new Date(e.expense_date);
-        return (
-          !isNaN(d.getTime()) &&
-          d.getMonth() === now.getMonth() &&
-          d.getFullYear() === now.getFullYear()
-        );
-      })
+      .filter((e) => e.expense_date?.slice(0, 7) === month)
       .reduce((s, e) => s + (Number(e.amount) || 0), 0);
   }, [expenses]);
 
@@ -65,53 +44,23 @@ export default function Purchase() {
       g.set(e.category, (g.get(e.category) ?? 0) + (Number(e.amount) || 0));
     }
     return Array.from(g.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6);
+      .sort((a, b) => b[1] - a[1]);
   }, [expenses]);
 
   const maxCat = byCategory[0]?.[1] || 1;
 
   const avgEntry = expenses.length ? totalSpend / expenses.length : 0;
 
-  const save = async () => {
-    const amt = Number(form.amount);
-    if (!amt || amt <= 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
-    setSaving(true);
-    try {
-      await fin.createExpense(
-        form.category,
-        form.description || null,
-        amt,
-        form.expense_date,
-        null
-      );
-      toast.success("Expense logged");
-      setOpen(false);
-      setForm({
-        category: "Rent",
-        description: "",
-        amount: "",
-        expense_date: todayYmd(),
-      });
-      load();
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const remove = async (id: number) => {
+    if (removing !== null || !await confirm({ title: "Delete this expense?", message: "This also reverses its accounting entries. The receipt remains in My Files.", confirmLabel: "Delete expense", danger: true })) return;
+    setRemoving(id);
     try {
       await fin.deleteExpense(id);
       toast.success("Expense deleted");
       load();
     } catch (e) {
       toast.error(errMsg(e));
-    }
+    } finally { setRemoving(null); }
   };
 
   return (
@@ -120,9 +69,9 @@ export default function Purchase() {
         title="Purchase"
         subtitle="Log and track company expenses"
         action={
-          <button className="btn-primary" onClick={() => setOpen(true)}>
+          <Link className="btn-primary" to="/purchase/new">
             <Plus size={16} /> Log expense
-          </button>
+          </Link>
         }
       />
 
@@ -137,7 +86,7 @@ export default function Purchase() {
         <MetricCard
           label="Total expenses"
           value={aed(totalSpend)}
-          change={`${num(expenses.length)} entries`}
+          change={`${num(expenses.length)} ${expenses.length === 1 ? "entry" : "entries"}`}
           changeTone="up"
         />
         <MetricCard
@@ -174,7 +123,7 @@ export default function Purchase() {
             </div>
           ) : (
             <div className="mt-4 space-y-3">
-              {byCategory.map(([name, amount]) => (
+              {byCategory.slice(0, 6).map(([name, amount]) => (
                 <div key={name}>
                   <div className="flex items-center justify-between text-[13px]">
                     <span className="text-foreground">{name}</span>
@@ -238,15 +187,18 @@ export default function Purchase() {
                       <Badge tone="info">{e.category}</Badge>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground truncate max-w-[200px]">
-                      {e.description || "—"}
+                      <Link className="font-medium text-foreground hover:underline" to={`/purchase/${e.id}`}>{e.details?.vendor || e.description || e.category}</Link>
+                      {e.details?.receipt && <Paperclip size={13} className="ml-2 inline" aria-label="Receipt attached" />}
                     </td>
                     <td className="px-5 py-3 text-right text-foreground tabular-nums font-medium">
                       {aed(Number(e.amount) || 0)}
                     </td>
                     <td className="px-5 py-3">
                       <button
-                        onClick={() => remove(e.id)}
-                        className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-danger hover:bg-hover"
+                        onClick={() => void remove(e.id)}
+                        disabled={removing !== null}
+                        aria-label={`Delete ${e.category} expense from ${fmtDate(e.expense_date)}`}
+                        className="btn-ghost w-10 !px-0 text-danger"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -259,61 +211,7 @@ export default function Purchase() {
         </div>
       </div>
 
-      {/* Add expense modal */}
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Log expense"
-      >
-        <div className="space-y-4">
-          <Field label="Category">
-            <SelectMenu
-              value={form.category}
-              onChange={(v) => setForm({ ...form, category: v })}
-              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
-            />
-          </Field>
-          <Field label="Description">
-            <input
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Optional note"
-              className="input"
-            />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Amount (AED)">
-              <input
-                type="number"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                placeholder="0.00"
-                className="input"
-              />
-            </Field>
-            <Field label="Date">
-              <input
-                type="date"
-                value={form.expense_date}
-                onChange={(e) => setForm({ ...form, expense_date: e.target.value })}
-                className="input"
-              />
-            </Field>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="btn-ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </button>
-            <button
-              className="btn-primary"
-              onClick={save}
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Log expense"}
-            </button>
-          </div>
-        </div>
-      </Modal>
+
     </div>
   );
 }

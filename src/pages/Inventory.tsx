@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -16,7 +17,6 @@ import {
   PackagePlus,
   ShoppingCart,
   ClipboardList,
-  Loader2,
   ChevronDown,
 } from "lucide-react";
 import {
@@ -25,7 +25,15 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { erp, pos, shareRecord, billing, Product, type StockMovement } from "../lib/api";
+import {
+  erp,
+  pos,
+  shareRecord,
+  billing,
+  insertedBefore,
+  Product,
+  type StockMovement,
+} from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { MenuPopover, MenuItemRow } from "../components/ui-menu";
 import { useUI } from "../lib/ui";
@@ -195,7 +203,7 @@ export default function Inventory() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load);
+  useLiveSync(load, ["products"]);
 
   const categories = useMemo(
     () =>
@@ -224,6 +232,7 @@ export default function Inventory() {
             matchCat &&
             (p.name.toLowerCase().includes(q.toLowerCase()) ||
               p.sku.toLowerCase().includes(q.toLowerCase()) ||
+              (p.category || "").toLowerCase().includes(q.toLowerCase()) ||
               (p.batch_number || "").toLowerCase().includes(q.toLowerCase()) ||
               (p.barcode || "").toLowerCase().includes(q.toLowerCase())) &&
             (!batchFilter ||
@@ -292,7 +301,7 @@ export default function Inventory() {
                     { key: "batch_number", label: "Batch" },
                     { key: "expiry_date", label: "Expiry" },
                   ]
-                )
+                ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))
               }
             >
               <Download size={15} /> Export
@@ -522,7 +531,7 @@ export default function Inventory() {
                 });
                 if (!ok) return;
                 try {
-                  for (const p of sel) await erp.deleteProduct(p.id);
+                  await erp.deleteProducts(sel.map((p) => p.id));
                   load();
                   toast.success(`Deleted ${sel.length}.`);
                 } catch (e) {
@@ -776,22 +785,37 @@ export default function Inventory() {
         onImport={async (rows) => {
           let ok = 0;
           const failed: string[] = [];
-          for (const r of rows) {
-            if (!String(r.name ?? "").trim()) continue;
-            try {
-              await erp.createProduct({
-                sku: String(r.sku ?? ""),
-                name: String(r.name ?? ""),
-                category: String(r.category ?? "") || undefined,
-                unit_price: Number(r.unit_price) || 0,
-                cost_price: Number(r.cost_price) || 0,
-                quantity: Number(r.quantity) || 0,
-                reorder_level: Number(r.reorder_level) || 0,
-                description: "",
-              } as Omit<Product, "id" | "created_at">);
-              ok++;
-            } catch {
-              failed.push(String(r.name));
+          const toProduct = (r: Record<string, unknown>) =>
+            ({
+              sku: String(r.sku ?? ""),
+              name: String(r.name ?? ""),
+              category: String(r.category ?? "") || undefined,
+              unit_price: Number(r.unit_price) || 0,
+              cost_price: Number(r.cost_price) || 0,
+              quantity: Number(r.quantity) || 0,
+              reorder_level: Number(r.reorder_level) || 0,
+              description: "",
+            }) as Omit<Product, "id" | "created_at">;
+          const usable = rows.filter((r) => String(r.name ?? "").trim());
+          try {
+            // One write for the whole file. Row-at-a-time reloads and rewrites
+            // the entire collection per product, which is what made a big
+            // import look like a hang.
+            await erp.createProducts(usable.map(toProduct));
+            ok = usable.length;
+          } catch (e) {
+            // A bulk insert cannot say WHICH row was bad, so a failed import
+            // pays to find out row by row. It resumes after the rows that were
+            // already written — the write is chunked, so an earlier chunk may
+            // have committed, and starting from zero would import those twice.
+            ok = insertedBefore(e);
+            for (const r of usable.slice(ok)) {
+              try {
+                await erp.createProduct(toProduct(r));
+                ok++;
+              } catch {
+                failed.push(String(r.name));
+              }
             }
           }
           if (failed.length) {
@@ -971,6 +995,7 @@ function ProductModal({
   }, [open, product]);
 
   const save = async () => {
+    if (saving) return;
     setTouched(true);
     if (!valid) return;
     setSaving(true);
@@ -1035,28 +1060,35 @@ function ProductModal({
   return (
     <Modal
       open={open}
-      onClose={onClose}
-      title={product ? "Edit Product" : "New Product"}
+      onClose={() => { if (!saving) onClose(); }}
+      title={product ? "Edit product" : "New product"}
     >
-      <div className="grid grid-cols-2 gap-3">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="SKU *">
           <input
             className={cn("input", touched && skuErr && "border-danger")}
+            required
+            aria-invalid={touched && skuErr}
+            aria-describedby={touched && skuErr ? "product-sku-error" : undefined}
             value={f.sku}
             onChange={(e) => setF({ ...f, sku: e.target.value })}
           />
           {touched && skuErr && (
-            <p className="text-[11px] text-danger mt-1">SKU is required.</p>
+            <p id="product-sku-error" className="text-xs text-danger mt-1">SKU is required.</p>
           )}
         </Field>
         <Field label="Name *">
           <input
             className={cn("input", touched && nameErr && "border-danger")}
+            required
+            aria-invalid={touched && nameErr}
+            aria-describedby={touched && nameErr ? "product-name-error" : undefined}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
           />
           {touched && nameErr && (
-            <p className="text-[11px] text-danger mt-1">Name is required.</p>
+            <p id="product-name-error" className="text-xs text-danger mt-1">Name is required.</p>
           )}
         </Field>
         <Field label="Category">
@@ -1145,7 +1177,7 @@ function ProductModal({
           <label className="text-[13px] font-medium text-brand-500">Custom fields</label>
           <button
             type="button"
-            className="btn-ghost !h-7 !px-2 text-xs"
+            className="btn-ghost"
             onClick={addField}
           >
             <Plus size={13} /> Add field
@@ -1162,19 +1194,21 @@ function ProductModal({
                 <input
                   className="input flex-1"
                   placeholder="Field name"
+                  aria-label={`Custom field ${i + 1} name`}
                   value={cf.key}
                   onChange={(e) => updateField(i, { key: e.target.value })}
                 />
                 <input
                   className="input flex-1"
                   placeholder="Value"
+                  aria-label={`Custom field ${i + 1} value`}
                   value={cf.value}
                   onChange={(e) => updateField(i, { value: e.target.value })}
                 />
                 <button
                   type="button"
                   aria-label="Remove field"
-                  className="rounded-full p-1.5 text-brand-400 hover:bg-danger/10 hover:text-danger transition-colors duration-200"
+                  className="btn-ghost w-10 !px-0 shrink-0 text-danger"
                   onClick={() => removeField(i)}
                 >
                   <Trash2 size={15} />
@@ -1185,7 +1219,7 @@ function ProductModal({
         )}
       </div>
 
-      <div className="flex justify-end gap-2 mt-5">
+      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button className="btn-ghost" onClick={onClose}>
           Cancel
         </button>
@@ -1194,9 +1228,10 @@ function ProductModal({
           disabled={saving || (touched && !valid)}
           onClick={save}
         >
-          {saving ? "Saving…" : product ? "Save changes" : "Save Product"}
+          {saving ? "Saving…" : product ? "Save changes" : "Create product"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -1246,6 +1281,7 @@ function StocktakeModal({
     .filter(Boolean) as { p: Product; counted: number; diff: number }[];
 
   const post = async () => {
+    if (posting) return;
     if (!diffs.length) return;
     setPosting(true);
     try {
@@ -1269,11 +1305,13 @@ function StocktakeModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Stocktake: physical count" size="2xl">
+    <Modal open={open} onClose={() => { if (!posting) onClose(); }} title="Stocktake: physical count" size="2xl">
+      <fieldset disabled={posting} className="min-w-0" aria-busy={posting}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <input
           className="input max-w-xs"
-          placeholder="Filter by name or SKU…"
+          aria-label="Filter by name or SKU"
+              placeholder="Filter by name or SKU…"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -1314,6 +1352,7 @@ function StocktakeModal({
                       type="number"
                       min={0}
                       className="input !h-8 tabular-nums"
+                      aria-label={`Counted quantity for ${p.name}`}
                       placeholder="—"
                       value={raw}
                       onChange={(e) =>
@@ -1347,7 +1386,7 @@ function StocktakeModal({
         </table>
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <p className="text-xs text-brand-400">
           {diffs.length
             ? `${diffs.length} product(s) will be adjusted.`
@@ -1371,6 +1410,7 @@ function StocktakeModal({
           </button>
         </div>
       </div>
+      </fieldset>
     </Modal>
   );
 }
@@ -1430,6 +1470,7 @@ function IssueStockModal({
     mode === "out" ? stock - qty : mode === "in" ? stock + qty : counted ?? stock;
 
   const submit = async () => {
+    if (saving) return;
     if (qtyErr || invErr) return;
     setSaving(true);
     try {
@@ -1462,9 +1503,10 @@ function IssueStockModal({
   };
 
   return (
-    <Modal open={!!product} onClose={onClose} title={`Stock entry - ${product.name}`}>
+    <Modal open={!!product} onClose={() => { if (!saving) onClose(); }} title={`Stock entry - ${product.name}`}>
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
       {/* entry type */}
-      <div className="mb-4 flex items-center gap-1 rounded-xl bg-brand-50 p-1 dark:bg-white/5 w-fit">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         {(
           [
             ["out", "Stock out"],
@@ -1475,10 +1517,8 @@ function IssueStockModal({
           <button
             key={m}
             type="button"
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors",
-              mode === m ? "bg-primary-100 text-primary-700" : "text-brand-400"
-            )}
+            aria-pressed={mode === m}
+            className={mode === m ? "btn-secondary" : "btn-ghost"}
             onClick={() => setMode(m)}
           >
             {label}
@@ -1503,7 +1543,7 @@ function IssueStockModal({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {mode === "out" ? (
           <Field label="Invoice / reference *">
             <input
@@ -1626,6 +1666,7 @@ function IssueStockModal({
           {entryLabel}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }

@@ -5,10 +5,16 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "theme_color": "#FFD600",
   "background_color": "#FFF9F0",
   "icons": [
+    {
+      "src": "/icons/filey-mascot.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/filey-logo.svg",
       "sizes": "any",

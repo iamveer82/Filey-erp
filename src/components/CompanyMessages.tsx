@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Send, Trash2, MessageSquare, Loader2, Reply } from "lucide-react";
+import { FileySpinner as Loader2 } from "./FileySpinner";
+import { isLocalMode } from "../lib/dataMode";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Send, Trash2, MessageSquare, Reply } from "lucide-react";
 import { messages, org, type OrgMessage } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
@@ -37,7 +39,7 @@ const tone = (id: string) => {
 
 /** Render message body, highlighting @mentions. */
 function renderBody(body: string): ReactNode {
-  const parts = body.split(/(@[\w.\-]+)/g);
+  const parts = body.split(/(@[\p{L}\p{N}_.\-]+)/gu);
   return parts.map((p, i) =>
     p.startsWith("@") ? (
       <span key={i} className="font-medium text-primary-700">
@@ -93,7 +95,7 @@ function MessageRow({
         <button
           aria-label="Delete message"
           onClick={() => onDelete(m.id)}
-          className="opacity-0 group-hover:opacity-100 text-brand-300 hover:text-danger transition-opacity shrink-0 cursor-pointer self-start"
+          className="btn-ghost h-10 w-10 p-0 text-muted-foreground hover:text-danger shrink-0 self-start"
         >
           <Trash2 size={14} />
         </button>
@@ -108,8 +110,12 @@ export default function CompanyMessages({
   /** Which channel to show and post into. Defaults to the room every message
    *  predating channels already belongs to. */
   channel = "general",
+  focusMessage,
+  onRead,
 }: {
   channel?: string;
+  focusMessage?: number;
+  onRead?: () => void;
 } = {}) {
   const { user } = useAuth();
   const { toast, confirm } = useUI();
@@ -120,26 +126,62 @@ export default function CompanyMessages({
   const [replyTo, setReplyTo] = useState<number | null>(null);
   const [replyText, setReplyText] = useState("");
   const [members, setMembers] = useState<MentionMember[]>([]);
+  const [pages,setPages] = useState(1);
+  const [hasMore,setHasMore] = useState(false);
+  const [error,setError] = useState("");
+  const request = useRef(0);
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  const focusRef = useRef<HTMLLIElement>(null);
 
-  const load = () => {
-    messages
-      .list(channel)
-      .then(setAll)
-      .catch(() => toast.error("Failed to load messages"))
-      .finally(() => setLoading(false));
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(load, [channel]);
-  useLiveSync(load);
+  const load = useCallback(async () => {
+    const id = ++request.current;
+    setLoading(true);
+    try {
+      let before: number | undefined;
+      let next: number | null = null;
+      let rows: OrgMessage[] = [];
+      for (let page = 0; page < pages; page++) {
+        const result = await messages.page(channel,before);
+        rows.push(...result.rows); next = result.next;
+        if (next === null) break;
+        before = next;
+      }
+      if (focusMessage && !rows.some(m => m.id === focusMessage)) rows.push(...await messages.thread(channel,focusMessage));
+      if (id !== request.current) return;
+      rows = [...new Map(rows.map(m => [m.id,m])).values()];
+      setAll(rows); setHasMore(next !== null); setError("");
+    } catch(e) {
+      if (id === request.current) setError(e instanceof Error ? e.message : "Could not load messages.");
+    } finally { if (id === request.current) setLoading(false); }
+  },[channel,pages,focusMessage]);
+  useEffect(() => { void load(); return () => { request.current++; }; },[load]);
+  useLiveSync(() => void load(),["org_messages","profiles"]);
+  useEffect(() => { if (!loading && focusMessage) focusRef.current?.scrollIntoView({block:"nearest"}); },[loading,focusMessage]);
   useEffect(() => {
+    const last = Math.max(0,...all.map(m => m.id));
+    if (!last || loading || error) return;
+    const read = () => {
+      if (document.visibilityState !== "visible") return;
+      void messages.markRead(channel,last).then(() => onReadRef.current?.()).catch(() => {});
+    };
+    read(); document.addEventListener("visibilitychange",read);
+    return () => document.removeEventListener("visibilitychange",read);
+  },[all,channel,loading,error]);
+  useEffect(() => {
+    if (isLocalMode()) { setMembers([]); return; }
     org
       .members()
       .then((ms) => setMembers(ms.map((m) => ({ id: m.user_id, name: m.name }))))
       .catch(() => toast.error("Failed to load members"));
-  }, []);
+  }, [toast]);
 
   const roots = useMemo(
-    () => all.filter((m) => !m.parent_id).sort((a, b) => b.id - a.id),
+    () => {
+      const latest = new Map<number,number>();
+      all.forEach(m => latest.set(m.parent_id || m.id,Math.max(latest.get(m.parent_id || m.id)||0,m.id)));
+      return all.filter(m => !m.parent_id).sort((a,b) => latest.get(b.id)!-latest.get(a.id)!);
+    },
     [all]
   );
   const repliesByParent = useMemo(() => {
@@ -156,7 +198,7 @@ export default function CompanyMessages({
 
   const post = async (body: string, parentId: number | null) => {
     const trimmed = body.trim();
-    if (!trimmed) return;
+    if (!trimmed || busy) return;
     setBusy(true);
     try {
       await messages.post(trimmed, parentId, channel);
@@ -166,7 +208,7 @@ export default function CompanyMessages({
       } else {
         setText("");
       }
-      load();
+      await load();
     } catch (e) {
       toast.error(`Could not post: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -194,7 +236,7 @@ export default function CompanyMessages({
 
   return (
     <InfoCard
-      title="Company Messages"
+      title={`#${channel}`}
       action={
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand-400">
           <MessageSquare size={12} /> {all.length}
@@ -202,12 +244,14 @@ export default function CompanyMessages({
       }
     >
       {/* composer */}
+      {isLocalMode() && <p className="mb-3 text-xs text-muted-foreground">Local channels stay on this device. Open a cloud workspace to talk with your team.</p>}
       <div className="flex items-center gap-2 mb-3">
-        <MentionInput
+      <MentionInput
           value={text}
           onChange={setText}
           onEnter={() => post(text, null)}
           members={members}
+          label="Team update"
           placeholder="Share an update… type @ to mention"
         />
         <button
@@ -221,6 +265,7 @@ export default function CompanyMessages({
       </div>
 
       {/* feed */}
+      {error && <div role="alert" className="mb-3 rounded-xl bg-muted p-3 text-sm"><p>{error}</p><button className="btn-ghost mt-2" onClick={() => void load()}>Try again</button></div>}
       {loading && all.length === 0 ? (
         <p className="text-sm text-brand-400 py-4 text-center">Loading…</p>
       ) : roots.length === 0 ? (
@@ -232,7 +277,7 @@ export default function CompanyMessages({
           {roots.map((m) => {
             const replies = repliesByParent.get(m.id) ?? [];
             return (
-              <li key={m.id}>
+              <li key={m.id} ref={m.id === focusMessage ? focusRef : undefined} className={m.id === focusMessage ? "rounded-xl bg-primary-100/40 p-3" : undefined}>
                 <MessageRow
                   m={m}
                   userId={user?.id}
@@ -259,10 +304,12 @@ export default function CompanyMessages({
                           onChange={setReplyText}
                           onEnter={() => post(replyText, m.id)}
                           members={members}
+                          label={`Reply to ${m.author}`}
                           placeholder={`Reply to ${m.author}… type @ to mention`}
                         />
                         <button
-                          className="btn-primary shrink-0 !py-1.5"
+                          aria-label="Post reply"
+                          className="btn-primary shrink-0"
                           disabled={busy || !replyText.trim()}
                           onClick={() => post(replyText, m.id)}
                         >
@@ -277,6 +324,7 @@ export default function CompanyMessages({
           })}
         </ul>
       )}
+      {hasMore && <button className="btn-ghost mt-4 w-full" disabled={loading} onClick={() => setPages(n => n+1)}>{loading ? "Loading…" : "Load older conversations"}</button>}
     </InfoCard>
   );
 }

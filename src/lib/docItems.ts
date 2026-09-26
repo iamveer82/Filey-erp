@@ -312,7 +312,9 @@ export function docTotals(
   );
   const taxableNet =
     netAfterLineDisc > 0 ? net * (docRatedNet / netAfterLineDisc) : 0;
-  const tax = taxableNet * ((taxRatePct || 0) / 100) + lineTax;
+  // Document discounts reduce the taxable base of explicit line rates too.
+  const lineTaxAfterDiscount = netAfterLineDisc > 0 ? lineTax * net / netAfterLineDisc : 0;
+  const tax = taxableNet * ((taxRatePct || 0) / 100) + lineTaxAfterDiscount;
   return {
     subtotal: r2(subtotal),
     discount: r2(disc),

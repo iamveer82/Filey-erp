@@ -1,0 +1,12 @@
+@media (min-width: 1280px) {
+  .filey-browser-panel {
+    width: var(--filey-browser-width, 44%);
+    min-width: 320px;
+    max-width: min(760px, calc(100% - 360px));
+  }
+}
+
+.filey-browser-resizer:hover > span,
+.filey-browser-resizer:focus-visible > span {
+  background-color: hsl(var(--muted-foreground));
+}

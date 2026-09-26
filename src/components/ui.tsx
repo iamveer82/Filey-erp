@@ -1,20 +1,24 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import {
   ReactNode,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { Dialog, DialogContent, DialogTitle, DialogClose } from "./Dialog";
 import { useT } from "../lib/i18n";
 import {
   X,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Users,
   Lock,
-  Loader2,
   AlertCircle,
   Inbox,
   Check,
@@ -36,7 +40,7 @@ export function Skeleton({ className }: { className?: string }) {
 /** Centered spinner for loading panels. */
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
+    <div role="status" aria-label={label || "Loading"} className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
       <Loader2 size={18} className="animate-spin" />
       {label && <span className="text-sm">{label}</span>}
     </div>
@@ -46,7 +50,7 @@ export function Spinner({ label }: { label?: string }) {
 /** Inline error banner — for surfacing load/save failures visibly. */
 export function ErrorBanner({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm font-semibold text-danger">
+    <div role="alert" className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm font-medium text-danger">
       <AlertCircle size={16} className="mt-px shrink-0" />
       <span>{message}</span>
     </div>
@@ -83,6 +87,51 @@ export function ShareToggle({
   );
 }
 
+/** A real on/off control. role="switch" + aria-checked so it announces as one,
+ *  and the label is part of the button so the whole row is the hit target. */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  busy,
+  label,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  busy?: boolean;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled || busy}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        checked ? "bg-primary-500" : "bg-border",
+        disabled || busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+        className
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none block h-5 w-5 rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-5" : "translate-x-0.5"
+        )}
+      />
+    </button>
+  );
+}
+
 export function PageHeader({
   title,
   subtitle,
@@ -94,12 +143,12 @@ export function PageHeader({
 }) {
   const t = useT();
   return (
-    <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
-      <div>
-        <h1 className="text-[22px] font-semibold text-foreground tracking-tight">{t(title)}</h1>
+    <div className="page-heading flex items-start justify-between mb-6 gap-4 flex-wrap">
+      <div className="min-w-0 flex-1 basis-[240px]">
+        <h1 className="text-[24px] leading-tight font-semibold text-foreground tracking-tight">{t(title)}</h1>
         {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{t(subtitle)}</p>}
       </div>
-      {action && <div className="flex items-center gap-2">{action}</div>}
+      {action && <div className="page-heading-actions flex min-w-0 max-w-full flex-wrap items-center gap-2">{action}</div>}
     </div>
   );
 }
@@ -181,7 +230,7 @@ export function MetricCard({
   rawValue,
   formatValue,
   change,
-  changeTone = "up",
+  changeTone = "neutral",
 }: {
   label: string;
   value: string;
@@ -192,8 +241,8 @@ export function MetricCard({
   formatValue?: (n: number) => string;
   /** Optional change string like "+12% vs last month" */
   change?: string;
-  /** Tone for the change text: up (green), down (red), warn (amber) */
-  changeTone?: "up" | "down" | "warn";
+  /** Tone for a measured change; descriptive metadata stays neutral */
+  changeTone?: "up" | "down" | "warn" | "neutral";
 }) {
   const display = rawValue !== undefined && formatValue ? formatValue(rawValue) : value;
   const numRef = useFitText<HTMLParagraphElement>(display);
@@ -202,7 +251,9 @@ export function MetricCard({
       ? "text-danger"
       : changeTone === "warn"
         ? "text-warning"
-        : "text-success";
+        : changeTone === "up"
+          ? "text-success"
+          : "text-muted-foreground";
   // No border-color transition: the base colour is a theme custom property, and
   // animating it leaves the previous theme's colour painted on a flip.
   return (
@@ -337,6 +388,8 @@ export function DataTable<T>({
   bulkActions,
   onRowClick,
   pageSize,
+  sort: controlledSort,
+  onSortChange,
 }: {
   columns: {
     key: string;
@@ -364,17 +417,23 @@ export function DataTable<T>({
   /** Cap how many rows render at once, with a Prev/Next footer. Keeps the
    *  card short enough to read without scrolling the page. */
   pageSize?: number;
+  /** Controlled ordering for saved views; omitted keeps local header sorting. */
+  sort?: { key: string; dir: 1 | -1 } | null;
+  onSortChange?: (next: { key: string; dir: 1 | -1 } | null) => void;
 }) {
   const showSkeleton = loading && rows.length === 0;
   const selectable = !!rowKey && !!bulkActions?.length;
   const [sel, setSel] = useState<Set<string | number>>(new Set());
   const [running, setRunning] = useState(false);
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const [localSort, setLocalSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const sort = controlledSort === undefined ? localSort : controlledSort;
   const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(
     null
   );
   const [editVal, setEditVal] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const savingRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const sortFn = sort && columns.find((c) => c.key === sort.key)?.sortValue;
@@ -388,10 +447,13 @@ export function DataTable<T>({
       return 0;
     });
   }, [rows, sortFn, sort]);
-  const toggleSort = (key: string) =>
-    setSort((s) =>
-      s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }
-    );
+  const toggleSort = (key: string) => {
+    const next = sort?.key === key
+      ? (sort.dir === 1 ? { key, dir: -1 as const } : null)
+      : { key, dir: 1 as const };
+    if (controlledSort === undefined) setLocalSort(next);
+    onSortChange?.(next);
+  };
 
   // Only pin the last column while the table is genuinely too wide — CSS has no
   // "if overflowing" selector, so measure. jsdom reports 0 for both, which
@@ -431,11 +493,17 @@ export function DataTable<T>({
   const selectedRows = rows.filter((r) => sel.has(keyOf(r)));
 
   const runBulk = async (a: BulkAction<T>) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setRunning(true);
+    setActionError("");
     try {
       await a.run(selectedRows);
       setSel(new Set());
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "The action could not be completed. Try again.");
     } finally {
+      savingRef.current = false;
       setRunning(false);
     }
   };
@@ -443,9 +511,10 @@ export function DataTable<T>({
   const colCount = columns.length + (selectable ? 1 : 0);
   return (
     <div className="card overflow-hidden p-0">
-      {selectable && sel.size > 0 && (
-        <div className="sticky top-0 z-20 flex items-center gap-3 px-4 py-2.5 bg-muted/60 border-b border-border">
-          <span className="text-[13px] font-semibold text-foreground">{sel.size} selected</span>
+      {actionError && <div className="p-3"><ErrorBanner message={actionError} /></div>}
+      {selectable && selectedRows.length > 0 && (
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-3 px-4 py-2.5 bg-muted/60 border-b border-border">
+          <span className="text-[13px] font-semibold text-foreground">{selectedRows.length} selected</span>
           <div className="flex items-center gap-1.5 flex-wrap">
             {bulkActions!.map((a) => (
               <button
@@ -453,7 +522,7 @@ export function DataTable<T>({
                 disabled={running}
                 onClick={() => runBulk(a)}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none",
+                  "btn-ghost h-7 px-2 text-xs disabled:pointer-events-none",
                   a.danger
                     ? "text-danger hover:bg-danger/10"
                     : "text-foreground hover:bg-hover"
@@ -475,7 +544,7 @@ export function DataTable<T>({
       <div
         ref={scrollRef}
         className={cn(
-          "overflow-x-auto"
+          "filey-table-scroll min-w-0 overflow-x-auto overscroll-x-contain"
         )}
       >
         <table className="w-full">
@@ -486,6 +555,7 @@ export function DataTable<T>({
                   <input
                     type="checkbox"
                     aria-label="Select all"
+                    disabled={running}
                     checked={allChecked}
                     onChange={toggleAll}
                     className="cursor-pointer"
@@ -496,6 +566,7 @@ export function DataTable<T>({
                 c.sortValue ? (
                   <th
                     key={c.key}
+                    aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
                     className={cn("th", ci === pinnedIdx && "cell-pinned-end")}
                   >
                     <button
@@ -503,17 +574,11 @@ export function DataTable<T>({
                       className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground"
                     >
                       {c.label}
-                      <span
-                        className={cn(
-                          "text-xs transition-all duration-200 inline-block",
-                          sort?.key === c.key
-                            ? "text-foreground"
-                            : "text-muted-foreground",
-                          sort?.key === c.key && sort.dir === -1 && "rotate-180"
-                        )}
-                      >
-                        {sort?.key === c.key ? "▲" : "↕"}
-                      </span>
+                      {sort?.key !== c.key
+                        ? <ArrowUpDown size={16} className="text-muted-foreground" aria-hidden="true" />
+                        : sort.dir === 1
+                          ? <ArrowUp size={16} aria-hidden="true" />
+                          : <ArrowDown size={16} aria-hidden="true" />}
                     </button>
                   </th>
                 ) : (
@@ -563,7 +628,7 @@ export function DataTable<T>({
               </tr>
             ) : (
               paged.map((row, i) => {
-                const k = selectable ? keyOf(row) : i;
+                const k = rowKey ? keyOf(row) : i;
                 const checked = selectable && sel.has(k);
                 return (
                   <tr
@@ -589,6 +654,7 @@ export function DataTable<T>({
                         <input
                           type="checkbox"
                           aria-label="Select row"
+                          disabled={running}
                           checked={checked}
                           onChange={() => toggle(k)}
                           className="cursor-pointer"
@@ -602,16 +668,22 @@ export function DataTable<T>({
                         if (!c.editable) return;
                         e.stopPropagation();
                         setEditVal(c.editable.value(row));
+                        setActionError("");
                         setEditing({ row: k, col: c.key });
                       };
                       const commit = async () => {
-                        if (!c.editable || editSaving) return;
+                        if (!c.editable || savingRef.current) return;
+                        savingRef.current = true;
                         setEditSaving(true);
+                        setActionError("");
                         try {
                           await c.editable.onSave(row, editVal);
-                        } finally {
-                          setEditSaving(false);
                           setEditing(null);
+                        } catch (error) {
+                          setActionError(error instanceof Error ? error.message : "The change could not be saved. Your entry is still here; try again.");
+                        } finally {
+                          savingRef.current = false;
+                          setEditSaving(false);
                         }
                       };
                       return (
@@ -622,6 +694,8 @@ export function DataTable<T>({
                           {isEditing ? (
                             <input
                               autoFocus
+                              aria-label={`Edit ${typeof c.label === "string" ? c.label : c.key}`}
+                              aria-invalid={!!actionError}
                               type={c.editable?.type ?? "text"}
                               value={editVal}
                               disabled={editSaving}
@@ -635,13 +709,14 @@ export function DataTable<T>({
                               className="input h-8 w-full text-sm"
                             />
                           ) : c.editable ? (
-                            <span
+                            <button
+                              type="button"
                               onClick={startEdit}
-                              title="Click to edit"
-                              className="-mx-1 block cursor-text rounded px-1 hover:bg-hover"
+                              title="Edit value"
+                              className="-mx-1 block w-full cursor-text rounded px-1 text-left hover:bg-hover"
                             >
                               {c.render(row)}
-                            </span>
+                            </button>
                           ) : (
                             c.render(row)
                           )}
@@ -656,7 +731,7 @@ export function DataTable<T>({
         </table>
       </div>
       {pageSize && sorted.length > pageSize && (
-        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-2.5">
           <span className="text-[12.5px] text-muted-foreground tabular-nums">
             {safePage * pageSize + 1}–
             {Math.min(sorted.length, (safePage + 1) * pageSize)} of {sorted.length}
@@ -697,7 +772,7 @@ export function Modal({
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full";
+  size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full" | "document";
 }) {
   const widthClass = {
     md: "max-w-lg",
@@ -706,101 +781,42 @@ export function Modal({
     "2xl": "max-w-4xl",
     "3xl": "max-w-5xl",
     full: "max-w-[95vw]",
+    document: "filey-document-dialog max-w-[95vw] h-[90dvh]",
   }[size];
-  const dialogRef = useRef<HTMLDivElement>(null);
-  // Callers pass an inline arrow for onClose, so its identity changes on every
-  // parent render. Keeping it in a ref keeps it out of the effect deps below —
-  // with it in there, the effect re-ran on each keystroke, and its cleanup
-  // yanked focus out of the field being typed in.
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    const prevFocus = document.activeElement as HTMLElement | null;
-    // Move focus into the dialog on open.
-    const focusables = () =>
-      Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])'
-        ) ?? []
-      );
-    (focusables()[0] ?? dialogRef.current)?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeRef.current();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const els = focusables();
-      if (!els.length) return;
-      const first = els[0];
-      const last = els[els.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      prevFocus?.focus?.();
-    };
-    // Only `open`: this runs once per open/close, never per render.
-  }, [open]);
-
-  if (!open) return null;
-  return createPortal(
-    <div
-      className="materialize-scrim fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        className={cn(
-          "materialize-surface flex max-h-[90vh] w-full flex-col rounded-xl bg-card border border-border shadow-lg outline-none",
-          widthClass
-        )}
-        onClick={(e) => e.stopPropagation()}
+  const returnFocus = useRef<HTMLElement | null>(null);
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent
+        showClose={false}
+        aria-describedby={undefined}
+        onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement | null; }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (returnFocus.current?.isConnected) returnFocus.current.focus();
+        }}
+        className={cn("flex flex-col gap-0 overflow-hidden p-0", widthClass)}
       >
-        <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border">
-          <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
-          <button
-            onClick={onClose}
-            aria-label="Close dialog"
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground cursor-pointer transition-colors duration-200"
-          >
+        <div className="flex shrink-0 items-center justify-between gap-4 px-4 sm:px-6 py-3 border-b border-border">
+          <DialogTitle className="min-w-0 break-words">{title}</DialogTitle>
+          <DialogClose aria-label="Close dialog" className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-hover hover:text-foreground">
             <X size={18} />
-          </button>
+          </DialogClose>
         </div>
-        <div className="overflow-y-auto px-6 py-5">{children}</div>
-      </div>
-    </div>,
-    document.body
+        <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-5">{children}</div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <label className="label">{label}</label>
-      {children}
-    </div>
-  );
+  return <FormField label={label}>{children}</FormField>;
 }
 
 /** Reusable form field with label, inline validation error (animated slide-in),
  *  and optional hint text. Drop-in replacement for raw label+input pairs. */
 export function FormField({
   label,
+  htmlFor,
   error,
   hint,
   children,
@@ -808,15 +824,28 @@ export function FormField({
   required,
 }: {
   label: string;
+  htmlFor?: string;
   error?: string;
   hint?: string;
   children: ReactNode;
   className?: string;
   required?: boolean;
 }) {
+  const fieldId = useId();
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLLabelElement>(null);
+  // Legacy fields often wrap a control in an icon or date-picker container.
+  // Associate the rendered control once instead of changing hundreds of callers.
+  useLayoutEffect(() => {
+    if (htmlFor) return;
+    const control = fieldRef.current?.querySelector<HTMLElement>('input:not([type="hidden"]),textarea,select,[role="combobox"],button[aria-haspopup="menu"]');
+    if (!control || !labelRef.current) return;
+    if (!control.id) control.id = fieldId;
+    labelRef.current.htmlFor = control.id;
+  });
   return (
-    <div className={cn("flex flex-col", className)}>
-      <label className="label">
+    <div ref={fieldRef} className={cn("flex flex-col", className)}>
+      <label ref={labelRef} className="label" htmlFor={htmlFor}>
         {label}
         {required && <span className="text-danger ml-0.5">*</span>}
       </label>
@@ -926,7 +955,7 @@ export function TimelineItem({
 }) {
   const dotClass: Record<TimelineStatus, string> = {
     done: "bg-success text-white border-success",
-    current: "bg-primary-500 text-white border-primary-500 ring-4 ring-primary-500/15",
+    current: "bg-primary-400 text-neutral-900 border-primary-500 ring-4 ring-primary-500/15",
     error: "bg-danger text-white border-danger",
     default: "bg-card text-muted-foreground border-border",
   };
@@ -957,7 +986,7 @@ export function TimelineItem({
   );
 }
 
-/** Pill-shaped filter chip with optional count. Used in table filter bars. */
+/** Shared filter control; status is conveyed by text, selection by neutral fill. */
 export function FilterChip({
   active,
   onClick,
@@ -971,21 +1000,12 @@ export function FilterChip({
   count?: number | string;
   tone?: "neutral" | "success" | "warn" | "danger" | "info";
 }) {
-  const tones: Record<string, string> = {
-    neutral: active
-      ? "bg-foreground text-background border-foreground"
-      : "bg-card text-muted-foreground border-border hover:bg-hover",    success: active
-      ? "bg-success text-white border-success"
-      : "bg-success/10 text-success border-success/20 hover:bg-success/20",
-    warn: active
-      ? "bg-warning text-white border-warning"
-      : "bg-warning/10 text-warning border-warning/20 hover:bg-warning/20",
-    danger: active
-      ? "bg-danger text-white border-danger"
-      : "bg-danger/10 text-danger border-danger/20 hover:bg-danger/20",
-    info: active
-      ? "bg-info text-white border-info"
-      : "bg-info/10 text-info border-info/20 hover:bg-info/20",
+  const tones = {
+    neutral: "text-muted-foreground",
+    success: "text-success",
+    warn: "text-warning",
+    danger: "text-danger",
+    info: "text-info",
   };
   return (
     <button
@@ -993,8 +1013,8 @@ export function FilterChip({
       aria-pressed={!!active}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer",
-        tones[tone]
+        "chip",
+        active ? "chip-active" : tones[tone]
       )}
     >
       {children}
@@ -1002,7 +1022,7 @@ export function FilterChip({
         <span
           className={cn(
             "inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-semibold",
-            active ? "bg-background/20 text-background" : "bg-muted text-muted-foreground"
+            "bg-muted text-muted-foreground"
           )}
         >
           {count}
@@ -1083,6 +1103,7 @@ export function ToggleTile({
         </div>
         <button
           type="button"
+          aria-label={label}
           aria-pressed={active}
           onClick={onToggle}
           className={cn(
@@ -1126,7 +1147,8 @@ export function SearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full h-9 rounded-md border border-border bg-background pl-9 pr-9 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-muted-foreground transition-[border-color]"
+        aria-label={placeholder}
+        className="input pl-9 pr-9"
       />
       {value && (
         <button

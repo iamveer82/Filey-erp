@@ -10,6 +10,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
+import { nextLocalId } from "./recordId";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -17,43 +18,284 @@ const hasTauri =
 type Row = Record<string, any>;
 type Result = { data: any; error: any };
 
+// All device writes, including pull-sync replacements, share one queue.
+let writeQueue: Promise<unknown> = Promise.resolve();
+function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
+  const execute = () => typeof navigator !== "undefined" && navigator.locks
+    ? navigator.locks.request("filey:local-data", run)
+    : run();
+  const pending = writeQueue.then(execute, execute);
+  writeQueue = pending.catch(() => {});
+  return pending;
+}
+
 // ---- storage backend: collection name -> Row[] ----------------------------
 
+/** Parsed collections, kept between reads.
+ *
+ *  Reading a collection used to mean an IPC hop, a SQLite read and a JSON.parse
+ *  of the WHOLE array — every time. One screen does that a dozen times over the
+ *  same table and an agent turn does it far more, all on the main thread, which
+ *  is a large part of why the app stopped repainting under load. This process is
+ *  the only writer, so between writes the parsed array IS the stored state and
+ *  the round trip buys nothing.
+ *
+ *  The raw JSON rides along so replaceColl can compare against what's stored
+ *  without re-serialising it.
+ *
+ *  Rows handed out are shared and read-only by contract. That takes nothing
+ *  away: mutating a returned row never reached storage before either — only
+ *  saveColl writes — so any code doing it was already a no-op bug.
+ *
+ *  DESKTOP ONLY. Under Tauri this process owns the SQLite store, so a parsed
+ *  collection stays true until we write it. In a browser a second tab writes
+ *  the same localStorage key behind our back and a stale memo would serve rows
+ *  another tab deleted. Browser mode re-reads; localStorage is synchronous and
+ *  it is not where the cost was. */
+const memo = new Map<string, { rows: Row[]; json: string }>();
+
+/** Forget everything cached. Exported for tests and for a restore, which
+ *  replaces the database underneath us. */
+export function clearLocalCache(): void {
+  memo.clear();
+  blobs.clear();
+  hashOf.clear();
+  journalMemo = null;
+}
+
+/* ---- big-field blob split ------------------------------------------------
+ *
+ *  Every invoice_docs row snapshots the company logo as a base64 data URL, on
+ *  purpose: an issued tax document has to keep the logo it was issued with.
+ *  But a collection is stored as ONE JSON array, so writing a single invoice
+ *  re-serialised every logo of every invoice ever. Measured: 2000 docs with a
+ *  150KB logo each is a 308MB string built on the main thread per save, then
+ *  shipped over IPC to SQLite. With the logos hoisted out it is 0.6MB.
+ *
+ *  So oversized string fields are stored once, under their own key, and the row
+ *  keeps a {__blob} marker. Keys are content hashes, so the same logo on 2000
+ *  invoices is one stored blob and re-saving writes nothing new.
+ *
+ *  Rows with an inline string (everything written before this existed) still
+ *  load unchanged — hydrate only touches markers. */
+const BLOB_MIN = 8192;
+const BLOB_KEY = (h: string) => `localdb:blob:${h}`;
+type BlobRef = { __blob: string };
+
+/** Blob payloads by hash. Content-addressed, so an entry is never stale. */
+const blobs = new Map<string, string>();
+
+/** The same lookup backwards, so a save doesn't re-hash a payload it has
+ *  already seen. Without it, writing one row of a 2000-invoice collection
+ *  hashed the logo 2000 times — trading the big serialisation for a big scan.
+ *  hydrate hands every row the same string instance, and V8 caches a string's
+ *  hash on the instance, so these lookups stay cheap. */
+const hashOf = new Map<string, string>();
+
+const isBlobRef = (v: any): v is BlobRef =>
+  !!v && typeof v === "object" && typeof (v as BlobRef).__blob === "string";
+
+/** Two mixed 32-bit passes plus the length. Not cryptographic — it only has to
+ *  make a collision between two of a company's own logos implausible, and a
+ *  content hash keeps every writer (another tab included) agreeing on the key
+ *  without coordination. */
+function hashString(s: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x1000193;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = (Math.imul(b + c, 0x85ebca6b) ^ (b >>> 13)) >>> 0;
+  }
+  return `${a.toString(36)}${b.toString(36)}${s.length.toString(36)}`;
+}
+
+async function putBlob(key: string, value: string): Promise<void> {
+  if (hasTauri) await invoke("cache_set", { key, value });
+  else localStorage.setItem(key, value);
+}
+
+/** Never throws, and tells the two failure cases apart.
+ *
+ *  `null`      — the store answered, and there is no such blob. Gone for good.
+ *  `undefined` — the read itself failed. The blob may well still be there.
+ *
+ *  Both matter. loadColl's catch turns any throw into an EMPTY collection, so a
+ *  failed logo read would blank every invoice on screen; and substituting ""
+ *  for a blob that is merely unreadable right now would let the next save
+ *  write that "" back and destroy the logo for real. */
+async function getBlob(h: string): Promise<string | null | undefined> {
+  const hit = blobs.get(h);
+  if (hit != null) return hit;
+  try {
+    const key = BLOB_KEY(h);
+    const v = hasTauri
+      ? await invoke<string | null>("cache_get", { key })
+      : localStorage.getItem(key);
+    if (v != null) {
+      blobs.set(h, v);
+      hashOf.set(v, h); // so re-saving these rows doesn't re-hash the payload
+    }
+    return v;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rows as they go to storage: oversized strings replaced by markers, with the
+ *  payloads written out first. Returns the JSON actually stored. */
+async function dehydrate(rows: Row[]): Promise<string> {
+  const pending: Promise<void>[] = [];
+  const added: string[] = [];
+  const out = rows.map((r) => {
+    let copy: Row | null = null;
+    for (const k of Object.keys(r)) {
+      const v = r[k];
+      if (typeof v !== "string" || v.length < BLOB_MIN) continue;
+
+      // A hit here means this exact value produced this hash before — Map keys
+      // compare by value — so no verification is needed on the common path.
+      const known = hashOf.get(v);
+      const h = known ?? hashString(v);
+      const held = blobs.get(h);
+
+      if (held === undefined) {
+        blobs.set(h, v);
+        added.push(h);
+        pending.push(putBlob(BLOB_KEY(h), v));
+      } else if (known === undefined && held !== v) {
+        // Two different payloads, one hash. Vanishingly unlikely, but pointing
+        // an invoice at another image is not a thing to leave to chance, and
+        // this branch only runs when we were hashing anyway. Leave it inline.
+        continue;
+      }
+      if (known === undefined) hashOf.set(v, h);
+
+      copy ??= { ...r };
+      copy[k] = { __blob: h } as BlobRef;
+    }
+    return copy ?? r;
+  });
+
+  // Payloads land before the rows that point at them, so a crash in between
+  // leaves an unreferenced blob rather than a row referencing nothing.
+  try {
+    if (pending.length) await Promise.all(pending);
+  } catch (e) {
+    // A blob that never reached storage must not stay cached claiming it did.
+    // This process would keep serving it from memory, the next one would find
+    // the marker pointing at nothing, and no save would ever retry the write
+    // because the cache said the payload was already there.
+    for (const h of added) blobs.delete(h);
+    throw e;
+  }
+  return JSON.stringify(out);
+}
+
+/** The inverse: markers swapped back for their payloads.
+ *
+ *  A blob the store says is gone resolves to "" rather than leaking
+ *  `[object Object]` into an <img src>. One that merely failed to read keeps
+ *  its marker: dehydrate passes a non-string straight through, so the reference
+ *  survives the round trip instead of being saved away as "". */
+async function hydrate(rows: Row[]): Promise<Row[]> {
+  let touched = false;
+  const out: Row[] = [];
+  for (const r of rows) {
+    let copy: Row | null = null;
+    for (const k of Object.keys(r)) {
+      const v = r[k];
+      if (!isBlobRef(v)) continue;
+      const payload = await getBlob(v.__blob);
+      if (payload === undefined) continue; // unreadable now — keep the marker
+      copy ??= { ...r };
+      copy[k] = payload ?? "";
+      touched = true;
+    }
+    out.push(copy ?? r);
+  }
+  return touched ? out : rows;
+}
+
+// ponytail: blobs are never garbage-collected — deleting the last invoice that
+// used a logo leaves the logo behind. A company has a handful of these ever, so
+// the leak is bounded and small. Sweep unreferenced keys on restore if that
+// ever stops being true.
+
 export async function loadColl(coll: string): Promise<Row[]> {
+  const hit = hasTauri ? memo.get(coll) : undefined;
+  if (hit) return hit.rows;
   const key = "localdb:" + coll;
   try {
-    if (hasTauri) {
-      const v = await invoke<string | null>("cache_get", { key });
-      return v ? (JSON.parse(v) as Row[]) : [];
-    }
-    const v = localStorage.getItem(key);
-    return v ? (JSON.parse(v) as Row[]) : [];
-  } catch {
-    return [];
+    const v = hasTauri
+      ? await invoke<string | null>("cache_get", { key })
+      : localStorage.getItem(key);
+    const parsed: unknown = v ? JSON.parse(v) : [];
+    if (!Array.isArray(parsed) || parsed.some((row) => !row || typeof row !== "object" || Array.isArray(row)))
+      throw new Error("Stored records are not a valid collection");
+    const rows = await hydrate(parsed as Row[]);
+    // json stays the STORED form (markers, not payloads) so replaceColl keeps
+    // comparing like with like.
+    if (hasTauri) memo.set(coll, { rows, json: v ?? "[]" });
+    return rows;
+  } catch (error) {
+    // Don't memo a failed read — the next call should try again.
+    throw new Error(`Could not read local ${coll}. Your saved records were not changed. ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 async function saveColl(coll: string, rows: Row[]): Promise<void> {
   const key = "localdb:" + coll;
-  const json = JSON.stringify(rows);
-  if (hasTauri) await invoke("cache_set", { key, value: json });
-  else localStorage.setItem(key, json);
+  const json = await dehydrate(rows);
+  if (!hasTauri) {
+    localStorage.setItem(key, json);
+    return;
+  }
+  try {
+    // Cache only what actually reached storage. A write that fails (disk full,
+    // DB locked) must not leave the UI reading rows nobody saved.
+    await invoke("cache_set", { key, value: json });
+    memo.set(coll, { rows, json });
+  } catch (e) {
+    memo.delete(coll);
+    throw e;
+  }
 }
 
 /** Overwrite a collection from the cloud (pull-sync) WITHOUT journalling —
  *  journalling it would echo the pulled rows straight back up on the next
  *  push. Returns true when the stored data actually changed. */
-export async function replaceColl(coll: string, rows: Row[]): Promise<boolean> {
-  const next = JSON.stringify(rows);
-  if (JSON.stringify(await loadColl(coll)) === next) return false;
-  const key = "localdb:" + coll;
-  if (hasTauri) await invoke("cache_set", { key, value: next });
-  else localStorage.setItem(key, next);
-  return true;
+export function replaceColl(
+  coll: string,
+  rows: Row[],
+  expectedJournalVersion?: number,
+): Promise<boolean> {
+  return serializeWrite(async () => {
+    if (expectedJournalVersion !== undefined && (await journalVersion()) !== expectedJournalVersion)
+      return false;
+    const next = await dehydrate(rows);
+    // Compare against the stored JSON rather than re-serialising what's already
+    // there: a pull that changes nothing used to parse AND stringify every table.
+    await loadColl(coll); // fills memo.json; free once warm
+    const current = hasTauri
+      ? memo.get(coll)?.json
+      : (localStorage.getItem("localdb:" + coll) ?? "[]");
+    if (current === next) return false;
+    const key = "localdb:" + coll;
+    if (!hasTauri) {
+      localStorage.setItem(key, next);
+      return true;
+    }
+    try {
+      await invoke("cache_set", { key, value: next });
+      memo.set(coll, { rows, json: next });
+    } catch (e) {
+      memo.delete(coll);
+      throw e;
+    }
+    return true;
+  });
 }
-
-const nextId = (rows: Row[]): number =>
-  rows.reduce((m, r) => (typeof r.id === "number" && r.id > m ? r.id : m), 0) + 1;
 
 // ---- sync journal ----------------------------------------------------------
 // Records which collections changed — per row: changed ids + deleted ids —
@@ -66,18 +308,24 @@ const nextId = (rows: Row[]): number =>
 
 export type SyncJournal = {
   v: number;
-  tables: Record<string, { all?: boolean; changed: any[]; deleted: any[] }>;
+  tables: Record<string, { all?: boolean; changed: any[]; deleted: any[]; deletedRevisions?: Record<string, number | null> }>;
 };
 
 const JOURNAL_KEY = "syncjournal";
 
+// Same deal as the collection memo above: journalMark reads and rewrites the
+// whole journal on every single row write, so saving an invoice with 20 lines
+// was 40 IPC round trips on the main thread.
+let journalMemo: SyncJournal | null = null;
+
 async function journalLoad(): Promise<SyncJournal> {
+  if (hasTauri && journalMemo) return journalMemo;
   try {
     const raw = hasTauri
       ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
       : localStorage.getItem(JOURNAL_KEY);
     const j = raw ? JSON.parse(raw) : null;
-    if (j && typeof j.v === "number" && j.tables) {
+    if (j && Number.isFinite(j.v) && j.v >= 0 && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
       for (const t of Object.keys(j.tables)) {
         const e = j.tables[t];
         // Journals written before row-level tracking meant "whole collection".
@@ -87,18 +335,34 @@ async function journalLoad(): Promise<SyncJournal> {
         }
         if (!Array.isArray(e.deleted)) e.deleted = [];
       }
-      return j as SyncJournal;
+      journalMemo = j as SyncJournal;
+      return journalMemo;
     }
-  } catch {
-    /* corrupt journal → start fresh; worst case a full re-push (idempotent) */
+    if (raw) throw new Error("Invalid pending-change journal");
+  } catch (error) {
+    journalMemo = null;
+    throw new Error(`Could not read pending local changes. Sync was stopped to preserve unsent records. ${error instanceof Error ? error.message : String(error)}`);
   }
-  return { v: 0, tables: {} };
+  journalMemo = { v: 0, tables: {} };
+  return journalMemo;
 }
 
 async function journalSave(j: SyncJournal): Promise<void> {
   const json = JSON.stringify(j);
-  if (hasTauri) await invoke("cache_set", { key: JOURNAL_KEY, value: json });
-  else localStorage.setItem(JOURNAL_KEY, json);
+  if (!hasTauri) {
+    localStorage.setItem(JOURNAL_KEY, json);
+    return;
+  }
+  journalMemo = j;
+  try {
+    await invoke("cache_set", { key: JOURNAL_KEY, value: json });
+  } catch (e) {
+    // journalCommit clears pushed tables before saving. Keeping an unpersisted
+    // clear in memory would drop rows that never reached the cloud, so fall
+    // back to storage — the worst it costs is re-pushing, which is idempotent.
+    journalMemo = null;
+    throw e;
+  }
 }
 
 /** Mark rows dirty and notify the auto-sync scheduler. Bare call (no opts) or
@@ -107,40 +371,189 @@ async function journalSave(j: SyncJournal): Promise<void> {
  *  scheduler in a hot retry loop. No-op for collections the cloud doesn't take. */
 export async function journalMark(
   coll: string,
-  opts?: { changed?: any[]; deleted?: any[]; all?: boolean; silent?: boolean }
+  opts?: { changed?: any[]; deleted?: any[]; deletedRevisions?: Record<string, number | null>; all?: boolean; silent?: boolean }
 ): Promise<void> {
   if (!PUSH_SET.has(coll)) return;
   const j = await journalLoad();
-  j.v++;
-  const entry = (j.tables[coll] ??= { changed: [], deleted: [] });
-  if (opts?.all || (!opts?.changed && !opts?.deleted)) entry.all = true;
-  for (const id of opts?.changed ?? [])
-    if (id != null && !entry.changed.includes(id)) entry.changed.push(id);
-  for (const id of opts?.deleted ?? [])
-    if (id != null && !entry.deleted.includes(id)) entry.deleted.push(id);
+  markJournal(j, coll, opts);
   await journalSave(j);
   if (!opts?.silent && typeof window !== "undefined")
     window.dispatchEvent(new Event("filey:local-write"));
 }
 
+function markJournal(j: SyncJournal, coll: string, opts: Parameters<typeof journalMark>[1]): void {
+  if (!PUSH_SET.has(coll)) return;
+  j.v++;
+  const entry = (j.tables[coll] ??= { changed: [], deleted: [] });
+  if (opts?.all || (!opts?.changed && !opts?.deleted)) entry.all = true;
+  // Set membership, not Array.includes: a bulk import marks thousands of ids
+  // against a list that is already thousands long, and the quadratic scan was
+  // the import's own bottleneck.
+  const push = (list: any[], ids: any[]): void => {
+    if (!ids.length) return;
+    const seen = new Set(list);
+    for (const id of ids) {
+      if (id == null || seen.has(id)) continue;
+      seen.add(id);
+      list.push(id);
+    }
+  };
+  push(entry.changed, opts?.changed ?? []);
+  push(entry.deleted, opts?.deleted ?? []);
+  if (opts?.deletedRevisions) entry.deletedRevisions = { ...entry.deletedRevisions, ...opts.deletedRevisions };
+}
+
+/** A COPY of the journal, isolated from writes that land afterwards.
+ *
+ *  It has to be a copy. On desktop journalLoad hands back the memo object that
+ *  journalMark mutates in place, so a caller holding a "before" snapshot was
+ *  holding the live journal: `snapshot.v !== current.v` compared a number with
+ *  itself and could never be true. Both guards built on that comparison were
+ *  dead — journalCommit's "don't clear what wasn't pushed", and pullNow's "a
+ *  local write raced this pull, stop". A row edited during a sync could be
+ *  cleared from the journal without ever being pushed, and then overwritten by
+ *  the next pull with the cloud's older copy.
+ *
+ *  Browser mode always re-read and re-parsed localStorage, so it was already
+ *  getting a fresh object and never had the bug. */
 export async function journalSnapshot(): Promise<SyncJournal> {
-  return journalLoad();
+  const j = await journalLoad();
+  const tables: SyncJournal["tables"] = {};
+  for (const t of Object.keys(j.tables)) {
+    const e = j.tables[t];
+    tables[t] = { ...e, changed: [...e.changed], deleted: [...e.deleted], ...(e.deletedRevisions ? { deletedRevisions: { ...e.deletedRevisions } } : {}) };
+  }
+  return { v: j.v, tables };
+}
+
+/** Just the version counter. Callers polling "has anything written since?" in
+ *  a loop want this, not a full copy of a journal that may hold thousands of
+ *  ids after a bulk import. */
+export async function journalVersion(): Promise<number> {
+  return (await journalLoad()).v;
+}
+
+/** Remember a successful upload without overwriting edits made during the request. */
+export function rememberSyncRevision(coll: string, id: string | number, revision: number): Promise<void> {
+  return rememberSyncRevisions(coll, new Map([[id, revision]]));
+}
+
+/** One collection write per upload batch, preserving edits made in flight. */
+export function rememberSyncRevisions(coll: string, revisions: Map<string | number, number>): Promise<void> {
+  return serializeWrite(async () => {
+    const rows = await loadColl(coll);
+    if (rows.some(row => revisions.has(row.id)))
+      await saveColl(coll, rows.map(row => revisions.has(row.id) ? { ...row, sync_revision: revisions.get(row.id) } : row));
+    const j = await journalSnapshot();
+    const deleted = j.tables[coll]?.deleted.filter(id => revisions.has(id)) ?? [];
+    if (deleted.length) {
+      const entry = j.tables[coll];
+      entry.deletedRevisions = { ...entry.deletedRevisions };
+      for (const id of deleted) entry.deletedRevisions[String(id)] = revisions.get(id)!;
+      await journalSave(j);
+    }
+  });
+}
+
+/** Apply an explicit conflict choice. A subsequent push still compares revisions. */
+type ConflictChoice = { id: string | number; remote: Row | null; reviewedLocal: Row | null; keepLocal?: boolean; localOrgId?: string };
+export function resolveLocalSyncConflict(coll: string, id: string | number, remote: Row | null, keepLocal: boolean, reviewedLocal: Row | null): Promise<void> {
+  return resolveLocalSyncConflicts(coll, [{ id, remote, reviewedLocal }], keepLocal);
+}
+
+/** Validate the whole collection first, then persist it and its journal once. */
+export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[], keepLocal: boolean): Promise<void> {
+  return serializeWrite(async () => {
+    const rows = await loadColl(coll);
+    const byId = new Map(rows.map(row => [row.id, row]));
+    for (const { id, reviewedLocal } of choices) {
+      if (JSON.stringify(byId.get(id) ?? null) !== JSON.stringify(reviewedLocal))
+        throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
+    }
+    const original = await journalSnapshot();
+    const journal = structuredClone(original);
+    const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
+    const changed = new Set(entry.all ? rows.map(row => row.id) : entry.changed);
+    const deleted = new Set(entry.deleted);
+    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of choices) {
+      const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
+      if (targetId !== id && byId.has(targetId))
+        throw new Error("Company settings changed on this device. Sync again before choosing a version.");
+      if (preference) {
+        const row = byId.get(id);
+        byId.delete(id);
+        if (row) byId.set(targetId, { ...row, id: targetId, ...(localOrgId ? { org_id: localOrgId } : {}), sync_revision: remote?.sync_revision ?? null });
+        changed.delete(id);
+        if (deleted.has(id)) {
+          deleted.delete(id); deleted.add(targetId);
+          entry.deletedRevisions = { ...entry.deletedRevisions, [String(targetId)]: remote?.sync_revision ?? null };
+          if (targetId !== id) delete entry.deletedRevisions[String(id)];
+        } else if (row) changed.add(targetId);
+      } else {
+        byId.delete(id);
+        if (remote) byId.set(targetId, remote);
+        changed.delete(id);
+        deleted.delete(id);
+        if (entry.deletedRevisions) delete entry.deletedRevisions[String(id)];
+      }
+    }
+    entry.changed = [...changed]; entry.deleted = [...deleted]; delete entry.all;
+    if (!changed.size && !deleted.size) delete journal.tables[coll];
+    journal.v++;
+    const next = [...byId.values()];
+    if (hasTauri) {
+      const json = await dehydrate(next);
+      // The chosen versions and their upload queue must survive together.
+      await invoke("cache_set_many", { entries: [["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]] });
+      memo.set(coll, { rows: next, json });
+      journalMemo = journal;
+      window.dispatchEvent(new Event("filey:remote-update"));
+      return;
+    }
+    try {
+      await saveColl(coll, next);
+      await journalSave(journal);
+    } catch (error) {
+      await saveColl(coll, rows);
+      await journalSave(original);
+      throw error;
+    }
+    window.dispatchEvent(new Event("filey:remote-update"));
+  });
 }
 
 /** Clear pushed tables from the journal — but only if nothing wrote since the
  *  snapshot (`v` unchanged). Otherwise leave it; the next debounced sync
  *  re-pushes, and upserts make that harmless. */
-export async function journalCommit(v: number, tables: string[]): Promise<void> {
-  const j = await journalLoad();
-  if (j.v !== v) return;
-  for (const t of tables) delete j.tables[t];
-  await journalSave(j);
+export function journalCommit(v: number, tables: string[], failures: Record<string, (string | number)[]> = {}): Promise<void> {
+  return serializeWrite(async () => {
+    const j = await journalSnapshot();
+    if (j.v !== v) return;
+    for (const t of tables) {
+      const entry = j.tables[t];
+      const pending = new Set(failures[t] ?? []);
+      if (!entry || !pending.size) { delete j.tables[t]; continue; }
+      // A failed row must not keep every successful row in the retry queue.
+      entry.changed = [...pending].filter(id => !entry.deleted.includes(id));
+      entry.deleted = entry.deleted.filter(id => pending.has(id));
+      if (entry.deletedRevisions) entry.deletedRevisions = Object.fromEntries(
+        entry.deleted.map(id => [String(id), entry.deletedRevisions![String(id)] ?? null]));
+      delete entry.all;
+    }
+    await journalSave(j);
+  });
 }
 
 // ---- query builder --------------------------------------------------------
 
 type Op = "select" | "insert" | "update" | "upsert" | "delete";
+type LocalStore = {
+  load: typeof loadColl;
+  save: typeof saveColl;
+  mark: typeof journalMark;
+};
 type Filter =
+  | { kind: "is"; col: string; val: null | boolean }
   | { kind: "eq"; col: string; val: any }
   | { kind: "lte"; col: string; val: any }
   | { kind: "in"; col: string; val: any[] }
@@ -153,11 +566,15 @@ class LocalBuilder implements PromiseLike<Result> {
   private payload: Row[] = [];
   private orders: { col: string; asc: boolean }[] = [];
   private limitN?: number;
+  private offsetN = 0;
   private want: "no" | "single" | "maybe" = "no";
   private returnRows = false; // a write followed by .select()
   private conflictKey?: string;
+  private store?: LocalStore;
 
   constructor(private coll: string) {}
+
+  inStore(store: LocalStore): this { this.store = store; return this; }
 
   select(_cols?: string): this {
     if (this.op !== "select") this.returnRows = true;
@@ -188,6 +605,10 @@ class LocalBuilder implements PromiseLike<Result> {
     this.filters.push({ kind: "eq", col, val });
     return this;
   }
+  is(col: string, val: null | boolean): this {
+    this.filters.push({ kind: "is", col, val });
+    return this;
+  }
   lte(col: string, val: any): this {
     this.filters.push({ kind: "lte", col, val });
     return this;
@@ -214,6 +635,11 @@ class LocalBuilder implements PromiseLike<Result> {
     this.limitN = n;
     return this;
   }
+  range(from: number, to: number): this {
+    this.offsetN = from;
+    this.limitN = Math.max(0, to - from + 1);
+    return this;
+  }
   single(): this {
     this.want = "single";
     return this;
@@ -237,6 +663,7 @@ class LocalBuilder implements PromiseLike<Result> {
 
   private matches(r: Row): boolean {
     for (const f of this.filters) {
+      if (f.kind === "is" && !(f.val === null ? r[f.col] == null : r[f.col] === f.val)) return false;
       if (f.kind === "eq" && !this.looseEq(r[f.col], f.val)) return false;
       if (f.kind === "lte" && !(r[f.col] <= f.val)) return false;
       if (f.kind === "in" && !f.val.some((v) => this.looseEq(r[f.col], v)))
@@ -259,9 +686,13 @@ class LocalBuilder implements PromiseLike<Result> {
     return true;
   }
 
-  private async exec(): Promise<Result> {
+  private async exec(store = this.store): Promise<Result> {
     try {
-      let rows = await loadColl(this.coll);
+      // loadColl hands back the cached array itself, so a write works on a copy:
+      // insert/upsert splice in place, and mutating the cache before the store
+      // has accepted the write would show rows that a failed save never kept.
+      let rows = await (store?.load ?? loadColl)(this.coll);
+      if (this.op !== "select") rows = [...rows];
       let result: any = null;
 
       if (this.op === "select") {
@@ -281,7 +712,7 @@ class LocalBuilder implements PromiseLike<Result> {
             return 0;
           });
         }
-        if (this.limitN != null) out = out.slice(0, this.limitN);
+        if (this.limitN != null) out = out.slice(this.offsetN, this.offsetN + this.limitN);
         result = out;
       } else if (this.op === "insert" || this.op === "upsert") {
         const written: Row[] = [];
@@ -299,13 +730,15 @@ class LocalBuilder implements PromiseLike<Result> {
               continue;
             }
           }
-          if (row.id == null) row.id = nextId(rows);
+          if (row.id == null) row.id = nextLocalId(rows);
+          if (rows.some((existing) => existing.id === row.id))
+            throw new Error("A record with this ID already exists.");
           if (row.created_at == null) row.created_at = new Date().toISOString();
           rows.push(row);
           written.push(row);
         }
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { changed: written.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "update") {
         const patch = this.payload[0] || {};
@@ -318,14 +751,17 @@ class LocalBuilder implements PromiseLike<Result> {
           }
           return r;
         });
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { changed: written.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "delete") {
         const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
-        await saveColl(this.coll, rows);
-        await journalMark(this.coll, { deleted: removed.map((r) => r.id) });
+        await (store?.save ?? saveColl)(this.coll, rows);
+        await (store?.mark ?? journalMark)(this.coll, {
+          deleted: removed.map((r) => r.id),
+          deletedRevisions: Object.fromEntries(removed.map((r) => [String(r.id), r.sync_revision ?? null])),
+        });
         result = null;
       }
 
@@ -345,16 +781,113 @@ class LocalBuilder implements PromiseLike<Result> {
     onF?: ((v: Result) => R1 | PromiseLike<R1>) | null,
     onR?: ((e: any) => R2 | PromiseLike<R2>) | null
   ): PromiseLike<R1 | R2> {
-    return this.exec().then(onF as any, onR as any);
+    const result = this.op === "select" || this.store ? this.exec() : withLocalTransaction(async (client) => {
+      const outcome = await this.exec(client.from(this.coll).store);
+      if (outcome.error) throw outcome.error;
+      return outcome;
+    }).catch((error) => ({ data: null, error }));
+    return result.then(onF as any, onR as any);
   }
 }
 
+/** Stage a document's collection writes together, then publish one change event.
+ *  Other writes wait; readers keep seeing committed records. Failed commits
+ *  restore their original collections and journal. Desktop commits all rows and
+ *  the pending-change journal in one native SQLite transaction. */
+export function withLocalTransaction<T>(
+  run: (client: Pick<typeof localClient, "from">) => Promise<T>,
+): Promise<T> {
+  return serializeWrite(async () => {
+    const original = new Map<string, Row[]>();
+    const staged = new Map<string, Row[]>();
+    const changes: [string, Parameters<typeof journalMark>[1]][] = [];
+    const store: LocalStore = {
+      async load(coll) {
+        if (staged.has(coll)) return staged.get(coll)!;
+        if (!original.has(coll)) original.set(coll, await loadColl(coll));
+        return original.get(coll)!;
+      },
+      async save(coll, rows) {
+        staged.set(coll, rows);
+      },
+      async mark(coll, opts) {
+        changes.push([coll, opts]);
+      },
+    };
+    const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
+    if (!staged.size) return result;
+    const journal = await journalSnapshot();
+    if (hasTauri) {
+      const nextJournal = structuredClone(journal);
+      for (const [coll, opts] of changes) markJournal(nextJournal, coll, opts);
+      const entries: [string, string][] = [];
+      for (const [coll, rows] of staged) entries.push(["localdb:" + coll, await dehydrate(rows)]);
+      entries.push([JOURNAL_KEY, JSON.stringify(nextJournal)]);
+      try {
+        await invoke("cache_set_many", { entries });
+        for (const [coll, rows] of staged) memo.set(coll, { rows, json: entries.find(([key]) => key === "localdb:" + coll)![1] });
+        journalMemo = nextJournal;
+      } catch (error) {
+        for (const coll of staged.keys()) memo.delete(coll);
+        journalMemo = null;
+        throw error;
+      }
+      window.dispatchEvent(new Event("filey:local-write"));
+      return result;
+    }
+    const committed: string[] = [];
+    try {
+      for (const [coll, rows] of staged) {
+        await saveColl(coll, rows);
+        committed.push(coll);
+      }
+      for (const [coll, opts] of changes) await journalMark(coll, { ...opts, silent: true });
+    } catch (error) {
+      const restored = await Promise.allSettled(
+        committed.map((coll) => saveColl(coll, original.get(coll)!)),
+      );
+      const journalRestored = await journalSave(journal).then(
+        () => true,
+        () => false,
+      );
+      if (!journalRestored || restored.some((entry) => entry.status === "rejected"))
+        throw new Error(
+          "The save failed and local storage could not be fully restored. Stop editing and restore a backup before retrying.",
+        );
+      throw error;
+    }
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:local-write"));
+    return result;
+  });
+}
+
 // ---- rpc ------------------------------------------------------------------
-// adjust_product_stock / adjust_account_balance both have JS read-modify-write
-// fallbacks in api.ts that run when the rpc errors — so returning an error here
-// makes them work locally with no extra code. The other two are cloud/sharing
-// features with no local meaning.
-async function localRpc(name: string): Promise<Result> {
+// Stock and balance adjustments share the document write queue, so concurrent
+// read-modify-write operations preserve every delta. Other RPCs require cloud.
+async function localRpc(name: string, args?: { p_id?: number; p_delta?: number }): Promise<Result> {
+  if (name === "adjust_product_stock" || name === "adjust_account_balance") {
+    try {
+      await withLocalTransaction(async (client) => {
+        if (!Number.isInteger(args?.p_id) || !Number.isFinite(args?.p_delta))
+          throw new Error("A valid record and finite adjustment are required.");
+        const coll = name === "adjust_product_stock" ? "products" : "accounts";
+        const field = name === "adjust_product_stock" ? "quantity" : "balance";
+        const { data, error } = await client.from(coll).select("*").eq("id", args!.p_id).single();
+        if (error) throw new Error(error.message);
+        const updated = await client
+          .from(coll)
+          .update({ [field]: (Number(data[field]) || 0) + args!.p_delta! })
+          .eq("id", args!.p_id);
+        if (updated.error) throw new Error(updated.error.message);
+      });
+      return { data: null, error: null };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  }
   return {
     data: null,
     error: { message: `rpc "${name}" is not available in local mode` },
@@ -474,12 +1007,8 @@ async function diskWrite(path: string, bytes: Uint8Array): Promise<void> {
   await invoke("blob_write", { path, bytes: Array.from(bytes) });
 }
 async function diskRead(path: string): Promise<Uint8Array | null> {
-  try {
-    const arr = await invoke<number[]>("blob_read", { path });
-    return arr ? Uint8Array.from(arr) : null;
-  } catch {
-    return null; // missing file
-  }
+  const arr = await invoke<number[] | null>("blob_read", { path });
+  return arr ? Uint8Array.from(arr) : null;
 }
 async function diskDelete(path: string): Promise<void> {
   try {
@@ -554,7 +1083,7 @@ function localStorageApi() {
 
 export const localClient = {
   from: (coll: string) => new LocalBuilder(coll),
-  rpc: (name: string) => localRpc(name),
+  rpc: (name: string, args?: { p_id?: number; p_delta?: number }) => localRpc(name, args),
   auth: localAuth,
   storage: localStorageApi(),
   channel: () => {

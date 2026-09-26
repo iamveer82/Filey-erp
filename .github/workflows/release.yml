@@ -7,11 +7,20 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      intel_recovery_tag:
+        description: 'Recover missing Intel Mac assets for an existing draft tag (blank for normal build)'
+        type: string
+        required: false
 
 # tauri-action creates the GitHub Release, which needs write access to repo
 # contents (otherwise: "Resource not accessible by integration").
 permissions:
   contents: write
+
+concurrency:
+  group: filey-release-${{ inputs.intel_recovery_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -25,7 +34,9 @@ jobs:
       # appends to it, giving one release with every platform in one latest.json.
       max-parallel: 1
       matrix:
-        include:
+        include: ${{ fromJSON(inputs.intel_recovery_tag != '' && '[{"os":"macos-latest","args":"--target x86_64-apple-darwin","rust_target":"x86_64-apple-darwin","bun_target":"bun-darwin-x64"}]' || '[{"os":"ubuntu-22.04","args":"--bundles deb,rpm"},{"os":"windows-latest","args":""},{"os":"macos-latest","args":""},{"os":"macos-latest","args":"--target x86_64-apple-darwin","rust_target":"x86_64-apple-darwin","bun_target":"bun-darwin-x64"}]') }}
+        # Recovery builds only Intel; the normal matrix retains all four builds.
+        # Original platform rationale:
           # deb + rpm only. tauri.conf sets targets "all", which on Linux also
           # builds an AppImage — and that step has failed on every single
           # release this project has ever cut ("failed to run linuxdeploy",
@@ -37,25 +48,44 @@ jobs:
           # FUSE out, so re-adding "appimage" needs the real linuxdeploy error
           # first — likeliest suspect is the bun-compiled wa-bridge sidecar in
           # externalBin, which linuxdeploy also tries to resolve deps for.
-          - os: ubuntu-22.04
-            args: "--bundles deb,rpm"
-          - os: windows-latest
-            args: ""
           # macOS is UNSIGNED — no APPLE_* secrets are set, so Gatekeeper marks
           # the .dmg as from an unidentified developer and users must right-click
           # → Open once. Set APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY /
           # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID (needs a $99/yr Apple
           # Developer account) and it notarizes with no workflow change.
           #
-          # arm64 only, not universal: the wa-bridge sidecar below is compiled
-          # for the RUNNER's host triple, and a universal build makes tauri look
-          # for an x86_64-apple-darwin sidecar too, which nothing produces.
-          # For Intel Macs, cross-compile the sidecar with bun's --target first.
-          - os: macos-latest
-            args: ""
+          # Not universal: a universal build makes tauri look for BOTH sidecar
+          # triples in one bundle. Two separate arch builds instead — each one
+          # carries the sidecar it can actually run, and tauri-action appends
+          # both to the same draft, so latest.json ends up with darwin-aarch64
+          # and darwin-x86_64.
+          # Intel Macs, cross-compiled from the arm64 runner: the Rust binary
+          # needs the rustup target and the bun sidecar needs --target, or an
+          # arm64 sidecar gets bundled into an x86_64 app and the bridge dies
+          # on launch with no error a user could act on.
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Validate Intel recovery target
+        if: inputs.intel_recovery_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.intel_recovery_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected a release tag"; exit 1; }
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets > release.json
+          node -e 'const r=require("./release.json"); if(!r.isDraft || r.assets.some(a=>/(_x64\.dmg|_x64\.app\.tar\.gz(?:\.sig)?)$/.test(a.name))) process.exit(1)'
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.intel_recovery_tag || github.ref }}
+
+      - name: Check recovery version
+        if: inputs.intel_recovery_tag != ''
+        env:
+          TAG: ${{ inputs.intel_recovery_tag }}
+        run: node -e 'if("v"+require("./src-tauri/tauri.conf.json").version!==process.env.TAG) process.exit(1)'
 
       - name: Linux build deps
         if: matrix.os == 'ubuntu-22.04'
@@ -70,23 +100,21 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Host triple only. macos-latest is already aarch64, and we don't build
-      # universal (see the matrix note about the sidecar).
+      # Host triple, plus the cross target on the rows that set one (Intel mac).
+      # Empty `targets` is the action's own default, so the other rows are
+      # unaffected.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Host and cross builds on the same runner would otherwise fight over
+          # one cache entry.
+          key: ${{ matrix.rust_target || 'host' }}
 
-      # npm install (not ci): lockfile is Windows-generated and lacks the
-      # linux-only optional native deps, so `npm ci` fails on the linux
-      # runner. install reconciles per-platform.
-      - run: npm install --no-audit --no-fund
-
-      - name: Typecheck & unit tests
-        run: |
-          npm run typecheck
-          npm test
+      - run: npm ci --no-audit --no-fund
 
       # The WhatsApp bridge ships as a Tauri sidecar so a QR-paired session can
       # start with the app instead of from a terminal. Compiled to a standalone
@@ -107,23 +135,43 @@ jobs:
         shell: bash
         run: |
           cd tools/wa-bridge
-          bun install --frozen-lockfile || bun install
+          npm ci --no-audit --no-fund
           # Fail here, not three steps later inside the bundler.
           test -d node_modules/libsignal || { echo "libsignal missing"; exit 1; }
-          TRIPLE=$(rustc -vV | sed -n 's/host: //p')
+          # Native tests run on the host even when packaging a cross target.
+          HOST_TRIPLE=$(rustc -vV | sed -n 's/host: //p')
+          if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" != "$HOST_TRIPLE" ]; then
+            mkdir -p ../../src-tauri/binaries
+            bun build --compile index.mjs --outfile "../../src-tauri/binaries/filey-wa-bridge-$HOST_TRIPLE"
+          fi
+          # Package the actual target separately; never rename host bytes.
+          TRIPLE="${{ matrix.rust_target }}"
+          [ -n "$TRIPLE" ] || TRIPLE=$(rustc -vV | sed -n 's/host: //p')
           EXT=""
           [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
+          BUN_TARGET=""
+          [ -n "${{ matrix.bun_target }}" ] && BUN_TARGET="--target=${{ matrix.bun_target }}"
           mkdir -p ../../src-tauri/binaries
-          bun build --compile index.mjs \
+          bun build --compile $BUN_TARGET index.mjs \
             --outfile "../../src-tauri/binaries/filey-wa-bridge-$TRIPLE$EXT"
           ls -la ../../src-tauri/binaries
+
+      # Run after the bridge installs its own dependencies; its tests are part
+      # of the root suite and need those imports even when transport is mocked.
+      - name: Typecheck & unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Native storage and security fixtures
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build desktop app
         uses: tauri-apps/tauri-action@v0
         with:
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: ${{ github.ref_type == 'tag' && format('Filey ERP {0}', github.ref_name) || '' }}
+          tagName: ${{ inputs.intel_recovery_tag || (github.ref_type == 'tag' && github.ref_name || '') }}
+          releaseName: ${{ (inputs.intel_recovery_tag || github.ref_type == 'tag') && format('Filey ERP {0}', inputs.intel_recovery_tag || github.ref_name) || '' }}
           releaseDraft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,7 +189,9 @@ jobs:
       - name: Upload installers as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: filey-erp-${{ matrix.os }}
+          # Two rows share macos-latest, and upload-artifact@v4 rejects a
+          # duplicate artifact name outright — the arch has to be in it.
+          name: filey-erp-${{ matrix.os }}-${{ matrix.rust_target || 'host' }}
           path: |
             src-tauri/target/**/release/bundle/**/*.dmg
             src-tauri/target/**/release/bundle/**/*.app
@@ -163,13 +213,13 @@ jobs:
   # goes missing.
   verify-release-assets:
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || inputs.intel_recovery_tag != ''
     runs-on: ubuntu-latest
     steps:
       - name: Assert every platform uploaded its installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
         run: |
           set -euo pipefail
           echo "Assets on $TAG:"
@@ -192,7 +242,8 @@ jobs:
           windows-msi   _x64_en-US\.msi$
           linux-deb     _amd64\.deb$
           linux-rpm     \.x86_64\.rpm$
-          macos-dmg     \.dmg$
+          macos-arm     aarch64\.dmg$
+          macos-intel   x64\.dmg$
           updater       ^latest\.json$
           PATTERNS
 

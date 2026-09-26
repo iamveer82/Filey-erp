@@ -1,49 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  erp,
-  billing,
-  crm,
-  type Product,
-  type Order,
-  type InvoiceDocSummary,
-  type CrmCustomer,
-} from "./api";
+import { useDeferredValue, useMemo } from "react";
 import { MODULES } from "../modules/registry";
 import { todayYmd } from "./format";
+import { useModules } from "./modules";
+import { getCacheScope } from "./api";
+import { workspaceQueries, workspaceQueryScope, emptyDataset, type WorkspaceDataset } from "./workspaceQueries";
 
-type Dataset = {
-  products: Product[];
-  orders: Order[];
-  invoices: InvoiceDocSummary[];
-  customers: CrmCustomer[];
-};
-
-const EMPTY: Dataset = {
-  products: [],
-  orders: [],
-  invoices: [],
-  customers: [],
-};
-
-/** Loads the searchable/alertable datasets once. The api layer already
- * caches these, so this stays cheap and shares across hooks. */
-function useDataset(): Dataset {
-  const [data, setData] = useState<Dataset>(EMPTY);
-  useEffect(() => {
-    let alive = true;
-    Promise.all([
-      erp.products().catch(() => [] as Product[]),
-      erp.orders().catch(() => [] as Order[]),
-      billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
-      crm.customers().catch(() => [] as CrmCustomer[]),
-    ]).then(([products, orders, invoices, customers]) => {
-      if (alive) setData({ products, orders, invoices, customers });
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return data;
+function useDataset(enabled = true): WorkspaceDataset {
+  const { isEnabled, loading, error } = useModules();
+  const modules = ["inventory", "orders", "invoicing", "customers"].filter(isEnabled);
+  const { currentData, isError } = workspaceQueries.useDatasetQuery(
+    { scope: workspaceQueryScope(), modules },
+    { skip: !enabled || loading || !!error || !getCacheScope() },
+  );
+  return !loading && !error && !isError && enabled ? currentData ?? emptyDataset : emptyDataset;
 }
 
 export type SearchHit = {
@@ -56,16 +25,18 @@ export type SearchHit = {
 /** Global cross-module search: nav pages + live products / orders /
  * invoices / customers, substring-matched. */
 export function useGlobalSearch(query: string): SearchHit[] {
-  const { products, orders, invoices, customers } = useDataset();
+  const deferredQuery = useDeferredValue(query);
+  const { products, orders, invoices, customers } = useDataset(!!deferredQuery.trim());
+  const { isEnabled } = useModules();
   return useMemo(() => {
-    const s = query.trim().toLowerCase();
+    const s = deferredQuery.trim().toLowerCase();
     if (!s) return [];
     const has = (...v: (string | undefined)[]) =>
       v.some((x) => x && x.toLowerCase().includes(s));
     const hits: SearchHit[] = [];
 
     for (const m of MODULES)
-      if (has(m.label, m.desc))
+      if (isEnabled(m.id) && has(m.label, m.desc))
         hits.push({ group: "Pages", label: m.label, sub: m.desc, to: m.to });
     for (const p of products)
       if (has(p.name, p.sku, p.category))
@@ -101,7 +72,7 @@ export function useGlobalSearch(query: string): SearchHit[] {
         });
 
     return hits.slice(0, 24);
-  }, [query, products, orders, invoices, customers]);
+  }, [deferredQuery, products, orders, invoices, customers, isEnabled]);
 }
 
 export type Notif = {

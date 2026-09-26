@@ -4,19 +4,140 @@
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
 @config "../tailwind.config.js";
 
+@keyframes filey-spin { to { transform: rotate(360deg); } }
+.page-heading-actions > .flex { max-width: 100%; flex-wrap: wrap; }
+.filey-spinner-arc { transform-origin: 12px 12px; animation: filey-spin 900ms linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .filey-spinner-arc { animation: none; }
+}
+
+/* Browser chrome, notches and software keyboards are part of the workspace. */
+.filey-document-dialog > :last-child { display: flex; flex: 1; flex-direction: column; overflow: hidden; padding: 0; }
+.filey-document-dialog > :last-child > :not(.fp-box) { flex-shrink: 0; margin: 0; padding: 4px 16px; border-bottom: 1px solid hsl(var(--border)); }
+.filey-document-dialog .fp-box { flex: 1; min-height: 0; max-height: none; border-radius: 0; padding: 16px; scrollbar-gutter: auto; background: hsl(var(--muted)); }
+@media screen and (max-width: 1023px) {
+  #root { height: var(--filey-viewport-height, 100dvh); }
+  .filey-workspace { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .workspace-header { height: calc(4rem + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .workspace-header > button, .workspace-header > div { flex-shrink: 0; }
+  .workspace-content { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+  .filey-dialog {
+    top: calc(var(--filey-viewport-top, 0px) + var(--filey-viewport-height, 100dvh) / 2);
+    max-height: calc(var(--filey-viewport-height, 100dvh) - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .filey-dialog.filey-document-dialog {
+    top: var(--filey-viewport-top, 0px); left: 0; transform: none; translate: none;
+    width: 100%; max-width: none; height: var(--filey-viewport-height, 100dvh); max-height: none;
+    border: 0; border-radius: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .filey-document-dialog .fp-box { padding: 8px; }
+  .filey-chat { min-height: calc(var(--filey-viewport-height, 100dvh) - 10rem); }
+}
+@media screen and (max-width: 1023px) {
+  /* A readable field size also avoids Safari zooming the page on focus. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), select, textarea { font-size: 16px !important; }
+  .filey-workspace :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .workspace-nav-link) { min-height: 44px; }
+  .workspace-header :is(button, a) { min-height: 44px; min-width: 44px; justify-content: center; }
+  input:is([type="checkbox"], [type="radio"]) { min-width: 24px; min-height: 24px; }
+  .filey-table-scroll { scroll-padding-inline: 1rem; }
+  .filey-table-scroll .cell-pinned-end { position: static; box-shadow: none; }
+  .workspace-notifications { position: fixed; inset-inline: 1rem; top: calc(4rem + env(safe-area-inset-top)); width: auto; max-height: calc(var(--filey-viewport-height, 100dvh) - 6rem); }
+}
+
+/* Shared navigation: compact on desktop, a contained sheet on touch screens. */
+.workspace-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 260px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--sidebar));
+  border-inline-end: 1px solid hsl(var(--border));
+}
+.workspace-sidebar-header { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 14px 14px 10px; }
+.workspace-brand { display: flex; flex: 1; min-width: 0; align-items: center; min-height: 40px; border-radius: 999px; padding-inline: 4px; }
+.workspace-sidebar-close { height: 44px; width: 44px; flex-shrink: 0; border-radius: 50%; place-items: center; color: hsl(var(--muted-foreground)); background: hsl(var(--hover)); }
+.workspace-navigation { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.workspace-nav-search { display: flex; align-items: center; gap: 9px; margin: 0 14px 12px; padding-inline: 12px 4px; min-height: 38px; border: 1px solid hsl(var(--border)); border-radius: 999px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
+.workspace-nav-search:focus-within { border-color: hsl(var(--foreground) / .45); box-shadow: 0 0 0 2px hsl(var(--foreground) / .07); }
+.workspace-nav-search > svg { flex-shrink: 0; }
+.workspace-nav-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; padding-block: 8px; font-size: 13px; color: hsl(var(--foreground)); }
+.workspace-nav-search input:focus-visible { outline: 0; box-shadow: none; }
+.workspace-nav-search input::placeholder { color: hsl(var(--muted-foreground)); }
+.workspace-nav-search button { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 50%; }
+.workspace-nav-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 12px; scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+.workspace-nav-group + .workspace-nav-group { margin-top: 10px; }
+.workspace-nav-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: .045em; color: hsl(var(--muted-foreground)); }
+.workspace-nav-heading svg { flex-shrink: 0; transform: rotate(-90deg); transition: transform 160ms ease-out; }
+.workspace-nav-heading svg[data-expanded="true"] { transform: rotate(0); }
+.workspace-nav-group nav { display: grid; gap: 3px; }
+.workspace-nav-group nav[hidden] { display: none; }
+.workspace-nav-link { display: flex; align-items: center; gap: 10px; min-height: 38px; border-radius: 999px; padding: 7px 12px; color: hsl(var(--foreground) / .8); font-size: 13.5px; line-height: 20px; transition: background-color 140ms ease-out, color 140ms ease-out; }
+.workspace-nav-icon { display: grid; flex-shrink: 0; width: 20px; place-items: center; color: hsl(var(--muted-foreground)); }
+.workspace-nav-link[data-assistant="true"] { min-height: 56px; padding-block: 3px; padding-inline-start: 5px; gap: 8px; font-weight: 600; background: hsl(var(--primary-400) / .1); }
+.workspace-nav-link[data-assistant="true"] .workspace-nav-icon { width: 48px; }
+.workspace-nav-link[aria-current="page"] { color: hsl(var(--background)); background: hsl(var(--foreground)); font-weight: 550; }
+.workspace-nav-link[aria-current="page"] .workspace-nav-icon { color: inherit; }
+.workspace-sidebar-footer { flex-shrink: 0; padding: 8px 12px 12px; border-top: 1px solid hsl(var(--border) / .7); }
+.workspace-support-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 2px; padding-bottom: 6px; }
+.workspace-support-links a { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 4px; border-radius: 999px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
+.workspace-support-links svg { flex-shrink: 0; }
+.workspace-support-links a[aria-current="page"] { color: hsl(var(--foreground)); background: hsl(var(--hover)); }
+.workspace-account-trigger { display: flex; width: 100%; align-items: center; gap: 10px; min-height: 52px; padding: 7px 9px; border-radius: 999px; background: hsl(var(--background)); border: 1px solid hsl(var(--border) / .7); }
+.workspace-drawer-backdrop { display: none; }
+@media (hover: hover) {
+  .workspace-nav-heading:hover, .workspace-nav-search button:hover, .workspace-support-links a:hover, .workspace-account-trigger:hover { background: hsl(var(--hover)); color: hsl(var(--foreground)); }
+  .workspace-nav-link:not([aria-current="page"]):hover { background: hsl(var(--hover)); color: hsl(var(--foreground)); }
+}
+@media screen and (max-width: 1023px) {
+  .workspace-sidebar {
+    position: fixed;
+    z-index: 50;
+    top: calc(var(--filey-viewport-top, 0px) + env(safe-area-inset-top) + 8px);
+    left: max(8px, env(safe-area-inset-left));
+    width: min(336px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    height: calc(var(--filey-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+    border: 1px solid hsl(var(--border));
+    border-radius: 24px;
+    box-shadow: 0 16px 60px rgb(0 0 0 / .16);
+    transform: translate3d(calc(-100% - 24px - env(safe-area-inset-left)), 0, 0);
+    will-change: transform;
+    transition: transform 220ms cubic-bezier(.32,.72,0,1);
+  }
+  .workspace-sidebar[data-open="true"] { transform: translate3d(0, 0, 0); transition-duration: 260ms; }
+  .workspace-sidebar-close { display: grid; }
+  .workspace-sidebar-header { padding: 12px 12px 10px; }
+  .workspace-nav-search { min-height: 44px; }
+  .workspace-nav-search button { height: 44px; width: 44px; }
+  .workspace-nav-heading { min-height: 44px; font-size: 12px; }
+  .workspace-nav-link { min-height: 44px; font-size: 14px; }
+  .workspace-nav-group + .workspace-nav-group { margin-top: 4px; }
+  .workspace-support-links a { min-height: 44px; font-size: 12px; }
+  .workspace-drawer-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / .24); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 220ms ease-out, visibility 0s linear 220ms; }
+  .workspace-drawer-backdrop[data-open="true"] { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-sidebar[data-open], .workspace-drawer-backdrop, .workspace-nav-heading svg, .workspace-nav-link { transition: none; }
+  .workspace-sidebar { will-change: auto; }
+}
+
 /* ── Design tokens (Emergent reference) ──────────────────────────────────
    Neutral zinc hsl scale; every Tailwind surface/text color in
    tailwind.config.js resolves through these, so the `.dark` class flips
    the whole app. Values are verbatim from the reference frontend. */
 @layer base {
   :root {
+    color-scheme: light;
     /* Light theme */
     --background: 0 0% 100%;
     /* Ground behind the page content. Cards are pure white and their outline is
        white too, so this soft tint is what makes each card read as a separate
        tile. In dark mode the card is already lighter than the page, so --page
        just matches --background there. */
-    --page: 240 5% 97%;
+    --page: 45 15% 97%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
@@ -36,21 +157,21 @@
     --info: 201 96% 32%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 74% 42%;
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
     --radius: 0.5rem;
-    --sidebar: 240 4% 97.5%;
+    --sidebar: 45 12% 98%;
     --hover: 240 4.8% 95.9%;
 
     /* Chart palette (light) — consumed by recharts via useChartColors and
        the legacy --chart-* names below. */
     --chart-primary: 240 10% 3.9%;
     --chart-secondary: 240 3.8% 46.1%;
-    --chart-grid: #f3f4f6;
-    --chart-axis: 240 3.8% 60%;
+    --chart-grid: #e4e4e7;
+    --chart-axis: 240 3.8% 46%;
     --tooltip-bg: 0 0% 100%;
     --tooltip-border: 240 5.9% 90%;
     --tooltip-fg: 240 10% 3.9%;
@@ -61,7 +182,7 @@
     --chart-fill-end: hsl(var(--primary-200));
     --chart-fill-opacity-start: 0.35;
     --chart-fill-opacity-end: 0.05;
-    --chart-tick: #9ca3af;
+    --chart-tick: #71717a;
     --chart-tooltip-bg: #ffffff;
     --chart-tooltip-border: #e5e7eb;
 
@@ -73,9 +194,9 @@
        ponytail: hue+sat swap, not a per-accent hand-tuned ramp. `--p-l400`
        is the one escape hatch, for hues that read too dark under the
        always-dark ink on primary surfaces (see .text-ink rules below). */
-    --p-h: 38;
-    --p-s: 92%;
-    --p-l400: 56%;
+    --p-h: 45;
+    --p-s: 96%;
+    --p-l400: 54%;
     --primary-50: var(--p-h) var(--p-s) 96%;
     --primary-100: var(--p-h) var(--p-s) 89%;
     --primary-200: var(--p-h) var(--p-s) 77%;
@@ -99,6 +220,7 @@
   [data-accent="slate"] { --p-h: 215; --p-s: 16%; --p-l400: 62%; }
 
   .dark {
+    color-scheme: dark;
     /* Dark theme — near-black */
     --background: 0 0% 4%;
     --page: 0 0% 4%;
@@ -129,7 +251,7 @@
     --chart-primary: 0 0% 96%;
     --chart-secondary: 0 0% 63%;
     --chart-grid: #1f1f1f;
-    --chart-axis: 0 0% 45%;
+    --chart-axis: 0 0% 63%;
     --tooltip-bg: 0 0% 8%;
     --tooltip-border: 0 0% 15%;
     --tooltip-fg: 0 0% 93%;
@@ -137,7 +259,7 @@
     --chart-stroke: hsl(var(--primary-400));
     --chart-fill-start: hsl(var(--primary-400));
     --chart-fill-end: hsl(var(--primary-900));
-    --chart-tick: #666666;
+    --chart-tick: #a1a1aa;
     --chart-tooltip-bg: #0e0e0e;
     --chart-tooltip-border: #262626;
   }
@@ -239,6 +361,10 @@
   summary {
     @apply cursor-pointer;
   }
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: hsl(var(--primary-400));
+  }
   /* Accessible focus ring — 2px primary-blue ring, 2px offset. Blue (not ink)
      so keyboard focus reads as an interactive affordance app-wide. */
   :focus-visible {
@@ -259,6 +385,8 @@
      CSS beats the inline stroke-width="2" presentation attribute. */
   svg.lucide {
     stroke-width: 1.75;
+    flex-shrink: 0;
+    vertical-align: middle;
   }
 }
 
@@ -452,10 +580,10 @@
     @apply text-[22px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
   }
 
-  /* ── Buttons — reference scale: 32px height, 6px radius, 13px text.
+  /* ── Buttons — reference scale: 32px height, pill radius, 13px text.
         Primary = amber CTA; ghost = bordered card surface (SectionButton). ── */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            bg-primary-400 px-3 text-[13px] font-medium text-neutral-900 select-none
            border border-primary-500/60
            transition-colors duration-200 hover:bg-primary-300
@@ -465,7 +593,7 @@
            disabled:hover:bg-primary-400 cursor-pointer;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            bg-foreground px-3 text-[13px] font-medium text-background
            border border-foreground select-none
            transition-opacity duration-200 hover:opacity-90
@@ -474,7 +602,7 @@
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
            px-3 text-[13px] font-medium text-foreground border border-border
            bg-card select-none transition-colors duration-200
            hover:bg-hover active:scale-[0.97]
@@ -482,11 +610,18 @@
            disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 rounded-md
-           bg-danger px-3 text-[13px] font-semibold text-white select-none
+    @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
+           bg-destructive px-3 text-[13px] font-medium text-white select-none
            transition-colors duration-200 hover:opacity-90 active:scale-[0.97]
            outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
            disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none cursor-pointer;
+  }
+
+  .btn-link {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-full text-[13px]
+           font-medium text-foreground underline-offset-4 hover:underline
+           outline-none focus-visible:ring-2 focus-visible:ring-ring
+           focus-visible:ring-offset-2 disabled:opacity-50 cursor-pointer;
   }
 
   /* Tactile press: buttons scale down 3% on press (Apple — respond on
@@ -500,6 +635,7 @@
     transition-property: color, background-color, border-color, box-shadow,
       transform;
     transition-duration: 140ms;
+    white-space: nowrap;
   }
   @media (prefers-reduced-motion: reduce) {
     .btn-primary:active,
@@ -515,7 +651,7 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-md border border-border bg-background px-3 text-[13px]
+    @apply w-full rounded-[8px] border border-border bg-card px-3 text-[13px]
            text-foreground placeholder:text-muted-foreground
            transition-[border-color] duration-200
            focus:outline-none focus:border-muted-foreground
@@ -524,7 +660,7 @@
   }
   .input,
   .select {
-    @apply h-9;
+    @apply h-10;
   }
   .textarea {
     @apply py-2 min-h-[88px] resize-y leading-relaxed;
@@ -551,9 +687,10 @@
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-border;
   }
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-border
+    @apply inline-flex items-center gap-1.5 rounded-full border border-border
            bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground
-           transition-colors duration-200 hover:bg-hover hover:text-foreground cursor-pointer;
+           transition-colors duration-200 hover:bg-hover hover:text-foreground cursor-pointer
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
   }
   .chip-active {
     @apply border-foreground/30 bg-hover text-foreground;

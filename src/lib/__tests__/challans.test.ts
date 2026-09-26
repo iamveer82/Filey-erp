@@ -1,35 +1,47 @@
 // Delivery challans: the shared record shape, and the agent tools over it.
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   loadChallans,
   saveChallans,
   blankChallanForm,
   challanRecord,
   DC_STORAGE_KEY,
+  DC_SETTING_KEY,
 } from "../challans";
 import { runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
+import { tools } from "../api";
+import { setDataMode } from "../dataMode";
+
+const settings = vi.hoisted(() => new Map<string, string>());
 
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    // Write-through to app_settings is a cross-device nicety, not part of what
-    // these cases are asserting.
-    tools: { setSetting: () => Promise.resolve(), settings: () => Promise.resolve([]) },
+    tools: {
+      setSetting: async (key: string, value: string) => { settings.set(`${localStorage.getItem("filey_data_mode")}:${key}`, value); },
+      settings: async () => {
+        const prefix = `${localStorage.getItem("filey_data_mode")}:`;
+        return [...settings].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key: key.slice(prefix.length), value }));
+      },
+    },
   };
 });
 
 beforeEach(() => {
   localStorage.clear();
+  settings.clear();
+  setDataMode("local");
   setAgentMode("auto"); // gate behaviour has its own tests
 });
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("challan storage", () => {
-  it("round-trips a record", () => {
+  it("round-trips a record", async () => {
     const form = blankChallanForm("DC-001");
-    saveChallans([challanRecord({ ...form, party_name: "Acme" })]);
-    const back = loadChallans();
+    await saveChallans([challanRecord({ ...form, party_name: "Acme" })]);
+    const back = await loadChallans();
     expect(back).toHaveLength(1);
     expect(back[0].number).toBe("DC-001");
     expect(back[0].party_name).toBe("Acme");
@@ -55,13 +67,49 @@ describe("challan storage", () => {
     expect(r.item_count).toBe(2);
   });
 
-  it("survives a corrupt blob rather than throwing", () => {
+  it("refuses to replace a corrupt legacy document collection with an empty one", async () => {
     localStorage.setItem(DC_STORAGE_KEY, "{not json");
-    expect(loadChallans()).toEqual([]);
+    await expect(loadChallans()).rejects.toThrow();
+  });
+
+  it("keeps local records separate from cloud records and leaves the legacy blob untouched", async () => {
+    const device = challanRecord(blankChallanForm("DC-LOCAL"));
+    const cloud = challanRecord(blankChallanForm("DC-CLOUD"));
+    localStorage.setItem(DC_STORAGE_KEY, JSON.stringify([device]));
+    expect(await loadChallans()).toEqual([device]);
+    setDataMode("cloud");
+    expect(await loadChallans()).toEqual([]);
+    await saveChallans([cloud]);
+    expect(await loadChallans()).toEqual([cloud]);
+    setDataMode("local");
+    expect(await loadChallans()).toEqual([device]);
+    await saveChallans([]);
+    expect(await loadChallans()).toEqual([]);
+    expect(localStorage.getItem(DC_STORAGE_KEY)).toBe(JSON.stringify([device]));
+    expect(settings.get(`cloud:${DC_SETTING_KEY}`)).toBe(JSON.stringify([cloud]));
+  });
+
+  it("propagates failed persistence without changing the previous documents", async () => {
+    const previous = challanRecord(blankChallanForm("DC-OLD"));
+    await saveChallans([previous]);
+    vi.spyOn(tools, "setSetting").mockRejectedValue(new Error("Disk is full"));
+    await expect(saveChallans([])).rejects.toThrow("Disk is full");
+    expect(await loadChallans()).toEqual([previous]);
   });
 });
 
 describe("create_delivery_challan", () => {
+  it("reports persistence failure instead of claiming the agent created a challan", async () => {
+    vi.spyOn(tools, "setSetting").mockRejectedValue(new Error("Disk is full"));
+    const out = await runTool("create_delivery_challan", {
+      party_name: "Acme",
+      items: [{ description: "Widget", qty: 1 }],
+    }, undefined, true) as { ok?: boolean; error?: string };
+    expect(out.ok).not.toBe(true);
+    expect(out.error).toContain("Disk is full");
+    expect(await loadChallans()).toEqual([]);
+  });
+
   it("creates a challan with items and returns its number", async () => {
     const out = (await runTool(
       "create_delivery_challan",
@@ -78,7 +126,7 @@ describe("create_delivery_challan", () => {
     expect(out.number).toBeTruthy();
     expect(out.items).toBe(1);
 
-    const stored = loadChallans();
+    const stored = await loadChallans();
     expect(stored).toHaveLength(1);
     expect(stored[0].party_name).toBe("Acme Trading");
     expect(stored[0].form?.items[0].description).toBe("Steel pipe");
@@ -86,7 +134,7 @@ describe("create_delivery_challan", () => {
   });
 
   it("defaults a missing qty to 1 and drops blank lines", async () => {
-    await runTool(
+    const out = await runTool(
       "create_delivery_challan",
       {
         party_name: "Acme",
@@ -95,7 +143,8 @@ describe("create_delivery_challan", () => {
       undefined,
       true
     );
-    const items = loadChallans()[0].form?.items ?? [];
+    expect(out).toMatchObject({ ok: true, items: 1 });
+    const items = (await loadChallans())[0].form?.items ?? [];
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({ description: "Widget", qty: 1 });
   });
@@ -108,7 +157,7 @@ describe("create_delivery_challan", () => {
       true
     )) as { error?: string };
     expect(out.error).toMatch(/party/i);
-    expect(loadChallans()).toEqual([]);
+    expect(await loadChallans()).toEqual([]);
   });
 
   it("refuses a challan with no usable items", async () => {
@@ -119,17 +168,26 @@ describe("create_delivery_challan", () => {
       true
     )) as { error?: string };
     expect(out.error).toMatch(/item/i);
-    expect(loadChallans()).toEqual([]);
+    expect(await loadChallans()).toEqual([]);
   });
 
   it("falls back to a delivery challan when the type is not recognised", async () => {
-    await runTool(
+    const out = await runTool(
       "create_delivery_challan",
       { party_name: "Acme", items: [{ description: "x" }], dc_type: "nonsense" },
       undefined,
       true
     );
-    expect(loadChallans()[0].dc_type).toBe("delivery");
+    expect(out).toMatchObject({ ok: true });
+    expect((await loadChallans())[0].dc_type).toBe("delivery");
+  });
+
+  it("still rejects invalid quantity types before saving any challan", async () => {
+    const out = await runTool("create_delivery_challan", {
+      party_name: "Acme", items: [{ description: "Widget", qty: "3" }],
+    }, undefined, true);
+    expect(out).toMatchObject({ code: "invalid_arguments" });
+    expect(await loadChallans()).toEqual([]);
   });
 
   it("gives each challan a distinct number", async () => {
@@ -140,7 +198,7 @@ describe("create_delivery_challan", () => {
         undefined,
         true
       );
-    const numbers = loadChallans().map((r) => r.number);
+    const numbers = (await loadChallans()).map((r) => r.number);
     expect(new Set(numbers).size).toBe(3);
   });
 });

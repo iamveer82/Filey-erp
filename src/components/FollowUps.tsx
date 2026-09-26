@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Plus, Trash2, AlarmClock, Repeat, Check } from "lucide-react";
 import {
   followups,
@@ -6,7 +6,7 @@ import {
   type FollowUp,
   type FollowUpRepeat,
 } from "../lib/api";
-import { Badge } from "./ui";
+import { Badge, ErrorBanner, Field, EmptyState } from "./ui";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { cn, fmtDate, todayYmd } from "../lib/format";
@@ -59,14 +59,19 @@ export default function FollowUps({
   const [cust, setCust] = useState<number | "">("");
   const [repeat, setRepeat] = useState<FollowUpRepeat>("none");
   const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const load = () =>
-    followups
+  const load = () => {
+    setError("");
+    setLoading(true);
+    return followups
       .list(customerId)
       .then(setItems)
-      .catch((e) =>
-        toast.error("Failed to load follow-ups: " + (e instanceof Error ? e.message : e))
-      );
+      .catch((e) => setError("Failed to load follow-ups: " + (e instanceof Error ? e.message : e)))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,10 +80,12 @@ export default function FollowUps({
 
   const [hint, setHint] = useState(false);
   const add = async () => {
+    if (pending.current) return;
     if (!title.trim()) {
       setHint(true);
       return;
     }
+    pending.current = true;
     setBusy(true);
     try {
       const selected = parties?.find((c) => c.id === cust);
@@ -100,6 +107,7 @@ export default function FollowUps({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   };
@@ -168,9 +176,10 @@ export default function FollowUps({
     >
       <button
         onClick={() => toggle(f)}
-        aria-label={f.done ? "Mark not done" : "Mark done"}
+        aria-label={`${f.done ? "Mark not done" : "Mark done"}: ${f.title}`}
+        aria-pressed={f.done}
         className={cn(
-          "grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full border transition-colors",
+          "btn-ghost w-10 !px-0 shrink-0",
           f.done
             ? "border-primary-400 bg-primary-400 text-neutral-900"
             : "border-border text-transparent hover:text-muted-foreground"
@@ -199,9 +208,9 @@ export default function FollowUps({
       </div>
       {statusPill[status]}
       <button
-        aria-label="Delete reminder"
+        aria-label={`Delete reminder: ${f.title}`}
         onClick={() => del(f)}
-        className="grid h-8 w-8 cursor-pointer place-items-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-danger"
+        className="btn-ghost w-10 !px-0 shrink-0 text-danger"
       >
         <Trash2 size={16} />
       </button>
@@ -215,9 +224,14 @@ export default function FollowUps({
         <p className="font-medium text-ink">{heading ?? "Follow-ups & reminders"}</p>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-end gap-2">
+      <fieldset disabled={busy} className="mb-4 flex min-w-0 flex-wrap items-end gap-3" aria-busy={busy}>
+        <div className="min-w-0 flex-1 basis-52">
+        <Field label="Reminder *">
         <input
-          className="input min-w-[180px] flex-1"
+          className="input"
+          required
+          aria-invalid={hint}
+          aria-describedby={hint ? "followup-title-error" : undefined}
           placeholder="e.g. Ask Mr Sharma about the oil purchase"
           value={title}
           onChange={(e) => {
@@ -226,6 +240,8 @@ export default function FollowUps({
           }}
           onKeyDown={(e) => e.key === "Enter" && add()}
         />
+        </Field>
+        </div>
         {!customerId && parties && (
           <SelectMenu
             className="w-auto"
@@ -244,12 +260,14 @@ export default function FollowUps({
             ]}
           />
         )}
+        <Field label="Due date">
         <DateField
           className="w-44"
           value={due}
           onChange={setDue}
           clearable={false}
         />
+        </Field>
         <SelectMenu
           className="w-auto"
           ariaLabel="Repeat"
@@ -263,100 +281,23 @@ export default function FollowUps({
           ]}
         />
         <button className="btn-primary" disabled={busy || !title.trim()} onClick={add}>
-          <Plus size={16} /> Add
+          <Plus size={16} /> {busy ? "Adding…" : "Add"}
         </button>
-      </div>
+      </fieldset>
 
       {hint && (
-        <p className="-mt-2 mb-3 text-[11px] text-danger">
+        <p id="followup-title-error" role="alert" className="-mt-2 mb-3 text-xs text-danger">
           Type a note before adding.
         </p>
       )}
 
-      {visible.length === 0 && (
-        <div className="empty-gradient rounded-xl p-8 flex flex-col items-center gap-4 text-center">
-          <svg
-            width="100"
-            height="80"
-            viewBox="0 0 100 80"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="opacity-80 text-primary-500"
-          >
-            <rect
-              x="24"
-              y="8"
-              width="52"
-              height="44"
-              rx="5"
-              fill="currentColor"
-              fill-opacity="0.12"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <line
-              x1="34"
-              y1="20"
-              x2="66"
-              y2="20"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="28"
-              x2="58"
-              y2="28"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="36"
-              x2="50"
-              y2="36"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <line
-              x1="34"
-              y1="44"
-              x2="62"
-              y2="44"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-            <circle
-              cx="50"
-              cy="68"
-              r="7"
-              fill="currentColor"
-              fill-opacity="0.12"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M47.5 68l1.7 1.7 3.3-3.3"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <div>
-            <p className="text-sm font-medium text-brand-700">No reminders yet</p>
-            <p className="text-xs text-brand-500 mt-1">
-              Add a note with a date - we'll remind you that day.
-            </p>
-          </div>
-        </div>
+      {loading && <p className="py-6 text-sm text-muted-foreground">Loading reminders…</p>}
+      {error && <div className="space-y-3"><ErrorBanner message={error} /><button className="btn-ghost" onClick={() => { void load(); }}>Retry</button></div>}
+      {!loading && !error && visible.length === 0 && (
+        <EmptyState icon={AlarmClock} title="No reminders yet" description="Add a note with a date - we'll remind you that day." />
       )}
 
-      {visible.length > 0 && <ul>{visible.map((f) => Row(f, statusOf(f)))}</ul>}
+      {!loading && !error && visible.length > 0 && <ul>{visible.map((f) => Row(f, statusOf(f)))}</ul>}
     </div>
   );
 }

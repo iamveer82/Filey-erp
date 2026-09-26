@@ -11,6 +11,8 @@ import {
   forgetLocalCredential,
   isLocalSignedIn,
   setLocalSignedIn,
+  claimLocalWorkspace,
+  assertLocalAccount,
 } from "./localAuth";
 
 beforeEach(() => {
@@ -104,6 +106,19 @@ describe("verifying offline", () => {
 });
 
 describe("the on-device session", () => {
+  it("prevents transferring a device workspace into a different organization", () => {
+    localStorage.setItem("filey_local_profile", JSON.stringify({ id: "uid-1", org_id: "company-one" }));
+    expect(() => assertLocalAccount("uid-1", "company-two")).toThrow("organization differs");
+    expect(() => assertLocalAccount("uid-1", "company-one")).not.toThrow();
+  });
+  it("keeps a device workspace and credential with its owner across another cloud sign-in", async () => {
+    await rememberLocalCredential("owner@example.com", "uid-1", "owner-password");
+    claimLocalWorkspace("uid-1");
+    await rememberLocalCredential("other@example.com", "uid-2", "other-password");
+    expect(getLocalCredential()?.userId).toBe("uid-1");
+    expect(() => assertLocalAccount("uid-2")).toThrow("another account");
+    expect(() => assertLocalAccount("uid-1")).not.toThrow();
+  });
   it("signing out ends the session but KEEPS the identity", async () => {
     await rememberLocalCredential("owner@example.com", "uid-1", "hunter2hunter2");
     setLocalSignedIn(true);

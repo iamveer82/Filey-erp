@@ -21,6 +21,7 @@ import {
 } from "../lib/campaigns";
 import { errMsg } from "../lib/format";
 import { useUI } from "../lib/ui";
+import { useLiveSync } from "../lib/realtime";
 import { DataTable, Badge, Modal, Field, InfoCard } from "./ui";
 
 /* Campaigns: compose once, send to a slice of the lead list. The rules that
@@ -57,6 +58,7 @@ export default function CampaignsPanel({ leads }: { leads: Lead[] }) {
   useEffect(() => {
     load();
   }, []);
+  useLiveSync(load);
 
   const send = async (c: Campaign) => {
     const pending = c.recipients.filter((r) => r.status === "pending").length;

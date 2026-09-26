@@ -12,6 +12,11 @@ export interface BookTxn {
   description: string;
   date: string;
   amount: number;
+  /** Which way the money went, when the caller knows. The ledger stores every
+   *  amount as a positive number with the direction in txn_type, so without
+   *  this the matcher cannot tell a 500 receipt from a 500 payment. Optional:
+   *  a caller that doesn't know leaves it off and matching behaves as before. */
+  direction?: "in" | "out";
 }
 export interface ReconMatch {
   line: StatementLine;
@@ -49,13 +54,16 @@ function splitCsvLine(line: string): string[] {
   return out.map((s) => s.trim());
 }
 
-/** Parse a money cell: strips commas/currency, treats (x) as negative. */
+/** Parse a money cell: strips commas/currency, treats (x) and a TRAILING minus
+ *  as negative. The trailing form ("1,234.56-") comes out of mainframe and SAP
+ *  exports; parseFloat reads it as positive and the sign is simply lost, which
+ *  turns a payment into a deposit with nothing to show for it. */
 function num(s: string): number {
   if (!s) return NaN;
   const cleaned = s.replace(/,/g, "").replace(/[^0-9.\-]/g, "");
   let v = parseFloat(cleaned);
   if (!isFinite(v)) return NaN;
-  if (/\(.*\)/.test(s)) v = -Math.abs(v);
+  if (/\(.*\)/.test(s) || /-\s*$/.test(s.trim())) v = -Math.abs(v);
   return v;
 }
 
@@ -146,15 +154,34 @@ export function matchStatement(
   const unmatchedLines: StatementLine[] = [];
   for (const line of lines) {
     const target = Math.round(Math.abs(line.amount) * 100);
+    const lineDir = line.amount < 0 ? "out" : "in";
     let best: BookTxn | undefined;
     let bestD = Infinity;
+    let bestAgrees = false;
     for (const t of txns) {
       if (used.has(t.id)) continue;
       if (Math.round(Math.abs(t.amount) * 100) !== target) continue;
       const dd = daysBetween(line.date, t.date);
-      if (dd <= toleranceDays && dd < bestD) {
+      if (dd > toleranceDays) continue;
+      // Direction is a PREFERENCE, not a filter. Pairing a 500 payment with a
+      // 500 receipt four days apart is a false reconciliation, and confirming
+      // one stamps reconciled_at on both — so a candidate going the same way
+      // beats a nearer one going the other way. It cannot be a hard rule:
+      // plenty of statements state every amount as a positive with the
+      // direction in a column this parser doesn't read, and refusing those
+      // would match nothing at all.
+      const agrees = t.direction === undefined || t.direction === lineDir;
+      if (bestAgrees && !agrees) continue;
+      if (agrees && !bestAgrees) {
         best = t;
         bestD = dd;
+        bestAgrees = true;
+        continue;
+      }
+      if (dd < bestD) {
+        best = t;
+        bestD = dd;
+        bestAgrees = agrees;
       }
     }
     if (best) {

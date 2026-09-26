@@ -1,13 +1,10 @@
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "./pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { AiImage } from "./ai";
 
 /* Turn an uploaded file into image(s) the AI can read. Images pass through;
  * PDFs are rendered to PNGs via pdfjs — ALL pages (capped), so multi-page
  * invoices/receipts aren't truncated to the first page. */
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 // Cap pages sent to the model — invoices/receipts are rarely longer, and this
 // bounds payload size + token cost. Pages beyond this are ignored.

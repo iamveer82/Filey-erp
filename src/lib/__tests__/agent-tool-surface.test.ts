@@ -1,16 +1,36 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { setCacheOrg } from "../api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as desktop from "../desktopBrowser";
 import { offeredTools } from "../agentHarness";
 import { TOOLS } from "../aiTools";
 import { setAgentMode } from "../agentMode";
 import { setCapabilityEnabled } from "../capabilities";
 import { TOOLSETS } from "../toolsets";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test-org", "test-user"); });
+afterEach(() => vi.restoreAllMocks());
 
 const names = (opened: string[] = [], opts = {}) =>
   offeredTools({ isOwner: true, ...opts }, new Set(opened)).map((t) => t.name);
 
 describe("what the model is offered", () => {
+  it("offers the built-in browser immediately in desktop chat without enabling optional computers or bypassing gates", () => {
+    vi.spyOn(desktop, "desktopBrowserSupported").mockReturnValue(true);
+    setAgentMode("auto");
+    const options = { computerSession: async () => 1 };
+    expect(names([], options)).toEqual(expect.arrayContaining(["workspace_browser", "computer_use"]));
+    expect(names([], options)).not.toContain("agent_computer");
+    expect(names()).not.toContain("workspace_browser");
+    expect(names([], { ...options, isOwner: false })).not.toContain("workspace_browser");
+    setCapabilityEnabled("computer", false);
+    expect(names([], options)).not.toContain("workspace_browser");
+    setCapabilityEnabled("computer", true);
+    setAgentMode("plan");
+    expect(names([], options)).not.toContain("workspace_browser");
+    setAgentMode("auto");
+    vi.mocked(desktop.desktopBrowserSupported).mockReturnValue(false);
+    expect(names([], options)).not.toContain("workspace_browser");
+  });
   it("is a fraction of the full tool list", () => {
     const offered = names();
     // The whole point: 89 near-neighbours is past where a model picks well.

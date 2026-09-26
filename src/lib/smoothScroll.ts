@@ -38,7 +38,7 @@ function reducedMotion(): boolean {
 
 /** The OS accessibility setting always wins over the app preference. */
 function wanted(): boolean {
-  return getSmoothScroll() && !reducedMotion();
+  return document.visibilityState !== "hidden" && getSmoothScroll() && !reducedMotion();
 }
 
 /**
@@ -76,11 +76,13 @@ export function attachSmoothScroll(
 
   update();
   window.addEventListener("filey-ui", update);
+  document.addEventListener("visibilitychange", update);
   const mq = typeof matchMedia !== "undefined" ? matchMedia(REDUCED) : null;
   mq?.addEventListener("change", update);
 
   return () => {
     window.removeEventListener("filey-ui", update);
+    document.removeEventListener("visibilitychange", update);
     mq?.removeEventListener("change", update);
     destroy();
   };

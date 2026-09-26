@@ -1,40 +1,19 @@
-import { useEffect, useState } from "react";
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  CheckCircle2,
-  LayoutGrid,
-  Signature,
-  Sparkles,
-  ArrowRight,
-  ArrowLeft,
-  FileText,
-  Upload,
-  Loader2,
-  FolderPlus,
+  CheckCircle2, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
+  FileText, Upload, FolderPlus, Download, X, Plus, ShieldCheck, RotateCcw, FileArchive,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
-import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-import { Card, FilterChip, PageHeader, SearchInput } from "../components/ui";
+import ToolsCatalogue from "../components/ToolsCatalogue";
 import { plural } from "../lib/format";
-import FileCard from "../components/FileCard";
-import { toolRuns } from "../lib/api";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "../lib/agentStorage";
+import { isLocalMode } from "../lib/dataMode";
 import { useUI } from "../lib/ui";
-import {
-  uploadOutputs,
-  ensureRoom,
-} from "../lib/toolStorage";
-import { downloadFile, type OutFile } from "../lib/pdfTools";
-import {
-  PDF_TOOLS,
-  toolById,
-  toolFlow,
-  type Tool,
-  ToolFields,
-  defaultParams,
-} from "../components/PdfToolbox";
-import InlinePdfEditor from "../components/InlinePdfEditor";
+import { downloadFile, zipOutputs, fileFromOutput, type OutFile } from "../lib/pdfTools";
+import { PDF_TOOLS, toolById, toolFlow, type Tool, ToolFields, defaultParams } from "../components/PdfToolbox";
+import ToolCover from "../components/ToolCover";
+import InlinePdfEditor, { type PdfEditorHandle } from "../components/InlinePdfEditor";
 import StampStudio from "../components/StampStudio";
 import ESignStudio from "../components/ESignStudio";
 import FormFillPanel from "../components/FormFillPanel";
@@ -46,259 +25,102 @@ import RotateStudio from "../components/RotateStudio";
 import { useAuth } from "../lib/auth";
 import { saveOutput } from "../lib/files";
 import { isConfigured } from "../lib/supabase";
+import "./PdfTools.css";
 
-/** Page-visual, single-PDF tools whose effect can be shown live on page 1. */
 const LIVE_PREVIEW_TOOLS = new Set([
-  "numbers",
-  "watermark",
-  "img-watermark",
-  "nup",
-  "crop",
-  "remove-annots",
-  "header-footer",
-  "greyscale",
+  "numbers", "watermark", "img-watermark", "nup", "crop",
+  "remove-annots", "header-footer", "greyscale",
 ]);
-
 export default function ToolsPage() {
-  const [active, setActive] = useState<Tool | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  // Reset to 8-tool view when switching category tabs.
-  const [cat, setCat] = useState<string>("All Tools");
-  // 88 tools across 7 categories: chips alone meant scrolling to find one.
-  const [query, setQuery] = useState("");
-  const [params, setParams] = useSearchParams();
-  const closeActive = () => setParams({});
-
-  // Each tool gets its own URL (?tool=<id>) so links are shareable and the
-  // browser Back button returns to the dashboard.
+  const [scope, setScope] = useState(agentStorageScope);
   useEffect(() => {
-    const id = params.get("tool");
-    if (!id) {
-      if (active) setActive(null);
-      return;
-    }
-    if (active?.id !== id) {
-      const t = toolById(id);
-      if (t) setActive(t);
-    }
-  }, [params, active]);
-  const { toast } = useUI();
-
-  const logRun = async (toolId: string, files: string[], outputs: OutFile[]) => {
-    const t = toolById(toolId);
-    try {
-      const runId = await toolRuns.log(toolId, t?.name ?? toolId, files[0] ?? "file");
-      if (typeof runId === "number" && runId > 0) {
-        const total = outputs.reduce((s, o) => s + o.bytes.byteLength, 0);
-        const room = await ensureRoom(total);
-        if (room) {
-          const paths = await uploadOutputs(runId, outputs);
-          if (paths.length) await toolRuns.setPaths(runId, paths, total);
-        } else {
-          toast.info("Storage quota full - output downloaded but not archived.");
-        }
-      }
-    } catch {
-      // Output already downloaded locally; only the archive copy failed.
-      if (isConfigured)
-        toast.info("Output downloaded, but couldn't be archived to recent activity.");
-    }
-  };
-
-  const openTool = (toolId: string) => {
-    setParams({ tool: toolId });
-  };
-
-  const cats = ["All Tools", ...Array.from(new Set(PDF_TOOLS.map((t) => t.cat)))];
-  // Full set per tab â€” the grid shows the first 8 and "View all" reveals the
-  // rest. (Previously capped at 11, which silently hid most of the ~50 tools.)
-  const needle = query.trim().toLowerCase();
-  const filteredTools = PDF_TOOLS.filter((t) => {
-    if (cat !== "All Tools" && t.cat !== cat) return false;
-    if (!needle) return true;
-    return (
-      t.name.toLowerCase().includes(needle) ||
-      t.desc.toLowerCase().includes(needle) ||
-      t.cat.toLowerCase().includes(needle)
-    );
-  });
-
-  if (active) {
-    return (
-      <PdfToolWorkspace
-        tool={active}
-        onBack={closeActive}
-        onComplete={(toolId, _toolName, file, outs) => logRun(toolId, [file], outs)}
-      />
-    );
-  }
-
-  return (
-    <div className="">
-      <PageHeader
-        title="Tools"
-        subtitle="Convert, merge, split & edit your files, all on-device"
-      />
-
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search tools by name or what they do…"
-          className="w-full max-w-sm"
-        />
-        <span className="text-[12.5px] text-muted-foreground">
-          {plural(filteredTools.length, "tool")}
-        </span>
-      </div>
-
-      {/* CATEGORY TABS */}
-      <div className="mb-5 flex flex-wrap items-center gap-1.5">
-        {cats.map((c) => (
-          <FilterChip
-            key={c}
-            active={cat === c}
-            onClick={() => {
-              setCat(c);
-              setShowAll(false);
-            }}
-          >
-            {c}
-          </FilterChip>
-        ))}
-      </div>
-
-      {/* TOOLS GRID - joined quiet cards (DEMO parity): shared hairlines
-          inside one rounded-xl border via .joined-kpis. */}
-      <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 joined-kpis">
-        {cat === "All Tools" && !needle && (
-          <ToolMiniCard
-            name="E-sign PDF"
-            desc="Draw, type or upload - place & download"
-            Icon={Signature}
-            flow={{ from: "PDF", to: "PDF" }}
-            onUse={() => setParams({ tool: "esign" })}
-          />
-        )}
-        {/* A search is already a narrowing action, so don't re-hide its results
-            behind "View all". */}
-        {(showAll || needle ? filteredTools : filteredTools.slice(0, 8)).map((t) => (
-          <ToolMiniCard
-            key={t.id}
-            name={t.name}
-            desc={t.desc}
-            Icon={t.icon}
-            flow={toolFlow(t)}
-            onUse={() => openTool(t.id)}
-          />
-        ))}
-      </div>
-
-      {filteredTools.length > 8 && !showAll && !needle && (
-        <div className="mb-4 flex justify-center">
-          <button onClick={() => setShowAll(true)} className="btn-ghost">
-            <LayoutGrid size={14} /> View all {filteredTools.length} tools
-          </button>
-        </div>
-      )}
-
-      {needle && filteredTools.length === 0 && (
-        <div className="mb-4 rounded-xl border border-border bg-card px-5 py-10 text-center">
-          <p className="text-[13px] font-medium text-foreground">
-            No tool matches “{query}”
-          </p>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
-            Try a different word, or clear the search to browse all{" "}
-            {PDF_TOOLS.length} tools.
-          </p>
-        </div>
-      )}
-
-      {/* Supported formats */}
-      <Card className="mb-4 p-4">
-        <p className="mb-3 text-sm font-semibold text-foreground">Works with your files</p>
-        <div className="flex flex-wrap gap-x-6 gap-y-4">
-          {(["pdf", "doc", "xls", "csv", "ppt", "img", "txt", "json"] as const).map(
-            (f) => (
-              <FileCard key={f} formatFile={f} />
-            )
-          )}
-        </div>
-      </Card>
-
-      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <CheckCircle2 size={12} className="text-success" />
-        All processing happens locally - files never leave this device.
-      </p>
-    </div>
-  );
+    const refresh = () => setScope(agentStorageScope());
+    for (const event of [AGENT_STORAGE_EVENT, "storage", "filey:workspace-changed"]) window.addEventListener(event, refresh);
+    return () => { for (const event of [AGENT_STORAGE_EVENT, "storage", "filey:workspace-changed"]) window.removeEventListener(event, refresh); };
+  }, []);
+  return <ToolsSession key={scope ?? "guest"} />;
 }
 
-function ToolMiniCard({
-  name,
-  desc,
-  Icon,
-  flow,
-  onUse,
-}: {
-  name: string;
-  desc: string;
-  Icon: typeof Sparkles;
-  /** Input→output formats shown as a chip, e.g. { from: "DOCX", to: "PDF" }. */
-  flow?: { from: string; to: string };
-  onUse: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onUse}
-      className="cursor-pointer bg-card p-5 text-left transition-colors hover:bg-hover"
-    >
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-hover text-foreground">
-          <Icon className="h-4 w-4" strokeWidth={1.75} />
-        </span>
-        {flow && (
-          <span
-            className="inline-flex items-center gap-0.5 rounded-full border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground"
-            title={`${flow.from} to ${flow.to}`}
-          >
-            {flow.from}
-            <ArrowRight size={9} className="text-primary-400" />
-            {flow.to}
-          </span>
-        )}
-      </div>
-      <div className="text-[14px] font-semibold text-foreground">{name}</div>
-      <div className="mt-1 line-clamp-2 text-[12.5px] text-muted-foreground">{desc}</div>
-    </button>
-  );
+function ToolsSession() {
+  const [params, setParams] = useSearchParams();
+  const active = toolById(params.get("tool") || "");
+  const [handoff, setHandoff] = useState<{ tool: string; files: File[]; revision: string } | null>(null);
+  const open = (tool: Tool, files: File[] = []) => {
+    setHandoff({ tool: tool.id, files, revision: crypto.randomUUID() });
+    setParams(previous => { const next = new URLSearchParams(previous); next.set("tool", tool.id); return next; });
+  };
+  const close = () => {
+    setHandoff(null);
+    setParams(previous => { const next = new URLSearchParams(previous); next.delete("tool"); return next; });
+  };
+  if (active) return <PdfToolWorkspace key={active.id + ":" + (handoff?.tool === active.id ? handoff.revision : "")} tool={active}
+    initialFiles={handoff?.tool === active.id ? handoff.files : []} onBack={close} onContinue={open} />;
+  return <>
+    {params.get("tool") && <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-sm">
+      <span>This tool could not be found. Choose one below.</span><button className="btn-ghost" onClick={close}>Dismiss</button>
+    </div>}
+    <ToolsCatalogue category={params.get("category") || "All tools"} query={params.get("q") || ""} onOpen={tool => open(tool)}
+      onFilter={(category, query) => setParams(previous => {
+        const next = new URLSearchParams(previous);
+        next.delete("tool");
+        if (category === "All tools") next.delete("category"); else next.set("category", category);
+        if (query) next.set("q", query); else next.delete("q");
+        return next;
+      }, { replace: true })} />
+  </>;
 }
 
-/* â”€â”€ Per-tool workspace: sticky back nav, tool card, upload, live preview,
- options panel, run button. Minimal + professional. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 function PdfToolWorkspace({
   tool,
   onBack,
-  onComplete,
+  initialFiles,
+  onContinue,
 }: {
   tool: Tool;
   onBack: () => void;
-  onComplete: (toolId: string, toolName: string, file: string, outs: OutFile[]) => void;
+  initialFiles: File[];
+  onContinue: (tool: Tool, files: File[]) => void;
 }) {
   const { toast } = useUI();
   const { user } = useAuth();
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(initialFiles);
   const [params, setParams] = useState<Record<string, string>>(() => defaultParams(tool));
   const [running, setRunning] = useState(false);
   const [outs, setOuts] = useState<OutFile[]>([]);
   const [savingFiles, setSavingFiles] = useState(false);
-  const canSave = isConfigured && !!user && outs.length > 0;
+  const [downloading, setDownloading] = useState(false);
+  const [nextTool, setNextTool] = useState("");
+  const mounted = useRef(true);
+  const scope = useRef(agentStorageScope());
+  const [fileRevision, setFileRevision] = useState(0);
+  const inputRevision = useRef(0);
+  const resultsRef = useRef<HTMLElement>(null);
+  useEffect(() => { if (outs.length) resultsRef.current?.focus(); }, [outs]);
+  const [dragging, setDragging] = useState(false);
+  const [error, setError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const busy = useRef(false);
+  const operation = useRef<AbortController | null>(null);
+  const [progress, setProgress] = useState("");
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; operation.current?.abort(); }; }, []);
+  const editorRef = useRef<PdfEditorHandle>(null);
+  const actionLabel = toolAction(tool);
+  const canSave = !isLocalMode() && isConfigured && !!user && outs.length > 0;
+  const locked = running || savingFiles || downloading;
+  const checkScope = () => {
+    if (!mounted.current || scope.current !== agentStorageScope()) throw new Error("Workspace changed. Open this tool again before saving output.");
+  };
+  const outputFiles = useMemo(() => outs.map(fileFromOutput), [outs]);
+  const compatible = PDF_TOOLS.filter(candidate => candidate.id !== tool.id && (candidate.id !== "add-attach" || outputFiles[0]?.type === "application/pdf") && (candidate.multi || outs.length === 1) && outputFiles.length > 0 && outputFiles.every(file => acceptsFile(file, candidate.accept)));
 
   const saveToMyFiles = async () => {
+    if (busy.current || locked || !outs.length) return;
+    busy.current = true;
     setSavingFiles(true);
     try {
-      for (const o of outs) await saveOutput(o, tool.name);
+      checkScope();
+      for (const o of outs) { checkScope(); await saveOutput(o, tool.name); }
+      checkScope();
       toast.success(
         `Saved ${outs.length} file${outs.length > 1 ? "s" : ""} to My Files.`
       );
@@ -306,59 +128,123 @@ function PdfToolWorkspace({
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingFiles(false);
+      busy.current = false;
     }
   };
   const Icon = tool.icon;
   const first = files[0];
   const firstIsPdf =
     !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
-  const replaceFirstFile = (f: File) =>
-    setFiles((prev) => (prev.length ? [f, ...prev.slice(1)] : [f]));
-
-  const pickFiles = (list: FileList | null) => {
-    if (!list) return;
-    setFiles(Array.from(list));
+  const updateFiles = (next: File[]) => {
+    setFiles(next);
+    inputRevision.current += 1;
+    setFileRevision(inputRevision.current);
+    setProgress("");
     setOuts([]);
+    setNextTool("");
+    setError("");
+  };
+  const replaceFirstFile = (file: File) => updateFiles([file, ...files.slice(1)]);
+  const pickFiles = (list: FileList | File[] | null) => {
+    if (!list?.length || running || savingFiles || downloading) return;
+    const incoming = Array.from(list);
+    const invalid = incoming.find(file => !acceptsFile(file, tool.accept));
+    if (invalid) { setError(`${invalid.name} is not supported by ${tool.name}. Choose ${toolFlow(tool).from} files.`); return; }
+    if (!tool.multi && incoming.length > 1) { setError("This tool works with one file at a time. Choose one file to continue."); return; }
+    if (incoming.some(file => file.size === 0)) { setError("One of these files is empty. Choose a file with content."); return; }
+    updateFiles(tool.multi ? [...files, ...incoming] : incoming);
   };
   const run = async () => {
+    if (busy.current || running || savingFiles || downloading) return;
     if (!files.length) {
       toast.error("Upload a file first.");
       return;
     }
+    const controller = new AbortController();
+    operation.current = controller;
+    const scope = agentStorageScope();
+    setProgress("Preparing file…");
     setRunning(true);
+    busy.current = true;
+    setError("");
+    setOuts([]);
     try {
-      const result = await tool.run(files, params);
-      setOuts(result);
-      for (const o of result) downloadFile(o);
-      onComplete(tool.id, tool.name, files[0].name, result);
-      toast.success(
-        `Done - ${result.length} file${result.length > 1 ? "s" : ""} downloaded.`
-      );
+      const edited = await editorRef.current?.prepare();
+      controller.signal.throwIfAborted();
+      const result = await tool.run(edited ? [edited, ...files.slice(1)] : files, params, {signal:controller.signal,onProgress:setProgress});
+      controller.signal.throwIfAborted();
+      if(scope !== agentStorageScope()) throw new Error("Workspace changed. Open this tool again before saving output.");
+      operation.current = null;
+      setProgress("Conversion complete. Results ready.");
+      await finishOutputs(result);
+      if (tool.id === "compress" && result[0]?.bytes.length >= (edited || files[0]).size)
+        setProgress("This PDF is already optimized. The original size and quality have been preserved.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      if(controller.signal.aborted) setProgress("Conversion cancelled. Original files are unchanged.");
+      else setError(e instanceof Error ? e.message : String(e));
     } finally {
+      operation.current = null;
       setRunning(false);
+      busy.current = false;
     }
   };
 
+  const downloadOutputs = async (outputs: OutFile[], bundle = false) => {
+    if (busy.current || locked) return;
+    busy.current = true;
+    setDownloading(true);
+    try {
+      checkScope();
+      const downloads = bundle ? [zipOutputs(outputs)] : outputs;
+      let saved = 0;
+      for (const output of downloads) {
+        checkScope();
+        if (await downloadFile(output)) saved += 1;
+      }
+      if (saved === downloads.length) {
+        toast.success(`Downloaded ${saved} file${saved === 1 ? "" : "s"}.`);
+      } else {
+        toast.info("Save canceled. Your output is ready; use Download results to try again.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save the output. Try Download results again.");
+    } finally {
+      setDownloading(false);
+      busy.current = false;
+    }
+  };
+  const finishOutputs = async (outputs: OutFile[]) => {
+    if (!outputs.length) throw new Error("No output was generated. Check the file and tool options.");
+    checkScope();
+    setOuts(outputs);
+    setNextTool("");
+    setProgress("Your results are ready. Download or continue with another tool.");
+  };
+  const acceptOutputs = async (outputs: OutFile[]) => {
+    if (inputRevision.current !== fileRevision || !mounted.current) return;
+    if (busy.current || running || savingFiles || downloading) return;
+    busy.current = true;
+    setRunning(true);
+    setError("");
+    try { await finishOutputs(outputs); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { busy.current = false; setRunning(false); }
+  };
+
   return (
-    <div className="">
-      {/* One header, not two. The tool name used to appear in a sticky bar and
-          again in a card 90px below it, with the category floating unanchored in
-          the top-right corner. Everything identifying the tool now sits on one
-          row, and it stays sticky so Upload stays reachable while scrolling. */}
-      <div className="sticky top-0 z-30 -mx-4 mb-4 border-b border-border bg-page px-4 py-3">
+    <div className="tools-page">
+      <div className="tool-workspace-header">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <button onClick={onBack} className="btn-ghost shrink-0">
+          <button onClick={onBack} disabled={running || savingFiles || downloading} className="btn-ghost shrink-0">
             <ArrowLeft size={14} /> All tools
           </button>
           <span className="hidden h-8 w-px bg-border sm:block" />
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground">
             <Icon size={18} />
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="tool-workspace-title min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate text-[15px] font-medium text-ink">{tool.name}</p>
+              <h1 className="text-[18px] font-semibold text-foreground">{tool.name}</h1>
               <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {tool.cat}
               </span>
@@ -376,88 +262,80 @@ function PdfToolWorkspace({
                 );
               })()}
             </div>
-            <p className="truncate text-xs text-brand-500">{tool.desc}</p>
+            <p className="mt-1 max-w-prose text-xs text-muted-foreground">{tool.desc}</p>
           </div>
-          {canSave && (
-            <button onClick={saveToMyFiles} disabled={savingFiles} className="btn-ghost">
-              {savingFiles ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <FolderPlus size={14} />
-              )}
-              Save to My Files
-            </button>
-          )}
-          <label className="btn-primary cursor-pointer">
-            <Upload size={14} /> {files.length ? plural(files.length, "file") : "Upload"}
+          {(files.length > 0 || tool.interactive === "esign") && <button type="button" className="btn-ghost" disabled={running || savingFiles || downloading} onClick={() => fileInput.current?.click()}>
+            {tool.multi && files.length ? <Plus size={14} /> : <Upload size={14} />} {files.length ? tool.multi ? "Add files" : "Replace file" : "Choose file"}
+          </button>}
             <input
+              ref={fileInput}
+              aria-label="Choose files for this tool"
               type="file"
               accept={tool.accept}
               multiple={tool.multi}
+              disabled={running || savingFiles || downloading}
               className="hidden"
-              onChange={(e) => pickFiles(e.target.files)}
+              onChange={(e) => { pickFiles(e.target.files); e.target.value = ""; }}
             />
-          </label>
         </div>
       </div>
 
-      {tool.interactive === "fill-form" ? (
+      <ol className="tool-steps" aria-label="Tool progress">
+        {[tool.interactive === "esign" ? "Create or upload" : "Choose files", "Edit & adjust", "Download"].map((label, index) => {
+          const step = outs.length ? 2 : files.length || tool.interactive === "esign" ? 1 : 0;
+          return <li key={label} aria-current={index === step ? "step" : undefined}><span className="tool-step-number">{index < step ? <CheckCircle2 size={14} /> : index + 1}</span>{label}</li>;
+        })}
+      </ol>
+      {error && <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger"><span className="flex-1">{error}</span><button type="button" aria-label="Dismiss error" className="btn-ghost h-10 w-10 shrink-0 p-0" onClick={() => setError("")}><X size={16} /></button></div>}
+      {!!outs.length && <section className="tool-results" aria-label="Your results" ref={resultsRef} tabIndex={-1}>
+        {tool.id === "compress" && <p role="status" className="mb-4 text-sm text-muted-foreground">{outs[0].bytes.length < files[0].size ? `${fileSize(files[0].size)} → ${fileSize(outs[0].bytes.length)} · ${Math.round((1 - outs[0].bytes.length / files[0].size) * 100)}% smaller` : progress}</p>}
+        <div className="tool-results-heading"><span className="tool-result-check"><CheckCircle2 size={24} /></span><div><h2>Your files are ready</h2><p>{plural(outs.length, "file")} · {fileSize(outs.reduce((sum, output) => sum + output.bytes.byteLength, 0))} · Original files unchanged</p></div>
+          <button type="button" className="btn-primary" disabled={locked} onClick={() => void downloadOutputs(outs, outs.length > 1)}>{downloading ? <Loader2 size={16} className="animate-spin" /> : outs.length > 1 ? <FileArchive size={16} /> : <Download size={16} />}{outs.length > 1 ? "Download all as ZIP" : "Download results"}</button>
+        </div>
+        <div className="tool-result-files">{outs.map((output, index) => <div key={index} className="flex items-center gap-3 py-3"><FileText size={18} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{output.name}</p><p className="text-xs text-muted-foreground">{fileSize(output.bytes.byteLength)}</p></div><button type="button" className="btn-ghost" disabled={locked} aria-label={"Download " + output.name} onClick={() => void downloadOutputs([output])}><Download size={15} /><span className="hidden sm:inline">Download</span></button></div>)}</div>
+        {compatible.length > 0 && <div className="tool-continue"><div><h3>Keep working on these files</h3><p>Pass your results straight to the next tool.</p></div><label className="sr-only" htmlFor="next-file-tool">Next tool</label><select id="next-file-tool" className="select" value={nextTool} disabled={locked} onChange={event => setNextTool(event.target.value)}><option value="">Choose next tool…</option>{compatible.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><button type="button" className="btn-ghost" disabled={locked || !nextTool} onClick={() => { const next = compatible.find(candidate => candidate.id === nextTool); if (next) onContinue(next, outputFiles); }}>Continue <ArrowRight size={15} /></button></div>}
+        <div className="tool-result-actions"><button type="button" className="btn-ghost" disabled={locked} onClick={() => { setOuts([]); setProgress(""); }}>Adjust again</button><button type="button" className="btn-ghost" disabled={locked} onClick={() => updateFiles([])}><RotateCcw size={15} />Start again</button>{canSave && <button type="button" className="btn-ghost" disabled={locked} onClick={saveToMyFiles}>{savingFiles ? <Loader2 size={15} className="animate-spin" /> : <FolderPlus size={15} />}Save to My Files</button>}<span>{canSave ? "Save to My Files uploads a copy to your cloud workspace." : "Results stay here until you leave this tool."}</span></div>
+      </section>}
+      {!outs.length && !!files.length && tool.interactive !== "merge" && <div className="tool-file-list" aria-label="Selected files">
+        {files.map((file, index) => <div className="tool-file-row" key={index}>
+          <FileText size={17} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={file.name}>{file.name}</p><p className="text-xs text-muted-foreground">{fileSize(file.size)}</p></div>
+          {files.length > 1 && <><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " up"} disabled={running || savingFiles || downloading || index === 0} onClick={() => { const next = [...files]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; updateFiles(next); }}><ArrowUp size={14} /></button><button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Move " + file.name + " down"} disabled={running || savingFiles || downloading || index === files.length - 1} onClick={() => { const next = [...files]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; updateFiles(next); }}><ArrowDown size={14} /></button></>}
+          <button type="button" className="btn-ghost h-10 w-10 shrink-0 p-0" aria-label={"Remove " + file.name} disabled={running || savingFiles || downloading} onClick={() => updateFiles(files.filter((_, i) => i !== index))}><X size={15} /></button>
+        </div>)}
+      </div>}
+      {downloading && <p role="status" className="mb-4 text-sm text-muted-foreground">Saving your download…</p>}
+      {running && <p role="status" className="mb-4 flex items-center gap-2 text-sm"><Loader2 size={16} className="animate-spin" />Preparing your results. Keep this tool open.</p>}
+      {progress && !outs.length && <div className="mb-4 flex flex-wrap items-center justify-between gap-3" role="status"><p className="text-sm text-muted-foreground">{progress}</p>{operation.current && <button className="btn-ghost" onClick={() => {operation.current?.abort();setProgress("Cancelling… finishing the current conversion step before releasing the files.");}}>Cancel conversion</button>}</div>}
+      <fieldset hidden={outs.length > 0} key={tool.interactive === "merge" ? tool.id : fileRevision} inert={running || savingFiles || downloading} disabled={running || savingFiles || downloading} className="min-w-0">
+      {!files.length && tool.interactive !== "esign" ? (
+        <div className="tool-dropzone" data-dragging={dragging} onDragOver={event => { event.preventDefault(); if (!locked) setDragging(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }} onDrop={event => { event.preventDefault(); setDragging(false); pickFiles(event.dataTransfer.files); }}>
+          <div className="tool-upload-summary"><ToolCover tool={tool} /><h2>{tool.name}</h2><p>{tool.desc}</p><span><ShieldCheck size={14} /> Free, on-device processing</span></div>
+          <div className="tool-upload-copy"><span className="tool-upload-icon"><Upload size={24} /></span><h2 className="text-lg font-semibold text-foreground">{dragging ? "Drop your files here" : "Add your " + toolFlow(tool).from + (tool.multi ? " files" : " file")}</h2><p className="max-w-sm text-sm text-muted-foreground">Drag {tool.multi ? "your files" : "a file"} here, or choose {tool.multi ? "them" : "one"} from your device.</p><button type="button" className="btn-primary" onClick={() => fileInput.current?.click()}><Upload size={16} />Choose {tool.multi ? "files" : "file"}</button><p className="text-xs text-muted-foreground">{tool.multi ? "Add multiple files, then arrange them in the order you want." : "Processed on your device. Your original stays unchanged."}</p></div>
+        </div>
+      ) : tool.interactive === "fill-form" ? (
         <div className="card">
           <FormFillPanel
             file={files[0] ?? undefined}
-            onDone={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
-              toast.success("Filled form downloaded.");
-            }}
+            onDone={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "esign" ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <ESignStudio
             file={files[0] ?? undefined}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "document", [out]);
-              toast.success("Signed document downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
-          {!!outs.length && (
-            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Signed document downloaded.
-            </div>
-          )}
         </div>
-      ) : !files.length ? (
-        <label className="grid h-72 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-border bg-card text-center text-sm text-muted-foreground hover:bg-hover">
-          <div>
-            <Upload size={22} className="mx-auto mb-1 text-muted-foreground" />
-            Drop or choose {tool.multi ? "files" : "a file"} to preview here
-            <input
-              type="file"
-              accept={tool.accept}
-              multiple={tool.multi}
-              className="hidden"
-              onChange={(e) => pickFiles(e.target.files)}
-            />
-          </div>
-        </label>
       ) : tool.interactive === "merge" ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <MergeStudio
             files={files}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0]?.name ?? "merge", [out]);
-              toast.success("Merged PDF downloaded.");
-            }}
+            onFilesChange={updateFiles}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "organize" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <OrganizeStudio
             file={files[0]}
             action={
@@ -467,38 +345,21 @@ function PdfToolWorkspace({
                   ? "extract"
                   : "organize"
             }
-            onApply={(outsList) => {
-              setOuts(outsList);
-              outsList.forEach(downloadFile);
-              onComplete(tool.id, tool.name, files[0].name, outsList);
-              toast.success(
-                `${outsList.length} file${outsList.length > 1 ? "s" : ""} downloaded.`
-              );
-            }}
+            onApply={(outputs) => { void acceptOutputs(outputs); }}
           />
         </div>
       ) : tool.interactive === "rotate" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <RotateStudio
             file={files[0]}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Rotated PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : tool.interactive === "redact" && firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <RedactStudio
             file={files[0]}
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Redacted PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
         </div>
       ) : (tool.interactive === "stamp" ||
@@ -507,7 +368,7 @@ function PdfToolWorkspace({
           tool.interactive === "logo" ||
           tool.interactive === "background") &&
         firstIsPdf ? (
-        <div className="card min-h-[480px]">
+        <div className="tool-studio">
           <StampStudio
             file={files[0]}
             mode={tool.interactive === "text-stamp" ? "text" : "image"}
@@ -520,28 +381,18 @@ function PdfToolWorkspace({
                     ? "background"
                     : "stamp"
             }
-            onApply={(out) => {
-              setOuts([out]);
-              downloadFile(out);
-              onComplete(tool.id, tool.name, files[0].name, [out]);
-              toast.success("Stamped PDF downloaded.");
-            }}
+            onApply={(out) => { void acceptOutputs([out]); }}
           />
-          {!!outs.length && (
-            <div className="mt-3 rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-              ✓ Stamped PDF downloaded.
-            </div>
-          )}
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-          <div className="card min-h-[480px]">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-brand-500">
+        <div className="tool-working-layout">
+          <div className="tool-studio">
+            <div className="tool-preview-heading">
+              <p className="text-sm font-semibold text-foreground">
                 {firstIsPdf
                   ? LIVE_PREVIEW_TOOLS.has(tool.id)
-                    ? "Live Preview"
-                    : "Editor"
+                    ? "Document preview"
+                    : "Edit document"
                   : "Preview"}
               </p>
               {!firstIsPdf && files.length > 1 && (
@@ -555,6 +406,9 @@ function PdfToolWorkspace({
             ) : firstIsPdf ? (
               <InlinePdfEditor
                 file={files[0]}
+                editorRef={editorRef}
+                disabled={running || savingFiles || downloading}
+                onDirtyChange={() => { setOuts([]); setProgress(""); }}
                 onApply={(f) => {
                   replaceFirstFile(f);
                   setOuts([]);
@@ -571,57 +425,68 @@ function PdfToolWorkspace({
               </>
             )}
           </div>
-          <aside className="card space-y-3 self-start lg:sticky lg:top-20">
-            <p className="text-sm font-medium text-ink">Options</p>
-            <ToolFields tool={tool} params={params} setParams={setParams} />
-            <button onClick={run} disabled={running} className="btn-primary w-full">
+          <aside className="tool-options-panel">
+            <div><h2 className="text-sm font-semibold text-foreground">Tool settings</h2><p className="mt-1 text-xs text-muted-foreground">Adjust your options, then create the result.</p></div>
+            <fieldset disabled={running || savingFiles || downloading}>
+              <ToolFields tool={tool} params={params} setParams={(next) => { setParams(next); setOuts([]); setNextTool(""); setProgress(""); }} />
+            </fieldset>
+            <button onClick={run} disabled={running || savingFiles || downloading} className="btn-primary w-full">
               {running ? (
                 <Loader2 size={15} className="animate-spin" />
               ) : (
-                <Sparkles size={15} />
+                <Download size={15} />
               )}
-              Run {tool.name}
+              {running ? "Preparing file…" : actionLabel}
             </button>
-            {!!outs.length && (
-              <div className="rounded-full border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-success">
-                ✓ {outs.length} file{outs.length > 1 ? "s" : ""} downloaded.
-              </div>
-            )}
-            <button onClick={() => setFiles([])} className="btn-ghost w-full">
-              Choose another file
-            </button>
+            <p className="text-xs text-muted-foreground">Includes your edits. Creates a new copy.</p>
           </aside>
         </div>
       )}
+      </fieldset>
     </div>
   );
+}
+
+function toolAction(tool: Tool) {
+  const flow = toolFlow(tool);
+  if (["To PDF", "From PDF", "Data"].includes(tool.cat) && flow.from !== flow.to && !["Report", "Export", "Data"].includes(flow.to)) return "Convert to " + flow.to;
+  const labels: Record<string, string> = { nup: "Arrange pages", "pdf-info": "Export PDF details", "page-dims": "Export page sizes", "ocr-pdf": "Make searchable", "ocr-text": "Extract text", "pdf-to-pdfa": "Add archival metadata", "bg-color": "Apply background", greyscale: "Make greyscale", invert: "Invert colours", "pdf-meta": "Save PDF details", grid: "Add grid", posterize: "Create poster", booklet: "Create booklet", "pdf2zip": "Create ZIP", "pdf-flatten": "Flatten PDF" };
+  return labels[tool.id] || tool.name;
+}
+
+function fileSize(bytes: number) {
+  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function acceptsFile(file: File, accept: string) {
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  const mime: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif", bmp: "image/bmp" };
+  const type = file.type.toLowerCase() || mime[extension] || "";
+  return !accept || accept.split(",").some(value => {
+    const rule = value.trim().toLowerCase();
+    return rule === "*/*" || (rule.startsWith(".") ? file.name.toLowerCase().endsWith(rule) : rule.endsWith("/*") ? type.startsWith(rule.slice(0, -1)) : type === rule);
+  });
 }
 
 function FilePreview({ file }: { file: File }) {
   const [img, setImg] = useState<string>("");
   const [text, setText] = useState<string>("");
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let dead = false;
     setImg("");
     setText("");
+    setLoading(true);
     (async () => {
       try {
-        if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
-          const data = new Uint8Array(await file.arrayBuffer());
-          const pdf = await safePdf.getDocument({ data }).promise;
-          const p = await pdf.getPage(1);
-          const vp = p.getViewport({ scale: 1.4 });
-          const c = document.createElement("canvas");
-          c.width = vp.width;
-          c.height = vp.height;
-          const ctx = c.getContext("2d");
-          if (!ctx) return;
-          await p.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
-          if (!dead) setImg(c.toDataURL("image/png"));
-        } else if (file.type.startsWith("image/")) {
-          const r = new FileReader();
-          r.onload = () => !dead && setImg(String(r.result || ""));
-          r.readAsDataURL(file);
+        if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)) {
+          const image = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ""));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          });
+          if (!dead) setImg(image);
         } else if (
           file.type.startsWith("text/") ||
           /\.(txt|csv|json|md)$/i.test(file.name)
@@ -630,13 +495,14 @@ function FilePreview({ file }: { file: File }) {
           if (!dead) setText(t.slice(0, 4000));
         }
       } catch {
-        /* preview unavailable */
-      }
+        /* Some formats have no browser preview. */
+      } finally { if (!dead) setLoading(false); }
     })();
     return () => {
       dead = true;
     };
   }, [file]);
+  if (loading) return <p role="status" className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 size={18} className="animate-spin" />Loading preview…</p>;
   if (img)
     return (
       <img
@@ -657,7 +523,7 @@ function FilePreview({ file }: { file: File }) {
         <FileText size={28} className="mx-auto text-muted-foreground" />
         <p className="mt-1 text-ink">{file.name}</p>
         <p className="text-xs">
-          Preview not available for this format - Run will still process it.
+          This format has no preview. Your file is ready to convert.
         </p>
       </div>
     </div>

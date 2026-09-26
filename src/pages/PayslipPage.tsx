@@ -10,7 +10,7 @@ import {
 } from "../lib/api";
 import { aed, numInput, getDisplayCurrency } from "../lib/format";
 import { downloadElementAsPdf } from "../lib/pdfTools";
-import { PageHeader } from "../components/ui";
+import { PageHeader, ErrorBanner } from "../components/ui";
 import { useUI } from "../lib/ui";
 
 export default function PayslipPage() {
@@ -24,16 +24,21 @@ export default function PayslipPage() {
   const [allowances, setAllowances] = useState(0);
   const [deductions, setDeductions] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [payrollError, setPayrollError] = useState("");
   /** Payroll already recorded for this employee, so a period cannot be paid
    *  twice — runPayroll posts to the ledger, and a second run would double the
    *  expense and the cash credit with nothing to show it was a mistake. */
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [saving, setSaving] = useState(false);
+  const operation = useRef(false);
 
   const loadPayroll = useCallback(() => {
-    hr.payroll()
-      .then(setPayroll)
-      .catch(() => setPayroll([]));
+    return hr.payroll()
+      .then((rows) => { setPayroll(rows); setPayrollError(""); })
+      .catch(() => {
+        setPayrollError("Payroll history could not be checked. Refresh it before recording or downloading a payslip.");
+      });
   }, []);
 
   useEffect(() => {
@@ -43,11 +48,12 @@ export default function PayslipPage() {
         if (emp) setEmployee(emp);
       }),
       billing.getCompany().then(setCompany).catch(() => {}),
-      hr.payroll().then(setPayroll).catch(() => {}),
-    ]).finally(() => setLoading(false));
-  }, [id]);
+      loadPayroll(),
+    ]).catch(() => setLoadError("Could not load this employee. Please reopen the payslip.")).finally(() => setLoading(false));
+  }, [id, loadPayroll]);
 
   if (loading) return <div className="p-10 text-center text-muted-foreground">Loading…</div>;
+  if (loadError) return <ErrorBanner message={loadError} />;
   if (!employee) return <div className="p-10 text-center text-muted-foreground">Employee not found.</div>;
 
   const basic = employee.salary || 0;
@@ -58,11 +64,14 @@ export default function PayslipPage() {
   });
 
   const download = async () => {
+    if (operation.current || payrollError) return;
     const src = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
     if (!src) {
       window.print(); // never leave the button doing nothing at all
       return;
     }
+    operation.current = true;
+    setSaving(true);
     // Capture from a full A4-width off-screen sheet, not the narrow preview
     // card. The exporter measures the node it is given and strips its
     // padding, so a card-sized node produced a card-sized page whose text
@@ -93,22 +102,23 @@ export default function PayslipPage() {
       // while the payroll history stayed empty and monthly payroll read zero.
       // Guarded by the same `recorded` lookup as the button, so a period can
       // never be posted twice.
-      if (saved && !recorded && !saving) {
-        setSaving(true);
+      if (saved && !recorded) {
         try {
           await hr.runPayroll(employee.id, month, basic, allowances, deductions);
-          loadPayroll();
+          await loadPayroll();
           toast.success(`Payslip recorded for ${periodLabel}.`);
         } catch (e) {
           toast.error(
             e instanceof Error ? e.message : "PDF saved, but recording it failed."
           );
-        } finally {
-          setSaving(false);
         }
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not export the payslip.");
     } finally {
       holder.remove();
+      operation.current = false;
+      setSaving(false);
     }
   };
 
@@ -123,21 +133,23 @@ export default function PayslipPage() {
    *  as a file and nowhere else: the employee's payroll history stayed empty,
    *  monthly payroll read zero, and the agent's list_payroll saw nothing. */
   const save = async () => {
-    if (recorded || saving) return;
-    const ok = await confirm({
-      title: "Record this payslip?",
-      message: `${employee.name} - ${periodLabel}, net ${aed(net)}. This posts the salary to your accounts as an expense paid from cash.`,
-      confirmLabel: "Record payslip",
-    });
-    if (!ok) return;
+    if (recorded || operation.current || payrollError) return;
+    operation.current = true;
     setSaving(true);
     try {
+      const ok = await confirm({
+        title: "Record this payslip?",
+        message: `${employee.name} - ${periodLabel}, net ${aed(net)}. This posts the salary to your accounts as an expense paid from cash.`,
+        confirmLabel: "Record payslip",
+      });
+      if (!ok) return;
       await hr.runPayroll(employee.id, month, basic, allowances, deductions);
-      loadPayroll();
+      await loadPayroll();
       toast.success(`Payslip recorded for ${periodLabel}.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record the payslip.");
     } finally {
+      operation.current = false;
       setSaving(false);
     }
   };
@@ -148,17 +160,18 @@ export default function PayslipPage() {
         title={`Payslip - ${employee.name}`}
         subtitle={periodLabel}
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button className="btn-ghost" onClick={() => nav("/people")}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-ghost" onClick={() => void download()}>
-              <Download size={15} /> Download PDF
+            <button className="btn-ghost" aria-label="Download PDF" disabled={saving || !!payrollError} onClick={() => void download()}>
+              <Download size={15} /> PDF
             </button>
             <button
               className="btn-primary"
+              aria-label={recorded ? "Saved payslip" : saving ? "Saving payslip…" : "Save payslip"}
               onClick={save}
-              disabled={!!recorded || saving}
+              disabled={!!recorded || saving || !!payrollError}
               title={
                 recorded
                   ? "Already recorded for this month"
@@ -166,28 +179,33 @@ export default function PayslipPage() {
               }
             >
               {recorded ? <Check size={15} /> : <Save size={15} />}
-              {recorded ? "Recorded" : saving ? "Recording…" : "Record payslip"}
+              {recorded ? "Saved" : saving ? "Saving…" : "Save"}
             </button>
           </div>
         }
       />
+
+      {payrollError && <div className="mb-4"><ErrorBanner message={payrollError} /><button className="btn-ghost mt-2" onClick={() => void loadPayroll()}>Refresh payroll history</button></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Left: editor */}
         <div className="space-y-4">
           <div className="card p-5 space-y-4">
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1">Month</label>
+              <label htmlFor="payslip-month" className="label">Month</label>
               <input
+                id="payslip-month"
                 type="month"
                 className="input"
+                disabled={saving}
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1">Basic Salary ({getDisplayCurrency()})</label>
+              <label htmlFor="payslip-basic" className="label">Basic Salary ({getDisplayCurrency()})</label>
               <input
+                id="payslip-basic"
                 type="number"
                 className="input"
                 value={basic || ""}
@@ -195,20 +213,24 @@ export default function PayslipPage() {
               />
             </div>
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1">Allowances ({getDisplayCurrency()})</label>
+              <label htmlFor="payslip-allowances" className="label">Allowances ({getDisplayCurrency()})</label>
               <input
+                id="payslip-allowances"
                 type="number"
                 className="input"
                 value={allowances || ""}
+                disabled={saving}
                 onChange={(e) => setAllowances(numInput(e.target.value))}
               />
             </div>
             <div>
-              <label className="block text-[12px] font-medium text-muted-foreground mb-1">Deductions ({getDisplayCurrency()})</label>
+              <label htmlFor="payslip-deductions" className="label">Deductions ({getDisplayCurrency()})</label>
               <input
+                id="payslip-deductions"
                 type="number"
                 className="input"
                 value={deductions || ""}
+                disabled={saving}
                 onChange={(e) => setDeductions(numInput(e.target.value))}
               />
             </div>

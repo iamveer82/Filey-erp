@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -96,72 +97,12 @@ const toE164Local = (raw: string): string | null => {
   return null;
 };
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="mb-5">
-      <h2 className="text-sm font-medium text-ink mb-2">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-/** DEMO parity: icon + label-over-value row for the Contact & tax panel. */
-function Info({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Mail;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start gap-3 py-2 border-b border-border last:border-0">
-      <Icon className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="text-[11.5px] text-muted-foreground">{label}</div>
-        <div className="text-[13px] text-foreground truncate">{value}</div>
-      </div>
-    </div>
-  );
-}
-
-/** DEMO parity: one cell of the joined KPI grid (12px label / 24px value /
- *  11.5px hint). Hairline dividers come via className on the wrapper. */
-function KpiCell({
-  label,
-  value,
-  hint,
-  valueClass,
-  className,
-}: {
-  label: string;
-  value: string;
-  hint?: ReactNode;
-  valueClass?: string;
-  className?: string;
-}) {
-  return (
-    <div className={cn("bg-card p-5", className)}>
-      <div className="text-[12px] text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          "mt-2 text-[24px] font-semibold tracking-tight tabular-nums",
-          valueClass ?? "text-foreground"
-        )}
-      >
-        {value}
-      </div>
-      {hint && <div className="mt-1 text-[11.5px] text-muted-foreground">{hint}</div>}
-    </div>
-  );
-}
-
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { toast, confirm } = useUI();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
   const [quotations, setQuotations] = useState<QuotationSummary[]>([]);
@@ -216,6 +157,7 @@ export default function CustomerDetail() {
         setReceiptRows(rcs);
         setCompany(co);
       })
+      .catch((error) => { if (alive) setLoadError(errMsg(error)); })
       .finally(() => {
         if (alive) setLoading(false);
       });
@@ -226,7 +168,9 @@ export default function CustomerDetail() {
 
   /** Refetch everything after a mutation (delete / share / edit). */
   const reload = () => {
-    Promise.all([
+    setLoadError("");
+    setLoading(true);
+    return Promise.all([
       crm.customers(),
       billing.listDocs(),
       quotes.listDocs(),
@@ -244,7 +188,8 @@ export default function CustomerDetail() {
         setReceiptRows(rcs);
         setCompany(co);
       })
-      .catch(() => {});
+      .catch((error) => setLoadError(errMsg(error)))
+      .finally(() => setLoading(false));
   };
 
   const customer = useMemo(
@@ -723,10 +668,23 @@ export default function CustomerDetail() {
     }
   };
 
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <Link to="/customers" className="btn-ghost"><ArrowLeft size={16} /> Back to customers</Link>
+        <div role="alert" className="rounded-xl border border-border bg-card p-5">
+          <p className="font-medium text-foreground">Could not load customer</p>
+          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          <button className="btn-ghost mt-4" onClick={() => { void reload(); }}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
   if (!loading && !customer) {
     return (
       <div className="">
-        <Link to="/customers" className="btn-ghost h-9 inline-flex mb-6">
+        <Link to="/customers" className="btn-ghost mb-6">
           <ArrowLeft size={15} /> Back to Customers
         </Link>
         <Card className="text-center py-16">
@@ -741,13 +699,13 @@ export default function CustomerDetail() {
 
   return (
     <div className="pb-10">
-      {/* DEMO parity header: square back button, 22px title + status pill,
+      {/* Record header: shared pill actions, title and status,
           13px subtitle, right-aligned actions */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <Link
           to="/customers"
           aria-label="Back to Customers"
-          className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-muted-foreground hover:text-foreground border border-border shrink-0"
+          className="btn-ghost w-10 !px-0 shrink-0"
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>
@@ -761,7 +719,7 @@ export default function CustomerDetail() {
           </div>
           <p className="text-[13px] text-muted-foreground mt-0.5">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() =>
               document
@@ -776,7 +734,7 @@ export default function CustomerDetail() {
           <button
             onClick={() => setEditOpen(true)}
             disabled={!customer}
-            className="btn-ghost h-8 inline-flex gap-1.5"
+            className="btn-ghost"
           >
             <Pencil className="h-3.5 w-3.5" /> Edit
           </button>
@@ -785,14 +743,14 @@ export default function CustomerDetail() {
               onClick={() =>
                 shareVia("email", { email: customer.email, url: display })
               }
-              className="btn-ghost h-8 inline-flex gap-1.5"
+              className="btn-ghost"
             >
               <Mail className="h-3.5 w-3.5" /> Email
             </button>
           )}
           <button
             onClick={() => nav("/invoicing?new=1")}
-            className="btn-primary h-8 inline-flex gap-1.5"
+            className="btn-primary"
           >
             <Plus className="h-3.5 w-3.5" /> New invoice
           </button>
@@ -804,7 +762,7 @@ export default function CustomerDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card mb-5">
         <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
           <div className="flex items-start gap-3">
-            <div className="h-11 w-11 rounded-lg bg-amber-500/10 text-amber-500 grid place-items-center shrink-0">
+            <div className="h-11 w-11 rounded-lg bg-primary-400/15 text-foreground grid place-items-center shrink-0">
               <Building2 className="h-5 w-5" strokeWidth={1.75} />
             </div>
             <div className="min-w-0">
@@ -829,7 +787,7 @@ export default function CustomerDetail() {
               <span
                 className={cn(
                   "inline-flex items-center gap-1",
-                  salesDelta >= 0 ? "text-emerald-500" : "text-danger"
+                  salesDelta >= 0 ? "text-success" : "text-danger"
                 )}
               >
                 {salesDelta >= 0 ? (
@@ -981,7 +939,7 @@ export default function CustomerDetail() {
                       <td className="px-5 py-2 text-right text-foreground tabular-nums">
                         {l.debit ? money(l.debit, currency) : "—"}
                       </td>
-                      <td className="px-5 py-2 text-right text-emerald-500 tabular-nums">
+                      <td className="px-5 py-2 text-right text-success tabular-nums">
                         {l.credit ? money(l.credit, currency) : "—"}
                       </td>
                     </tr>
@@ -1012,20 +970,20 @@ export default function CustomerDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => window.print()}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Printer className="h-3.5 w-3.5" /> Print
               </button>
               <button
                 onClick={copyStatementLink}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Copy className="h-3.5 w-3.5" /> Copy link
               </button>
               <button
                 onClick={emailStatement}
                 disabled={!customer}
-                className="btn-ghost h-8 inline-flex gap-1.5"
+                className="btn-ghost"
               >
                 <Send className="h-3.5 w-3.5" /> Email
               </button>
@@ -1044,13 +1002,15 @@ export default function CustomerDetail() {
             <div className="flex items-center gap-2 mb-3">
               <button
                 onClick={() => setJournalMode(false)}
-                className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium border transition-colors ${!journalMode ? "bg-foreground text-background border-foreground" : "bg-card text-muted-foreground border-border hover:bg-hover"}`}
+                aria-pressed={!journalMode}
+                className={!journalMode ? "btn-secondary" : "btn-ghost"}
               >
                 Ledger templates
               </button>
               <button
                 onClick={() => setJournalMode(true)}
-                className={`px-3 py-1.5 rounded-md text-[12.5px] font-medium border transition-colors ${journalMode ? "bg-foreground text-background border-foreground" : "bg-card text-muted-foreground border-border hover:bg-hover"}`}
+                aria-pressed={journalMode}
+                className={journalMode ? "btn-secondary" : "btn-ghost"}
               >
                 Sales Journal
               </button>
@@ -1322,6 +1282,7 @@ export default function CustomerDetail() {
         <div className="mb-5">
           <PartyBankDetails
             value={customer.bank_details}
+            countryCode={customer.country_code}
             onSave={async (bank) => {
               await crm.updateCustomer(customer.id, { bank_details: bank });
               await crm.customers().then(setCustomers).catch(() => {});
@@ -1570,7 +1531,7 @@ function EditCustomerModal({
   const nameErr = !f.name.trim();
 
   const save = async () => {
-    if (!customer) return;
+    if (!customer || saving) return;
     setTouched(true);
     if (nameErr) return;
     setSaving(true);
@@ -1598,10 +1559,14 @@ function EditCustomerModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit customer">
-      <div className="grid grid-cols-2 gap-3">
+    <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="Edit customer">
+      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Contact name *">
           <input
+            required
+            aria-invalid={touched && nameErr}
+            aria-describedby={touched && nameErr ? "record-name-error" : undefined}
             className={cn("input", touched && nameErr && "border-danger")}
             value={f.name}
             onChange={(e) => setF({ ...f, name: e.target.value })}
@@ -1643,7 +1608,7 @@ function EditCustomerModal({
             onChange={(e) => setF({ ...f, segment: e.target.value })}
           />
         </Field>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <Field label="Address">
             <input
               className="input"
@@ -1669,18 +1634,19 @@ function EditCustomerModal({
           />
         </Field>
       </div>
-      <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-border">
-        <button onClick={onClose} className="btn-ghost h-8">
+      <div className="flex flex-wrap justify-end gap-2 pt-4 mt-5 border-t border-border">
+        <button onClick={onClose} className="btn-ghost">
           Cancel
         </button>
         <button
           onClick={save}
           disabled={saving}
-          className="btn-primary h-8 inline-flex gap-1.5"
+          className="btn-primary"
         >
           {saving ? "Saving…" : "Save changes"}
         </button>
       </div>
+      </fieldset>
     </Modal>
   );
 }

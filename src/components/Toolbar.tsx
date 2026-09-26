@@ -29,8 +29,8 @@ export function Toolbar({
         className
       )}
     >
-      <div className="flex flex-1 items-center gap-3">
-        <div className="relative flex-1 max-w-md">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className="relative min-w-[160px] flex-1 max-w-md">
           <Search
             size={16}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-400"
@@ -40,6 +40,7 @@ export function Toolbar({
             value={searchValue || ""}
             onChange={(e) => onSearch?.(e.target.value)}
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
             className="input pl-9"
           />
         </div>
@@ -48,7 +49,7 @@ export function Toolbar({
       {primaryAction && (
         <button
           onClick={primaryAction.onClick}
-          className="inline-flex items-center justify-center gap-1.5 rounded-full bg-primary-400 px-4 py-2 text-sm font-medium text-ink shadow-sm transition-colors hover:bg-primary-500 shrink-0"
+          className="btn-primary shrink-0"
         >
           {primaryAction.icon || <Plus size={16} />}
           {primaryAction.label}

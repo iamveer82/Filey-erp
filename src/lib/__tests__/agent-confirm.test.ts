@@ -1,15 +1,58 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runTool, setToolConfirm } from "../aiTools";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runTool, setToolConfirm, approvalArgs, redactArgs } from "../aiTools";
 import { isOwnerNumber } from "../waAgent";
+import { setDataMode } from "../dataMode";
 
 /* The WhatsApp path routes sensitive-tool approval over chat instead of the
  * in-app modal, via a per-run `confirm` override on runTool. These pin that the
  * override — not the global handler — is what decides, in both directions. */
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  setDataMode("local");
+});
 afterEach(() => setToolConfirm(() => false));
 
 describe("runTool confirm override", () => {
+  it("shows intended computer and browser input for approval while masking it in logs", () => {
+    for (const [name, field] of [
+      ["computer_use", "text"],
+      ["agent_computer", "text"],
+      ["agent_computer", "url"],
+      ["browser", "value"],
+    ]) {
+      const args = {
+        action: "type",
+        [field]: "Hello from Filey",
+        credentials: { api_key: "private" },
+      };
+      expect(approvalArgs(name, args)).toEqual({
+        ...args,
+        credentials: { api_key: "********" },
+      });
+      expect(redactArgs(name, args)[field]).toBe("********");
+      expect(args.credentials.api_key).toBe("private");
+    }
+  });
+  it("cancels while waiting for approval and never performs the late-approved action", async () => {
+    const controller = new AbortController();
+    let approve!: (value: boolean) => void;
+    const result = runTool(
+      "mark_invoice_paid",
+      { invoice_number: "T-1" },
+      () =>
+        new Promise<boolean>((resolve) => {
+          approve = resolve;
+        }),
+      true,
+      undefined,
+      controller.signal
+    );
+    await vi.waitFor(() => expect(approve).toBeTypeOf("function"));
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    approve(true);
+  });
   it("denies a sensitive tool when the override says no, even if the global says yes", async () => {
     setToolConfirm(() => true);
     const r = await runTool("mark_invoice_paid", { invoice_number: "T-1" }, () => false);
@@ -35,8 +78,9 @@ describe("isOwnerNumber", () => {
     expect(isOwnerNumber(ME, null, "971501234567")).toBe(true);
   });
 
-  it("matches the company WhatsApp number from the profile", () => {
-    expect(isOwnerNumber(null, "+971 50 765 4321", "971507654321")).toBe(true);
+  it("does not grant agent control from a company contact field or unresolved LID", () => {
+    expect(isOwnerNumber(null, "+971 50 765 4321", "971507654321")).toBe(false);
+    expect(isOwnerNumber(ME, null, "971501234567@lid")).toBe(false);
   });
 
   it("rejects a number that is merely a substring of the owner's", () => {
@@ -61,11 +105,15 @@ describe("isOwnerNumber", () => {
 describe("runTool owner-only gate", () => {
   it("denies an owner-only tool to a non-owner, regardless of confirm", async () => {
     const r = await runTool("run_shell", { command: "echo hi" }, () => true, false);
-    expect(r).toEqual({ error: `"run_shell" is owner-only — only the business owner can run it.` });
+    expect(r).toEqual({
+      error: `"run_shell" is owner-only — only the business owner can run it.`,
+    });
   });
 
   it("lets an owner past the gate (blocked only at the desktop boundary)", async () => {
     const r = await runTool("run_shell", { command: "echo hi" }, () => true, true);
-    expect(r).not.toEqual({ error: `"run_shell" is owner-only — only the business owner can run it.` });
+    expect(r).not.toEqual({
+      error: `"run_shell" is owner-only — only the business owner can run it.`,
+    });
   });
 });

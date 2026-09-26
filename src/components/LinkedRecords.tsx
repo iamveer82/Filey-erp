@@ -1,5 +1,6 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link2, Plus, X, Loader2, Search } from "lucide-react";
+import { Link2, Plus, X, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { links } from "../lib/api";

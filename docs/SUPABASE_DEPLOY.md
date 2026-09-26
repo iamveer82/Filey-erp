@@ -80,11 +80,17 @@ supabase functions deploy channel-webhook --no-verify-jwt
 ## 5. Set Secrets
 
 ```bash
-# Stripe billing
+# Dodo Payments — sells both plans (see docs/dodo-payments.md)
+supabase secrets set DODO_PAYMENTS_API_KEY=xxx
+supabase secrets set DODO_PAYMENTS_WEBHOOK_KEY=whsec_xxx
+supabase secrets set DODO_PAYMENTS_ENVIRONMENT=test_mode   # live_mode when you are ready to charge
+supabase secrets set DODO_PRODUCT_FREEDOM=pdt_xxx          # one-time Freedom licence
+supabase secrets set DODO_PRODUCT_CLOUD=pdt_xxx            # $5/month Cloud subscription
+
+# Stripe — DEPRECATED. Keep set only while apps older than 2.11.1 are in the
+# wild: they still call the stripe function to activate a licence.
 supabase secrets set STRIPE_SECRET_KEY=sk_live_xxx
 supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_xxx
-supabase secrets set STRIPE_PRICE_PRO=price_xxx
-supabase secrets set STRIPE_PRICE_BUSINESS=price_xxx
 supabase secrets set STRIPE_PRICE_LITE=price_xxx        # one-time Offline (desktop) license price
 
 # Licensing — ECDSA P-256 PRIVATE key (PEM) used by the stripe edge function
@@ -111,7 +117,7 @@ supabase secrets set SITE_URL=https://app.fileyerp.com
   - Get credentials from Google Cloud Console
   - Set redirect URL from Supabase
 - Set Site URL to your app URL
-- Add email templates for welcome, reset, OTP
+  - Preserve the welcome and OTP templates. For password recovery, configure Supabase Auth's custom SMTP with Resend and install `supabase/templates/recovery.html` as the Reset password template. Deploy the matching frontend first. See [password recovery setup and verification](password-recovery.md); Edge Function secrets alone do not configure Auth email.
 
 ## 7. Set Up Scheduled Jobs
 - Go to Database → Scheduled Functions (pg_cron)
@@ -149,3 +155,29 @@ npm run dev
 
 # Create an account, verify data saves to Supabase
 ```
+
+## Applied migration log
+
+The commit that added the September 2026 migrations recorded two of them as
+rejected. They have since been applied. This is the deployed state of project
+`voyrjqgaypiylwskkwpr`:
+
+| Migration | Applied | Verified by |
+| --- | --- | --- |
+| `2026-09-06-business-reliability.sql` | yes | `filey_save_document` resolves |
+| `2026-09-06-crm-workspace.sql` | yes | `crm_*` tables resolve; `filey_convert_lead` resolves |
+| `2026-09-06-international-business.sql` | 10 Sep 2026 | the six country/fx columns return 42501, not 42703 |
+| `2026-09-06-work-items.sql` | 10 Sep 2026 | `to_regclass('public.work_items')` is non-null, `relrowsecurity` true |
+| `2026-09-12-crm-sales-workflow.sql` | 12 Sep 2026 | isolated PostgreSQL rollback/access/concurrency checks; hosted function resolves, invoker security, authenticated grant, anonymous denial |
+
+The September 12 migration changes only the conversion function and its grants;
+it does not rewrite business records. The international columns and work-items
+table were rechecked in the hosted catalog on the same date. Management credentials
+were supplied only to the deployment process, never committed or bundled.
+
+Checking from outside, with only the anon key, tells you which of the two it
+is: a missing table answers `PGRST205` and a missing column `42703`, while
+one that exists answers `42501` because RLS stops the anon role before it
+reads anything. A missing *function* is not distinguishable this way — an
+existing function called with the wrong argument names returns `PGRST202`
+just like an absent one, so probe RPCs with their real parameter names.

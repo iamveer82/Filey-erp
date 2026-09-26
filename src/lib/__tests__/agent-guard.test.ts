@@ -51,6 +51,18 @@ describe("repeated calls", () => {
     const again = g.before("send_invoice", { b: 2, a: 1 });
     expect(again.short).toBeTruthy();
   });
+  it("reads current records after a mutation instead of reusing pre-edit results", () => {
+    const g = createGuard();
+    g.after("list_invoices", {}, { invoices: [] });
+    g.after("create_invoice_draft", { customer: "Acme" }, { id: 1 });
+    expect(g.before("list_invoices", {})).toEqual({});
+    expect(g.before("create_invoice_draft", { customer: "Acme" }).short).toBeDefined();
+  });
+  it("always takes a fresh computer screenshot", () => {
+    const g = createGuard();
+    g.after("computer_use", { action: "screenshot", window_id: "1" }, { snapshot_id: "old" });
+    expect(g.before("computer_use", { action: "screenshot", window_id: "1" })).toEqual({});
+  });
 });
 
 describe("coaching a failure", () => {
@@ -74,6 +86,9 @@ describe("coaching a failure", () => {
   it("switches to wrapping up on the final step", () => {
     const r = coachResult({ error: "nope" }, 1) as { what_to_do: string };
     expect(r.what_to_do).toMatch(/last step/i);
+  });
+  it("does not coach the model to bypass a denied approval", () => {
+    expect(coachResult({ error: "Cancelled — the user did not approve this action." }, 6)).toMatchObject({ what_to_do: expect.stringContaining("Do not retry through a different tool") });
   });
 });
 

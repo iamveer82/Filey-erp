@@ -1,21 +1,14 @@
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import CountryTaxFields from "../../components/CountryTaxFields";
+import { taxRegimeFor, taxIdError, isUaeRegime } from "../../lib/taxRegimes";
+import { CURRENCIES } from "../../lib/format";
 import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
-import {
-  Building2,
-  Upload,
-  X,
-  Check,
-  Landmark,
-  FileText,
-  Stamp,
-  Hash,
-  Bookmark,
-} from "lucide-react";
+import { Building2, Upload, X, Check } from "lucide-react";
 import { DocPresetsPanel } from "../../components/DocPresetBar";
-import { numInput } from "../../lib/format";
 import {
   DOC_NUMBER_KINDS,
   loadDocFormats,
@@ -28,7 +21,7 @@ import {
   loadBankInfo,
   saveBankInfo,
   EMPTY_BANK,
-  BANK_FIELDS,
+  bankFields,
   type BankInfo,
 } from "../../components/BankDetails";
 import {
@@ -46,7 +39,6 @@ import {
   type CompanyStampSig,
 } from "../../components/StampSignatureSettings";
 
-const CURRENCIES = ["AED", "USD", "EUR", "GBP", "INR", "SAR"];
 const BUSINESS_TYPES = [
   "Sole Proprietorship",
   "Private Limited",
@@ -90,7 +82,9 @@ export default function CompanyDetails() {
       .getCompany()
       .then((d) =>
         setC(
-          d ? { ...d, country_subdivision: normalizeEmirate(d.country_subdivision) } : d
+          d && isUaeRegime(d.currency, d.country_code)
+            ? { ...d, country_subdivision: normalizeEmirate(d.country_subdivision) }
+            : d
         )
       )
       .catch(console.error);
@@ -108,13 +102,42 @@ export default function CompanyDetails() {
       .catch((e) => console.warn("Failed to load document formats", e));
   }, []);
 
+  /** Format errors for the identifiers this country actually uses. An Indian
+   *  IFSC and a UAE IBAN are checked; a field the country does not use is not
+   *  validated, and never blocked. */
+  const [bankErr, setBankErr] = useState<Partial<Record<keyof BankInfo, string>>>({});
+
   const setBankField = (k: keyof BankInfo, v: string) => {
     setBank((b) => ({ ...b, [k]: v }));
     setSaved(false);
   };
 
-  if (!c) return <div className="card text-sm text-brand-400">Loading…</div>;
+  const checkBank = (country: string | null | undefined) => {
+    const errs: Partial<Record<keyof BankInfo, string>> = {};
+    for (const f of bankFields(country)) {
+      if (!f.validate) continue;
+      const problem = f.validate(bank[f.key] ?? "");
+      if (problem) errs[f.key] = problem;
+    }
+    setBankErr(errs);
+    return Object.keys(errs).length === 0;
+  };
 
+  if (!c)
+    return (
+      <SettingsPanel>
+        <SettingsSection
+          title="Company Details"
+          description="Loading your company settings."
+        >
+          <div className="h-10 animate-pulse rounded-[8px] bg-muted" />
+          <div className="h-10 animate-pulse rounded-[8px] bg-muted" />
+        </SettingsSection>
+      </SettingsPanel>
+    );
+
+  const regime = taxRegimeFor(c.currency, c.country_code);
+  const uae = isUaeRegime(c.currency, c.country_code);
   const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) => {
     setC({ ...c, [k]: v });
     setSaved(false);
@@ -149,11 +172,14 @@ export default function CompanyDetails() {
       setFieldError("email", "Enter a valid email");
       hasErr = true;
     }
-    if (c.trn && !/^\d{15}$/.test(c.trn.trim())) {
-      setFieldError("trn", "TRN must be exactly 15 digits");
+    if (taxIdError(c.trn, c.country_code)) {
+      setFieldError("trn", taxIdError(c.trn, c.country_code));
       hasErr = true;
     }
     if (hasErr) return;
+    // A mistyped IFSC or IBAN is worth catching here: it is printed on
+    // invoices, and the bank rejects it days later when a payment fails.
+    if (!checkBank(c.country_code)) return;
 
     setSaving(true);
     try {
@@ -167,8 +193,8 @@ export default function CompanyDetails() {
         saveCompanyStampSig(stampSig),
       ]);
       const fmtResults = await Promise.allSettled(
-        DOC_NUMBER_KINDS.filter((spec) => docFmts[spec.kind] !== undefined).map(
-          (spec) => saveDocFormat(spec.kind, docFmts[spec.kind]!)
+        DOC_NUMBER_KINDS.filter((spec) => docFmts[spec.kind] !== undefined).map((spec) =>
+          saveDocFormat(spec.kind, docFmts[spec.kind]!)
         )
       );
       const failures = [
@@ -182,7 +208,9 @@ export default function CompanyDetails() {
           .filter(Boolean),
       ];
       if (failures.length) {
-        toast.error(`Saved company details, but these failed: ${failures.join(", ")}. Try saving again.`);
+        toast.error(
+          `Saved company details, but these failed: ${failures.join(", ")}. Try saving again.`
+        );
       }
       try {
         const fresh = await billing.getCompany();
@@ -209,50 +237,52 @@ export default function CompanyDetails() {
   };
 
   return (
-    <div className="card">
-      <p className="font-medium text-ink">Company Details</p>
-      <p className="text-sm text-brand-500 mt-0.5 mb-5">
-        Update your company information. These details appear on invoices, quotations and
-        other documents automatically.
-      </p>
-
-      <p className="label">Company Logo</p>
-      <div className="flex items-center gap-4 mb-5">
-        <div className="w-24 h-24 rounded-xl border border-brand-200 bg-brand-50 grid place-items-center overflow-hidden">
-          {c.logo ? (
-            <img
-              src={c.logo}
-              alt="logo"
-              className="max-h-full max-w-full object-contain"
-            />
-          ) : (
-            <Building2 size={28} className="text-brand-300" />
-          )}
-        </div>
-        <div>
-          <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
-            <Upload size={14} /> Upload Logo
-          </button>
-          <p className="text-[11px] text-brand-400 mt-1">JPG, PNG or SVG · max 2MB</p>
-          {c.logo && (
-            <button
-              className="text-[11px] font-medium text-danger mt-1 cursor-pointer"
-              onClick={() => set("logo", undefined)}
-            >
-              <X size={11} className="inline" /> Remove
+    <SettingsPanel>
+      <SettingsSection
+        title="Company logo"
+        description="Your logo appears on invoices, quotations and other documents."
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-xl border border-border bg-muted grid place-items-center overflow-hidden">
+            {c.logo ? (
+              <img
+                src={c.logo}
+                alt="Company logo"
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <Building2 size={28} className="text-muted-foreground" />
+            )}
+          </div>
+          <div>
+            <button className="btn-ghost" onClick={() => fileRef.current?.click()}>
+              <Upload size={14} /> Upload Logo
             </button>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => onLogo(e.target.files?.[0])}
-          />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              JPG, PNG or SVG · max 2MB
+            </p>
+            {c.logo && (
+              <button
+                className="btn-ghost text-danger mt-2"
+                onClick={() => set("logo", undefined)}
+              >
+                <X size={11} className="inline" /> Remove
+              </button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onLogo(e.target.files?.[0])}
+            />
+          </div>
         </div>
-      </div>
-
-      <div className="space-y-4">
+      </SettingsSection>
+      <SettingsSection
+        title="Company Details"
+        description="Business information used across your workspace and documents."
+      >
         <FormField label="Company Name" error={fieldErrors.name} required>
           <input
             className="input"
@@ -274,89 +304,23 @@ export default function CompanyDetails() {
               ]}
             />
           </FormField>
-          <FormField label="TRN (Tax Registration Number)" hint="15-digit number">
+          <FormField label={regime.trnLabel} error={fieldErrors.trn}>
             <input
               className="input"
-              placeholder="100000000000003"
+              placeholder={regime.trnLabel}
               value={c.trn ?? ""}
-              onChange={(e) => set("trn", e.target.value)}
+              onChange={(e) => {
+                setC({ ...c, trn: e.target.value, vat_number: e.target.value });
+                setSaved(false);
+              }}
             />
           </FormField>
         </div>
-        {/* UAE e-invoice: seller legal registration + emirate (entered once). */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField
-            label="Legal Registration ID"
-            hint="Trade license / EID / passport no."
-          >
-            <input
-              className="input"
-              placeholder="CN-1234567"
-              value={c.legal_id ?? ""}
-              onChange={(e) => set("legal_id", e.target.value)}
-            />
-          </FormField>
-          <FormField label="ID Type" hint="UAE e-invoice">
-            <SelectMenu
-              value={c.legal_id_type ?? ""}
-              onChange={(v) => set("legal_id_type", v)}
-              options={[
-                { value: "", label: "Select…" },
-                ...LEGAL_ID_TYPES.map((t) => ({ value: t.code, label: t.label })),
-              ]}
-            />
-          </FormField>
-          <FormField label="Emirate" hint="Country subdivision">
-            <SelectMenu
-              value={c.country_subdivision ?? ""}
-              onChange={(v) => set("country_subdivision", v)}
-              options={[
-                { value: "", label: "Select…" },
-                ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
-              ]}
-            />
-          </FormField>
-        </div>
-        <FormField
-          label="WhatsApp number"
-          hint="The number customers message - often not the same as your phone"
-        >
-          <input
-            className="input"
-            inputMode="tel"
-            placeholder="+971 52 950 5734"
-            value={c.whatsapp ?? ""}
-            onChange={(e) => set("whatsapp", e.target.value)}
-          />
-        </FormField>
-        {/* Employer half of a UAE WPS salary file. Blank unless payroll is
-            filed through WPS - nothing else reads these. */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField
-            label="MOHRE establishment ID"
-            hint="13 digits - for the WPS salary file"
-          >
-            <input
-              className="input"
-              inputMode="numeric"
-              placeholder="1234567890123"
-              value={c.mol_establishment_id ?? ""}
-              onChange={(e) => set("mol_establishment_id", e.target.value)}
-            />
-          </FormField>
-          <FormField
-            label="WPS bank routing code"
-            hint="9 digits - from your paying bank"
-          >
-            <input
-              className="input"
-              inputMode="numeric"
-              placeholder="033112345"
-              value={c.wps_bank_code ?? ""}
-              onChange={(e) => set("wps_bank_code", e.target.value)}
-            />
-          </FormField>
-        </div>
+      </SettingsSection>
+      <SettingsSection
+        title="Contact & address"
+        description="How customers can reach your company."
+      >
         <FormField label="Address" error={fieldErrors.address} required>
           <>
             <input
@@ -371,12 +335,14 @@ export default function CompanyDetails() {
             <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
               <input
                 className="input"
+                aria-label="City, Country"
                 placeholder="City, Country"
                 value={c.city ?? ""}
                 onChange={(e) => set("city", e.target.value)}
               />
               <input
                 className="input"
+                aria-label="Zip / Postal Code"
                 placeholder="Zip / Postal Code"
                 value={c.zip ?? ""}
                 onChange={(e) => set("zip", e.target.value)}
@@ -409,7 +375,7 @@ export default function CompanyDetails() {
             />
           </FormField>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
           <FormField label="Website" hint="www.company.com">
             <input
               className="input"
@@ -418,71 +384,152 @@ export default function CompanyDetails() {
               onChange={(e) => set("website", e.target.value)}
             />
           </FormField>
+        </div>{" "}
+        <FormField
+          label="WhatsApp number"
+          hint="The number customers message - often not the same as your phone"
+        >
+          <input
+            className="input"
+            inputMode="tel"
+            placeholder="+971 52 950 5734"
+            value={c.whatsapp ?? ""}
+            onChange={(e) => set("whatsapp", e.target.value)}
+          />
+        </FormField>
+      </SettingsSection>
+      <SettingsSection
+        title="Tax Information"
+        description="Choose your business country and defaults for new documents."
+      >
+        <CountryTaxFields
+          company={c}
+          onChange={(next) => {
+            setC(next);
+            setSaved(false);
+          }}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {" "}
           <FormField label="Currency">
             <SelectMenu
               value={c.currency ?? "AED"}
               onChange={(v) => set("currency", v)}
-              options={CURRENCIES.map((cur) => ({ value: cur, label: cur }))}
-            />
-          </FormField>
-        </div>
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink">Tax Information</p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Select how tax is applied to your transactions
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <FormField label="Tax Type">
-            <SelectMenu
-              value={c.tax_type ?? "VAT"}
-              onChange={(v) => set("tax_type", v)}
-              options={["VAT", "GST", "Sales Tax", "None"].map((t) => ({
-                value: t,
-                label: t,
+              options={CURRENCIES.map((cur) => ({
+                value: cur.code,
+                label: `${cur.code} — ${cur.name}`,
               }))}
             />
-          </FormField>
-          <FormField label="VAT Registration Number">
-            <input
-              className="input"
-              value={c.vat_number ?? ""}
-              onChange={(e) => set("vat_number", e.target.value)}
-            />
-          </FormField>
-          <FormField label="Default Tax Rate (%)" hint="e.g. 5">
-            <input
-              type="number"
-              className="input"
-              placeholder="5"
-              value={c.default_tax_rate ?? ""}
-              onChange={(e) => set("default_tax_rate", numInput(e.target.value))}
+          </FormField>{" "}
+          <FormField label="Tax collection">
+            <SelectMenu
+              value={c.tax_type === "None" ? "none" : "rates"}
+              onChange={(v) => {
+                setC({
+                  ...c,
+                  tax_type: v === "none" ? "None" : regime.taxLabel,
+                  default_tax_rate: v === "none" ? 0 : c.default_tax_rate,
+                });
+                setSaved(false);
+              }}
+              options={[
+                { value: "rates", label: "Use default and line rates" },
+                { value: "none", label: "No tax on new documents" },
+              ]}
             />
           </FormField>
         </div>
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink flex items-center gap-2">
-          <Bookmark size={16} /> Document Presets
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          The template each section starts a new document on. Set once here - or
-          from the preset row above any section's list - instead of choosing on
-          every document.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Registration & payroll"
+        description="Legal registration details and country-specific payroll settings."
+      >
+        {/* UAE e-invoice: seller legal registration + emirate (entered once). */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField
+            label="Legal Registration ID"
+            hint={
+              uae ? "Trade license / EID / passport no." : "Company registration number"
+            }
+          >
+            <input
+              className="input"
+              placeholder="CN-1234567"
+              value={c.legal_id ?? ""}
+              onChange={(e) => set("legal_id", e.target.value)}
+            />
+          </FormField>
+          {uae && (
+            <FormField label="ID Type" hint="UAE e-invoice">
+              <SelectMenu
+                value={c.legal_id_type ?? ""}
+                onChange={(v) => set("legal_id_type", v)}
+                options={[
+                  { value: "", label: "Select…" },
+                  ...LEGAL_ID_TYPES.map((t) => ({ value: t.code, label: t.label })),
+                ]}
+              />
+            </FormField>
+          )}
+          <FormField label={uae ? "Emirate" : "State / Province"}>
+            {uae ? (
+              <SelectMenu
+                value={c.country_subdivision ?? ""}
+                onChange={(v) => set("country_subdivision", v)}
+                options={[
+                  { value: "", label: "Select…" },
+                  ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
+                ]}
+              />
+            ) : (
+              <input
+                className="input"
+                value={c.country_subdivision || ""}
+                onChange={(e) => set("country_subdivision", e.target.value)}
+              />
+            )}
+          </FormField>
+        </div>
+        {/* WPS is specific to UAE payroll. */}
+        {uae && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField
+              label="MOHRE establishment ID"
+              hint="13 digits - for the WPS salary file"
+            >
+              <input
+                className="input"
+                inputMode="numeric"
+                placeholder="1234567890123"
+                value={c.mol_establishment_id ?? ""}
+                onChange={(e) => set("mol_establishment_id", e.target.value)}
+              />
+            </FormField>
+            <FormField
+              label="WPS bank routing code"
+              hint="9 digits - from your paying bank"
+            >
+              <input
+                className="input"
+                inputMode="numeric"
+                placeholder="033112345"
+                value={c.wps_bank_code ?? ""}
+                onChange={(e) => set("wps_bank_code", e.target.value)}
+              />
+            </FormField>
+          </div>
+        )}
+      </SettingsSection>
+      <SettingsSection
+        title="Document Presets"
+        description="Choose the starting template for each document type. Preset changes save immediately."
+      >
         <DocPresetsPanel />
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink flex items-center gap-2">
-          <Stamp size={16} /> Stamp & Signature
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Upload once here. Then toggle “Stamp” and “Signature” on any invoice, quotation,
-          purchase order, declaration letter or delivery challan to print them.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Stamp & Signature"
+        description="Upload once, then turn on the stamp or signature in any document."
+      >
         <StampSignatureSettings
           value={stampSig}
           onChange={(next) => {
@@ -490,40 +537,35 @@ export default function CompanyDetails() {
             setSaved(false);
           }}
         />
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink flex items-center gap-2">
-          <Landmark size={16} /> Bank Details
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Enter once here. Then toggle “Show bank details” on any invoice, quotation or
-          other document to print them.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Bank Details"
+        description="Payment details you can include on invoices and other documents."
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {BANK_FIELDS.map((f) => (
-            <FormField key={f.key} label={f.label}>
+          {bankFields(c.country_code).map((f) => (
+            <FormField
+              key={f.key}
+              label={f.label}
+              error={bankErr[f.key] || undefined}
+            >
               <input
                 className="input"
                 placeholder={f.placeholder}
                 value={bank[f.key] ?? ""}
-                onChange={(e) => setBankField(f.key, e.target.value)}
+                onChange={(e) => {
+                  setBankField(f.key, e.target.value);
+                  if (bankErr[f.key]) setBankErr((prev) => ({ ...prev, [f.key]: "" }));
+                }}
               />
             </FormField>
           ))}
         </div>
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink flex items-center gap-2">
-          <FileText size={16} /> Letterhead
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Upload your full A4 letterhead (logo, header and footer artwork on one page).
-          Toggle “Use letterhead” on an LPO, declaration letter or other document to print
-          the body on top of it - then adjust the header and footer spacing on that
-          document so the text clears your artwork.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Letterhead"
+        description="Upload an A4 page with your header and footer. Adjust body spacing in the document editor."
+      >
         <LetterheadConfig
           value={lh}
           onChange={(next) => {
@@ -531,21 +573,11 @@ export default function CompanyDetails() {
             setSaved(false);
           }}
         />
-      </div>
-
-      <div className="mt-6 pt-5 border-t border-brand-100">
-        <p className="font-medium text-ink flex items-center gap-2">
-          <Hash size={16} /> Document Numbering
-        </p>
-        <p className="text-sm text-brand-500 mt-0.5 mb-4">
-          Set how each document type numbers itself. Put the part that should count up
-          inside braces - its digits set the width and the starting value, so{" "}
-          <span className="font-mono">{"{001}"}</span> means 001, 002, 003… Everything
-          outside the braces stays fixed. Use <span className="font-mono">{"{YY}"}</span>{" "}
-          or <span className="font-mono">{"{YYYY}"}</span> for the year. Leave a type
-          blank to keep its built-in scheme. Each type counts separately, so a quote and
-          the invoice it becomes never share a number.
-        </p>
+      </SettingsSection>
+      <SettingsSection
+        title="Document Numbering"
+        description="Use {001} for a counter and {YY} or {YYYY} for the year. Leave a format empty to use its default."
+      >
         <div className="space-y-3">
           {DOC_NUMBER_KINDS.map((spec) => (
             <div key={spec.kind} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -561,7 +593,7 @@ export default function CompanyDetails() {
                 />
               </FormField>
               <FormField label="Preview">
-                <div className="input flex items-center font-mono text-brand-500 bg-brand-50 dark:bg-white/5">
+                <div className="flex min-h-10 items-center break-all font-mono text-xs text-muted-foreground">
                   {(docFmts[spec.kind] ?? "").trim()
                     ? numberPreview(docFmts[spec.kind] ?? "")
                     : `${spec.prefix}-0001, ${spec.prefix}-0002, …`}
@@ -570,9 +602,8 @@ export default function CompanyDetails() {
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="flex items-center justify-end gap-3 mt-6">
+      </SettingsSection>
+      <div className="flex flex-wrap items-center justify-end gap-3 p-5 sm:p-6">
         {saved && (
           <span className="inline-flex items-center gap-1 text-sm font-medium text-success">
             <Check size={15} /> Saved - applied to all documents
@@ -582,6 +613,6 @@ export default function CompanyDetails() {
           {saving ? "Saving…" : "Save Changes"}
         </button>
       </div>
-    </div>
+    </SettingsPanel>
   );
 }

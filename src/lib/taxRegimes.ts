@@ -1,32 +1,17 @@
-// Tax regimes keyed by currency — the rules engine behind the currency
-// switcher. Switching the app to INR is not a relabelling exercise: India
-// charges GST (slab rates, GSTIN identifiers), the UAE charges 5% VAT under
-// the FTA, Saudi 15% VAT under ZATCA. New documents adopt the regime of the
-// currency they are raised in; existing documents keep the rules they were
-// issued under.
-//
-// Scope note: India's CGST/SGST intra-state split needs a place-of-supply
-// model the documents don't carry yet, so the single-line presentation equals
-// the inter-state (IGST) form — one GST line at the slab rate. The slabs
-// themselves are the real ones.
-
+/** Tax jurisdiction is independent of the document and display currencies.
+ * Currency fallback is ONLY for legacy records without a country snapshot.
+ * Presets are starting points, not automatic product/transaction classification.
+ * Sources and coverage: docs/international-business.md. Reviewed 2026-09-06. */
 export interface TaxRegime {
   id: string;
   country: string;
-  /** ISO currency code that triggers this regime. */
   currency: string;
-  /** Tax name on documents and forms: "VAT", "GST". */
   taxLabel: string;
-  /** Registration-number label: "TRN", "GSTIN", "VAT No.". */
   trnLabel: string;
-  /** Default rate (%) pre-filled on new documents. Absent = keep the
-   *  company's own default (generic regimes have no statutory answer). */
   defaultRate?: number;
-  /** Statutory rates (%) the regime recognises, for pickers and hints. */
   rates: number[];
   authority: string;
 }
-
 const GENERIC: TaxRegime = {
   id: "generic",
   country: "International",
@@ -36,9 +21,41 @@ const GENERIC: TaxRegime = {
   rates: [],
   authority: "",
 };
-
+export const EU_COUNTRIES =
+  "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split(
+    " "
+  );
+const EU_STANDARD: Record<string, number> = {
+  AT: 20,
+  BE: 21,
+  BG: 20,
+  HR: 25,
+  CY: 19,
+  CZ: 21,
+  DK: 25,
+  EE: 24,
+  FI: 25.5,
+  FR: 20,
+  DE: 19,
+  GR: 24,
+  HU: 27,
+  IE: 23,
+  IT: 22,
+  LV: 21,
+  LT: 21,
+  LU: 17,
+  MT: 18,
+  NL: 21,
+  PL: 23,
+  PT: 23,
+  RO: 21,
+  SK: 23,
+  SI: 22,
+  ES: 21,
+  SE: 25,
+};
 const REGIMES: Record<string, TaxRegime> = {
-  AED: {
+  AE: {
     id: "uae-vat",
     country: "United Arab Emirates",
     currency: "AED",
@@ -48,17 +65,17 @@ const REGIMES: Record<string, TaxRegime> = {
     rates: [0, 5],
     authority: "UAE Federal Tax Authority",
   },
-  INR: {
+  IN: {
     id: "in-gst",
     country: "India",
     currency: "INR",
     taxLabel: "GST",
     trnLabel: "GSTIN",
     defaultRate: 18,
-    rates: [0, 5, 12, 18, 28],
+    rates: [0, 5, 18, 40],
     authority: "GST Council",
   },
-  SAR: {
+  SA: {
     id: "ksa-vat",
     country: "Saudi Arabia",
     currency: "SAR",
@@ -69,26 +86,82 @@ const REGIMES: Record<string, TaxRegime> = {
     authority: "ZATCA",
   },
 };
-
-/** The regime governing a currency. Unknown currencies get a neutral
- *  "Tax / Tax ID" regime so documents stay renderable anywhere. */
-export function taxRegimeFor(currency?: string | null): TaxRegime {
-  const ccy = (currency || "").trim().toUpperCase();
-  return REGIMES[ccy] ?? GENERIC;
+const names = new Intl.DisplayNames(["en"], { type: "region" });
+export const COUNTRY_OPTIONS = [
+  "AE",
+  "IN",
+  ...EU_COUNTRIES,
+  "SA",
+  "GB",
+  "US",
+  "CA",
+  "AU",
+  "NZ",
+  "SG",
+  "BH",
+  "OM",
+  "QA",
+  "KW",
+  "CH",
+  "ZA",
+  "JP",
+]
+  .map((code) => ({ value: code, label: names.of(code) || code }))
+  .sort((a, b) => a.label.localeCompare(b.label));
+const supported = new Set(COUNTRY_OPTIONS.map((c) => c.value));
+const LEGACY_COUNTRY: Record<string, string> = { AED: "AE", INR: "IN", SAR: "SA" };
+export function taxRegimeFor(
+  currency?: string | null,
+  countryCode?: string | null
+): TaxRegime {
+  const code =
+    countryCode?.trim().toUpperCase() ||
+    LEGACY_COUNTRY[(currency || "").trim().toUpperCase()] ||
+    "";
+  if (REGIMES[code]) return REGIMES[code];
+  if (EU_COUNTRIES.includes(code))
+    return {
+      ...GENERIC,
+      id: `eu-vat-${code.toLowerCase()}`,
+      country: names.of(code) || code,
+      taxLabel: "VAT",
+      trnLabel: "VAT ID",
+      defaultRate: EU_STANDARD[code],
+      rates: [0, EU_STANDARD[code]],
+      authority: "National VAT authority",
+    };
+  return {
+    ...GENERIC,
+    country: supported.has(code) ? names.of(code) || code : GENERIC.country,
+  };
 }
-
-/** True when the currency's regime is the UAE's (gates UAE-only features like
- *  the Peppol PINT-AE e-invoice XML). */
-export function isUaeRegime(currency?: string | null): boolean {
-  return taxRegimeFor(currency).id === "uae-vat";
+export function isUaeRegime(
+  currency?: string | null,
+  countryCode?: string | null
+): boolean {
+  return taxRegimeFor(currency, countryCode).id === "uae-vat";
 }
-
-/** The rate a NEW document of this currency starts on: the regime's statutory
- *  default when it has one, otherwise the company's own default. */
 export function defaultTaxRate(
   currency: string | null | undefined,
-  companyDefault: number | null | undefined
+  companyDefault: number | null | undefined,
+  countryCode?: string | null
 ): number {
-  const regime = taxRegimeFor(currency);
-  return regime.defaultRate ?? companyDefault ?? 0;
+  // A configured zero is intentional (e.g. an unregistered business).
+  return companyDefault ?? taxRegimeFor(currency, countryCode).defaultRate ?? 0;
+}
+export function validateCountry(code?: string | null, template?: string | null): void {
+  if (code != null && code !== "" && !supported.has(code))
+    throw new Error("Select a supported business country.");
+  if (code && code !== "AE" && template && /(^|-)uae($|-)/.test(template)) throw new Error("Choose a general document template for this tax country. UAE templates contain UAE-specific legal text.");
+}
+/** Format check only; registration/validity must be checked with the authority. */
+export function taxIdError(value?: string | null, country?: string | null): string {
+  const id = value?.trim() || "";
+  if (!id) return "";
+  if (country === "AE" && !/^\d{15}$/.test(id)) return "TRN must be exactly 15 digits.";
+  if (country === "IN" && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[A-Z0-9]$/.test(id))
+    return "GSTIN must be 15 characters in the Indian GSTIN format.";
+  if (id.length > 40 || !/^[A-Za-z0-9 ./-]+$/.test(id))
+    return "Enter a tax ID using letters, numbers, spaces, dots, slashes or hyphens (up to 40 characters).";
+  return "";
 }

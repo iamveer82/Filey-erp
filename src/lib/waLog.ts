@@ -5,6 +5,8 @@
 // ponytail: localStorage, capped. Move to SQLite if the owner ever wants the
 // whole thread searchable rather than "what happened recently".
 
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+
 export interface WaLogEntry {
   /** epoch ms */
   at: number;
@@ -14,6 +16,9 @@ export interface WaLogEntry {
   from: string;
   name?: string;
   text: string;
+  /** A user-requested /new starts fresh context without deleting the log. */
+  sessionStart?: boolean;
+  document?: { key: string; filename: string; channel: "whatsapp" | "sms"; outcome: "draft" | "handed_off" | "accepted" | "observed_sent" | "unknown" };
 }
 
 const KEY = "filey.wa_log";
@@ -21,7 +26,7 @@ const LIMIT = 200;
 
 function read(): WaLogEntry[] {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = readAgentStorage(KEY);
     const v = raw ? JSON.parse(raw) : [];
     return Array.isArray(v) ? (v as WaLogEntry[]) : [];
   } catch {
@@ -29,12 +34,15 @@ function read(): WaLogEntry[] {
   }
 }
 
-export function waLogAdd(e: Omit<WaLogEntry, "at"> & { at?: number }): void {
+export function waLogAdd(
+  e: Omit<WaLogEntry, "at"> & { at?: number },
+  expectedScope?: string
+): void {
   try {
     const rows = read();
     rows.push({ ...e, at: e.at ?? Date.now() });
     if (rows.length > LIMIT) rows.splice(0, rows.length - LIMIT);
-    localStorage.setItem(KEY, JSON.stringify(rows));
+    writeAgentStorage(KEY, JSON.stringify(rows), expectedScope);
   } catch {
     // A full or unavailable localStorage must never break answering a message.
   }
@@ -52,7 +60,7 @@ export function waLogList(opts: { from?: string; limit?: number } = {}): WaLogEn
 
 export function waLogClear(): void {
   try {
-    localStorage.removeItem(KEY);
+    writeAgentStorage(KEY, null);
   } catch {
     /* ignore */
   }

@@ -55,6 +55,9 @@ const ENV_LIMITED = new Set([
   "extract-tables", "remove-blank", "pdf2zip",
   // pdfjs-backed passes (same worker limitation)
   "pdf-flatten", "extract-attach", "decrypt",
+  // Sanitization now rebuilds visible pages to remove hidden content securely.
+  // Actual output is checked in pdfjs-compatibility.test.ts with native canvas.
+  "sanitize",
 ]);
 
 async function makePdf(pages = 2, name = "fixture.pdf"): Promise<File> {
@@ -164,6 +167,7 @@ describe("Tools registry", () => {
     console.info(
       `[tools-audit] passed=${passed.length} skipped=${skipped.length} failed=${failures.length}`
     );
+    if (skipped.length) console.info("[tools-audit] not covered by jsdom (require separate runtime checks):\n  " + skipped.join("\n  "));
     if (failures.length) console.info("[tools-audit] failures:\n  " + failures.join("\n  "));
     expect(failures).toEqual([]);
   }, 120_000);

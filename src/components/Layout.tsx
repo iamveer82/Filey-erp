@@ -1,17 +1,13 @@
-import {
-  ReactNode,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { ReactNode, useEffect, useRef, useState, type CSSProperties } from "react";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
+  ArrowLeft,
   Search,
   LogOut,
   UserRound,
   Settings,
+  CreditCard,
   Command,
   Menu,
   PanelLeft,
@@ -20,11 +16,15 @@ import {
   LifeBuoy,
   BookOpen,
   Languages,
+  Cloud,
+  HardDrive,
+  X,
 } from "lucide-react";
-import { motion } from "framer-motion";
-import AppIcon from "./AppIcon";
-import BloubBot from "./BloubBot";
+import WorkspaceNavigation from "./WorkspaceNavigation";
+import Logo from "./Logo";
+import PaperMark from "./PaperMark";
 import ErrorBoundary from "./ErrorBoundary";
+import BrowserPanel from "./BrowserPanel";
 import { PageContextProvider } from "../lib/pageContext";
 import { cn, todayYmd, CURRENCIES } from "../lib/format";
 import { initDisplayCurrency, useDisplayCurrency } from "../lib/displayCurrency";
@@ -38,21 +38,9 @@ import { useGlobalSearch, useNotifications } from "../lib/spotlight";
 import { attachSmoothScroll } from "../lib/smoothScroll";
 import { useUI } from "../lib/ui";
 import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
+import { isLocalMode } from "../lib/dataMode";
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
-
-/** Sidebar sections (Emergent reference grouping). Order within a group
- *  mirrors the user's workflow. */
-const MODULE_GROUPS: { title: string; ids: string[] }[] = [
-  { title: "Assistant", ids: ["agent"] },
-  { title: "Business", ids: ["overview", "reports"] },
-  { title: "Sales", ids: ["orders", "invoicing", "quoting", "crm", "customers", "follow-ups"] },
-  { title: "Purchases", ids: ["suppliers", "purchase", "purchase-orders"] },
-  { title: "Inventory", ids: ["inventory"] },
-  { title: "Accounting", ids: ["people", "accounting", "bank-accounts", "cheques", "payment-receipts", "declaration"] },
-  { title: "Tools", ids: ["tools", "files", "email-templates", "delivery-challans"] },
-  { title: "System", ids: ["settings", "integrations"] },
-];
 
 /** Quick-action commands for the search dropdown. `?new=1` deep-links a
  *  page to auto-open its create form. */
@@ -60,7 +48,11 @@ const COMMANDS: { label: string; to: string; keywords: string }[] = [
   { label: "New invoice", to: "/invoicing?new=1", keywords: "create invoice bill" },
   { label: "New quotation", to: "/quoting?new=1", keywords: "create quote" },
   { label: "Add product", to: "/inventory?new=1", keywords: "create product stock item" },
-  { label: "Add customer", to: "/crm?new=1", keywords: "create customer client crm" },
+  {
+    label: "Add customer",
+    to: "/customers?new=1",
+    keywords: "create customer client crm",
+  },
   { label: "Add supplier", to: "/suppliers?new=1", keywords: "create supplier vendor" },
   { label: "New sales order", to: "/orders?new=1", keywords: "create order" },
   {
@@ -85,15 +77,13 @@ const TONE_DOT: Record<string, string> = {
 function Wordmark() {
   return (
     <span className="flex items-center gap-2">
-      <img
-        src="/icons/filey-logo.png"
-        width={33}
-        height={33}
-        alt=""
-        draggable={false}
-        className="h-[33px] w-[33px] shrink-0 select-none rounded-md object-cover"
-      />
-      <span className="text-[15px] font-semibold text-foreground tracking-tight">Filey</span>
+      <Logo size={36} />
+      <span className="text-[19px] font-semibold text-foreground tracking-tight">
+        Filey
+        <span className="ml-1.5 text-[11px] font-medium text-muted-foreground tracking-normal">
+          ERP
+        </span>
+      </span>
     </span>
   );
 }
@@ -106,6 +96,13 @@ export default function Layout({ children }: { children: ReactNode }) {
   const navModules = enabledModules();
   const name = profile?.name || "User";
   const { t } = useLang();
+  const local = isLocalMode();
+  const [workspaceChanged, setWorkspaceChanged] = useState(false);
+  useEffect(() => {
+    const changed = () => setWorkspaceChanged(true);
+    window.addEventListener("filey:workspace-changed", changed);
+    return () => window.removeEventListener("filey:workspace-changed", changed);
+  }, []);
 
   // Online/offline state for connectivity indicator
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -142,7 +139,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       .catch((e) => console.error("Failed to sync display currency:", e));
   };
   useEffect(syncCurrency, []);
-  useLiveSync(syncCurrency);
+  useLiveSync(syncCurrency, ["company_profile"]);
   // Re-key the route container when the display currency changes (see below).
   const { currency: displayCcy } = useDisplayCurrency();
   const initials = name
@@ -152,12 +149,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     .join("")
     .toUpperCase();
 
-  // Sidebar: fixed 248px (reference). Header button hides/shows on desktop;
-  // mobile uses an off-canvas drawer.
+  // Desktop visibility is saved; mobile uses a separate navigation drawer.
   const [hidden, setHidden] = useState(
     () => localStorage.getItem("sidebar.hidden") === "1"
   );
   const [mobileOpen, setMobileOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closeMenuRef = useRef<HTMLButtonElement>(null);
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width:1024px)").matches
   );
@@ -170,6 +168,44 @@ export default function Layout({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+  useEffect(() => {
+    if (!mobileOpen || isDesktop) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const controls = () => {
+      const selector = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex="0"]';
+      return [
+        ...sidebarRef.current?.querySelectorAll<HTMLElement>(selector) || [],
+        ...document.querySelector(".workspace-account-menu")?.querySelectorAll<HTMLElement>(selector) || [],
+      ].filter(el => el.getClientRects().length);
+    };
+    closeMenuRef.current?.focus({ preventScroll: true });
+    const trap = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileOpen(false);
+      }
+      if (event.key !== "Tab") return;
+      const items = controls(),
+        first = items[0],
+        last = items[items.length - 1];
+      if (!items.includes(document.activeElement as HTMLElement)) {
+        event.preventDefault();
+        first?.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    window.addEventListener("keydown", trap);
+    return () => {
+      window.removeEventListener("keydown", trap);
+      previous?.focus({ preventScroll: true });
+    };
+  }, [mobileOpen, isDesktop]);
   useEffect(() => {
     localStorage.setItem("sidebar.hidden", hidden ? "1" : "0");
   }, [hidden]);
@@ -230,7 +266,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       .catch((e) => console.error("Failed to load inbox:", e));
   };
   useEffect(loadInbox, []);
-  useLiveSync(loadInbox);
+  useLiveSync(loadInbox, ["notifications"]);
 
   // Surface due / overdue follow-ups as in-app reminders, once per day.
   useEffect(() => {
@@ -338,166 +374,161 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <PageContextProvider>
-      <div className="flex h-full w-full overflow-hidden bg-background">
+      {workspaceChanged && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="workspace-changed-title"
+          className="fixed inset-0 z-50 bg-background/95 grid place-items-center p-6"
+        >
+          <div className="max-w-md space-y-4">
+            <h2 id="workspace-changed-title" className="text-lg font-semibold">
+              Workspace changed in another tab
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              This tab is paused to keep records in the correct workspace. Reload to use
+              the current workspace. Unsaved form changes in this tab will be discarded.
+            </p>
+            <button
+              className="btn-primary"
+              autoFocus
+              onClick={() => window.location.reload()}
+            >
+              Reload workspace
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="filey-workspace flex h-full w-full overflow-hidden bg-background">
         {/* Offline banner */}
         {!isOnline && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
-            {t("You are offline - changes will sync when reconnected")}
+            {local
+              ? "Offline · working with this device’s records"
+              : "Offline · showing cached cloud records. Some actions require a connection."}
           </div>
         )}
-        {/* Mobile drawer backdrop */}
-        {mobileOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
-            onClick={() => setMobileOpen(false)}
-            aria-hidden="true"
-          />
-        )}
+        <div
+          className="workspace-drawer-backdrop"
+          data-open={mobileOpen}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
 
-        {/* ───────────── Sidebar (reference: 248px, grouped sections) ───────────── */}
         {showSidebar && (
           <aside
-            className={cn(
-              "w-[248px] shrink-0 h-full bg-sidebar border-r border-border flex flex-col",
-              "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:h-screen max-lg:transition-transform max-lg:duration-200",
-              mobileOpen ? "max-lg:translate-x-0" : "max-lg:-translate-x-full"
-            )}
+            id="workspace-sidebar"
+            ref={sidebarRef}
+            inert={!isDesktop && !mobileOpen}
+            role={!isDesktop && mobileOpen ? "dialog" : undefined}
+            aria-modal={!isDesktop && mobileOpen ? true : undefined}
+            aria-label="Workspace navigation"
+            className="workspace-sidebar"
+            data-open={mobileOpen}
           >
-            <div className="px-3 pt-3 pb-3">
-              <Link
-                to="/overview"
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-hover"
-                title="Filey"
-              >
+            <div className="workspace-sidebar-header">
+              <Link to="/overview" aria-label={t("Filey home")} onClick={() => setMobileOpen(false)}
+                className="workspace-brand" title="Filey">
                 <Wordmark />
-                <ChevronsUpDown className="ml-auto h-3.5 w-3.5 text-muted-foreground" />
               </Link>
+              <button ref={closeMenuRef} type="button"
+                aria-label="Close menu"
+                onClick={() => setMobileOpen(false)}
+                className="workspace-sidebar-close lg:hidden">
+                <X size={18} aria-hidden="true" />
+              </button>
             </div>
 
-            <div className="px-2 pb-3 overflow-y-auto overflow-x-hidden flex-1">
-              {MODULE_GROUPS.map((group) => {
-                const items = navModules.filter((m) => group.ids.includes(m.id));
-                if (items.length === 0) return null;
-                return (
-                  <div key={group.title} className="mt-3 first:mt-0">
-                    <div className="px-2.5 pb-1 text-[11.5px] font-medium text-muted-foreground">
-                      {t(group.title)}
-                    </div>
-                    <nav className="flex flex-col gap-0.5">
-                      {items.map(({ id, to, label, icon: iconName }) => (
-                        <NavLink
-                          key={to}
-                          to={to}
-                          className={({ isActive }) =>
-                            cn(
-                              "group flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13.5px] transition-colors",
-                              isActive
-                                ? "bg-hover text-foreground font-medium"
-                                : "text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                            )
-                          }
-                        >
-                          {({ isActive }) => (
-                            <>
-                              {/* Filey AI carries the assistant's own animated
-                                  face instead of a glyph — the one living icon
-                                  in the rail, so the assistant reads as a
-                                  presence rather than a page. It idles with
-                                  ambient tricks, watches the pointer, and
-                                  springs on hover/press. */}
-                              {id === "agent" ? (
-                                <motion.span
-                                  className="shrink-0 leading-none"
-                                  whileHover={{ scale: 1.12, rotate: -4 }}
-                                  whileTap={{ scale: 0.92 }}
-                                  transition={{ type: "spring", stiffness: 480, damping: 22 }}
-                                >
-                                  <BloubBot
-                                    size={48}
-                                    state="idle"
-                                    animate
-                                    ambient
-                                    trackCursor
-                                  />
-                                </motion.span>
-                              ) : (
-                                <AppIcon
-                                  name={iconName}
-                                  className={cn(
-                                    "h-[15px] w-[15px] shrink-0",
-                                    isActive ? "text-foreground" : "text-muted-foreground"
-                                  )}
-                                />
-                              )}
-                              <span className="truncate">{t(label)}</span>
-                            </>
-                          )}
-                        </NavLink>
-                      ))}
-                    </nav>
-                  </div>
-                );
-              })}
+            <WorkspaceNavigation
+              modules={navModules}
+              isDesktop={isDesktop}
+              mobileOpen={mobileOpen}
+              onNavigate={() => setMobileOpen(false)}
+            />
 
-              <div className="mt-6 border-t border-border pt-3 space-y-0.5">
-                <a
-                  href="#help"
-                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                >
-                  <LifeBuoy className="h-[15px] w-[15px]" />
-                  {t("Help Center")}
+            <div className="workspace-sidebar-footer">
+              {!("__TAURI_INTERNALS__" in window) && (
+                <a href="https://gofiley.com/" className="workspace-nav-link mb-1">
+                  <ArrowLeft size={18} aria-hidden="true" />
+                  <span>{t("Back to GoFiley")}</span>
                 </a>
-                <a
-                  href="#docs"
-                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] text-muted-foreground hover:bg-hover/60 hover:text-foreground"
-                >
-                  <BookOpen className="h-[15px] w-[15px]" />
-                  {t("Documentation")}
-                </a>
-              </div>
-            </div>
-
-            <div className="border-t border-border p-2">
-              <AccountDropdown className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-hover">
-                <Avatar size={28} />
-                <span className="leading-tight text-left min-w-0">
-                  <span className="block text-[13px] font-medium text-foreground truncate">
-                    {name}
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground truncate">
-                    {profile?.email ?? profile?.company ?? "Admin"}
+              )}
+              <nav className="workspace-support-links" aria-label={t("Support")}>
+                <NavLink to="/help" onClick={() => setMobileOpen(false)}>
+                  <LifeBuoy size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <span className="truncate">{t("Help Center")}</span>
+                </NavLink>
+                <NavLink to="/docs" onClick={() => setMobileOpen(false)}>
+                  <BookOpen size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <span className="truncate">{t("Documentation")}</span>
+                </NavLink>
+              </nav>
+              <AccountDropdown className="workspace-account-trigger">
+                <Avatar size={32} />
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-[13px] font-medium leading-5 text-foreground">{name}</span>
+                  <span className="block truncate text-[11.5px] leading-4 text-muted-foreground">
+                    {profile?.company || profile?.email || t("Account")}
                   </span>
                 </span>
-                <ChevronsUpDown className="ml-auto h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               </AccountDropdown>
             </div>
           </aside>
         )}
 
         {/* ───────────── Main column ───────────── */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          <header className="shrink-0 z-30 h-14 bg-background/85 backdrop-blur border-b border-border flex items-center px-6 gap-4">
+        <div
+          inert={mobileOpen && !isDesktop}
+          className="flex-1 min-w-0 flex flex-col overflow-hidden"
+        >
+          <header className="workspace-header shrink-0 z-30 h-16 bg-background border-b border-border flex items-center px-3 sm:px-6 gap-2 sm:gap-3">
             {/* Sidebar toggle - desktop hides/shows, mobile opens the drawer */}
             <button
               onClick={() => (isDesktop ? setHidden((h) => !h) : setMobileOpen(true))}
               aria-label={t("Toggle sidebar")}
-              className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-foreground lg:inline-grid hidden"
+              className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground lg:inline-grid hidden"
             >
-              <PanelLeft className="h-4 w-4" />
+              <PanelLeft size={18} aria-hidden="true" />
             </button>
             <button
               onClick={() => setMobileOpen(true)}
               aria-label={t("Open menu")}
-              className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-foreground lg:hidden"
+              aria-controls="workspace-sidebar"
+              aria-expanded={mobileOpen}
+              className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground lg:hidden"
             >
-              <Menu className="h-4 w-4" />
+              <Menu size={18} aria-hidden="true" />
             </button>
-            <div className="h-4 w-px bg-border" />
+            <div className="hidden sm:block h-4 w-px bg-border" />
             <span className="text-[14px] font-medium text-foreground truncate">
-              {pageMeta ? t(pageMeta.label) : "Filey"}
+              {pageMeta
+                ? t(pageMeta.label)
+                : pathname === "/help"
+                  ? "Help Center"
+                  : pathname === "/docs"
+                    ? "Documentation"
+                    : "Filey"}
             </span>
 
             <div className="ml-auto flex items-center gap-2">
+              <button
+                aria-label="Open search"
+                onClick={() => window.dispatchEvent(new Event("toggle-command-palette"))}
+                className="grid h-10 w-10 place-items-center rounded-full hover:bg-hover md:hidden"
+              >
+                <Search size={18} aria-hidden="true" />
+              </button>
+              <Link
+                to="/settings?section=datamode"
+                aria-label={`Storage: ${local ? "This device" : "Cloud"}. Open storage settings`}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover"
+              >
+                {local ? <HardDrive size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
+                <span className="hidden sm:inline">
+                  {local ? "This device" : "Cloud"}
+                </span>
+              </Link>
               {/* Global search (reference: 260px, ⌘K hint) */}
               <div ref={searchRef} className="relative hidden md:flex items-center">
                 <Search className="absolute left-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
@@ -538,7 +569,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                               <span className="grid h-6 w-6 place-items-center rounded-md bg-muted text-foreground">
                                 <Command size={12} />
                               </span>
-                              <span className="text-[13px] text-foreground">{c.label}</span>
+                              <span className="text-[13px] text-foreground">
+                                {c.label}
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -596,16 +629,16 @@ export default function Layout({ children }: { children: ReactNode }) {
               <CurrencySwitcher />
 
               {/* Light / dark theme toggle */}
-              <AnimatedThemeToggler />
+              <span className="hidden min-[400px]:inline-flex"><AnimatedThemeToggler /></span>
 
               {/* Notifications */}
               <div ref={notifRef} className="relative">
                 <button
                   aria-label="Notifications"
                   onClick={() => setNotifOpen((o) => !o)}
-                  className="h-8 w-8 grid place-items-center rounded-md hover:bg-hover text-foreground relative"
+                  className="h-10 w-10 grid place-items-center rounded-full hover:bg-hover text-foreground relative"
                 >
-                  <Bell className="h-4 w-4" />
+                  <Bell size={18} aria-hidden="true" />
                   {badge > 0 && (
                     <span className="absolute top-1 right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold grid place-items-center">
                       {badge > 9 ? "9+" : badge}
@@ -616,7 +649,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 {notifOpen && (
                   <div
                     style={{ "--materialize-origin": "top right" } as CSSProperties}
-                    className="materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
+                    className="workspace-notifications materialize-surface absolute right-0 top-11 z-30 w-80 max-h-[60vh] overflow-y-auto overscroll-contain rounded-lg bg-card border border-border shadow-lg"
                   >
                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                       <p className="text-[13px] font-semibold text-foreground">
@@ -664,7 +697,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                             />
                             <span className="min-w-0">
                               <span className="block text-[13px] font-medium text-foreground">
-                                {n.actor} {n.kind === "mention" ? "mentioned you" : n.kind}
+                                {n.actor}{" "}
+                                {n.kind === "mention" ? "mentioned you" : n.kind}
                               </span>
                               <span className="block text-[11.5px] text-muted-foreground truncate">
                                 {n.body}
@@ -708,6 +742,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
           </header>
 
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <main
             ref={scrollWrapRef}
             className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-page"
@@ -728,11 +763,16 @@ export default function Layout({ children }: { children: ReactNode }) {
                   where WebView2's table scrollbar (which appears after Lenis has
                   measured) was enough to clip "Next" in half. The gutter keeps
                   the footer above the fold whatever the scroller does. */}
-              <div key={`${pathname}:${displayCcy}`} className="fade-in px-4 sm:px-6 pt-6 pb-16">
+              <div
+                key={`${pathname}:${displayCcy}`}
+                className="workspace-content min-w-0 fade-in px-4 sm:px-6 pt-6 pb-16"
+              >
                 <ErrorBoundary>{children}</ErrorBoundary>
               </div>
             </div>
           </main>
+          <BrowserPanel />
+          </div>
         </div>
       </div>
     </PageContextProvider>
@@ -755,8 +795,8 @@ function CurrencySwitcher() {
         aria-label="Display currency"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        title="Currency for totals, new documents and their tax rules (AED→VAT, INR→GST)"
-        className="hidden h-8 cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 text-[12.5px] font-medium text-foreground transition-colors hover:bg-hover hover:border-border sm:inline-flex"
+        title="Currency for displayed totals and new documents. Tax country is set separately."
+        className="hidden h-8 cursor-pointer items-center gap-1 rounded-full border border-transparent px-2 text-[12.5px] font-medium text-foreground transition-colors hover:bg-hover hover:border-border sm:inline-flex"
       >
         {currency}
         <ChevronDown className="h-3 w-3 text-muted-foreground" />
@@ -824,7 +864,7 @@ function AccountDropdown({
         anchorRef={btnRef}
         align="end"
         closeOnScroll
-        className="min-w-52"
+        className="workspace-account-menu min-w-52"
       >
         <div className="truncate px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
           {profile?.email || name}
@@ -839,6 +879,8 @@ function AccountDropdown({
           label={t("Settings")}
           onClick={() => run(() => nav("/settings"))}
         />
+        <MenuItemRow icon={<PaperMark />} label="Paper wallet" onClick={() => run(() => nav("/settings?section=credits"))} />
+        <MenuItemRow icon={<CreditCard size={14} />} label="Plan & billing" onClick={() => run(() => nav("/settings?section=billing"))} />
         <MenuSep />
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
           <Languages size={12} /> {t("Language")}

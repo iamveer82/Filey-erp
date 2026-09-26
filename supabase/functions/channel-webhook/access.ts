@@ -88,15 +88,22 @@ export async function tryPair(
 ): Promise<string | null> {
   const m = /^\s*PAIR\s+(\d{6})\s*$/i.exec(text);
   if (!m) return null;
+  if (msg.channel === "telegram" && (msg.chatType ?? "private") !== "private")
+    return "Pair in a private message with the bot, not in a group.";
+  if (msg.channel === "slack" && !msg.userId) return "Cannot pair without a sender identity.";
   const { data: row } = await client
     .from("agent_channels")
-    .select("credentials,owner_ref")
+    .select("credentials,owner_ref,enabled")
     .eq("user_id", ownerId)
     .eq("provider", msg.channel)
     .maybeSingle();
   if (!row) return null;
+  if (!row.enabled) return "This channel is disabled. Reconnect it in Filey.";
   if (row.owner_ref) return "This channel is already paired.";
   const creds = (row.credentials ?? {}) as Record<string, string>;
+  const expires = Date.parse(creds.pair_expires_at ?? "");
+  if (!Number.isFinite(expires) || expires <= Date.now())
+    return "That pairing code has expired. Reconnect the channel to get a new code.";
   // Keyed by the sender's identity so one stranger guessing codes can't
   // lock the real owner out of pairing on another account/channel.
   const sender =
@@ -107,8 +114,8 @@ export async function tryPair(
     return "Too many attempts — try again later.";
   }
   if (!creds.pair_code || !(await timingSafeEqualStr(String(creds.pair_code), m[1]))) {
-    // Failed attempts are what the limiter counts, and each one leaves an
-    // audit row — brute-forcing the code shows up in audit_log.
+    // Every attempt is already reserved. Also audit incorrect codes so
+    // brute-forcing shows up in the account's activity trail.
     await logAction(client, ownerId, attemptAction, {
       provider: msg.channel,
       sender: String(sender).slice(0, 64),
@@ -119,7 +126,8 @@ export async function tryPair(
   }
   const rest = { ...creds };
   delete rest.pair_code; // one-time: spent codes cannot pair a second account
-  const { error } = await client
+  delete rest.pair_expires_at;
+  const { data: paired, error } = await client
     .from("agent_channels")
     .update({
       owner_ref: msg.channel === "slack" ? msg.userId : msg.externalId,
@@ -127,8 +135,14 @@ export async function tryPair(
       updated_at: new Date().toISOString(),
     })
     .eq("user_id", ownerId)
-    .eq("provider", msg.channel);
+    .eq("provider", msg.channel)
+    .eq("enabled", true)
+    .is("owner_ref", null)
+    .eq("credentials->>pair_code", creds.pair_code)
+    .eq("credentials->>pair_expires_at", creds.pair_expires_at)
+    .select("owner_ref");
   if (error) return `Pairing failed: ${error.message}`;
+  if (!paired?.length) return "This pairing code was already used or replaced. Reconnect the channel if needed.";
   onPaired?.();
-  return `✅ Paired. You can talk to me here now — same memory, same books.`;
+  return `✅ Paired. You can talk to me here now. Hosted channels share your saved channel memories and books; device-local memory stays on the device.`;
 }

@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { toast } from "../components/Toaster";
+import { reportMoney } from "../lib/reportMoney";
+import { getExchangeRates } from "../lib/exchange-rates";
+import { ChartFrame } from "../components/charts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Download, Sparkles, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle2, Clock, User } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import {
@@ -9,7 +13,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   CartesianGrid,
   PieChart,
   Pie,
@@ -20,17 +23,18 @@ import {
   erp,
   fin,
   crm,
-  quotes,
+  receipts,
   billing,
-  type Product,
+  isPostedStatus,
   type Order,
   type InvoiceDocSummary,
+  type InvoicePayment,
   type Expense,
   type CrmCustomer,
-  type QuotationSummary,
+  type ReceiptSummary,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
-import { num, aed, cn, fmtDate, todayYmd, localYmd, plural } from "../lib/format";
+import { num, aed, chartAmount, cn, fmtDate, todayYmd, plural } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import {
   Badge,
@@ -46,28 +50,20 @@ import {
   ChartGradient,
 } from "../components/charts";
 import { useAuth } from "../lib/auth";
-
-/* ── Overview (Emergent reference layout) ──────────────────────────────────
-   JoinedGrid KPIs → Sales/Received bar + segments pie → Recent invoices +
-   activity → Cash movement area. Data loaders unchanged - reskin only. */
+import { useDisplayCurrency } from "../lib/displayCurrency";
+import { invoicePaymentsInAed, overviewDeltas, overviewTrend } from "./overviewData";
 
 type Range = "7d" | "30d" | "90d";
-const RANGE_DAYS: Record<Range, number> = { "7d": 8, "30d": 30, "90d": 90 };
-
-/** saveDoc posts an invoice to Orders, Inventory and Accounting only when its
- *  status is "sent", and un-posts it for anything else. Counting "everything
- *  that isn't a draft" therefore showed revenue on the dashboard that the books
- *  deliberately exclude, so the two never reconciled. */
-const isPosted = (status?: string | null) => status === "sent" || status === "paid";
+const RANGE_DAYS: Record<Range, number> = { "7d": 7, "30d": 30, "90d": 90 };
 
 /** Recharts draws a full axis grid for an all-zero series: eight zero-height
  *  bars, or a line pinned flat to the baseline. On a fresh workspace that reads
  *  as a broken chart rather than an empty one, so show this instead. */
-function ChartEmpty({ hint }: { hint: string }) {
+function ChartEmpty({ hint, error }: { hint: string; error?: boolean }) {
   return (
     <div className="grid h-full place-items-center px-4 text-center">
       <div>
-        <p className="text-[13px] font-medium text-foreground">Nothing to chart yet</p>
+        <p className="text-[13px] font-medium text-foreground">{error ? "Chart unavailable" : "Nothing to chart yet"}</p>
         <p className="mt-1 max-w-[34ch] text-[12px] text-muted-foreground">{hint}</p>
       </div>
     </div>
@@ -93,49 +89,61 @@ export default function ModernOverview() {
   const cs = useChartStyle();
   const c = cs.c;
   const { profile } = useAuth();
+  const { currency } = useDisplayCurrency();
 
-  const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [invoicePayments, setInvoicePayments] = useState<InvoicePayment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const [quotations, setQuotations] = useState<QuotationSummary[]>([]);
+  const [receiptList, setReceiptList] = useState<ReceiptSummary[]>([]);
   const [companyName, setCompanyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [range, setRange] = useState<Range>("7d");
+  const loadId = useRef<symbol | undefined>(undefined);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const id = Symbol();
+    loadId.current = id;
     setError("");
+    setLoading(true);
     try {
-      const [p, o, i, e, cust, q, comp] = await Promise.all([
-        erp.products().catch(() => [] as Product[]),
-        erp.orders().catch(() => [] as Order[]),
-        billing.listDocs().catch(() => [] as InvoiceDocSummary[]),
-        fin.expenses().catch(() => [] as Expense[]),
-        crm.customers().catch(() => [] as CrmCustomer[]),
-        quotes.listDocs().catch(() => [] as QuotationSummary[]),
+      const [o, i, e, cust, r, paymentRows, comp, rates] = await Promise.all([
+        erp.orders(),
+        billing.listDocs(),
+        fin.expenses(),
+        crm.customers(),
+        receipts.list(),
+        billing.allPayments(),
         billing.getCompany().catch(() => null),
+        getExchangeRates(),
       ]);
-      setProducts(p);
+      const reportingInvoices = i.map(row => reportMoney(row, ["total", "paid", "balance"], rates));
+      const reportingReceipts = r.map(row => reportMoney(row, ["amount"], rates));
+      const reportingPayments = invoicePaymentsInAed(paymentRows, i, rates);
+      if (id !== loadId.current) return;
       setOrders(o);
-      setInvoices(i);
+      setInvoices(reportingInvoices);
+      setInvoicePayments(reportingPayments);
       setExpenses(e);
       setCustomers(cust);
-      setQuotations(q);
+      setReceiptList(reportingReceipts);
       setCompanyName((comp as { name?: string } | null)?.name || "");
     } catch (err: unknown) {
+      if (id !== loadId.current) return;
       setError((err as Error)?.message || "Failed to load overview data");
     } finally {
-      setLoading(false);
+      if (id === loadId.current) setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, []);
 
-  useLiveSync(load);
+  useEffect(() => {
+    void load();
+    return () => { loadId.current = undefined; };
+  }, [load]);
+
+  useLiveSync(load, ["orders", "invoice_docs", "invoice_doc_items", "invoice_payments", "expenses", "crm_customers", "payment_receipts", "company_profile"]);
 
   // ── Derived metrics ────────────────────────────────────────────────────
   const orderStats = useMemo(() => {
@@ -149,10 +157,9 @@ export default function ModernOverview() {
   }, [orders]);
 
   const revenue = useMemo(() => {
-    const issued = invoices.filter((i) => i.status !== "draft");
-    const collected = issued.reduce((s, i) => s + ((i.total || 0) - (i.balance ?? 0)), 0);
+    const issued = invoices.filter((i) => isPostedStatus(i.status));
     const total = issued.reduce((s, i) => s + (i.total || 0), 0);
-    return { collected, total, count: issued.length };
+    return { total, count: issued.length };
   }, [invoices]);
 
   // Outstanding = unpaid invoice balances, plus how many are past due date.
@@ -161,7 +168,7 @@ export default function ModernOverview() {
     let total = 0;
     let overdue = 0;
     for (const i of invoices) {
-      if (i.status === "draft" || i.status === "paid") continue;
+      if (!isPostedStatus(i.status) || i.status === "paid") continue;
       const bal = i.balance ?? 0;
       if (bal <= 0) continue;
       total += bal;
@@ -175,92 +182,24 @@ export default function ModernOverview() {
   // orders/customers by creation date). Point-in-time balances (outstanding)
   // have no prior snapshot, so they show their hint text only — no invented
   // percentages.
-  const deltas = useMemo(() => {
-    const DAY = 86400000;
-    const now = Date.now();
-    const curStart = now - 30 * DAY;
-    const prevStart = now - 60 * DAY;
-    const pct = (cur: number, prev: number): number | null =>
-      prev > 0 ? ((cur - prev) / prev) * 100 : null;
+  const deltas = useMemo(
+    () => overviewDeltas(invoices, receiptList, customers, orders),
+    [invoices, receiptList, customers, orders]
+  );
 
-    let revCur = 0;
-    let revPrev = 0;
-    for (const i of invoices) {
-      if (!isPosted(i.status) || !i.issue_date) continue;
-      const t = +new Date(i.issue_date);
-      const collected = (i.total || 0) - (i.balance ?? 0);
-      if (t >= curStart) revCur += collected;
-      else if (t >= prevStart) revPrev += collected;
-    }
-
-    let ordCur = 0;
-    let ordPrev = 0;
-    for (const o of orders) {
-      if (!o.created_at) continue;
-      const t = +new Date(o.created_at);
-      if (t >= curStart) ordCur += 1;
-      else if (t >= prevStart) ordPrev += 1;
-    }
-
-    let custCur = 0;
-    let custPrev = 0;
-    for (const cu of customers) {
-      if (!cu.created_at) continue;
-      const t = +new Date(cu.created_at);
-      if (t >= curStart) custCur += 1;
-      else if (t >= prevStart) custPrev += 1;
-    }
-
-    return {
-      revenue: pct(revCur, revPrev),
-      orders: pct(ordCur, ordPrev),
-      customers: pct(custCur, custPrev),
-    };
-  }, [invoices, orders, customers]);
-
-  // ── Daily invoiced vs collected series for the selected range. Collected
-  // is attributed to the invoice's issue date (payment dates aren't in the
-  // summary) — a close proxy for cash-in shape. Real data only, no filler.
-  const trend = useMemo(() => {
-    const days = RANGE_DAYS[range];
-    const series: { d: string; invoiced: number; received: number }[] = [];
-    const byDay = new Map<string, { invoiced: number; received: number }>();
-    for (const i of invoices) {
-      if (!isPosted(i.status) || !i.issue_date) continue;
-      const key = i.issue_date.slice(0, 10);
-      const row = byDay.get(key) || { invoiced: 0, received: 0 };
-      row.invoiced += i.total || 0;
-      row.received += (i.total || 0) - (i.balance ?? 0);
-      byDay.set(key, row);
-    }
-    const now = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      // Bucket keys are issue_date strings — local calendar days. A UTC key
-      // here labelled the bar with one day (toLocaleDateString) and looked up
-      // another, so before 4am in Dubai every bar showed the previous day.
-      const key = localYmd(d);
-      const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-      const row = byDay.get(key);
-      series.push({ d: label, invoiced: row?.invoiced || 0, received: row?.received || 0 });
-    }
-    return series;
-  }, [invoices, range]);
-
-  const barTrend = useMemo(
-    () => (range === "7d" ? trend : trend.slice(-8)),
-    [trend, range]
+  const trend = useMemo(
+    () => overviewTrend(invoices, receiptList, expenses, RANGE_DAYS[range], new Date(), invoicePayments),
+    [invoices, receiptList, expenses, range, invoicePayments]
   );
 
   // Drafts and anything outside the window contribute nothing, so a workspace
   // with invoices in it can still produce an all-zero series.
   const hasBarData = useMemo(
-    () => barTrend.some((r) => r.invoiced > 0 || r.received > 0),
-    [barTrend]
+    () => trend.some((r) => r.invoiced !== 0 || r.received !== 0 || r.invoicePayments !== 0),
+    [trend]
   );
   const hasTrendData = useMemo(
-    () => trend.some((r) => r.invoiced > 0 || r.received > 0),
+    () => trend.some((r) => r.received !== 0 || r.expenses !== 0 || r.invoicePayments !== 0),
     [trend]
   );
 
@@ -294,7 +233,7 @@ export default function ModernOverview() {
       out.push({
         title: `Invoice ${i.number}`,
         status: cap(i.status || "draft"),
-        when: i.issue_date || i.updated_at,
+        when: i.updated_at || i.issue_date || "",
         kind: "invoice",
       });
     for (const e of expenses.slice(0, 4))
@@ -311,16 +250,17 @@ export default function ModernOverview() {
   }, [orders, invoices, expenses]);
 
   const isEmpty =
-    products.length === 0 &&
     orders.length === 0 &&
     invoices.length === 0 &&
+    invoicePayments.length === 0 &&
     customers.length === 0 &&
-    quotations.length === 0;
+    receiptList.length === 0 &&
+    expenses.length === 0;
 
   const kpis = [
     {
-      label: "Revenue",
-      value: aed(revenue.collected),
+      label: "Invoiced sales",
+      value: aed(revenue.total),
       delta: deltas.revenue,
       hint: plural(revenue.count, "invoice"),
       to: "/invoicing",
@@ -333,7 +273,7 @@ export default function ModernOverview() {
       to: "/orders",
     },
     {
-      label: "Active customers",
+      label: "Customers",
       value: num(customers.length),
       delta: deltas.customers,
       hint: "Directory count",
@@ -364,7 +304,7 @@ export default function ModernOverview() {
         { key: "change_30d", label: "Change vs prior 30d" },
         { key: "detail", label: "Detail" },
       ]
-    );
+    ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
   };
 
   const firstName =
@@ -377,7 +317,7 @@ export default function ModernOverview() {
         subtitle="Live view of your business, driven by real data in your workspace."
         action={
           <>
-            <button onClick={onExport} className="btn-ghost">
+            <button onClick={onExport} className="btn-ghost" disabled={loading || !!error}>
               <Download size={15} /> Export
             </button>
             <button onClick={() => nav("/invoicing?new=1")} className="btn-primary">
@@ -387,7 +327,12 @@ export default function ModernOverview() {
         }
       />
 
-      {error && <ErrorBanner message={error} />}
+      {error && (
+        <div className="mb-4">
+          <ErrorBanner message={error} />
+          <button className="btn-ghost mt-2" onClick={() => void load()}>Retry overview</button>
+        </div>
+      )}
 
       {/* ── KPI joined grid ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-border rounded-xl overflow-hidden bg-card">
@@ -409,11 +354,11 @@ export default function ModernOverview() {
                 <Skeleton className="mt-3 h-8 w-28" />
               ) : (
                 <div className="mt-3 text-[22px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
-                  {k.value}
+                  {error ? "—" : k.value}
                 </div>
               )}
               <div className="mt-2 flex items-center gap-2 text-[11.5px]">
-                {k.delta != null && (
+                {!loading && !error && k.delta != null && (
                   <span
                     title="vs previous 30 days"
                     className={cn(
@@ -426,31 +371,56 @@ export default function ModernOverview() {
                     {k.delta.toFixed(1)}%
                   </span>
                 )}
-                <span className="text-muted-foreground">{k.hint}</span>
+                <span className="text-muted-foreground">{loading ? "Loading workspace…" : error ? "Data unavailable" : k.hint}</span>
               </div>
             </button>
           );
         })}
       </div>
 
+      <div className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Business overview</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Amounts in {currency} · customer segments show the full directory</p>
+        </div>
+        <div role="group" aria-label="Chart period" className="flex items-center gap-1 border border-border rounded-full p-1 text-[12px]">
+          {(["7d", "30d", "90d"] as Range[]).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              aria-pressed={range === r}
+              className={cn(
+                "px-3 py-1.5 rounded-full transition-colors",
+                range === r ? "bg-foreground text-background font-medium" : "text-muted-foreground hover:bg-hover"
+              )}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── Charts row: sales bar + segments pie ── */}
-      <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card">
+      <div className="grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card">
         <ChartPanel
-          title="Sales vs Payments received"
-          subtitle="Last 8 days, from your invoices & receipts"
-          live
+          title="Invoiced and payment records"
+          subtitle={`Last ${RANGE_DAYS[range]} days · invoices by issue date, invoice payments and receipt documents by payment date`}
           className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border"
           bodyClassName="h-[280px] mt-4"
         >
-          {!loading && !hasBarData ? (
-            <ChartEmpty hint="Send an invoice and the day it was raised shows up here." />
+          {loading ? (
+            <Skeleton className="h-full w-full" />
+          ) : error ? (
+            <ChartEmpty error hint="Retry to load your workspace figures." />
+          ) : !hasBarData ? (
+            <ChartEmpty hint="Send an invoice or record an invoice payment or receipt within this period." />
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barTrend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
+            <ChartFrame height={280}>
+              <BarChart data={trend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
                 <ChartGradient id="barSold" color={c.accent} from={0.9} to={0.3} />
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis dataKey="d" {...cs.axisProps} />
-                <YAxis {...cs.axisProps} />
+                <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
+                <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
                 <Tooltip
                   contentStyle={cs.tooltipStyle}
                   cursor={cs.cursor}
@@ -466,28 +436,39 @@ export default function ModernOverview() {
                 />
                 <Bar
                   dataKey="received"
-                  name="Received"
+                  name="Receipt documents"
+                  fill={c.tertiary}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                />
+                <Bar
+                  dataKey="invoicePayments"
+                  name="Invoice payments"
                   fill={c.primary}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartFrame>
           )}
         </ChartPanel>
         <ChartPanel
           title="Customer segments"
-          subtitle="By segment tag"
+          subtitle="All customers · from the customer directory"
           bodyClassName="mt-2"
         >
-          {segmentPie.length === 0 ? (
+          {loading ? (
+            <Skeleton className="h-[220px] w-full" />
+          ) : error ? (
+            <div className="h-[220px]"><ChartEmpty error hint="Retry to load customer segments." /></div>
+          ) : segmentPie.length === 0 ? (
             <div className="h-[220px] grid place-items-center text-[12.5px] text-muted-foreground">
               No customers yet
             </div>
           ) : (
             <>
               <div className="relative h-[220px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ChartFrame height={220}>
                   <PieChart>
                     <Pie
                       data={segmentPie}
@@ -503,7 +484,7 @@ export default function ModernOverview() {
                     </Pie>
                     <Tooltip contentStyle={cs.tooltipStyle} />
                   </PieChart>
-                </ResponsiveContainer>
+                </ChartFrame>
                 {/* Donut centre: the whole point of the chart, stated once */}
                 <div className="absolute inset-0 grid place-items-center pointer-events-none">
                   <div className="text-center">
@@ -564,14 +545,14 @@ export default function ModernOverview() {
                 </tr>
               </thead>
               <tbody>
-                {recent.length === 0 && (
+                {(loading || error || recent.length === 0) && (
                   <tr>
                     <td colSpan={5} className="px-6 py-10 text-center text-muted-foreground">
-                      No invoices yet
+                      {loading ? "Loading invoices…" : error ? "Invoices unavailable" : "No invoices yet"}
                     </td>
                   </tr>
                 )}
-                {recent.map((r) => (
+                {!loading && !error && recent.map((r) => (
                   <tr
                     key={r.id}
                     tabIndex={0}
@@ -600,10 +581,10 @@ export default function ModernOverview() {
             <div className="text-[12.5px] text-muted-foreground mt-0.5">Live from your workspace</div>
           </div>
           <div className="px-5 pb-5 space-y-3">
-            {activity.length === 0 && (
-              <p className="text-[12.5px] text-muted-foreground">Nothing yet.</p>
+            {(loading || error || activity.length === 0) && (
+              <p className="text-[12.5px] text-muted-foreground">{loading ? "Loading activity…" : error ? "Activity unavailable" : "Nothing yet."}</p>
             )}
-            {activity.map((a, i) => (
+            {!loading && !error && activity.map((a, i) => (
               <div key={i} className="flex gap-3">
                 <div className="h-8 w-8 rounded-full bg-hover border border-border grid place-items-center text-muted-foreground shrink-0">
                   {a.kind === "invoice" ? (
@@ -628,42 +609,28 @@ export default function ModernOverview() {
         </div>
       </div>
 
-      {/* ── Cash movement area ── */}
+      {/* ── Separate payment records and recorded expenses ── */}
       <div className="mt-5 rounded-xl border border-border bg-card">
         <ChartPanel
-          title="Cash movement"
-          subtitle="Money in vs money out"
-          action={
-              <div className="flex items-center gap-1 border border-border rounded-md p-0.5 text-[12px]">
-                {(["7d", "30d", "90d"] as Range[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setRange(r)}
-                    aria-pressed={range === r}
-                    className={cn(
-                      "px-2.5 py-1 rounded",
-                      range === r
-                        ? "bg-foreground text-background font-medium"
-                        : "text-muted-foreground hover:bg-hover"
-                    )}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            }
+          title="Payment records and expenses"
+          subtitle={`Last ${RANGE_DAYS[range]} days · separate payment sources; invoice payments use saved invoice exchange rates. Receipt documents may describe the same payment, so these series are not added together.`}
             bodyClassName="h-[260px] mt-2"
           >
-            {!loading && !hasTrendData ? (
-              <ChartEmpty hint="Money in and money out appear here once invoices are sent and paid." />
+            {loading ? (
+              <Skeleton className="h-full w-full" />
+            ) : error ? (
+              <ChartEmpty error hint="Retry to load your workspace figures." />
+            ) : !hasTrendData ? (
+              <ChartEmpty hint="Record an invoice payment, receipt or expense within this period." />
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartFrame height={260}>
                 <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
                   <ChartGradient id="cashIn" color={c.accent} from={0.35} />
                   <ChartGradient id="cashOut" color={c.primary} from={0.25} />
+                  <ChartGradient id="invoicePayments" color={c.tertiary} from={0.2} />
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                  <XAxis dataKey="d" {...cs.axisProps} />
-                  <YAxis {...cs.axisProps} />
+                  <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
+                  <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
                   <Tooltip
                     contentStyle={cs.tooltipStyle}
                     cursor={cs.cursor}
@@ -673,7 +640,7 @@ export default function ModernOverview() {
                   <Area
                     type="monotone"
                     dataKey="received"
-                    name="Cash in"
+                    name="Receipt documents"
                     stroke={c.accent}
                     fill="url(#cashIn)"
                     strokeWidth={2}
@@ -682,8 +649,19 @@ export default function ModernOverview() {
                   />
                   <Area
                     type="monotone"
-                    dataKey="invoiced"
-                    name="Sales"
+                    dataKey="invoicePayments"
+                    name="Invoice payments"
+                    stroke={c.tertiary}
+                    fill="url(#invoicePayments)"
+                    strokeDasharray="5 3"
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 3, strokeWidth: 0 }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="expenses"
+                    name="Recorded expenses"
                     stroke={c.primary}
                     fill="url(#cashOut)"
                     strokeWidth={2}
@@ -691,27 +669,27 @@ export default function ModernOverview() {
                     activeDot={{ r: 3, strokeWidth: 0 }}
                   />
                 </AreaChart>
-              </ResponsiveContainer>
+              </ChartFrame>
             )}
           </ChartPanel>
       </div>
 
       {/* ── Empty state ── */}
-      {isEmpty && !loading && (
+      {isEmpty && !loading && !error && (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="grid h-14 w-14 place-items-center rounded-xl bg-muted text-muted-foreground mb-4">
             <Sparkles size={24} />
           </div>
           <p className="text-[14px] font-semibold text-foreground">Fresh start</p>
           <p className="text-[12.5px] text-muted-foreground mt-1 max-w-[36ch]">
-            Add your first product or create an invoice to populate the dashboard.
+            Create an invoice, add a customer, or record an expense to populate the overview.
           </p>
           <div className="mt-4 flex items-center gap-2">
             <button onClick={() => nav("/invoicing?new=1")} className="btn-primary">
               <Plus size={15} /> New invoice
             </button>
-            <button onClick={() => nav("/inventory?new=1")} className="btn-ghost">
-              Add product
+            <button onClick={() => nav("/customers?new=1")} className="btn-ghost">
+              Add customer
             </button>
           </div>
         </div>

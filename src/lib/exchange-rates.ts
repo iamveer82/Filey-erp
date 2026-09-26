@@ -6,6 +6,11 @@
 const CACHE_KEY = "filey_exchange_rates";
 const CACHE_TIME_KEY = "filey_exchange_rates_ts";
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+// A failed fetch must NOT pin the hardcoded approximations for four hours.
+// These rates get frozen onto invoices (fx_rate) and into the AED tax total the
+// FTA requires on a foreign-currency invoice, so a stale one is a wrong number
+// on a tax document. Serve the fallback, but come back for the real rate soon.
+const FALLBACK_TTL_MS = 5 * 60 * 1000;
 const AED_TO_USD = 3.6725; // UAE Dirham is pegged to USD
 
 export type Rates = Record<string, number>;
@@ -24,10 +29,12 @@ export async function refreshRates(): Promise<Rates> {
 
 function loadCached(): Rates | null {
   try {
-    const ts = localStorage.getItem(CACHE_TIME_KEY);
-    if (!ts) return null;
-    const age = Date.now() - Number(ts);
-    if (age > CACHE_TTL_MS) return null;
+    const expiresAt = localStorage.getItem(CACHE_TIME_KEY);
+    if (!expiresAt) return null;
+    // Stores an EXPIRY, not a write time, so a cache entry can carry its own
+    // lifetime. A value written by the previous format is a past timestamp and
+    // therefore reads as expired, which is the right answer for it anyway.
+    if (Date.now() > Number(expiresAt)) return null;
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as Rates;
@@ -37,23 +44,34 @@ function loadCached(): Rates | null {
   }
 }
 
-function saveCache(rates: Rates): void {
+function saveCache(rates: Rates, ttlMs: number = CACHE_TTL_MS): void {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(rates));
-    localStorage.setItem(CACHE_TIME_KEY, String(Date.now()));
+    localStorage.setItem(CACHE_TIME_KEY, String(Date.now() + ttlMs));
   } catch (e) {
     console.warn("Failed to save exchange-rate cache", e);
   }
 }
 
-async function fetchFresh(): Promise<Rates> {
-  // Try frankfurter.app (free, no key, EUR base)
-  // Then convert to AED base using AED pegged rate
+let pending: Promise<Rates> | undefined;
+function fetchFresh(): Promise<Rates> {
+  // The overview, currency menu and invoice form can request rates together.
+  return pending ??= fetchRates().finally(() => { pending = undefined; });
+}
+
+async function fetchRates(): Promise<Rates> {
+  // v2 includes AED; the old ECB-only endpoint omitted it and therefore
+  // silently selected approximate fallback rates on every successful request.
   try {
-    const res = await fetch("https://api.frankfurter.app/latest?from=EUR");
+    const res = await fetch("https://api.frankfurter.dev/v2/rates?base=EUR", { signal: AbortSignal.timeout(12000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const eurRates: Rates = data.rates as Rates;
+    const data: unknown = await res.json();
+    if (!Array.isArray(data)) throw new Error("Invalid exchange-rate response");
+    const eurRates: Rates = {};
+    for (const row of data) {
+      if (row?.base !== "EUR" || typeof row.quote !== "string" || !/^[A-Z]{3}$/.test(row.quote) || typeof row.rate !== "number" || !Number.isFinite(row.rate) || row.rate <= 0) continue;
+      eurRates[row.quote] = row.rate;
+    }
     // Convert from EUR base to AED base
     // AED = USD * 3.6725
     // 1 EUR = X USD → 1 EUR = X * 3.6725 AED
@@ -61,7 +79,7 @@ async function fetchFresh(): Promise<Rates> {
     if (!eurRates.USD || !eurRates.AED) {
       // Fallback to hardcoded rates
       const fallback = getFallbackRates();
-      saveCache(fallback);
+      saveCache(fallback, FALLBACK_TTL_MS);
       return fallback;
     }
     const eurToAed = eurRates.AED;
@@ -74,13 +92,20 @@ async function fetchFresh(): Promise<Rates> {
         rates[currency] = eurToAed / (eurValue as number);
       }
     }
+    // The API is queried with from=EUR and, like most rate APIs, leaves the
+    // base currency out of its own rates object — so EUR was missing from every
+    // live result. A EUR invoice with no frozen rate then counted as unratable
+    // and its amount fell through unconverted, while the hardcoded FALLBACK
+    // does list EUR. EUR working only while the API was DOWN is not a state
+    // anyone would think to check. eurToAed is by definition AED per 1 EUR.
+    if (!(rates.EUR > 0)) rates.EUR = eurToAed;
     saveCache(rates);
     return rates;
   } catch (e) {
     console.warn("Exchange-rate API failed; using fallback rates", e);
     // API down — use hardcoded fallback
     const fallback = getFallbackRates();
-    saveCache(fallback);
+    saveCache(fallback, FALLBACK_TTL_MS);
     return fallback;
   }
 }

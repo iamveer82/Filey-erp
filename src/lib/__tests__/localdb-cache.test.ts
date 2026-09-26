@@ -1,0 +1,133 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// The desktop read cache (localdb.ts) only engages under Tauri, so this file
+// fakes that: __TAURI_INTERNALS__ present + a stubbed invoke standing in for the
+// SQLite-backed kv_cache. It guards the thing a cache gets wrong — serving a
+// stale collection after a write.
+
+const store = new Map<string, string>();
+const invoke = vi.fn(async (cmd: string, args: any) => {
+  if (cmd === "cache_get") return store.get(args.key) ?? null;
+  if (cmd === "cache_set") {
+    store.set(args.key, args.value);
+    return null;
+  }
+  if (cmd === "cache_set_many") {
+    for (const [key, value] of args.entries) store.set(key, value);
+    return null;
+  }
+  return null;
+});
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (c: string, a: any) => invoke(c, a) }));
+
+const reads = (): number =>
+  invoke.mock.calls.filter(([c, a]) => c === "cache_get" && a.key === "localdb:widgets")
+    .length;
+
+/** Fresh module per test: the cache is module state, and so is `hasTauri`. */
+async function freshClient() {
+  (window as any).__TAURI_INTERNALS__ = {};
+  vi.resetModules();
+  invoke.mockClear();
+  return (await import("../localdb")).localClient;
+}
+
+beforeEach(() => store.clear());
+
+describe("localdb desktop read cache", () => {
+  it("commits a sync choice with its upload queue atomically and preserves both after a failed write", async () => {
+    const client = await freshClient();
+    const { resolveLocalSyncConflicts, journalSnapshot } = await import("../localdb");
+    await client.from("products").insert({ id: 1, name: "Local", sync_revision: 1 });
+    const local = (await client.from("products").select().single()).data;
+    const choice = { id: 1, reviewedLocal: local, remote: { id: 1, name: "Cloud", sync_revision: 3 } };
+    const before = await journalSnapshot();
+    const savedInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "cache_set_many") throw new Error("Disk full");
+      return savedInvoke(cmd, args);
+    });
+    try {
+      await expect(resolveLocalSyncConflicts("products", [choice], true)).rejects.toThrow("Disk full");
+      expect((await client.from("products").select().single()).data).toEqual(local);
+      expect(await journalSnapshot()).toEqual(before);
+    } finally { invoke.mockImplementation(savedInvoke); }
+    await resolveLocalSyncConflicts("products", [choice], true);
+    const restarted = await freshClient();
+    expect((await restarted.from("products").select().single()).data).toMatchObject({ name: "Local", sync_revision: 3 });
+    expect((await (await import("../localdb")).journalSnapshot()).tables.products.changed).toEqual([1]);
+  });
+  it("reads storage once, then serves repeat queries from memory", async () => {
+    const c = await freshClient();
+    await c.from("widgets").insert([{ name: "A" }, { name: "B" }]);
+    const before = reads();
+    for (let i = 0; i < 5; i++) await c.from("widgets").select();
+    expect(reads()).toBe(before); // five queries, zero extra round trips
+  });
+
+  it("does not serve stale rows after an insert", async () => {
+    const c = await freshClient();
+    await c.from("widgets").insert({ name: "A" });
+    await c.from("widgets").select(); // warm the cache
+    await c.from("widgets").insert({ name: "B" });
+    const { data } = await c.from("widgets").select();
+    expect(data.map((r: any) => r.name)).toEqual(["A", "B"]);
+  });
+
+  it("does not serve stale rows after an update or a delete", async () => {
+    const c = await freshClient();
+    await c.from("widgets").insert([{ name: "A" }, { name: "B" }]);
+    await c.from("widgets").select();
+
+    await c.from("widgets").update({ name: "A2" }).eq("name", "A");
+    let { data } = await c.from("widgets").select().eq("name", "A2");
+    expect(data).toHaveLength(1);
+
+    await c.from("widgets").delete().eq("name", "B");
+    ({ data } = await c.from("widgets").select());
+    expect(data.map((r: any) => r.name)).toEqual(["A2"]);
+  });
+
+  it("survives a restart: a cold module reads what the last one wrote", async () => {
+    let c = await freshClient();
+    await c.from("widgets").insert({ name: "A" });
+    c = await freshClient(); // new process, same kv_cache
+    const { data } = await c.from("widgets").select();
+    expect(data.map((r: any) => r.name)).toEqual(["A"]);
+  });
+
+  it("replaceColl reports no change when the pulled rows match, and writes when they differ", async () => {
+    await freshClient();
+    const { replaceColl } = await import("../localdb");
+    const rows = [{ id: 1, name: "A" }];
+    expect(await replaceColl("widgets", rows)).toBe(true);
+    expect(await replaceColl("widgets", [{ id: 1, name: "A" }])).toBe(false);
+    expect(await replaceColl("widgets", [{ id: 1, name: "B" }])).toBe(true);
+  });
+
+  it("does not keep rows whose write failed", async () => {
+    const c = await freshClient();
+    await c.from("widgets").insert({ name: "kept" });
+    await c.from("widgets").select(); // warm
+
+    invoke.mockImplementationOnce(async () => {
+      throw new Error("disk full");
+    });
+    const { error } = await c.from("widgets").insert({ name: "lost" });
+    expect(error).toBeTruthy();
+
+    const { data } = await c.from("widgets").select();
+    expect(data.map((r: any) => r.name)).toEqual(["kept"]);
+  });
+
+  it("replaceColl's rows are visible to the next query", async () => {
+    const c = await freshClient();
+    await c.from("widgets").insert({ name: "old" });
+    await c.from("widgets").select(); // warm
+    const { replaceColl } = await import("../localdb");
+    await replaceColl("widgets", [{ id: 9, name: "pulled" }]);
+    const { data } = await c.from("widgets").select();
+    expect(data.map((r: any) => r.name)).toEqual(["pulled"]);
+  });
+});

@@ -1,3 +1,4 @@
+import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
   BarChart,
@@ -5,10 +6,9 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { aed, cn } from "../../lib/format";
+import { aed, chartAmount, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useFinancials } from "./useReportsData";
 
@@ -166,7 +166,7 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartFrame height={280}>
                 <BarChart
                   data={expenseByCategory}
                   margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
@@ -184,6 +184,7 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
                   />
                   <YAxis
                     {...cs.axisProps}
+                    tickFormatter={(v) => chartAmount(Number(v))}
                   />
                   <Tooltip
                     contentStyle={tooltipStyle}
@@ -191,12 +192,12 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
                   />
                   <Bar
                     dataKey="value"
-                    name="AED"
+                    name="Expense"
                     fill="url(#expG)"
                     radius={[6, 6, 0, 0]}
                    maxBarSize={32} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartFrame>
             </div>
           )}
         </div>

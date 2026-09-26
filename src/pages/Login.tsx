@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -6,16 +7,18 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Loader2,
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
 import Logo from "../components/Logo";
+import PasswordRecovery from "../components/PasswordRecovery";
 import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
 import { useAuth, type Channel } from "../lib/auth";
 import { isLocalMode } from "../lib/dataMode";
 import { getLocalCredential, hasLocalCredential } from "../lib/localAuth";
+import { checkPassword, strengthLabel } from "../lib/password";
+import { cn } from "../lib/format";
 
 /** Supabase answers in its own vocabulary, and two of its replies actively
  *  mislead: a missing account reads as a wrong password, and a code request for
@@ -25,7 +28,7 @@ const humanError = (e: unknown): string => {
   if (/signups not allowed for otp|otp_disabled/i.test(m))
     return "No Filey account uses this email, so there's no code to send. Create an account instead.";
   if (/invalid login credentials|invalid email or password/i.test(m))
-    return "That email and password don't match an account. If you signed up with a one-time code, sign in with “One-time code” below.";
+    return "That email and password don't match an account. New to Filey? Create one below. Signed up with a code? Use “One-time code”.";
   if (/email not confirmed/i.test(m))
     return "This account hasn't been confirmed yet. Use “One-time code” to get a fresh one.";
   if (/failed to fetch|network/i.test(m))
@@ -33,13 +36,8 @@ const humanError = (e: unknown): string => {
   return m;
 };
 
-/* The primary action deliberately mirrors the sign-up page on gofiley.com —
-   same amber gradient, same 44px height - so signing up on the site and
-   signing in here read as one product rather than two. It is fixed brand
-   colour rather than the user's accent: this screen is pre-auth, before any
-   accent preference has loaded. */
-const CTA =
-  "flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 text-sm font-semibold text-[#1A1206] transition-all duration-200 hover:brightness-105 active:scale-[0.98] disabled:opacity-60 disabled:hover:brightness-100";
+// Keep the roomy authentication target while sharing the app's button tokens.
+const CTA = "btn-primary h-11 w-full";
 
 type Mode = "signin" | "signup";
 type Method = "password" | "otp";
@@ -57,10 +55,7 @@ function Segmented<T extends string>({
   disabled?: boolean;
 }) {
   return (
-    <div
-      className="flex rounded-lg bg-muted p-1 gap-1"
-      role="tablist"
-    >
+    <div className="flex rounded-full bg-muted p-1 gap-1" role="tablist">
       {options.map((o) => {
         const active = o.v === value;
         return (
@@ -72,7 +67,7 @@ function Segmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(o.v)}
             className={
-              "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
+              "flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-200 cursor-pointer disabled:cursor-not-allowed " +
               (active
                 ? "bg-card text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground")
@@ -96,8 +91,7 @@ export default function Login() {
     resendOtp,
   } = useAuth();
   // Google blocks OAuth inside embedded webviews — web build only.
-  const hasTauriShell =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const hasTauriShell = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   // ponytail: providers are off in Supabase (phone_provider_disabled, google
   // disabled), so offering them only produces errors. Flip the env var once
   // the provider is actually enabled in the dashboard.
@@ -125,9 +119,14 @@ export default function Login() {
   const deviceClaimed = localMode && hasLocalCredential();
 
   const [screen, setScreen] = useState<Screen>("form");
-  const [mode, setMode] = useState<Mode>("signin");
+  // A device no account has claimed is almost always a new customer — often
+  // one who just paid on the website and has no account yet. Open on signup.
+  const [mode, setMode] = useState<Mode>(() =>
+    isLocalMode() && !hasLocalCredential() ? "signup" : "signin"
+  );
   const [channel, setChannel] = useState<Channel>("email");
   const [method, setMethod] = useState<Method>("password");
+  const [recovering, setRecovering] = useState(false);
 
   // A claimed device already knows whose it is — typing the address again is
   // a memory test nobody should have to pass, and getting it wrong looks
@@ -163,6 +162,8 @@ export default function Login() {
     );
   const clearFieldErrors = () => setFieldErrors({});
 
+  const pwVerdict = checkPassword(password, channel === "email" ? identifier : undefined);
+
   const cred = { channel, value: identifier };
   const idLabel = channel === "email" ? "Email" : "Phone number";
   const idPlaceholder = channel === "email" ? "you@company.com" : "+9715XXXXXXXX";
@@ -177,12 +178,21 @@ export default function Login() {
     clearFieldErrors();
   };
 
-  const submitForm = async (e: React.FormEvent) => {
+  const submitForm = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErr(null);
     setMsg(null);
     clearFieldErrors();
 
+    // Password managers may fill controls without a React change event.
+    const fields = new FormData(e.currentTarget);
+    const identifier = String(fields.get("identifier") ?? "").trim();
+    const password = String(fields.get("password") ?? "");
+    const confirm = String(fields.get("confirm") ?? "");
+    const cred = { channel, value: identifier };
+    setIdentifier(identifier);
+    setPassword(password);
+    setConfirm(confirm);
     // Inline field validation
     let hasError = false;
     if (!identifier.trim()) {
@@ -206,9 +216,18 @@ export default function Login() {
       if (!password) {
         setFieldError("password", "Password is required");
         hasError = true;
-      } else if (password.length < 8) {
-        setFieldError("password", "Password must be at least 8 characters");
-        hasError = true;
+      } else if (mode === "signup") {
+        // Only on the way IN. Judging an existing password at sign-in would
+        // lock out anyone who set one before this policy existed, and tell an
+        // attacker which guesses are worth making.
+        const verdict = checkPassword(
+          password,
+          channel === "email" ? identifier : undefined
+        );
+        if (!verdict.ok) {
+          setFieldError("password", verdict.problem ?? "Choose a stronger password");
+          hasError = true;
+        }
       }
       if (mode === "signup" && password !== confirm) {
         setFieldError("confirm", "Passwords do not match");
@@ -246,7 +265,14 @@ export default function Login() {
         );
       }
     } catch (e2: any) {
-      setErr(humanError(e2));
+      // Signing up with an address that already has an account: take them to
+      // sign-in with the password they just typed, one click from done.
+      if (mode === "signup" && /already exists|already registered/i.test(e2?.message ?? "")) {
+        setMode("signin");
+        setMethod("password");
+        setConfirm("");
+        setMsg("You already have a Filey account with this email. Sign in below.");
+      } else setErr(humanError(e2));
     } finally {
       setBusy(false);
     }
@@ -292,9 +318,7 @@ export default function Login() {
       aria-live="polite"
       className={
         "flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs font-medium " +
-        (kind === "err"
-          ? "text-danger bg-danger/10"
-          : "text-foreground bg-muted")
+        (kind === "err" ? "text-danger bg-danger/10" : "text-foreground bg-muted")
       }
     >
       {kind === "err" ? (
@@ -325,9 +349,16 @@ export default function Login() {
 
   // Minimal centered auth surface — the same quiet canvas+card language as
   // the rest of the app (SetupNotice, ProfileSetup). No brand circus.
+  if (recovering) return <PasswordRecovery initialEmail={channel === "email" ? identifier : ""} offline={offline} onBack={() => setRecovering(false)} />;
   return (
     <div className="min-h-full bg-canvas grid place-items-center p-6">
       <div className="w-full max-w-sm">
+        {!hasTauriShell && (
+          <a href="https://gofiley.com/" className="btn-ghost mb-6">
+            <ArrowLeft size={16} aria-hidden="true" />
+            Back to GoFiley
+          </a>
+        )}
         <div className="flex flex-col items-center text-center mb-6">
           <Logo size={44} />
           <h1 className="mt-4 text-[22px] font-semibold tracking-tight text-foreground">
@@ -338,7 +369,7 @@ export default function Login() {
 
         <div className="card p-6">
           {screen === "form" ? (
-            <form onSubmit={submitForm} className="space-y-4">
+            <form noValidate onSubmit={submitForm} className="space-y-4">
               {phoneEnabled && (
                 <Segmented<Channel>
                   value={channel}
@@ -356,6 +387,7 @@ export default function Login() {
 
               <FormField
                 label={idLabel}
+                htmlFor="identifier"
                 error={fieldErrors.identifier}
                 hint={
                   channel === "phone"
@@ -378,6 +410,7 @@ export default function Login() {
                   )}
                   <input
                     id="identifier"
+                    name="identifier"
                     className="input h-11 pl-10"
                     type={channel === "email" ? "email" : "tel"}
                     inputMode={channel === "email" ? "email" : "tel"}
@@ -395,8 +428,13 @@ export default function Login() {
               {!(mode === "signin" && method === "otp") && (
                 <FormField
                   label="Password"
+                  htmlFor="password"
                   error={fieldErrors.password}
-                  hint="At least 8 characters"
+                  hint={
+                    mode === "signup"
+                      ? "At least 8 characters. Length beats symbols — a short phrase works well."
+                      : undefined
+                  }
                   required
                 >
                   <div className="relative">
@@ -406,6 +444,7 @@ export default function Login() {
                     />
                     <input
                       id="password"
+                      name="password"
                       className="input h-11 pl-10 pr-10"
                       type={showPw ? "text" : "password"}
                       autoComplete={
@@ -416,23 +455,55 @@ export default function Login() {
                         setPassword(e.target.value);
                         if (fieldErrors.password) setFieldError("password", "");
                       }}
-                      minLength={8}
+                      minLength={mode === "signup" ? 8 : undefined}
                     />
                     <button
                       type="button"
-                      tabIndex={-1}
                       aria-label={showPw ? "Hide password" : "Show password"}
                       onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                     >
                       {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
                   </div>
+                  {/* Signup only, and only once there is something to judge.
+                      Telling someone their password is weak after they submit
+                      is how you get "12345678" on the second attempt. */}
+                  {mode === "signup" && password.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex h-1 flex-1 gap-1" aria-hidden="true">
+                        {[0, 1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className={cn(
+                              "h-full flex-1 rounded-full transition-colors duration-200",
+                              i < pwVerdict.score
+                                ? pwVerdict.score >= 3
+                                  ? "bg-emerald-500"
+                                  : "bg-amber-500"
+                                : "bg-brand-100 dark:bg-white/10"
+                            )}
+                          />
+                        ))}
+                      </div>
+                      <span
+                        className="text-xs text-brand-400 tabular-nums"
+                        aria-live="polite"
+                      >
+                        {pwVerdict.ok ? strengthLabel(pwVerdict.score) : "Weak"}
+                      </span>
+                    </div>
+                  )}
                 </FormField>
               )}
 
               {mode === "signup" && (
-                <FormField label="Confirm password" error={fieldErrors.confirm} required>
+                <FormField
+                  htmlFor="confirm"
+                  label="Confirm password"
+                  error={fieldErrors.confirm}
+                  required
+                >
                   <div className="relative">
                     <Lock
                       size={16}
@@ -440,6 +511,7 @@ export default function Login() {
                     />
                     <input
                       id="confirm"
+                      name="confirm"
                       className="input h-11 pl-10 pr-10"
                       type={showConfirm ? "text" : "password"}
                       autoComplete="new-password"
@@ -452,10 +524,9 @@ export default function Login() {
                     />
                     <button
                       type="button"
-                      tabIndex={-1}
                       aria-label={showConfirm ? "Hide password" : "Show password"}
                       onClick={() => setShowConfirm((s) => !s)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                     >
                       {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -464,20 +535,15 @@ export default function Login() {
               )}
 
               {mode === "signin" && method === "password" && (
-                // There is no password-reset email in this project, but a
-                // one-time code signs you in without one — which is the actual
-                // recovery route. Nobody thinks to look under a segmented
-                // control for that, so say it in the words people search for.
                 <button
                   type="button"
-                  disabled={busy || offline}
+                  disabled={busy}
                   className="block ml-auto text-xs font-medium text-brand-500 hover:text-ink cursor-pointer transition-colors duration-200 disabled:opacity-50"
                   onClick={() => {
-                    setMethod("otp");
+                    setRecovering(true);
+                    setPassword("");
                     setErr(null);
-                    setMsg(
-                      "No problem. We'll email you a one-time code to sign in. You can set a new password afterwards in Settings → Security."
-                    );
+                    setMsg(null);
                   }}
                 >
                   Forgot password?
@@ -548,10 +614,22 @@ export default function Login() {
                     }}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
-                      <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.02.15 3.5 2.7.24.02c2.2-2 3.5-5 3.5-8.6z" />
-                      <path fill="#34A853" d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.7-2.9c-1 .7-2.4 1.2-4.2 1.2-3.1 0-5.8-2.1-6.7-5l-.14.01-3.6 2.8-.05.13C3.5 21.3 7.4 24 12 24z" />
-                      <path fill="#FBBC05" d="M5.3 14.4c-.3-.8-.4-1.6-.4-2.4s.1-1.7.4-2.4l-.01-.16-3.7-2.8-.12.06C.5 8.2 0 10 0 12s.5 3.8 1.5 5.4l3.8-3z" />
-                      <path fill="#EA4335" d="M12 4.7c2.2 0 3.7 1 4.6 1.8l3.3-3.2C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.5 6.6l3.8 3c.9-2.9 3.6-4.9 6.7-4.9z" />
+                      <path
+                        fill="#4285F4"
+                        d="M23.5 12.3c0-.9-.1-1.5-.3-2.3H12v4.5h6.5c-.1 1.1-.8 2.7-2.4 3.8l-.02.15 3.5 2.7.24.02c2.2-2 3.5-5 3.5-8.6z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 24c3.2 0 5.9-1.1 7.9-2.9l-3.7-2.9c-1 .7-2.4 1.2-4.2 1.2-3.1 0-5.8-2.1-6.7-5l-.14.01-3.6 2.8-.05.13C3.5 21.3 7.4 24 12 24z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.3 14.4c-.3-.8-.4-1.6-.4-2.4s.1-1.7.4-2.4l-.01-.16-3.7-2.8-.12.06C.5 8.2 0 10 0 12s.5 3.8 1.5 5.4l3.8-3z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 4.7c2.2 0 3.7 1 4.6 1.8l3.3-3.2C17.9 1.2 15.2 0 12 0 7.4 0 3.5 2.7 1.5 6.6l3.8 3c.9-2.9 3.6-4.9 6.7-4.9z"
+                      />
                     </svg>
                     Continue with Google
                   </button>
@@ -619,8 +697,7 @@ export default function Login() {
           >
             {mode === "signin" ? (
               <>
-                No account yet?{" "}
-                <span className="font-medium text-ink">Create one</span>
+                No account yet? <span className="font-medium text-ink">Create one</span>
               </>
             ) : (
               <>
@@ -632,7 +709,7 @@ export default function Login() {
         )}
 
         <p className="text-[11px] text-brand-400 text-center mt-6">
-          Protected workspace · Supabase-secured
+          Secure sign-in · Your workspace, protected
         </p>
       </div>
     </div>

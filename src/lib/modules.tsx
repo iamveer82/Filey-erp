@@ -1,13 +1,18 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { tools, org } from "./api";
+import { tools, getCacheScope } from "./api";
 import { useAuth } from "./auth";
-import { isLocalMode } from "./dataMode";
+import { effectiveDataMode } from "./dataMode";
 import { MODULES, type AppModule } from "../modules/registry";
+import { useLiveSync } from "./realtime";
+
+import { canUseModule, loadModuleAccess, type ModuleAccess } from "./moduleAccess";
 
 const KEY = "modules.disabled";
 
 interface ModulesValue {
   loading: boolean;
+  error: string;
+  retry: () => void;
   modules: AppModule[];
   isEnabled: (id: string) => boolean;
   enabledModules: () => AppModule[];
@@ -21,65 +26,55 @@ const Ctx = createContext<ModulesValue | null>(null);
 export function ModulesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [disabled, setDisabled] = useState<string[]>([]);
-  // Allowed module ids for the current member (null = no restriction).
-  // Owners/admins are never restricted.
-  const [allowed, setAllowed] = useState<string[] | null>(null);
+  const [access, setAccess] = useState<ModuleAccess | null>(null);
+  const [accessWorkspace, setAccessWorkspace] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-
+  const [generation, retry] = useState(0);
+  useLiveSync(() => retry(n => n + 1), ["org_members", "app_settings"]);
+  const workspaceKey = () => effectiveDataMode() + ":" + String(getCacheScope());
+  const [workspace, setWorkspace] = useState(workspaceKey);
   useEffect(() => {
-    tools
-      .settings()
-      .then((rows) => {
-        const row = rows.find((r) => r.key === KEY);
-        if (row?.value) {
-          try {
-            const arr = JSON.parse(row.value);
-            if (Array.isArray(arr)) setDisabled(arr.map(String));
-          } catch (e) {
-            console.warn("Failed to parse disabled modules setting", e);
-            /* ignore bad value */
-          }
-        }
-      })
-      .catch((e) => {
-        console.error("Failed to load module settings:", e);
-        return [];
-      })
-      .finally(() => setLoading(false));
+    const changed = () => setWorkspace(workspaceKey());
+    const refresh = () => retry(n => n+1);
+    window.addEventListener("filey:agent-storage", changed);
+    window.addEventListener("filey:workspace-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("filey:agent-storage", changed);
+      window.removeEventListener("filey:workspace-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
   }, []);
-
   useEffect(() => {
-    // Local mode is single-user and on-device only: there is no org
-    // membership to resolve, and the privacy promise is that nothing leaves
-    // the machine — so never fire the cloud org_members/profiles queries
-    // (they 401 without a cloud session anyway).
-    if (!user?.id || isLocalMode()) {
-      setAllowed(null);
-      return;
-    }
-    org
-      .members()
-      .then((ms) => {
-        const me = ms.find((m) => m.user_id === user.id);
-        if (me && !["owner", "admin"].includes(me.role) && Array.isArray(me.modules)) {
-          setAllowed(me.modules);
-        } else {
-          setAllowed(null);
-        }
-      })
-      .catch(() => setAllowed(null));
-  }, [user?.id]);
+    let active = true;
+    // Keep the current screen/form mounted during a same-workspace recheck.
+    // Server reads and writes still enforce permissions; failure clears access.
+    setError("");
+    void (async () => {
+      const [permissions, rows] = await Promise.all([loadModuleAccess(), tools.settings()]);
+      const raw = rows.find(row => row.key === KEY)?.value;
+      const parsed: unknown = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(parsed)) throw new Error("Module settings could not be read.");
+      if (active && workspace === workspaceKey()) {
+        setAccess(permissions); setAccessWorkspace(workspace); setDisabled(parsed.map(String));
+      }
+    })().catch(error => {
+      if (active) {
+        setAccess(null); setDisabled([]);
+        setError(error instanceof Error ? error.message : "Workspace permissions could not be loaded.");
+      }
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [user?.id, workspace, generation]);
 
   const isEnabled = (id: string) => {
-    const m = MODULES.find((x) => x.id === id);
-    if (m?.core) return true;
-    if (disabled.includes(id)) return false;
-    // Member-level access restriction set by the org owner.
-    if (allowed && !allowed.includes(id)) return false;
-    return true;
+    if (accessWorkspace !== workspaceKey() || !access || !canUseModule(access,id)) return false;
+    return !!MODULES.find(module => module.id === id)?.core || !disabled.includes(id);
   };
 
   const persist = (prev: string[], next: string[]) => {
+    if (!access?.admin) { setError("Only an administrator can change workspace modules."); return; }
     setDisabled(next);
     tools
       .setSetting(KEY, JSON.stringify(next))
@@ -103,6 +98,8 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 
   const value: ModulesValue = {
     loading,
+    error,
+    retry: () => retry(n => n+1),
     modules: MODULES,
     isEnabled,
     enabledModules: () => MODULES.filter((m) => isEnabled(m.id)),
@@ -114,10 +111,12 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 }
 
 const defaultValue: ModulesValue = {
-  loading: false,
+  loading: true,
+  error: "",
+  retry: () => {},
   modules: MODULES,
-  isEnabled: () => true,
-  enabledModules: () => MODULES,
+  isEnabled: () => false,
+  enabledModules: () => [],
   toggle: () => {},
   enableAll: () => {},
 };

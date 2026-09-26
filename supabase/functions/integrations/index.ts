@@ -14,6 +14,8 @@
 // Bring-your-own-key still works and bypasses this entirely (see lib/composio,
 // lib/zernio) — that path is for offline installs and self-hosters.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
+import { cachedCatalog } from "../_shared/catalog-cache.ts";
 
 const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
 const ZERNIO_BASE = "https://zernio.com/api/v1";
@@ -51,21 +53,18 @@ Deno.serve(async (req) => {
     const { provider, action, payload } = await req.json();
     const op = `${provider}_${action}`;
 
-    // verify_jwt=true means the platform already checked the signature, so the
-    // sub claim can be trusted for identity and rate limiting.
+    if (!["composio", "zernio"].includes(provider)) return json({ error: "Unknown integration provider" }, 400);
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-    let userId = "";
-    try {
-      userId = JSON.parse(atob(jwt.split(".")[1])).sub ?? "";
-    } catch {
-      /* rejected below */
-    }
-    if (!userId) return json({ error: "Unauthorized" }, 401);
-
-    const supa = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    if (!jwt) return json({ error: "Sign in to use integrations." }, 401);
+    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: auth, error: authError } = await supa.auth.getUser(jwt);
+    if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
+    const userId = auth.user.id;
+    const { data: profile, error: profileError } = await supa.from("profiles").select("org_id").eq("id",userId).maybeSingle();
+    if (profileError || !profile?.org_id) return json({error:"Workspace access could not be verified."},403);
+    const { data: member, error: memberError } = await supa.from("org_members").select("role,modules").eq("org_id",profile.org_id).eq("user_id",userId).maybeSingle();
+    if (memberError || !integrationAllowed(member,provider)) return json({error:"Your role does not have access to this integration."},403);
+    const entity = await integrationEntity(profile.org_id,userId);
 
     // A cloud user can bring their own key (integration_keys, service-role
     // readable only). When they have, this call spends their credits, not
@@ -79,15 +78,13 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
 
+    if (action === "status" && !payload?.connected_account_id) return json({
+      configured: !!ownKey || !!Deno.env.get(provider === "composio" ? "COMPOSIO_API_KEY" : "ZERNIO_API_KEY"),
+    });
     if (BILLABLE.has(op) && !ownKey) {
       // Same tier resolution as send-email: the org's plan decides the ceiling.
       let paid = false;
-      const { data: prof } = await supa
-        .from("profiles")
-        .select("org_id")
-        .eq("id", userId)
-        .maybeSingle();
-      const orgId = prof?.org_id as string | undefined;
+      const orgId = profile.org_id as string;
       if (orgId && orgId !== "default") {
         const { data: org } = await supa
           .from("organizations")
@@ -122,7 +119,7 @@ Deno.serve(async (req) => {
 
     const result =
       provider === "composio"
-        ? await composio(action, payload ?? {}, userId, ownKey)
+        ? await composio(action, payload ?? {}, entity, ownKey)
         : provider === "zernio"
           ? await zernio(action, payload ?? {}, ownKey)
           : { status: 400, body: { error: `Unknown provider: ${provider}` } };
@@ -173,23 +170,33 @@ async function composio(
     return { status: 503, body: { error: "Integrations aren't configured yet." } };
   const headers = { "x-api-key": key, "Content-Type": "application/json" };
 
-  if (action === "list")
-    return callJson(
+  if (action === "list") {
+    const cursor = typeof payload.cursor === "string" ? payload.cursor : "";
+    const result = await callJson(
       // Scoped to the caller: without user_id this would return every
       // customer's connections on the platform account.
-      `${COMPOSIO_BASE}/connected_accounts?limit=50&user_id=${encodeURIComponent(userId)}`,
+      `${COMPOSIO_BASE}/connected_accounts?limit=100&user_ids=${encodeURIComponent(userId)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       { headers },
       "Could not list connections"
     );
+    if (result.status >= 400) return result;
+    const body = result.body as {items?:Record<string,unknown>[];next_cursor?:string};
+    if (!Array.isArray(body.items)) return {status:502,body:{error:"Invalid connection list."}};
+    try { return {status:200,body:{items:body.items.map(account => connectionSummary(account,userId)),next_cursor:body.next_cursor}}; }
+    catch { return {status:403,body:{error:"Connection ownership could not be verified."}}; }
+  }
 
   if (action === "status") {
     const id = String(payload.connected_account_id ?? "");
     if (!id) return { status: 400, body: { error: "connected_account_id required" } };
-    return callJson(
+    const result = await callJson(
       `${COMPOSIO_BASE}/connected_accounts/${encodeURIComponent(id)}`,
       { headers },
       "Could not read connection status"
     );
+    if (result.status >= 400) return result;
+    try { return {status:200,body:connectionSummary(result.body as Record<string,unknown>,userId)}; }
+    catch { return {status:403,body:{error:"Connection belongs to a different workspace."}}; }
   }
 
   if (action === "connect") {
@@ -254,23 +261,22 @@ async function composio(
     // rather than only the ones we thought to list.
     const q = String(payload.query ?? "").trim();
     const n = Number(payload.limit ?? 20);
-    return callJson(
-      `${COMPOSIO_BASE}/toolkits?limit=${n}${q ? `&search=${encodeURIComponent(q)}` : ""}`,
-      { headers },
-      "Could not search apps"
-    );
+    if (q.length > 200 || !Number.isInteger(n) || n < 1 || n > 100)
+      return { status: 400, body: { error: "Use a search under 201 characters and a limit from 1 to 100." } };
+    const url = `${COMPOSIO_BASE}/toolkits?limit=${n}${q ? `&search=${encodeURIComponent(q)}` : ""}`;
+    return cachedCatalog(url, key, () => callJson(url, { headers }, "Could not search apps"));
   }
 
   if (action === "tools") {
     // What can this customer actually do right now — the tools belonging to the
     // apps they have connected.
     const toolkits = String(payload.toolkits ?? "");
+    const n = Number(payload.limit ?? 40);
+    if (toolkits.length > 500 || !Number.isInteger(n) || n < 1 || n > 100)
+      return { status: 400, body: { error: "Invalid toolkit filter or limit (1–100)." } };
     const q = toolkits ? `&toolkit_slug=${encodeURIComponent(toolkits)}` : "";
-    return callJson(
-      `${COMPOSIO_BASE}/tools?limit=${Number(payload.limit ?? 40)}${q}`,
-      { headers },
-      "Could not list tools"
-    );
+    const url = `${COMPOSIO_BASE}/tools?limit=${n}${q}`;
+    return cachedCatalog(url, key, () => callJson(url, { headers }, "Could not list tools"));
   }
 
   return { status: 400, body: { error: `Unknown Composio action: ${action}` } };

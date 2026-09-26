@@ -2,23 +2,24 @@ import { useRef, useState, type ReactNode } from "react";
 import { Upload, X, Stamp, PenTool } from "lucide-react";
 import { tools } from "../lib/api";
 import { uploadCompanyAsset } from "../lib/files";
-import { STAMP_DEFAULT, SIGN_DEFAULT, type StampSig } from "./StampSignature";
-import { CompanyAssetImage } from "./CompanyAssetImage";
+import { STAMP_DEFAULT, SIGN_DEFAULT, StampSigAdjust, type StampSig } from "./StampSignature";
 
 /* Company-wide stamp & signature images uploaded once in
  * Settings → Company Details, then optionally enabled per document.
  *
- * Images are uploaded to Supabase Storage (`files` bucket) and only the
- * storage path + a cached signed URL are kept in `app_settings`. This keeps
- * settings small, makes images follow the user across devices, and survives
- * browser cache clearing. */
+ * Cloud uploads use private Storage paths; offline uploads keep image bytes
+ * inline in app_settings and the regular sync queue uploads them on reconnect.
+ * Preview URLs are transient and must never replace either durable value. */
 
 export interface CompanyStampSig {
   stamp?: StampSig;
   signature?: StampSig;
 }
 
-export const EMPTY_STAMP_SIG: CompanyStampSig = { stamp: undefined, signature: undefined };
+export const EMPTY_STAMP_SIG: CompanyStampSig = {
+  stamp: undefined,
+  signature: undefined,
+};
 
 const STAMP_KEY = "company_stamp";
 const SIGN_KEY = "company_signature";
@@ -85,8 +86,7 @@ export async function saveCompanyStampSig(s: CompanyStampSig): Promise<void> {
   // with a link that had already expired by the next visit.
   const persist = (v?: StampSig) => {
     if (!v) return {};
-    const { _previewUrl: _drop, ...rest } = v;
-    return rest;
+    return durable(v);
   };
   await tools.setSetting(STAMP_KEY, JSON.stringify(persist(s.stamp)));
   await tools.setSetting(SIGN_KEY, JSON.stringify(persist(s.signature)));
@@ -132,62 +132,28 @@ function UploadCard({
     }
   };
 
-  // Prefer the durable reference (data: URL in local mode, storage path in cloud)
-  // over the transient signed URL — _previewUrl expires in 5 minutes and would
-  // show a broken image once it does. CompanyAssetImage resolves storage paths
-  // on its own, so `data` is always the safe choice.
-  const previewUrl = value?.data || value?._previewUrl;
-
   return (
-    <div className="rounded-xl border border-brand-200 p-4">
-      <div className="flex items-center gap-2 text-ink font-medium text-sm">
-        {icon} {label}
-      </div>
-      <div className="mt-3">
-        {previewUrl ? (
-          <div className="relative flex items-center justify-center py-4 rounded-xl bg-brand-50/40 dark:bg-white/[0.03] border border-brand-100/50 min-h-[100px]">
-            <CompanyAssetImage
-              src={previewUrl}
-              alt={label}
-              className="object-contain rounded"
-              style={{
-                width: `${(180 * (value?.scale ?? 100)) / 100}px`,
-                maxHeight: `${(80 * (value?.scale ?? 100)) / 100}px`,
-                clipPath: `inset(${value?.cropTop}% ${value?.cropRight}% ${value?.cropBottom}% ${value?.cropLeft}%)`,
-                opacity: (value?.opacity ?? 100) / 100,
-              }}
-            />
-            <button
-              title={`Remove ${label.toLowerCase()}`}
-              aria-label={`Remove ${label.toLowerCase()}`}
-              className="absolute top-1.5 right-1.5 grid place-items-center w-6 h-6 rounded-xl bg-white/90 border border-brand-200 text-danger hover:bg-red-50 transition-colors"
-              onClick={() => onChange(undefined)}
-            >
-              <X size={13} />
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => ref.current?.click()}
-            className="flex w-full flex-col items-center justify-center gap-1.5 py-8 rounded-xl border-2 border-dashed border-brand-200 cursor-pointer hover:border-brand-400 hover:bg-brand-50/10 transition-all disabled:opacity-60"
-          >
-            <Upload size={18} className="text-brand-400" />
-            <span className="text-xs font-medium text-brand-600">
-              {uploading ? "Uploading…" : `Upload ${label}`}
-            </span>
-            <span className="text-[10px] text-brand-400">Transparent PNG works best</span>
-          </button>
-        )}
+    <div className="min-w-0 space-y-3">
+      {value?.data ? <StampSigAdjust label={label} icon={icon} value={value} onChange={onChange} />
+        : <h3 className="flex items-center gap-2 text-sm font-medium">{icon}{label}</h3>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-ghost" disabled={uploading} onClick={() => ref.current?.click()} aria-label={`${value?.data ? 'Replace' : 'Upload'} ${label}`}>
+          <Upload size={15} /> {uploading ? "Uploading…" : value?.data ? "Replace image" : "Upload image"}
+        </button>
+        {value?.data && <button type="button" className="btn-ghost text-danger" aria-label={`Remove ${label.toLowerCase()}`} onClick={() => onChange(undefined)}><X size={15} /> Remove</button>}
         <input
           ref={ref}
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
+          onChange={(e) => { void handleFile(e.target.files?.[0]); e.target.value = ""; }}
         />
-        {err && <p className="mt-2 text-[11px] text-danger">{err}</p>}
+        <p className="w-full text-xs text-muted-foreground">Transparent PNG works best. New images start at 100% opacity.</p>
+        {err && (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {err}
+          </p>
+        )}
       </div>
     </div>
   );

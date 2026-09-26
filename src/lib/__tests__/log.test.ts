@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearLog, log, logAsText, logEntries, onLog } from "../log";
+import { clearLog, log, logAsText, logEntries, onLog, supportSummary } from "../log";
 
 beforeEach(() => {
   clearLog();
@@ -69,4 +69,13 @@ describe("the diagnostics log", () => {
     expect(text).toContain("[sync]");
     expect(text).toContain("13 row(s) failed");
   });
+});
+
+it("exports correlation IDs without any free-form private data", () => {
+  log.error("agent", "customer@example.com invoice 500", {apiKey:"private-key", phone:"+971500000000"});
+  log.warn("private-area-name", "secret document title");
+  const result = supportSummary();
+  expect(result).toContain(logEntries()[0].id);
+  expect(JSON.parse(result).events[1].area).toBe("app");
+  for (const secret of ["customer@example.com", "private-key", "+971500000000", "private-area-name", "secret document title"]) expect(result).not.toContain(secret);
 });

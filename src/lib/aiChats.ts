@@ -1,12 +1,24 @@
 /* Local store for the copilot's chat sessions. Each session keeps its own
  * rolling memory (last TURN_CAP turns). Persisted in this browser only. */
 
+import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   /** Files the agent produced on this turn, kept with the message that made
    *  them so they stay reachable instead of vanishing at the next question. */
-  files?: { name: string; path?: string; url?: string }[];
+  files?: { name: string; path?: string; url?: string; videoJobId?: string; mediaJobId?: string }[];
+  run?: {
+    plan: { step: string; status: "pending" | "in_progress" | "completed" | "blocked" }[];
+    actions: {
+      id: string;
+      name: string;
+      status: "running" | "completed" | "failed" | "waiting";
+      detail?: string;
+    }[];
+    outcome?: string;
+  };
 }
 export interface Chat {
   id: string;
@@ -18,7 +30,6 @@ export interface Chat {
 
 const CHATS_KEY = "filey.ai.chats";
 const ACTIVE_KEY = "filey.ai.active";
-const LEGACY_KEY = "filey.ai.history"; // single-history from earlier builds
 export const TURN_CAP = 30;
 /** Total sessions kept. Chats used to be unbounded, so a long-lived install
  *  crept toward the ~5 MB localStorage ceiling and then silently stopped
@@ -43,24 +54,8 @@ export function newChat(): Chat {
 
 export function loadChats(): Chat[] {
   try {
-    const raw = localStorage.getItem(CHATS_KEY);
+    const raw = readAgentStorage(CHATS_KEY);
     if (raw) return JSON.parse(raw) as Chat[];
-    // one-time migration of the old single conversation
-    const legacy = localStorage.getItem(LEGACY_KEY);
-    if (legacy) {
-      const turns = JSON.parse(legacy) as ChatTurn[];
-      if (Array.isArray(turns) && turns.length) {
-        const c: Chat = {
-          id: uid(),
-          title: deriveTitle(turns),
-          turns: turns.slice(-TURN_CAP),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        saveChats([c]);
-        return [c];
-      }
-    }
     return [];
   } catch {
     console.error("Failed to load chats from localStorage");
@@ -73,24 +68,44 @@ let saveFailed = false;
 /** Persist the session list. Returns false when the write failed (quota full,
  *  storage blocked) so a caller that cares can tell the user — history used to
  *  stop saving with nothing but a console line. */
-export function saveChats(chats: Chat[]): boolean {
+export function saveChats(chats: Chat[], expectedScope?: string): boolean {
   try {
     // A blob URL dies with the page that made it, so persisting one leaves a
     // download chip that silently does nothing tomorrow. Paths survive; URLs
     // are dropped on the way to disk and simply aren't offered after a reload.
     const clean = chats.map((c) => ({
       ...c,
-      turns: c.turns.map((t) =>
-        t.files
-          ? { ...t, files: t.files.map(({ name, path }) => ({ name, path })).filter((f) => f.path) }
-          : t
-      ),
+      turns: c.turns.map((t) => ({
+        role: t.role,
+        text: t.text,
+        ...(t.files
+          ? {
+              files: t.files
+                .map(({ name, path, videoJobId, mediaJobId }) => ({ name, path, videoJobId, mediaJobId }))
+                .filter((f) => f.path || f.videoJobId || f.mediaJobId),
+            }
+          : {}),
+        ...(t.run
+          ? {
+              run: {
+                plan: t.run.plan.map(({ step, status }) => ({ step, status })),
+                actions: t.run.actions.map(({ id, name, status, detail }) => ({
+                  id,
+                  name,
+                  status,
+                  detail,
+                })),
+                outcome: t.run.outcome,
+              },
+            }
+          : {}),
+      })),
     }));
     // Newest sessions win when over the cap.
     const bounded = [...clean]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, MAX_CHATS);
-    localStorage.setItem(CHATS_KEY, JSON.stringify(bounded));
+    writeAgentStorage(CHATS_KEY, JSON.stringify(bounded), expectedScope);
     saveFailed = false;
     return true;
   } catch (e) {
@@ -124,7 +139,7 @@ export function resolveOpeningChat(): Chat {
 
 export function getActiveId(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_KEY);
+    return readAgentStorage(ACTIVE_KEY);
   } catch {
     console.error("Failed to get active chat ID from localStorage");
     return null;
@@ -132,8 +147,7 @@ export function getActiveId(): string | null {
 }
 export function setActiveId(id: string | null): void {
   try {
-    if (id) localStorage.setItem(ACTIVE_KEY, id);
-    else localStorage.removeItem(ACTIVE_KEY);
+    writeAgentStorage(ACTIVE_KEY, id);
   } catch {
     console.error("Failed to set active chat ID in localStorage");
   }

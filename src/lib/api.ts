@@ -1,7 +1,10 @@
+import { clearLog } from "./log";
+import { defaultTaxRate, validateCountry, taxIdError } from "./taxRegimes";
+import { validateWorkItem, type WorkInput, type WorkItem } from "./workItems";
 import { invoke } from "@tauri-apps/api/core";
-import { sb, isConfigured, supabase } from "./supabase";
-import { isLocalMode } from "./dataMode";
-import { quotationTotals, applyRoundOff, r2 } from "./money";
+import { sb, isConfigured, supabase, invokeFn } from "./supabase";
+import { isLocalMode, assertWorkspaceCurrent, setWorkspaceTransition } from "./dataMode";
+import { applyRoundOff, r2 } from "./money";
 import {
   splitItemMeta,
   mergeItemMeta,
@@ -22,6 +25,11 @@ import {
   type LinkedRecord,
 } from "./links";
 import { notifyDataChanged } from "./realtime";
+import { log } from "./log";
+import { withLocalTransaction } from "./localdb";
+import { loadModuleAccess } from "./moduleAccess";
+import { validateExpense, type ExpenseDetails } from "./expenseDetails";
+import { localWorkspaceOwner } from "./localAuth";
 
 // ===== Types =====
 export interface Product {
@@ -131,6 +139,7 @@ export interface Expense {
   amount: number;
   expense_date: string;
   account_id?: number;
+  details?: ExpenseDetails | null;
 }
 export interface Txn {
   id: number;
@@ -199,6 +208,9 @@ export interface Lead {
   status: string;
   est_value: number;
   owner?: string;
+  converted_company_id?: number | null;
+  converted_person_id?: number | null;
+  converted_deal_id?: number | null;
   created_at: string;
 }
 export interface CrmCustomer {
@@ -279,6 +291,7 @@ export interface Person {
   phone?: string;
   phone_e164?: string;
   linkedin?: string;
+  telegram?: string;
   notes?: string;
   owner?: string;
   is_primary?: boolean;
@@ -311,6 +324,8 @@ export interface CrmTask {
 }
 export interface Opportunity {
   id: number;
+  quotation_id?: number | null;
+  invoice_id?: number | null;
   title: string;
   /** Display name, kept in step with customer_id for back-compat. */
   customer_name: string;
@@ -361,6 +376,8 @@ export interface InvoiceItem {
 }
 export interface InvoiceDocSummary {
   id: number;
+  customer_id?: number | null;
+  quotation_id?: number | null;
   /** Authoring user — distinguishes my invoices from team-shared ones. */
   user_id?: string;
   number: string;
@@ -396,6 +413,8 @@ export interface InvoicePayment {
   paid_at: string;
 }
 export interface InvoiceDoc {
+  /** Frozen jurisdiction; changing currency never changes tax treatment. */
+  tax_country_code?: string;
   id: number;
   number: string;
   status: string;
@@ -461,6 +480,7 @@ export type InvoiceDocInput = Omit<
   "id" | "created_at" | "updated_at"
 > & { id?: number };
 export interface CompanyProfile {
+  country_code?: string;
   name: string;
   business_type?: string;
   address?: string;
@@ -505,10 +525,21 @@ const onLine = () =>
   typeof navigator === "undefined" ? true : navigator.onLine;
 
 let activeCacheOrg = "default";
+let cacheIdentity = 0;
 /** Scope the local read-cache to an organization. Call whenever the
  *  signed-in user's org changes (login, org switch, sign-out). */
-export function setCacheOrg(orgId?: string | null): void {
-  activeCacheOrg = orgId && orgId.trim() ? orgId : "default";
+export function setCacheOrg(orgId?: string | null, userId?: string): void {
+  const next = `${orgId?.trim() || "default"}${userId ? `:user:${userId}` : ""}`;
+  if (next === activeCacheOrg) return;
+  clearLog();
+  activeCacheOrg = next;
+  cacheIdentity++;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:agent-storage"));
+}
+
+/** A consumer must not use an anonymous/default cache for account data. */
+export function getCacheScope(): string | null {
+  return activeCacheOrg.includes(":user:") ? activeCacheOrg : null;
 }
 
 async function cacheGet<T>(key: string): Promise<T | null> {
@@ -548,29 +579,61 @@ async function cacheRead<T>(key: string): Promise<CacheEnvelope<T> | null> {
   return { __t: 0, v: raw as T };
 }
 
+let cacheClock = 0;
+const cacheStamp = () => cacheClock = Math.max(Date.now(), cacheClock + 1);
 const cacheWrite = (key: string, value: unknown): Promise<void> =>
-  cacheSet(key, { __t: Date.now(), v: value } satisfies CacheEnvelope<unknown>);
+  cacheSet(key, { __t: cacheStamp(), v: value } satisfies CacheEnvelope<unknown>);
 
 /** When the last mutation happened. A cached list stored before this can't be
  *  trusted to show it, so those reads go to the server instead of serving. */
 let lastWriteAt = 0;
-function markWrite(): void {
-  lastWriteAt = Date.now();
+let lastAnyWriteAt = 0;
+const tableWrites = new Map<string, number>();
+function markWrite(tables?: readonly string[]): void {
+  lastAnyWriteAt = cacheStamp();
+  if (tables?.length) for (const table of tables) tableWrites.set(table, lastAnyWriteAt);
+  else lastWriteAt = lastAnyWriteAt;
+}
+const readRevision = (tables?: readonly string[]) => tables
+  ? Math.max(lastWriteAt, ...tables.map(table => tableWrites.get(table) ?? 0))
+  : lastAnyWriteAt;
+
+const fetching = new Map<string, Promise<unknown>>();
+class SupersededRead extends Error {}
+
+/** Share one cloud read between mounted pages, header widgets and refreshes.
+ * A save or identity change prevents an older response from becoming current. */
+function fetchCached<T>(k: string, run: () => Promise<T>, tables?: readonly string[]): Promise<T> {
+  const identity = cacheIdentity, revision = readRevision(tables);
+  const requestKey = `${identity}:${revision}:${k}`;
+  const pending = fetching.get(requestKey);
+  if (pending) return pending as Promise<T>;
+  const request = (async () => {
+    await flushOutbox();
+    if (identity !== cacheIdentity || isLocalMode()) throw new SupersededRead();
+    const fresh = await run();
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || revision !== readRevision(tables) || isLocalMode()) throw new SupersededRead();
+    await cacheWrite(k, fresh);
+    if (identity !== cacheIdentity || revision !== readRevision(tables) || isLocalMode()) throw new SupersededRead();
+    return fresh;
+  })();
+  fetching.set(requestKey, request);
+  void request.finally(() => fetching.delete(requestKey)).catch(() => {});
+  return request;
 }
 
 /** Background refresh behind a served cache hit. One per key at a time; the
  *  UI is only nudged when the data actually changed, so this can't loop. */
 const revalidating = new Set<string>();
-function revalidate<T>(k: string, run: () => Promise<T>): void {
+function revalidate<T>(k: string, run: () => Promise<T>, tables?: readonly string[]): void {
   if (revalidating.has(k)) return;
   revalidating.add(k);
   void (async () => {
     try {
-      await flushOutbox();
-      const fresh = await run();
       const prev = await cacheRead<T>(k);
-      await cacheWrite(k, fresh);
-      if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged();
+      const fresh = await fetchCached(k, run, tables);
+      if (JSON.stringify(prev?.v) !== JSON.stringify(fresh)) notifyDataChanged(tables);
     } catch {
       /* keep serving the cached copy */
     } finally {
@@ -584,22 +647,7 @@ type OutboxOp =
   | { k: "update"; t: string; id: number; row: Record<string, unknown> }
   | { k: "delete"; t: string; id: number };
 
-async function outboxAdd(op: OutboxOp): Promise<void> {
-  const json = JSON.stringify(op);
-  try {
-    if (hasTauri) {
-      await invoke("outbox_add", { op: json });
-    } else {
-      const a = JSON.parse(localStorage.getItem("outbox") || "[]");
-      a.push({ id: Date.now() + a.length, op: json });
-      localStorage.setItem("outbox", JSON.stringify(a));
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
-async function outboxList(): Promise<{ id: number; op: string }[]> {
+export async function pendingCloudWrites(): Promise<{ id: number; op: string }[]> {
   try {
     if (hasTauri)
       return await invoke<{ id: number; op: string }[]>("outbox_list");
@@ -625,21 +673,42 @@ async function outboxRemove(id: number): Promise<void> {
   }
 }
 
+/** True for a failure that repeating cannot fix: Postgres integrity-violation
+ *  classes (23xxx — unique key taken, foreign key gone, NOT NULL) and
+ *  PostgREST's no-rows. A row deleted on another device, or an id already
+ *  claimed there, will read the same way on every retry.
+ *
+ *  Everything else is treated as temporary — offline, timeout, 5xx, an expired
+ *  token — and left queued. Erring that way costs a retry; erring the other
+ *  way discards a write the user made. */
+export function outboxOpIsDoomed(e: unknown): boolean {
+  const code = String((e as { code?: string } | null)?.code ?? "");
+  return /^23\d\d\d$/.test(code) || code === "PGRST116";
+}
+
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
   if (flushing || !isConfigured || !onLine()) return;
   flushing = true;
+  const identity = cacheIdentity;
   try {
-    const list = await outboxList();
+    const list = await pendingCloudWrites();
     for (const entry of list) {
-      let op: OutboxOp;
+      // The previous network request may have completed after a storage switch.
+      // Never replay a queued cloud save through the local client or a new account.
+      assertWorkspaceCurrent();
+      if (isLocalMode() || identity !== cacheIdentity) break;
+      let op: OutboxOp & { _workspace?: string };
       try {
         op = JSON.parse(entry.op);
       } catch {
         await outboxRemove(entry.id);
         continue;
       }
+      // Older unscoped entries cannot safely be attributed to the current account.
+      // Keep them available for explicit recovery instead of replaying into another company.
+      if (op._workspace !== activeCacheOrg) continue;
       try {
         if (op.k === "insert") {
           const { error } = await sb().from(op.t).insert(op.row);
@@ -655,8 +724,23 @@ export async function flushOutbox(): Promise<void> {
           if (error) throw error;
         }
         await outboxRemove(entry.id);
-      } catch {
-        break; // stop; retry remaining on next reconnect
+      } catch (e) {
+        // Order matters here — an insert must land before the update that
+        // follows it — so a temporary failure stops the whole replay and
+        // everything waits for the next reconnect.
+        if (!outboxOpIsDoomed(e)) break;
+        // But an op that can NEVER apply used to stop it the same way, and
+        // nothing ever cleared it: the queue jammed on that one entry, every
+        // offline write made afterwards piled up behind it, and none of them
+        // ever reached the cloud. No error surfaced anywhere. Drop the doomed
+        // op and keep draining — it was already lost, the ones behind it were
+        // not.
+        log.warn(
+          "outbox",
+          `dropping ${op.k} on ${op.t} — it cannot succeed`,
+          (e as { message?: string })?.message ?? e
+        );
+        await outboxRemove(entry.id);
       }
     }
   } finally {
@@ -665,6 +749,10 @@ export async function flushOutbox(): Promise<void> {
 }
 
 if (typeof window !== "undefined") {
+  for (const event of ["filey:cloud-change", "filey:remote-update"])
+    window.addEventListener(event, event => markWrite((event as CustomEvent<{ tables?: string[] }>).detail?.tables));
+  for (const event of ["focus", "online"])
+    window.addEventListener(event, () => markWrite());
   window.addEventListener("online", () => {
     flushOutbox().catch((e) => console.error("Failed to flush outbox:", e));
   });
@@ -674,15 +762,33 @@ if (typeof window !== "undefined") {
 async function readCached<T>(
   key: string,
   run: () => Promise<T>,
-  empty: T
+  empty: T,
+  tables?: readonly string[],
+  retry = true
 ): Promise<T> {
+  assertWorkspaceCurrent();
   if (isLocalMode()) return run(); // local store is the source of truth
+  const identity = cacheIdentity;
+  const current = () => {
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || isLocalMode()) throw new Error("Your workspace changed. Reopen this section.");
+  };
+  // Membership itself is loaded by a separate RPC, never this cache. Restricted
+  // staff always read through RLS so a former role's cached rows cannot leak.
+  const access = await loadModuleAccess();
+  current();
+  if (!access.admin && access.modules !== null) {
+    const data = await run();
+    current();
+    return data;
+  }
   // Namespace the local cache by the active organization so data from
   // one org never bleeds into another on a shared device.
   const k = `${activeCacheOrg}:${key}`;
   if (!isConfigured) return (await cacheRead<T>(k))?.v ?? empty;
 
   const hit = await cacheRead<T>(k);
+  current();
   if (!onLine()) return hit?.v ?? empty;
 
   // Stale-while-revalidate. This used to await the network on every read even
@@ -690,19 +796,22 @@ async function readCached<T>(
   // paid a full round trip per list before anything appeared. Serve the copy
   // and refresh behind it — but only when it provably post-dates every write
   // made this session, or a user could save something and not see it.
-  if (hit && hit.__t > lastWriteAt) {
-    revalidate(k, run);
+  if (hit && hit.__t > readRevision(tables)) {
+    if (Date.now() - hit.__t > 15_000) revalidate(k, run, tables);
     return hit.v;
   }
 
   try {
-    await flushOutbox();
-    const data = await run();
-    await cacheWrite(k, data);
-    return data;
-  } catch {
-    console.error("Failed to read fresh data from server, using cache");
-    return hit?.v ?? empty;
+    return await fetchCached(k, run, tables);
+  } catch (error) {
+    current();
+    if (error instanceof SupersededRead) {
+      if (retry) return readCached(key, run, empty, tables, false);
+      throw new Error("Data changed while loading. Please try again.");
+    }
+    if (!hit) throw error; // A failed first load is not an empty business.
+    console.warn("Could not refresh data; displaying the saved snapshot");
+    return hit.v;
   }
 }
 
@@ -712,35 +821,82 @@ function offlineError(): never {
   );
 }
 
-/** Single-row write: online → run; offline → queue for replay. */
+function workspaceGuard(): () => void {
+  const identity = cacheIdentity, local = isLocalMode();
+  return () => {
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || local !== isLocalMode())
+      throw new Error("Your workspace changed. Reopen this section before saving.");
+  };
+}
+
+/** Cloud saves require connectivity; local saves commit directly to the device. */
 async function write<T>(
-  op: OutboxOp,
+  _op: OutboxOp,
   run: () => Promise<T>,
-  offlineResult: T
+  _offlineResult: T
 ): Promise<T> {
-  markWrite();
-  if (isLocalMode()) return run(); // commit straight to the local store
-  if (!isConfigured)
-    throw new Error("Cloud storage is not configured.");
-  if (onLine()) {
+  const checkWorkspace = workspaceGuard();
+  assertWorkspaceCurrent();
+  if (!isLocalMode()) {
+    if (!isConfigured) throw new Error("Cloud storage is not configured.");
+    if (!onLine()) return offlineError();
     await flushOutbox();
-    return run();
   }
-  await outboxAdd(op);
-  return offlineResult;
+  checkWorkspace();
+  const result = await run();
+  // A read started during the save may have cached the previous rows.
+  markWrite([_op.t]);
+  notifyDataChanged([_op.t]);
+  return result;
+}
+
+/** Many-row write in ONE round trip.
+ *
+ *  A CSV import used to call the single-row create per row, and each of those
+ *  reloads the whole collection, re-serialises it, rewrites the sync journal
+ *  and fires a local-write event. Measured on this store: 4000 rows in one
+ *  call is ~13ms; the same rows one at a time is ~400x more per row, which is
+ *  the import sitting there frozen.
+ *
+ *  Cloud batches require connectivity, so an unsaved import cannot appear successful. */
+async function writeMany<T>(
+  _ops: OutboxOp[],
+  run: () => Promise<T>,
+  _offlineResult: T
+): Promise<T> {
+  const checkWorkspace = workspaceGuard();
+  assertWorkspaceCurrent();
+  if (!isLocalMode()) {
+    if (!isConfigured) throw new Error("Cloud storage is not configured.");
+    if (!onLine()) return offlineError();
+    await flushOutbox();
+  }
+  checkWorkspace();
+  const result = await run();
+  const tables = [...new Set(_ops.map(op => op.t))];
+  markWrite(tables);
+  notifyDataChanged(tables);
+  return result;
 }
 
 /** Multi-step / read-modify-write op — requires a live connection. */
-async function online<T>(run: () => Promise<T>): Promise<T> {
-  // Conservative: online() covers read-modify-write ops, so treat it as a
-  // mutation for cache purposes rather than risk serving a stale list after one.
-  markWrite();
-  if (isLocalMode()) return run(); // no network needed in local mode
-  if (!isConfigured)
-    throw new Error("Cloud storage is not configured.");
-  if (!onLine()) offlineError();
-  await flushOutbox();
-  return run();
+async function online<T>(run: () => Promise<T>, mutates = true): Promise<T> {
+  const checkWorkspace = workspaceGuard();
+  // Most callers mutate. Read-only callers opt out so live reloads cannot
+  // trigger another reload indefinitely.
+  if (mutates) markWrite();
+  assertWorkspaceCurrent();
+  if (!isLocalMode()) {
+    if (!isConfigured) throw new Error("Cloud storage is not configured.");
+    if (!onLine()) offlineError();
+    await flushOutbox();
+  }
+  checkWorkspace();
+  const result = await run();
+  // Invalidate snapshots that were fetched while this operation was saving.
+  if (mutates) { markWrite(); notifyDataChanged(); }
+  return result;
 }
 
 // ---- generic Supabase helpers ----
@@ -748,13 +904,32 @@ async function sList<T>(
   table: string,
   order?: { col: string; asc: boolean }[],
   select = "*",
-  client: any = null
+  client: any = null,
+  limit = Infinity
 ): Promise<T[]> {
-  let q: any = (client ?? sb()).from(table).select(select);
-  for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as T[];
+  if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) throw new Error("Invalid row limit.");
+  const rows: T[] = [];
+  const remote = client != null || !isLocalMode();
+  for (let offset = 0; offset < limit; offset += 500) {
+    const take = Math.min(500, limit - offset);
+    let q: any = (client ?? sb()).from(table).select(select);
+    for (const o of order ?? []) {
+      // Offline IDs are random. "Newest first" must sort by creation time;
+      // keep id as the stable tie-breaker used by pagination.
+      if (o.col === "id" && !o.asc && !(order ?? []).some(entry => entry.col === "created_at"))
+        q = q.order("created_at", { ascending: false });
+      q = q.order(o.col, { ascending: o.asc });
+    }
+    if (remote) {
+      if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
+      q = q.range(offset, offset + take - 1);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!remote || (data ?? []).length < take) return rows.slice(0, limit);
+  }
+  return rows;
 }
 /** Child rows belonging to one parent, filtered by the server.
  *
@@ -767,9 +942,10 @@ async function sChildren<T>(
   // string too, not just a parent id — the same server-side narrowing applies
   // to a date column (attendance for one day) as to a foreign key.
   id: number | string,
-  order?: { col: string; asc: boolean }[]
+  order?: { col: string; asc: boolean }[],
+  client: any = null
 ): Promise<T[]> {
-  let q: any = sb().from(table).select("*").eq(fk, id);
+  let q: any = (client ?? sb()).from(table).select("*").eq(fk, id);
   for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
   const { data, error } = await q;
   if (error) throw error;
@@ -789,18 +965,99 @@ async function sInsert(
   if (error) throw error;
   return (data as { id: number }).id;
 }
+/** Quotes and POs share the same header/line save contract. */
+async function saveDocumentLines(
+  table: "quotations" | "purchase_orders", itemTable: string, fk: string,
+  row: Record<string, unknown>, items: Record<string, unknown>[], id?: number
+): Promise<number> {
+  if (items.length > 500) throw new Error("A document supports at most 500 lines.");
+  const mode = isLocalMode(), scope = activeCacheOrg;
+  const checkScope = () => { assertWorkspaceCurrent(); if (mode !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the document before saving."); };
+  if (!isLocalMode()) {
+    const { data, error } = await sb().rpc("filey_save_document", { p_table: table, p_header: row, p_items: items, p_id: id || null });
+    if (error) throw error;
+    return Number(data);
+  }
+  return withLocalTransaction(async (client) => {
+    checkScope();
+    const stale = id ? await sChildren<{ id: number }>(itemTable, fk, id, undefined, client) : [];
+    const docId = id || await sInsert(table, row, client);
+    await sInsertMany(itemTable, items.map((item, position) => ({ ...item, [fk]: docId, position })), client);
+    if (id) await sUpdate(table, id, row, client);
+    await sDeleteMany(itemTable, stale.map((line) => line.id), client);
+    checkScope();
+    return docId;
+  });
+}
+
+/** Rows per round trip. A 5000-row import in one request is a body big enough
+ *  to time out against PostgREST, and the matching delete filter would blow
+ *  past the URL length limit — the continuous sync chunks its deletes at 100
+ *  for exactly that reason. Chunked, the import is still one write per chunk
+ *  instead of one per row, which is where the win actually came from. */
+const BULK_CHUNK = 500;
+const chunked = <T>(xs: T[], n: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
+  return out;
+};
+
+/** Insert an array of rows. All-or-nothing per chunk, like Postgres — callers
+ *  that need to know WHICH row was bad retry the slow way on failure. */
+async function sInsertMany(
+  table: string,
+  rows: Record<string, unknown>[],
+  client: any = null
+): Promise<number[]> {
+  if (!rows.length) return [];
+  const ids: number[] = [];
+  for (const part of chunked(rows, BULK_CHUNK)) {
+    const { data, error } = await (client ?? sb())
+      .from(table)
+      .insert(part)
+      .select("id");
+    // Earlier chunks are already committed, so the count rides on the error: a
+    // caller that retries row by row must start after them or it writes the
+    // successful rows a second time.
+    if (error) throw Object.assign(new Error(error.message), { inserted: ids.length });
+    for (const r of (data ?? []) as { id: number }[]) ids.push(r.id);
+  }
+  return ids;
+}
+
+/** How many rows a failed bulk insert had already written. */
+export const insertedBefore = (e: unknown): number =>
+  typeof (e as { inserted?: unknown })?.inserted === "number"
+    ? (e as { inserted: number }).inserted
+    : 0;
 async function sUpdate(
   table: string,
   id: number,
   patch: Record<string, unknown>,
   client: any = null
 ): Promise<void> {
-  const { error } = await (client ?? sb()).from(table).update(patch).eq("id", id);
+  const { data, error } = await (client ?? sb()).from(table).update(patch).eq("id", id).select("id").single();
   if (error) throw error;
+  if (!data) throw new Error("Record not found or access denied. Refresh before trying again.");
 }
 async function sDelete(table: string, id: number, client: any = null): Promise<void> {
   const { error } = await (client ?? sb()).from(table).delete().eq("id", id);
   if (error) throw error;
+}
+/** Delete many ids in one statement. Selecting 200 rows and deleting them one
+ *  at a time rewrote the whole collection 200 times. */
+async function sDeleteMany(
+  table: string,
+  ids: number[],
+  client: any = null
+): Promise<void> {
+  if (!ids.length) return;
+  // 100, not BULK_CHUNK: this filter rides in the URL, and that is the size
+  // the continuous sync settled on for the same reason.
+  for (const part of chunked(ids, 100)) {
+    const { error } = await (client ?? sb()).from(table).delete().in("id", part);
+    if (error) throw error;
+  }
 }
 
 /** Org/team data lives ONLY in the cloud. In local mode sb() is the on-device
@@ -899,25 +1156,31 @@ export function nextAvgCost(
 /** Fold a goods receipt into products.cost_price (moving average), so COGS
  *  and stock valuation track what the stock actually cost. Call BEFORE the
  *  quantity is incremented — onHand must be the pre-receipt quantity.
- *  Best-effort: a cost update failure must not block receiving. */
+ *  Invoice transactions require the cost write to succeed with the receipt. */
 async function applyMovingAverageCost(
   productId: number,
   recvQty: number,
-  unitCost: number
+  unitCost: number,
+  client: any = null,
 ): Promise<void> {
   if (!productId || !(recvQty > 0) || !(unitCost > 0)) return;
   try {
-    const { data } = await sb()
+    const db = client ?? sb();
+    const { data, error } = await db
       .from("products")
       .select("quantity,cost_price")
       .eq("id", productId)
       .single();
+    if (error) throw error;
     const onHand = Math.max(0, Number(data?.quantity) || 0);
     const oldCost = Number(data?.cost_price) || 0;
     const next = nextAvgCost(onHand, oldCost, recvQty, unitCost);
-    if (next !== oldCost)
-      await sb().from("products").update({ cost_price: next }).eq("id", productId);
+    if (next !== oldCost) {
+      const updated = await db.from("products").update({ cost_price: next }).eq("id", productId);
+      if (updated.error) throw updated.error;
+    }
   } catch (e) {
+    if (client && isLocalMode()) throw e;
     console.warn("Moving-average cost update failed", e);
   }
 }
@@ -925,31 +1188,44 @@ async function applyMovingAverageCost(
 async function adjustProductStock(
   productId: number,
   delta: number,
-  ctx?: StockCtx
+  ctx?: StockCtx,
+  client: any = null,
 ): Promise<void> {
-  if (!productId || delta === 0) return;
+  if (!Number.isInteger(productId) || productId <= 0 || !Number.isFinite(delta))
+    throw new Error("Choose a product and enter a finite stock quantity.");
+  if (delta === 0) return;
+  const db = client ?? sb();
   const apply = async () => {
-    const { error } = await sb().rpc("adjust_product_stock", {
-      p_id: productId,
-      p_delta: delta,
-    });
-    if (!error) return;
-    // Fallback: read current qty and write the delta ourselves (best-effort, not atomic).
-    const { data: row, error: fe } = await sb()
+    if (!(client && isLocalMode())) {
+      const { error } = await db.rpc("adjust_product_stock", {
+        p_id: productId,
+        p_delta: delta,
+      });
+      if (!error) return;
+      if (isLocalMode() || !["PGRST202", "42883"].includes(error.code)) throw new Error(error.message);
+    }
+    // Local transactions stage this delta; the missing-cloud-RPC fallback is stepwise.
+    const { data: row, error: fe } = await db
       .from("products")
       .select("quantity")
       .eq("id", productId)
       .single();
-    if (fe) throw new Error(`Stock RPC failed and fallback fetch failed: ${fe.message}`);
-    const next = Math.max(0, (Number(row?.quantity) || 0) + delta);
-    const { error: ue } = await sb()
+    if (fe) throw new Error(`Could not read product stock: ${fe.message}`);
+    // NOT clamped at zero. Clamping loses the overshoot, and every stock move
+    // here has a reverse: selling 5 from a stock of 3 clamped to 0, then
+    // reverting that invoice added 5 back and left 5 on hand where 3 had been.
+    // Overselling invented inventory, silently, and the stock_movements ledger
+    // (which records the true -5/+5) stopped agreeing with the product row.
+    // Negative stock is information — it says you owe units — so record it.
+    const next = (Number(row?.quantity) || 0) + delta;
+    const { error: ue } = await db
       .from("products")
       .update({ quantity: next })
       .eq("id", productId);
-    if (ue) throw new Error(`Stock RPC failed and fallback update failed: ${ue.message}`);
+    if (ue) throw new Error(`Could not update product stock: ${ue.message}`);
   };
   await apply();
-  // Movement log — best-effort: a failed log must never undo/block the stock write.
+  // A scoped local transaction keeps the movement and quantity inseparable.
   try {
     await sInsert("stock_movements", {
       product_id: productId,
@@ -960,14 +1236,22 @@ async function adjustProductStock(
       moved_at: ctx?.date
         ? new Date(`${ctx.date}T12:00:00`).toISOString()
         : new Date().toISOString(),
-    });
+    }, client);
   } catch (e) {
+    if (client && isLocalMode()) throw e;
     console.warn("stock movement log failed", e);
   }
 }
 
-/** Invoices created since the 1st of the current month (free-tier cap). */
-async function invoicesThisMonth(): Promise<number> {
+/** New invoices this month. Cloud usage is workspace-wide, including deleted
+ *  invoices, and never downloads invoice contents just to count them. */
+export async function invoicesThisMonth(): Promise<number> {
+  if (!isLocalMode()) {
+    const { data, error } = await sb().rpc("filey_invoice_usage");
+    if (error) throw error;
+    if (!Number.isSafeInteger(data) || data < 0) throw new Error("Invoice usage could not be loaded.");
+    return data;
+  }
   const rows = await sList<{ created_at?: string }>("invoice_docs");
   const start = new Date();
   start.setDate(1);
@@ -975,24 +1259,30 @@ async function invoicesThisMonth(): Promise<number> {
   return rows.filter((r) => r.created_at && new Date(r.created_at) >= start).length;
 }
 
-async function adjustAccountBalance(accountId: number, delta: number): Promise<void> {
+async function adjustAccountBalance(
+  accountId: number,
+  delta: number,
+  client: any = null,
+): Promise<void> {
   if (!accountId || delta === 0) return;
-  const { error } = await sb().rpc("adjust_account_balance", {
-    p_id: accountId,
-    p_delta: delta,
-  });
-  if (!error) return;
-  const { data: row, error: fe } = await sb()
+  const db = client ?? sb();
+  if (!(client && isLocalMode())) {
+    const { error } = await db.rpc("adjust_account_balance", {
+      p_id: accountId,
+      p_delta: delta,
+    });
+    if (!error) return;
+    if (isLocalMode() || !["PGRST202", "42883"].includes(error.code))
+      throw new Error(error.message);
+  }
+  const { data: row, error: fe } = await db
     .from("accounts")
     .select("balance")
     .eq("id", accountId)
     .single();
   if (fe) throw new Error(`Account balance RPC failed and fallback fetch failed: ${fe.message}`);
   const next = (Number(row?.balance) || 0) + delta;
-  const { error: ue } = await sb()
-    .from("accounts")
-    .update({ balance: next })
-    .eq("id", accountId);
+  const { error: ue } = await db.from("accounts").update({ balance: next }).eq("id", accountId);
   if (ue) throw new Error(`Account balance RPC failed and fallback update failed: ${ue.message}`);
 }
 
@@ -1053,12 +1343,21 @@ export const erp = {
     readCached<Product[]>(
       "erp_products",
       () => sList<Product>("products", [{ col: "name", asc: true }]),
-      []
+      [], ["products"]
     ),
   createProduct: (input: Omit<Product, "id" | "created_at">) => {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "products", row }, () =>
       sInsert("products", row), -1
+    );
+  },
+  /** Import path: every row in one write. See writeMany. */
+  createProducts: (inputs: Omit<Product, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "products", row })),
+      () => sInsertMany("products", rows),
+      []
     );
   },
   updateStock: (productId: number, delta: number, note?: string) =>
@@ -1082,8 +1381,10 @@ export const erp = {
   ) =>
     online(async () => {
       const q =
-        type === "adjust" ? Math.trunc(Number(qty) || 0) : Math.abs(Number(qty) || 0);
-      if (!productId || q === 0) return;
+        type === "adjust" ? Number(qty) : Math.abs(Number(qty));
+      if (!Number.isFinite(q) || !Number.isInteger(productId) || productId <= 0)
+        throw new Error("Choose a product and enter a finite stock quantity.");
+      if (q === 0) return;
       const delta = type === "out" ? -q : q;
       await adjustProductStock(productId, delta, {
         type,
@@ -1102,7 +1403,7 @@ export const erp = {
       const map: Record<string, StockMovement[]> = {};
       for (const m of rows) (map[String(m.product_id)] ??= []).push(m);
       return map;
-    }),
+    }, false),
   updateProduct: (
     productId: number,
     patch: Partial<Omit<Product, "id" | "created_at">>
@@ -1116,11 +1417,18 @@ export const erp = {
     write({ k: "delete", t: "products", id: productId }, () =>
       sDelete("products", productId), undefined
     ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteProducts: (productIds: number[]) =>
+    writeMany(
+      productIds.map((id) => ({ k: "delete" as const, t: "products", id })),
+      () => sDeleteMany("products", productIds),
+      undefined
+    ),
   orders: () =>
     readCached<Order[]>(
       "erp_orders",
       () => sList<Order>("orders", [{ col: "id", asc: false }]),
-      []
+      [], ["orders"]
     ),
   createOrder: (orderNumber: string, customerName: string, total: number) => {
     const row = {
@@ -1192,7 +1500,7 @@ export const erp = {
         ...(order as Order),
         items: (items ?? []) as OrderItem[],
       };
-    }),
+    }, false),
   /** Update an order header + replace its line items, re-adjusting stock by
    *  the net delta (old qty restored, new qty removed) atomically per product. */
   updateOrder: (
@@ -1355,6 +1663,7 @@ export const erp = {
 };
 
 // ===== HR =====
+const pendingPayrollRuns = new Set<string>();
 export const hr = {
   employees: () =>
     readCached<Employee[]>(
@@ -1472,12 +1781,12 @@ export const hr = {
     basic: number,
     allowances: number,
     deductions: number,
-    accountId?: number | null
+    accountId?: number | null,
   ) => {
     const net = basic + allowances - deductions;
     const row = {
       employee_id: employeeId,
-      period,
+      period: period.trim(),
       basic,
       allowances,
       deductions,
@@ -1485,37 +1794,85 @@ export const hr = {
       status: "pending",
     };
     return online(async () => {
-      const id = await sInsert("payroll", row);
-      const targetId = accountId ?? (await findOrCreatePayrollAccount());
-      const today = todayYmd();
-      const ref = `Payroll ${id}`;
-      if (targetId > 0) {
-        await sInsert("transactions", {
-          account_id: targetId,
-          txn_type: "debit",
-          amount: net,
-          description: `Payroll ${period}`,
-          ref,
-          source: "payroll",
-          txn_date: today,
-        });
-        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", net));
-        // Contra leg — salaries paid from Cash/Bank (keeps the ledger balanced).
-        const cashId = await findOrCreateCashAccount();
-        if (cashId > 0) {
-          await sInsert("transactions", {
-            account_id: cashId,
-            txn_type: "credit",
-            amount: net,
-            description: `Payroll ${period} — paid`,
-            ref,
-            source: "payroll",
-            txn_date: today,
-          });
-          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", net));
-        }
+      if (
+        !Number.isInteger(employeeId) ||
+        employeeId <= 0 ||
+        !row.period ||
+        [basic, allowances, deductions].some((value) => !Number.isFinite(value) || value < 0) ||
+        net < 0
+      )
+        throw new Error("Choose an employee and period, with valid non-negative pay amounts.");
+      const key = `${activeCacheOrg}:${employeeId}:${row.period}`;
+      if (pendingPayrollRuns.has(key))
+        throw new Error("Payroll for this employee and period is already being recorded.");
+      pendingPayrollRuns.add(key);
+      try {
+        const record = async (client: any) => {
+          const employee = await client.from("employees").select("id").eq("id", employeeId).single();
+          if (employee.error) throw employee.error;
+          const existing = await client
+            .from("payroll")
+            .select("id")
+            .eq("employee_id", employeeId)
+            .eq("period", row.period)
+            .maybeSingle();
+          if (existing.error) throw existing.error;
+          if (existing.data)
+            throw new Error(
+              "Payroll is already recorded for this employee and period. Open the existing payslip instead.",
+            );
+          const targetId = accountId ?? (await findOrCreatePayrollAccount(client));
+          const account = await client
+            .from("accounts")
+            .select("account_type")
+            .eq("id", targetId)
+            .single();
+          if (account.error) throw account.error;
+          if (account.data?.account_type !== "expense")
+            throw new Error("Choose an expense account for payroll.");
+          const id = await sInsert("payroll", row, client);
+          const today = todayYmd();
+          const ref = `Payroll ${id}`;
+          if (net > 0) {
+            await sInsert(
+              "transactions",
+              {
+                account_id: targetId,
+                txn_type: "debit",
+                amount: net,
+                description: `Payroll ${period}`,
+                ref,
+                source: "payroll",
+                txn_date: today,
+              },
+              client,
+            );
+            await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", net), client);
+            // Contra leg — salaries paid from Cash/Bank (keeps the ledger balanced).
+            const cashId = await findOrCreateCashAccount(client);
+            if (cashId > 0) {
+              await sInsert(
+                "transactions",
+                {
+                  account_id: cashId,
+                  txn_type: "credit",
+                  amount: net,
+                  description: `Payroll ${period} — paid`,
+                  ref,
+                  source: "payroll",
+                  txn_date: today,
+                },
+                client,
+              );
+              await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", net), client);
+            }
+          }
+          return id;
+        };
+        return await (isLocalMode() ? withLocalTransaction(record) : record(sb()));
+      } finally {
+        pendingPayrollRuns.delete(key);
       }
-      return id;
     });
   },
   markPayrollPaid: (payrollId: number) =>
@@ -1818,7 +2175,8 @@ export const fin = {
     description: string | null,
     amount: number,
     expenseDate: string,
-    accountId: number | null
+    accountId: number | null,
+    details?: ExpenseDetails | null
   ) => {
     const row = {
       category,
@@ -1826,12 +2184,36 @@ export const fin = {
       amount,
       expense_date: expenseDate,
       account_id: accountId,
+      ...(details ? { details } : {}),
     };
     return online(async () => {
-      const id = await sInsert("expenses", row);
-      const targetId = accountId ?? (await findOrCreateExpenseAccount());
+      validateExpense(category, amount, expenseDate, details);
+      if (!isLocalMode()) {
+        const { data, error } = await sb().rpc("filey_record_expense", { p_expense: row });
+        if (error) throw new Error(["PGRST202", "42883", "42703"].includes(error.code) ? "Expense storage needs the latest database update. Apply the expense-entry migration before saving." : error.message);
+        return Number(data);
+      }
+      return withLocalTransaction(async client => {
+      if (details?.submission_id) {
+        const existing = (await sList<Expense>("expenses", undefined, "*", client)).find(expense => expense.details?.submission_id === details.submission_id);
+        if (existing) {
+          if (existing.amount !== amount || existing.category !== category || existing.expense_date !== expenseDate || JSON.stringify(existing.details) !== JSON.stringify(details))
+            throw new Error("This expense was already saved. Open it from Purchase to review the saved details.");
+          return existing.id;
+        }
+      }
+      if (details?.receipt) {
+        const file = await client.from("user_files").select("id").eq("id", details.receipt.id).single();
+        if (file.error || !file.data) throw new Error("The receipt could not be found. Attach it again before saving.");
+      }
+      const targetId = accountId ?? (await findOrCreateExpenseAccount(client));
+      const cashId = details?.payment_account_id ?? await findOrCreateCashAccount(client);
+      for (const [id, type] of [[targetId, "expense"], [cashId, "asset"]] as const) {
+        const account = await client.from("accounts").select("account_type").eq("id", id).single();
+        if (account.error || account.data?.account_type !== type) throw new Error(`Choose a valid ${type === "expense" ? "expense" : "cash or bank"} account.`);
+      }
+      const id = await sInsert("expenses", { ...row, account_id: targetId }, client);
       const ref = `Expense ${id}`;
-      if (targetId > 0) {
         await sInsert("transactions", {
           account_id: targetId,
           txn_type: "debit",
@@ -1840,12 +2222,10 @@ export const fin = {
           ref,
           source: "expense",
           txn_date: expenseDate,
-        });
-        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount));
+        }, client);
+        await adjustAccountBalance(targetId, ledgerDelta("expense", "debit", amount), client);
         // Contra leg — expense assumed paid from Cash/Bank, so the books stay
         // balanced (debit Expense, credit Cash). On-credit spend → manual AP entry.
-        const cashId = await findOrCreateCashAccount();
-        if (cashId > 0) {
           await sInsert("transactions", {
             account_id: cashId,
             txn_type: "credit",
@@ -1854,17 +2234,33 @@ export const fin = {
             ref,
             source: "expense",
             txn_date: expenseDate,
-          });
-          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", amount));
-        }
-      }
+          }, client);
+          await adjustAccountBalance(cashId, ledgerDelta("asset", "credit", amount), client);
       return id;
+      });
     });
   },
+  getExpense: (id: number) => online(async () => {
+    const { data, error } = await sb().from("expenses").select("*").eq("id", id).single();
+    if (error) throw error;
+    return data as Expense;
+  }, false),
   deleteExpense: (expenseId: number) =>
-    write({ k: "delete", t: "expenses", id: expenseId }, () =>
-      sDelete("expenses", expenseId), undefined
-    ),
+    online(async () => {
+      if (!isLocalMode()) {
+        const { error } = await sb().rpc("filey_delete_expense", { p_id: expenseId });
+        if (error) throw error;
+        return;
+      }
+      await withLocalTransaction(async client => {
+        const expense = await client.from("expenses").select("id").eq("id", expenseId).single();
+        if (expense.error) throw expense.error;
+        const { data, error } = await client.from("transactions").select("*").eq("source", "expense").eq("ref", `Expense ${expenseId}`);
+        if (error) throw error;
+        await reverseTransactions(data as InvoiceTxn[], client);
+        await sDelete("expenses", expenseId, client);
+      });
+    }),
   transactions: () =>
     readCached<Txn[]>(
       "fin_transactions",
@@ -1906,15 +2302,20 @@ export const fin = {
     accountId: number,
     txnType: string,
     amount: number,
-    description: string | null
+    description: string | null,
+    txnDate = todayYmd()
   ) => {
     const row = {
       account_id: accountId,
       txn_type: txnType,
       amount,
       description,
+      txn_date: txnDate,
     };
     return online(async () => {
+      const date = new Date(`${txnDate}T00:00:00.000Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(txnDate) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== txnDate)
+        throw new Error("Enter a valid journal date.");
       const id = await sInsert("transactions", row);
       // Sign depends on the account's normal balance, not a fixed credit=+ rule:
       // a debit grows an asset/expense but shrinks a liability/revenue.
@@ -1977,8 +2378,26 @@ export const fin = {
   repairLedger: () =>
     online(async () => {
       const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
+      const accts = await sList<Account>("accounts");
+      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+      const deltaOf = (t: any): number =>
+        ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount));
+
+      // Sum the journal as it stands AND as it will stand once the duplicates
+      // are gone, in one pass. Only the DIFFERENCE is applied to each stored
+      // balance.
+      //
+      // Overwriting the balance with the survivors' sum — what this used to do
+      // — throws away everything an account holds that was never posted as a
+      // transaction, and the opening balance typed in when the account was
+      // created is exactly that: createAccount stores it on the row and posts
+      // no journal entry for it. A bank account opened at 50,000 was silently
+      // reset to zero, by a button whose own confirm dialog promises accounts
+      // are untouched. Repairing drift must not destroy the starting position.
       const seen = new Set<string>();
-      let removed = 0;
+      const dupes: any[] = [];
+      const before = new Map<number, number>();
+      const after = new Map<number, number>();
       for (const t of txns) {
         const key = [
           t.account_id ?? "",
@@ -1987,30 +2406,25 @@ export const fin = {
           t.description ?? "",
           t.txn_date ?? "",
         ].join("|");
-        if (seen.has(key)) {
-          await sDelete("transactions", t.id);
-          removed++;
-        } else {
-          seen.add(key);
-        }
-      }
-      // Recompute every account balance from the surviving transactions.
-      const accts = await sList<Account>("accounts");
-      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-      const bal = new Map<number, number>();
-      const survivors = await sList<any>("transactions");
-      for (const t of survivors) {
+        const dupe = seen.has(key);
+        if (dupe) dupes.push(t);
+        else seen.add(key);
         if (!t.account_id) continue;
-        const type = typeById.get(t.account_id) ?? "asset";
-        bal.set(
-          t.account_id,
-          (bal.get(t.account_id) ?? 0) +
-            ledgerDelta(type, t.txn_type, Number(t.amount))
-        );
+        const d = deltaOf(t);
+        before.set(t.account_id, (before.get(t.account_id) ?? 0) + d);
+        if (!dupe) after.set(t.account_id, (after.get(t.account_id) ?? 0) + d);
       }
-      for (const a of accts)
-        await sUpdate("accounts", a.id, { balance: bal.get(a.id) ?? 0 });
-      return { removed };
+
+      for (const t of dupes) await sDelete("transactions", t.id);
+      for (const a of accts) {
+        // Whatever the balance holds beyond the journal is the opening
+        // position; it survives untouched.
+        const opening = Number(a.balance ?? 0) - (before.get(a.id) ?? 0);
+        await sUpdate("accounts", a.id, {
+          balance: r2(opening + (after.get(a.id) ?? 0)),
+        });
+      }
+      return { removed: dupes.length };
     }),
   report: () =>
     readCached<FinanceReport>(
@@ -2087,7 +2501,7 @@ export const tools = {
           [{ col: "key", asc: true }],
           "key,value"
         ),
-      []
+      [], ["app_settings"]
     ),
   setSetting: (key: string, value: string) =>
     online(async () => {
@@ -2109,7 +2523,7 @@ export const tools = {
         .limit(limit);
       if (error) throw error;
       return (data ?? []) as AuditEntry[];
-    }),
+    }, false),
   logAction: (
     actor: string,
     action: string,
@@ -2152,6 +2566,99 @@ export function matchCustomerId(
   return hits.length === 1 ? hits[0].id : null;
 }
 
+const CRM_TABLES = new Set(["crm_customers", "crm_people", "crm_leads", "crm_opportunities", "crm_tasks", "crm_notes", "crm_activities"]);
+
+/** The new CRM editor needs acknowledged writes, including an error if RLS
+ *  or a concurrent deletion means an update matched no row. */
+export async function persistCrmRecord(table: string, patch: Record<string, unknown>, id?: number, expectedUpdatedAt?: string | null): Promise<number> {
+  if (!CRM_TABLES.has(table)) throw new Error("Unsupported CRM object.");
+  const result = await online(async () => {
+    const row = clean(patch);
+    delete row.id; delete row.user_id; delete row.org_id; delete row.created_at;
+    row.updated_at = new Date().toISOString();
+    if (id == null) return sInsert(table, row);
+    let query = sb().from(table).update(row).eq("id", id);
+    if (expectedUpdatedAt !== undefined) query = expectedUpdatedAt === null ? query.is("updated_at", null) : query.eq("updated_at", expectedUpdatedAt);
+    const { data, error } = await query.select("id").single();
+    if (expectedUpdatedAt !== undefined && (error?.code === "PGRST116" || (!error && !data))) throw new Error("Record changed or is unavailable. Refresh it before retrying.");
+    if (error) throw error;
+    if (!data) throw new Error("Record no longer exists or you do not have permission to edit it.");
+    return Number(data.id);
+  });
+  markWrite();
+  notifyDataChanged();
+  return result;
+}
+
+export async function removeCrmRecord(table: string, id: number): Promise<void> {
+  if (!CRM_TABLES.has(table)) throw new Error("Unsupported CRM object.");
+  await online(async () => {
+    if (isLocalMode()) {
+      const { data, error } = await sb().from(table).select("id").eq("id", id).single();
+      if (error || !data) throw new Error("Record no longer exists.");
+      await sDelete(table, id);
+    } else {
+      const { data, error } = await sb().from(table).delete().eq("id", id).select("id").single();
+      if (error) throw error;
+      if (!data) throw new Error("Record no longer exists or you do not have permission to delete it.");
+    }
+  });
+  markWrite();
+  notifyDataChanged();
+}
+
+export async function importCrmRecords(table: string, rows: Record<string, unknown>[]): Promise<void> {
+  if (!CRM_TABLES.has(table) || rows.length === 0 || rows.length > 500) throw new Error("Import between 1 and 500 CRM records at a time.");
+  await online(async () => {
+    const { error } = await sb().from(table).insert(rows.map((input) => {
+      const row = clean(input);
+      delete row.id; delete row.user_id; delete row.org_id;
+      return row;
+    }));
+    if (error) throw error;
+  });
+  markWrite();
+  notifyDataChanged();
+}
+
+const leadConversions = new Map<number, Promise<number>>();
+async function convertLead(leadId: number): Promise<number> {
+  const running = leadConversions.get(leadId);
+  if (running) return running;
+  const run = online(async () => {
+    if (!isLocalMode()) {
+      const { data, error } = await sb().rpc("filey_convert_lead", { p_lead_id: leadId });
+      if (error) throw error;
+      return Number(data);
+    }
+    const { data, error } = await sb().from("crm_leads").select("*").eq("id", leadId).single();
+    if (error) throw error;
+    const lead = data as Lead;
+    if (lead.converted_deal_id) return lead.converted_deal_id;
+    if (lead.status === "converted") throw new Error("This lead was already converted. Find its company and deal in CRM.");
+    const created: [string, number][] = [];
+    // ponytail: local storage has no multi-collection transaction; compensate
+    // failed writes. Move to a SQLite transaction if crash-atomic conversion is needed.
+    try {
+      const companyId = await sInsert("crm_customers", { name: lead.name, company: lead.company || lead.name, email: lead.email || null, phone: lead.phone || null, segment: "Converted lead" });
+      created.push(["crm_customers", companyId]);
+      const personId = await sInsert("crm_people", { company_id: companyId, name: lead.name, email: lead.email || null, phone: lead.phone || null, owner: lead.owner || null, is_primary: true });
+      created.push(["crm_people", personId]);
+      const dealId = await sInsert("crm_opportunities", { title: `${lead.company || lead.name} — new opportunity`, customer_name: lead.company || lead.name, customer_id: companyId, person_id: personId, stage: "qualification", value: lead.est_value || 0, probability: 20, owner: lead.owner || null });
+      created.push(["crm_opportunities", dealId]);
+      await sUpdate("crm_leads", leadId, { status: "converted", converted_company_id: companyId, converted_person_id: personId, converted_deal_id: dealId });
+      return dealId;
+    } catch (error) {
+      const rollback = await Promise.allSettled(created.reverse().map(([table, id]) => sDelete(table, id)));
+      if (rollback.some((r) => r.status === "rejected")) throw new Error("Lead conversion failed and some new records could not be removed. Review companies, contacts and deals before retrying.");
+      throw error;
+    }
+  });
+  leadConversions.set(leadId, run);
+  try { const id = await run; markWrite(); notifyDataChanged(); return id; }
+  finally { leadConversions.delete(leadId); }
+}
+
 export const crm = {
   leads: () =>
     readCached<Lead[]>(
@@ -2175,45 +2682,27 @@ export const crm = {
     write({ k: "delete", t: "crm_leads", id: leadId }, () =>
       sDelete("crm_leads", leadId), undefined
     ),
-  convertLead: (leadId: number) =>
-    online(async () => {
-      const { data, error } = await sb()
-        .from("crm_leads")
-        .select("*")
-        .eq("id", leadId)
-        .single();
-      if (error) throw error;
-      const l = data as Lead;
-      const display = l.company || l.name;
-      await sInsert("crm_customers", {
-        name: l.name,
-        company: l.company ?? null,
-        email: l.email ?? null,
-        phone: l.phone ?? null,
-        segment: "Converted lead",
-      });
-      const oppId = await sInsert("crm_opportunities", {
-        title: `${display} — new opportunity`,
-        customer_name: display,
-        stage: "qualification",
-        value: l.est_value,
-        probability: 20,
-        owner: l.owner ?? null,
-      });
-      await sUpdate("crm_leads", leadId, { status: "converted" });
-      return oppId;
-    }),
+  convertLead,
   customers: () =>
     readCached<CrmCustomer[]>(
       "crm_customers",
       () =>
         sList<CrmCustomer>("crm_customers", [{ col: "name", asc: true }]),
-      []
+      [], ["crm_customers"]
     ),
   createCustomer: (input: Omit<CrmCustomer, "id" | "created_at">) => {
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "crm_customers", row }, () =>
       sInsert("crm_customers", row), -1
+    );
+  },
+  /** Import path: every row in one write. See writeMany. */
+  createCustomers: (inputs: Omit<CrmCustomer, "id" | "created_at">[]) => {
+    const rows = inputs.map((i) => clean(i as Record<string, unknown>));
+    return writeMany(
+      rows.map((row) => ({ k: "insert" as const, t: "crm_customers", row })),
+      () => sInsertMany("crm_customers", rows),
+      []
     );
   },
   updateCustomer: (
@@ -2236,6 +2725,11 @@ export const crm = {
       () => sList<EmailOptOut>("email_optouts", [{ col: "id", asc: false }]),
       []
     ),
+  /** The same list, for the send path. No cache and no empty fallback: a read
+   *  that fails must not look like "nobody has unsubscribed", so the error
+   *  travels and the campaign stops instead of mailing the whole opt-out list. */
+  optOutsStrict: () =>
+    sList<EmailOptOut>("email_optouts", [{ col: "id", asc: false }]),
   addOptOut: (email: string, reason: EmailOptOut["reason"] = "manual") => {
     const row = clean({ email: email.trim().toLowerCase(), reason });
     return write({ k: "insert", t: "email_optouts", row }, () =>
@@ -2741,55 +3235,53 @@ async function findOrCreateAccount(
   type: string,
   code: string,
   name: string,
-  pattern: RegExp
+  pattern: RegExp,
+  client: any = null
 ): Promise<number> {
-  const { data } = await sb()
+  const { data, error } = await (client ?? sb())
     .from("accounts")
     .select("id,name")
     .eq("account_type", type);
+  if (error) throw error;
   const list = (data as { id: number; name: string }[] | null) ?? [];
   // Match by name pattern only — no "first account of this type" fallback. That
   // fallback let e.g. the AP lookup grab an "Output VAT" liability (and vice
   // versa); a dedicated account is created instead when nothing matches.
   const acct = list.find((a) => pattern.test(a.name));
   if (acct) return acct.id;
-  try {
-    return await sInsert("accounts", { code, name, account_type: type, balance: 0 });
-  } catch {
-    return -1;
-  }
+  return sInsert("accounts", { code, name, account_type: type, balance: 0 }, client);
 }
 
-async function findOrCreateOutputVatAccount(): Promise<number> {
+async function findOrCreateOutputVatAccount(client: any = null): Promise<number> {
   // Named without "Payable" so the AP pattern can't claim it.
-  return findOrCreateAccount("liability", "2100", "Output VAT", /output vat|vat on sales|sales vat/i);
+  return findOrCreateAccount("liability", "2100", "Output VAT", /output vat|vat on sales|sales vat/i, client);
 }
-async function findOrCreateInputVatAccount(): Promise<number> {
+async function findOrCreateInputVatAccount(client: any = null): Promise<number> {
   return findOrCreateAccount(
     "asset",
     "1250",
     "Input VAT",
-    /input vat|vat on purchases|purchase vat|vat recoverable/i
+    /input vat|vat on purchases|purchase vat|vat recoverable/i, client
   );
 }
 
-async function findOrCreateSalesAccount(): Promise<number> {
-  return findOrCreateAccount("revenue", "4000", "Sales Revenue", /sales|revenue|income/i);
+async function findOrCreateSalesAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("revenue", "4000", "Sales Revenue", /sales|revenue|income/i, client);
 }
-async function findOrCreateArAccount(): Promise<number> {
+async function findOrCreateArAccount(client: any = null): Promise<number> {
   return findOrCreateAccount(
     "asset",
     "1200",
     "Accounts Receivable",
-    /receivable|debtors|ar/i
+    /\b(receivable|debtors|ar)\b/i, client
   );
 }
-async function findOrCreateCashAccount(): Promise<number> {
+async function findOrCreateCashAccount(client: any = null): Promise<number> {
   return findOrCreateAccount(
     "asset",
     "1000",
     "Cash & Bank",
-    /cash|bank/i
+    /cash|bank/i, client
   );
 }
 
@@ -2798,53 +3290,21 @@ async function findOrCreateCashAccount(): Promise<number> {
  *  directions: a loss adds to it, a gain nets against it. Only ever created
  *  when a difference actually arises, so a business billing in pegged dollars
  *  never sees it. */
-async function findOrCreateFxAccount(): Promise<number> {
+async function findOrCreateFxAccount(client: any = null): Promise<number> {
   return findOrCreateAccount(
     "expense",
     "5900",
     "Foreign Exchange Gain/Loss",
-    /foreign exchange|fx gain|exchange (gain|loss)/i
+    /foreign exchange|fx gain|exchange (gain|loss)/i, client
   );
 }
 
-async function findOrCreateExpenseAccount(): Promise<number> {
-  const { data } = await sb()
-    .from("accounts")
-    .select("id,name")
-    .eq("account_type", "expense");
-  const list = (data as { id: number; name: string }[] | null) ?? [];
-  const acct = list.find((a) => /operating|expense|general/i.test(a.name)) ?? list[0];
-  if (acct) return acct.id;
-  try {
-    return await sInsert("accounts", {
-      code: "5000",
-      name: "Operating Expenses",
-      account_type: "expense",
-      balance: 0,
-    });
-  } catch {
-    return -1;
-  }
+async function findOrCreateExpenseAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("expense", "5000", "Operating Expenses", /operating|expense|general/i, client);
 }
 
-async function findOrCreatePayrollAccount(): Promise<number> {
-  const { data } = await sb()
-    .from("accounts")
-    .select("id,name")
-    .eq("account_type", "expense");
-  const list = (data as { id: number; name: string }[] | null) ?? [];
-  const acct = list.find((a) => /salary|payroll|wage/i.test(a.name)) ?? list[0];
-  if (acct) return acct.id;
-  try {
-    return await sInsert("accounts", {
-      code: "5200",
-      name: "Salaries & Wages",
-      account_type: "expense",
-      balance: 0,
-    });
-  } catch {
-    return -1;
-  }
+async function findOrCreatePayrollAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("expense", "5200", "Salaries & Wages", /\b(salar(?:y|ies)|payroll|wages?)\b/i, client);
 }
 
 /** The signed change a posting makes to an account's (natural-positive) balance.
@@ -2861,49 +3321,60 @@ function ledgerDelta(type: string, txnType: string, amount: number): number {
  *  account balances. Type-aware, so it exactly undoes each posting (an earlier
  *  fixed-sign version double-counted asset/expense legs). Used before re-posting
  *  or when a document is reverted to draft / deleted. */
+type InvoiceTxn = {
+  id: number; account_id: number | null; txn_type: string; amount: number | string;
+  invoice_id?: number | null; source?: string | null; ref?: string | null;
+  description?: string; txn_date?: string;
+};
+
+async function reverseTransactions(txns: InvoiceTxn[], client: any = null): Promise<void> {
+  if (!txns.length) return;
+  const accts = await sList<Account>("accounts", undefined, "*", client);
+  const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
+  for (const t of txns) {
+    const delta = t.account_id
+      ? -ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount))
+      : 0;
+    if (t.account_id) {
+      await adjustAccountBalance(t.account_id, delta, client);
+    }
+    try {
+      await sDelete("transactions", t.id, client);
+    } catch (error) {
+      if (t.account_id) await adjustAccountBalance(t.account_id, -delta, client);
+      throw error;
+    }
+  }
+}
+
 async function reverseInvoiceTransactions(
   invoiceId: number | undefined,
-  ref: string
+  ref: string,
+  includePayments = false,
+  client: any = null,
 ): Promise<number> {
   // Match by BOTH keys. Postings made before invoice_id was tracked carry only
   // a ref; reversing by either key keeps re-finalize from leaving orphan rows
   // that pile up (the "8 invoices → 15 entries" bug). Dedup by row id so a row
   // matched on both keys isn't reversed twice.
-  type TxnRow = { id: number; account_id: number | null; txn_type: string; amount: number | string };
-  const rows = new Map<number, TxnRow>();
-  const byRef = await sb().from("transactions").select("*").eq("ref", ref);
+  const rows = new Map<number, InvoiceTxn>();
+  const db = client ?? sb();
+  const byRef = await db.from("transactions").select("*").eq("ref", ref);
   if (byRef.error) throw byRef.error;
-  for (const t of (byRef.data ?? []) as TxnRow[]) rows.set(t.id, t);
+  for (const t of (byRef.data ?? []) as InvoiceTxn[]) {
+    if (!t.invoice_id || t.invoice_id === invoiceId) rows.set(t.id, t);
+  }
   if (invoiceId) {
-    const byId = await sb()
+    const byId = await db
       .from("transactions")
       .select("*")
       .eq("invoice_id", invoiceId);
     if (byId.error) throw byId.error;
-    for (const t of (byId.data ?? []) as TxnRow[]) rows.set(t.id, t);
+    for (const t of (byId.data ?? []) as InvoiceTxn[]) rows.set(t.id, t);
   }
-  const txns = [...rows.values()];
-  if (txns.length) {
-    const accts = await sList<Account>("accounts");
-    const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-    for (const t of txns) {
-      if (!t.account_id) continue;
-      const type = typeById.get(t.account_id) ?? "asset";
-      await adjustAccountBalance(
-        t.account_id,
-        -ledgerDelta(type, t.txn_type, Number(t.amount))
-      );
-    }
-  }
-  const delRef = await sb().from("transactions").delete().eq("ref", ref);
-  if (delRef.error) throw delRef.error;
-  if (invoiceId) {
-    const delId = await sb()
-      .from("transactions")
-      .delete()
-      .eq("invoice_id", invoiceId);
-    if (delId.error) throw delId.error;
-  }
+  const txns = [...rows.values()].filter((t) => includePayments ||
+    (t.source !== "payment" && !/ Payment(?: #\d+)?$/.test(t.ref ?? "")));
+  await reverseTransactions(txns, client);
   return txns.length;
 }
 
@@ -2913,27 +3384,41 @@ async function reverseInvoiceTransactions(
 async function reverseInvoiceOrderAndStock(
   number: string,
   items: { product_id?: number; qty: number; unit_price: number }[],
-  isPurchase = false
+  isPurchase = false,
+  client: any = null,
 ) {
   if (!isPurchase) {
     const orderNumber = `SO-${number}`;
-    const { data: order } = await sb()
+    const { data: order, error } = await (client ?? sb())
       .from("orders")
       .select("id")
       .eq("order_number", orderNumber)
       .maybeSingle();
+    if (error) throw error;
     if (order?.id) {
-      await sb().from("orders").delete().eq("id", order.id);
+      await sDelete("orders", order.id, client);
     }
   }
   const dir = isPurchase ? -1 : 1;
+  const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+  const movements = await sChildren<{ product_id: number; qty: number }>("stock_movements", "ref", ref, undefined, client);
+  if (movements.length) {
+    const net = new Map<number, number>();
+    for (const m of movements) net.set(m.product_id, (net.get(m.product_id) ?? 0) + Number(m.qty));
+    for (const [productId, qty] of net) {
+      if (qty) await adjustProductStock(productId, -qty, {
+        type: isPurchase ? "purchase" : "sale", ref, note: "Posting reversed",
+      }, client);
+    }
+    return;
+  }
   for (const it of items) {
     if (!it.product_id || !it.qty) continue;
     await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)), {
       type: isPurchase ? "purchase" : "sale",
       ref: `${isPurchase ? "Bill" : "Invoice"} ${number}`,
       note: "Posting reversed",
-    });
+    }, client);
   }
 }
 
@@ -2946,8 +3431,8 @@ async function reverseInvoiceOrderAndStock(
  * collecting payment — which moves the invoice to "paid" — reversed the very
  * postings the sale had created, emptying the books for work already invoiced.
  */
-const POSTED_STATUSES = new Set(["sent", "paid"]);
-const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
+const POSTED_STATUSES = new Set(["sent", "paid", "overdue"]);
+export const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
 
 async function propagateInvoice(
   doc: Record<string, unknown>,
@@ -2958,7 +3443,8 @@ async function propagateInvoice(
     // Carries per-line meta (calc mode, manual amount, formula, per-line
     // tax/discount) so the linked order total matches the invoice exactly.
     custom?: Record<string, string> | null;
-  }[]
+  }[],
+  client: any = null,
 ) {
   try {
     const id = Number(doc.id ?? 0);
@@ -2970,8 +3456,8 @@ async function propagateInvoice(
 
     // 1) Reverse any previous posting for this document. Only touch stock/orders
     //    if a prior posting actually existed (else first finalize would net to 0).
-    const prior = await reverseInvoiceTransactions(id || undefined, ref);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
+    const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
+    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase, client);
 
     const { net: netDoc, tax: taxDoc, total: totalDoc } = docTotals(
       {
@@ -3012,12 +3498,12 @@ async function propagateInvoice(
         if (!it.product_id || !it.qty) continue;
         const qty = Math.abs(Number(it.qty));
         // Moving average first — needs the pre-receipt on-hand quantity.
-        await applyMovingAverageCost(it.product_id, qty, toBase(Number(it.unit_price) || 0));
-        await adjustProductStock(it.product_id, qty, { type: "purchase", ref });
+        await applyMovingAverageCost(it.product_id, qty, toBase(Number(it.unit_price) || 0), client);
+        await adjustProductStock(it.product_id, qty, { type: "purchase", ref }, client);
       }
       if (total > 0) {
-        const inventoryId = await findOrCreateInventoryAccount();
-        const apId = await findOrCreateApAccount();
+        const inventoryId = await findOrCreateInventoryAccount(client);
+        const apId = await findOrCreateApAccount(client);
         // debit Inventory (net, ex-VAT)
         if (inventoryId > 0) {
           await sInsert("transactions", {
@@ -3029,12 +3515,12 @@ async function propagateInvoice(
             source,
             invoice_id: id || null,
             txn_date: txnDate,
-          });
-          await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net));
+          }, client);
+          await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net), client);
         }
         // debit Input VAT (recoverable) for the tax portion
         if (tax > 0) {
-          const vatId = await findOrCreateInputVatAccount();
+          const vatId = await findOrCreateInputVatAccount(client);
           if (vatId > 0) {
             await sInsert("transactions", {
               account_id: vatId,
@@ -3045,8 +3531,8 @@ async function propagateInvoice(
               source,
               invoice_id: id || null,
               txn_date: txnDate,
-            });
-            await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax));
+            }, client);
+            await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax), client);
           }
         }
         // credit Accounts Payable (gross — what we owe the supplier)
@@ -3060,8 +3546,8 @@ async function propagateInvoice(
             source,
             invoice_id: id || null,
             txn_date: txnDate,
-          });
-          await adjustAccountBalance(apId, ledgerDelta("liability", "credit", total));
+          }, client);
+          await adjustAccountBalance(apId, ledgerDelta("liability", "credit", total), client);
         }
       }
       return;
@@ -3074,19 +3560,19 @@ async function propagateInvoice(
       customer_id: (doc.customer_id as number | undefined) ?? null,
       status: "completed",
       total,
-    });
+    }, client);
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
       await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)), {
         type: "sale",
         ref,
-      });
+      }, client);
     }
     // COGS: relieve Inventory at cost and book the cost of the sale. Only
     // product-linked lines have a cost; free-text lines are skipped. Tagged with
     // this invoice's ref/id so it reverses with the rest on revert.
     {
-      const products = await sList<Product>("products");
+      const products = await sList<Product>("products", undefined, "*", client);
       const costById = new Map(products.map((p) => [p.id, Number(p.cost_price) || 0]));
       let cogs = 0;
       for (const it of items) {
@@ -3095,8 +3581,8 @@ async function propagateInvoice(
       }
       cogs = Math.round(cogs * 100) / 100;
       if (cogs > 0) {
-        const cogsId = await findOrCreateCogsAccount();
-        const invId = await findOrCreateInventoryAccount();
+        const cogsId = await findOrCreateCogsAccount(client);
+        const invId = await findOrCreateInventoryAccount(client);
         if (cogsId > 0) {
           await sInsert("transactions", {
             account_id: cogsId,
@@ -3107,8 +3593,8 @@ async function propagateInvoice(
             source,
             invoice_id: id || null,
             txn_date: txnDate,
-          });
-          await adjustAccountBalance(cogsId, ledgerDelta("expense", "debit", cogs));
+          }, client);
+          await adjustAccountBalance(cogsId, ledgerDelta("expense", "debit", cogs), client);
         }
         if (invId > 0) {
           await sInsert("transactions", {
@@ -3120,14 +3606,14 @@ async function propagateInvoice(
             source,
             invoice_id: id || null,
             txn_date: txnDate,
-          });
-          await adjustAccountBalance(invId, ledgerDelta("asset", "credit", cogs));
+          }, client);
+          await adjustAccountBalance(invId, ledgerDelta("asset", "credit", cogs), client);
         }
       }
     }
     if (total > 0) {
-      const revenueId = await findOrCreateSalesAccount();
-      const arId = await findOrCreateArAccount();
+      const revenueId = await findOrCreateSalesAccount(client);
+      const arId = await findOrCreateArAccount(client);
       // credit Sales Revenue (net, ex-VAT)
       if (revenueId > 0) {
         await sInsert("transactions", {
@@ -3139,12 +3625,12 @@ async function propagateInvoice(
           source,
           invoice_id: id || null,
           txn_date: txnDate,
-        });
-        await adjustAccountBalance(revenueId, ledgerDelta("revenue", "credit", net));
+        }, client);
+        await adjustAccountBalance(revenueId, ledgerDelta("revenue", "credit", net), client);
       }
       // credit Output VAT (liability owed to the tax authority)
       if (tax > 0) {
-        const vatId = await findOrCreateOutputVatAccount();
+        const vatId = await findOrCreateOutputVatAccount(client);
         if (vatId > 0) {
           await sInsert("transactions", {
             account_id: vatId,
@@ -3155,8 +3641,8 @@ async function propagateInvoice(
             source,
             invoice_id: id || null,
             txn_date: txnDate,
-          });
-          await adjustAccountBalance(vatId, ledgerDelta("liability", "credit", tax));
+          }, client);
+          await adjustAccountBalance(vatId, ledgerDelta("liability", "credit", tax), client);
         }
       }
       // debit Accounts Receivable (gross — what the customer owes)
@@ -3170,19 +3656,21 @@ async function propagateInvoice(
           source,
           invoice_id: id || null,
           txn_date: txnDate,
-        });
-        await adjustAccountBalance(arId, ledgerDelta("asset", "debit", total));
+        }, client);
+        await adjustAccountBalance(arId, ledgerDelta("asset", "debit", total), client);
       }
     }
   } catch (e) {
     console.error("Invoice propagation failed:", e);
+    throw e;
   }
 }
 
 /** Remove an invoice's footprint from Orders, Inventory and Accounting. */
 async function unpropagateInvoice(
   doc: Record<string, unknown>,
-  items: { product_id?: number; qty: number; unit_price: number }[]
+  items: { product_id?: number; qty: number; unit_price: number }[],
+  client: any = null,
 ) {
   try {
     const id = Number(doc.id ?? 0);
@@ -3190,47 +3678,54 @@ async function unpropagateInvoice(
     if (!number) return;
     const isPurchase = doc.doc_type === "purchase";
     const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
-    const prior = await reverseInvoiceTransactions(id || undefined, ref);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase);
+    const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
+    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, items, isPurchase, client);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
+    throw e;
   }
 }
 
-async function findOrCreateApAccount(): Promise<number> {
+async function findOrCreateApAccount(client: any = null): Promise<number> {
   return findOrCreateAccount(
     "liability",
     "2000",
     "Accounts Payable",
-    /payable|creditors|ap\b/i
+    /\b(payable|creditors|ap)\b/i, client
   );
 }
 /** Inventory as a balance-sheet asset — stock you've bought to resell. The cost
  *  sits here until the goods are sold (then it becomes COGS). */
-async function findOrCreateInventoryAccount(): Promise<number> {
-  return findOrCreateAccount("asset", "1300", "Inventory", /inventory|stock/i);
+async function findOrCreateInventoryAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("asset", "1300", "Inventory", /inventory|stock/i, client);
 }
-async function findOrCreateCogsAccount(): Promise<number> {
-  return findOrCreateAccount("expense", "5050", "Cost of Goods Sold", /cost of goods|cogs/i);
+async function findOrCreateCogsAccount(client: any = null): Promise<number> {
+  return findOrCreateAccount("expense", "5050", "Cost of Goods Sold", /cost of goods|cogs/i, client);
 }
 
-/** A purchase order's accounting footprint, posted when it's received/done:
- *  debit Inventory (net, ex-VAT), debit Input VAT (recoverable tax portion),
- *  credit Accounts Payable (gross — what we owe the supplier). The stored PO
- *  `total` is the net subtotal (Σ qty × unit_cost); VAT is derived from the
- *  PO's `tax_rate`. Idempotent — reverses any prior posting for this PO before
- *  re-posting. Stock is handled separately by pos.receive. */
+function purchaseTotals(doc: Pick<PurchaseOrder, "discount" | "tax_rate" | "unit_price_formula">, items: PoItem[]) {
+  return lineAwareTotals(items.map(it => ({
+    ...splitItemMeta(it.custom), description: it.description,
+    qty: Number(it.quantity), unit_price: Number(it.unit_cost),
+  })), Number(doc.discount ?? 0), Number(doc.tax_rate ?? 0), doc.unit_price_formula);
+}
+
+/** Recalculate from saved lines: older PO totals sometimes excluded VAT.
+ * This keeps Inventory net, Input VAT separate and Accounts Payable gross. */
 async function propagatePurchase(doc: Record<string, unknown>) {
   try {
     const number = String(doc.po_number ?? "").trim();
     if (!number) return;
     const ref = `PO ${number}`;
-    await reverseInvoiceTransactions(undefined, ref); // clear prior posting
-    const net = Number(doc.total ?? 0); // PO total is the net subtotal, ex-VAT
-    if (net <= 0) return;
-    const rate = Number(doc.tax_rate ?? 0);
-    const tax = rate > 0 ? Math.round(net * rate) / 100 : 0; // recoverable Input VAT
-    const gross = net + tax; // what we owe the supplier
+    const items = await sChildren<PoItem>("purchase_order_items", "po_id", Number(doc.id));
+    const totals = purchaseTotals(doc as unknown as PurchaseOrder, items);
+    const rates = await getExchangeRates().catch(() => ({}));
+    const toBase = (value: number) => r2(docAmountInAed(value, doc.currency as string, doc.fx_rate as number, rates));
+    const gross = toBase(totals.total);
+    const tax = toBase(totals.tax);
+    const net = r2(gross - tax);
+    await reverseInvoiceTransactions(undefined, ref);
+    if (gross <= 0) return;
     const txnDate =
       (doc.order_date as string) || todayYmd();
     const inventoryId = await findOrCreateInventoryAccount();
@@ -3309,7 +3804,7 @@ export const billing = {
         // (The local shim ignores the column list and returns whole rows, which
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
-          "id,user_id,number,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
+          "id,user_id,number,customer_id,quotation_id,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
           "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
@@ -3364,6 +3859,8 @@ export const billing = {
           return {
             id: d.id,
             number: d.number,
+            customer_id: d.customer_id,
+            quotation_id: d.quotation_id,
             customer_name: d.customer_name,
             status: d.status,
             template: d.template,
@@ -3388,7 +3885,7 @@ export const billing = {
           };
         }) as InvoiceDocSummary[];
       },
-      []
+      [], ["invoice_docs", "invoice_doc_items", "invoice_payments"]
     ),
   getDoc: (docId: number) =>
     readCached<InvoiceDoc>(
@@ -3437,7 +3934,16 @@ export const billing = {
   saveDoc: (input: InvoiceDocInput) =>
     online(async () => {
       const { items, id, ...docFields } = input;
+      if (items.length > 500) throw new Error("A document supports at most 500 lines.");
+      if (items.some((item) => !Number.isFinite(Number(item.qty)) || Number(item.qty) < 0 ||
+        !Number.isFinite(Number(item.unit_price)) || Number(item.unit_price) < 0))
+        throw new Error("Invoice quantities and prices must be finite, non-negative numbers.");
       const row = clean(docFields as Record<string, unknown>);
+      if (!id && !row.tax_country_code) {
+        const company = await billing.getCompany();
+        if (company.country_code) row.tax_country_code = company.country_code;
+      }
+      validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
       // Freeze the FX rate (AED per unit) the first time a non-AED invoice is
       // saved, so its AED-equivalent doesn't drift with live rates afterward.
       // Best-effort + cached (lib/exchange-rates); never blocks the save.
@@ -3450,72 +3956,111 @@ export const billing = {
           console.warn("FX freeze skipped:", e);
         }
       }
-      let docId: number;
-      // Ids of the lines this save replaces. They are NOT deleted here: this
-      // used to wipe every item first and re-insert after, with no transaction
-      // between, so anything that made the insert fail — a column the cloud DB
-      // hadn't migrated yet, a check constraint, a dropped connection — left
-      // the invoice permanently empty and showing a zero total. The delete is
-      // deferred until the replacements are safely written.
-      let staleItemIds: number[] = [];
-      if (id && id > 0) {
-        await sUpdate("invoice_docs", id, row);
-        const { data: existing, error } = await sb()
-          .from("invoice_doc_items")
-          .select("id")
-          .eq("invoice_id", id);
-        if (error) throw error;
-        staleItemIds = ((existing ?? []) as { id: number }[]).map((r) => r.id);
-        docId = id;
-      } else {
-        await checkFreeInvoiceCap(invoicesThisMonth);
-        docId = await sInsert("invoice_docs", row);
-      }
-      if (items.length) {
-        const { error } = await sb()
-          .from("invoice_doc_items")
-          .insert(
-            items.map((it, i) => ({
-              invoice_id: docId,
-              description: it.description,
-              qty: it.qty,
-              unit_price: it.unit_price,
-              unit: it.unit || undefined,
-              custom: it.custom || undefined,
-              tax_category: it.tax_category || undefined,
-              position: i,
-              product_id: it.product_id ?? null,
-            }))
-          );
-        // Throwing here now costs the user nothing: the previous lines are
-        // still in the table, so the invoice survives a failed save intact.
-        if (error) throw error;
-      }
-      // Replacements are in. Retiring the old lines by id (rather than by
-      // invoice_id) is what keeps the ones just written.
-      if (staleItemIds.length) {
-        const { error } = await sb()
-          .from("invoice_doc_items")
-          .delete()
-          .in("id", staleItemIds);
-        if (error) throw error;
-      }
-      // Keep Orders, Inventory and Accounting in sync with the invoice state.
-      // Pass the saved id so postings carry invoice_id and can be reversed.
-      // Idempotent + best-effort: failures are logged but never block saving.
-      const docRow: Record<string, unknown> = {
-        ...(row as Record<string, unknown>),
-        id: docId,
+      const persist = async (client: any) => {
+        let docId: number;
+        // Ids of the lines this save replaces. They are NOT deleted here: this
+        // used to wipe every item first and re-insert after, with no transaction
+        // between, so anything that made the insert fail — a column the cloud DB
+        // hadn't migrated yet, a check constraint, a dropped connection — left
+        // the invoice permanently empty and showing a zero total. The delete is
+        // deferred until the replacements are safely written.
+        let staleItemIds: number[] = [];
+        let previousDoc: Record<string, unknown> | null = null;
+        let previousItems: any[] = [];
+        if (id && id > 0) {
+          const previous = await client.from("invoice_docs").select("*").eq("id", id).single();
+          if (previous.error) throw previous.error;
+          previousDoc = previous.data;
+          const { data: existing, error } = await client
+            .from("invoice_doc_items")
+            .select("*")
+            .eq("invoice_id", id);
+          if (error) throw error;
+          staleItemIds = ((existing ?? []) as { id: number }[]).map((r) => r.id);
+          previousItems = existing ?? [];
+          docId = id;
+        } else {
+          await checkFreeInvoiceCap(invoicesThisMonth);
+          docId = await sInsert("invoice_docs", row, client);
+        }
+        let insertedItemIds: number[] = [];
+        try {
+          if (items.length) {
+            insertedItemIds = await sInsertMany(
+              "invoice_doc_items",
+              items.map((it, i) => ({
+                invoice_id: docId,
+                description: it.description,
+                qty: it.qty,
+                unit_price: it.unit_price,
+                unit: it.unit || undefined,
+                custom: it.custom || undefined,
+                tax_category: it.tax_category || undefined,
+                position: i,
+                product_id: it.product_id ?? null,
+              })),
+              client,
+            );
+            // Throwing here now costs the user nothing: the previous lines are
+            // still in the table, so the invoice survives a failed save intact.
+          }
+          if (previousDoc) await sUpdate("invoice_docs", docId, row, client);
+          // Replacements are in. Retiring the old lines by id (rather than by
+          // invoice_id) is what keeps the ones just written.
+          if (staleItemIds.length) {
+            const { error } = await client.from("invoice_doc_items").delete().in("id", staleItemIds);
+            if (error) throw error;
+          }
+          return { docId, previousDoc, previousItems };
+        } catch (error) {
+          // Device writes are staged by withLocalTransaction. Cloud retains a
+          // compensating path until invoice posting has a server transaction.
+          if (!isLocalMode()) {
+            try {
+              await sDeleteMany("invoice_doc_items", insertedItemIds, client);
+              if (previousDoc) {
+                await sUpdate("invoice_docs", docId, previousDoc, client);
+                if (previousItems.length) {
+                  const restored = await client
+                    .from("invoice_doc_items")
+                    .upsert(previousItems, { onConflict: "id" });
+                  if (restored.error) throw restored.error;
+                }
+              } else await sDelete("invoice_docs", docId, client);
+            } catch {
+              throw new Error(
+                "The invoice save failed and could not be fully restored. Reopen this invoice and check its lines before retrying.",
+              );
+            }
+          }
+          throw error;
+        }
       };
-      if (isPostedStatus(docRow.status)) {
-        await propagateInvoice(docRow, items);
-      } else {
-        await unpropagateInvoice(docRow, items);
-      }
-      return docId;
+      const saveAndPost = async (client: any) => {
+        const { docId, previousDoc, previousItems } = await persist(client);
+        // Keep the invoice, its lines, stock and ledger in the same local commit.
+        // Reverse the PREVIOUS quantities and number before posting an edit.
+        if (previousDoc) await unpropagateInvoice(previousDoc, previousItems, client);
+        const docRow: Record<string, unknown> = { ...row, id: docId };
+        if (isPostedStatus(docRow.status)) {
+          await propagateInvoice(docRow, items, client);
+        } else {
+          await unpropagateInvoice(docRow, items, client);
+        }
+        return docId;
+      };
+      return isLocalMode() ? withLocalTransaction(saveAndPost) : saveAndPost(sb());
+    }),
+  // Appearance edits must not replace lines or reverse/repost stock and payments.
+  updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature">>) =>
+    online(async () => {
+      const allowed = ["template", "show_logo", "show_stamp", "show_signature", "stamp", "signature"];
+      const fields = Object.fromEntries(Object.entries(patch).filter(([key, value]) => allowed.includes(key) && value !== undefined));
+      if (!Object.keys(fields).length) throw new Error("Choose an appearance change first.");
+      await sUpdate("invoice_docs", docId, fields);
     }),
   deleteDoc: (docId: number) =>
-    write({ k: "delete", t: "invoice_docs", id: docId }, async () => {
+    online(async () => {
       const { data: doc, error } = await sb()
         .from("invoice_docs")
         .select("*")
@@ -3523,7 +4068,6 @@ export const billing = {
         .single();
       if (error) throw error;
       const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
-      await sDelete("invoice_docs", docId);
       await unpropagateInvoice(
         doc as Record<string, unknown>,
         items
@@ -3533,44 +4077,50 @@ export const billing = {
             unit_price: i.unit_price,
           }))
       );
+      // Reverse receipts while the foreign key still identifies their invoice.
+      await reverseInvoiceTransactions(docId, `Invoice ${doc.number} Payment`, true);
       // Restore any advance credit this invoice had consumed — otherwise the
       // negative `applied:inv#<id>` ledger row outlives the invoice and the
       // customer's credit stays reduced by a document that no longer exists.
-      try {
-        const tag = `applied:inv#${docId}`;
-        const advs = await sList<any>("advances");
-        for (const a of advs) if (a.note === tag) await sDelete("advances", a.id);
-      } catch {
-        /* best-effort — never block the delete */
+      const advs = await sList<any>("advances");
+      for (const a of advs) if (a.note === `applied:inv#${docId}`) await sDelete("advances", a.id);
+      // Local storage has no FK cascades; explicitly clean child rows in both modes.
+      for (const table of ["invoice_payments", "invoice_doc_items"]) {
+        const { error: childError } = await sb().from(table).delete().eq("invoice_id", docId);
+        if (childError) throw childError;
       }
+      await sDelete("invoice_docs", docId);
       return undefined;
-    }, undefined),
+    }),
   setStatus: (docId: number, status: string) =>
-    write(
-      { k: "update", t: "invoice_docs", id: docId, row: { status } },
+    online(
       async () => {
-        const { data: doc, error } = await sb()
-          .from("invoice_docs")
-          .select("*")
-          .eq("id", docId)
-          .single();
-        if (error) throw error;
-        const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
-        await sUpdate("invoice_docs", docId, { status });
-        const docItems = items
-          .map((i) => ({
-            product_id: i.product_id ?? undefined,
-            qty: i.qty,
-            unit_price: i.unit_price,
-            custom: i.custom ?? undefined, // keep meta so the order total matches
-          }));
-        if (isPostedStatus(status)) {
-          await propagateInvoice(doc as Record<string, unknown>, docItems);
-        } else {
-          await unpropagateInvoice(doc as Record<string, unknown>, docItems);
-        }
-      },
-      undefined
+        const change = async (client: any) => {
+          const { data: doc, error } = await client
+            .from("invoice_docs")
+            .select("*")
+            .eq("id", docId)
+            .single();
+          if (error) throw error;
+          const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId, undefined, client);
+          await sUpdate("invoice_docs", docId, { status }, client);
+          if (isPostedStatus(status) === isPostedStatus(doc.status)) return;
+          const docItems = items
+            .map((i) => ({
+              product_id: i.product_id ?? undefined,
+              qty: i.qty,
+              unit_price: i.unit_price,
+              custom: i.custom ?? undefined, // keep meta so the order total matches
+              tax_category: i.tax_category ?? undefined,
+            }));
+          if (isPostedStatus(status)) {
+            await propagateInvoice(doc as Record<string, unknown>, docItems, client);
+          } else {
+            await unpropagateInvoice(doc as Record<string, unknown>, docItems, client);
+          }
+        };
+        return isLocalMode() ? withLocalTransaction(change) : change(sb());
+      }
     ),
   shareDoc: (docId: number, shared: boolean) =>
     online(() =>
@@ -3583,15 +4133,16 @@ export const billing = {
       )
     ),
   /** Team-share an invoice: with the whole org (all=true) or specific
-   *  members (merged into shared_with). Server validates author/admin. */
+   *  members (replaces shared_with). Server validates author/admin. */
   shareWithMembers: (docId: number, all: boolean, userIds: string[]) =>
     online(async () => {
-      const { error } = await sb().rpc("share_invoice", {
+      const { data, error } = await sb().rpc("share_invoice", {
         p_id: docId,
         p_all: all,
         p_user_ids: JSON.parse(JSON.stringify(userIds ?? [])),
       });
       if (error) throw error;
+      if (!data?.ok) throw new Error("Sharing was not saved. Check your permissions and selected members.");
     }),
   /** The invoice's current team-visibility state (author/admin reads directly). */
   sharingState: (docId: number) =>
@@ -3603,7 +4154,7 @@ export const billing = {
         .single();
       if (error) throw error;
       return data as { shared: boolean; shared_with: string[] | null; user_id: string };
-    }),
+    }, false),
   /** Ensure the invoice is shared and return its public portal token. */
   publicLink: (docId: number) =>
     online(async () => {
@@ -3625,6 +4176,14 @@ export const billing = {
       return (data as { share_token: string }).share_token;
     }),
   // ----- payments -----
+  /** Complete dated payment history for reporting; consumers must join to the
+   * relevant sales/purchase invoices before aggregating or converting currency. */
+  allPayments: () =>
+    readCached<InvoicePayment[]>(
+      "invoice_payments:all",
+      () => sList<InvoicePayment>("invoice_payments", [{ col: "paid_at", asc: false }]),
+      []
+    ),
   payments: (invoiceId: number) =>
     online(async () => {
       const { data, error } = await sb()
@@ -3634,7 +4193,7 @@ export const billing = {
         .order("paid_at", { ascending: false });
       if (error) throw error;
       return (data ?? []) as InvoicePayment[];
-    }),
+    }, false),
   addPayment: (
     invoiceId: number,
     amount: number,
@@ -3642,150 +4201,238 @@ export const billing = {
     paidAt: string
   ) =>
     online(async () => {
-      const { data: pay } = await sb()
-        .from("invoice_payments")
-        .insert({
-          invoice_id: invoiceId,
-          amount,
-          method: method ?? null,
-          paid_at: paidAt,
-        })
-        .select("id")
-        .single();
-      const paymentId = (pay as { id: number } | null)?.id;
-
-      // Auto-mark the invoice paid once the balance is cleared.
-      const [{ data: doc }, items, { data: pays }] = await Promise.all([
-        sb().from("invoice_docs").select("*").eq("id", invoiceId).single(),
-        sChildren<any>("invoice_doc_items", "invoice_id", invoiceId),
-        sb()
-          .from("invoice_payments")
-          .select("amount")
-          .eq("invoice_id", invoiceId),
-      ]);
-      const docRow = doc as InvoiceDoc;
-      const total = docTotal(
-        docRow,
-        (
-          items as {
-            invoice_id: number;
-            qty: number;
-            unit_price: number;
-            custom?: Record<string, string> | null;
-          }[]
-        ).filter((i) => i.invoice_id === invoiceId)
-      );
-      const paid = ((pays as { amount: number | string }[]) ?? []).reduce(
-        (s, p) => s + Number(p.amount),
-        0
-      );
-      const status =
-        paid >= total - 0.005 ? "paid" : docRow.status === "paid" ? "sent" : docRow.status;
-      if (status !== docRow.status)
-        await sUpdate("invoice_docs", invoiceId, { status });
-
-      // Post the cash receipt to accounting: debit Cash/Bank, credit AR.
-      // The payment is entered in the INVOICE's currency, and the ledger is in
-      // the base one. Posting face value credited AR by 500 against a debit of
-      // 1,836 for the same $500 — so the receivable never cleared however much
-      // the customer paid, and cash was understated by the exchange rate.
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+      if (!paidAt || Number.isNaN(Date.parse(paidAt))) throw new Error("Enter a valid payment date.");
       const payRates = await getExchangeRates().catch(() => ({}));
-      const docCurrency = (docRow as { currency?: string } | null)?.currency;
-      const docFx = (docRow as { fx_rate?: number } | null)?.fx_rate;
-      // AR was raised at the rate on the date of supply, so it must be RELIEVED
-      // at that same rate or the receivable never reaches zero.
-      const amountBase = docAmountInAed(amount, docCurrency, docFx, payRates);
-      // Cash, though, is worth what it was worth on the day it arrived. When
-      // those differ the gap is a real gain or loss, not a rounding artefact —
-      // it posts to Foreign Exchange Gain/Loss so the books still balance.
-      // Pegged currencies produce zero here and no account is ever created.
-      // …but only when a spot rate actually exists. Without one, converting
-      // "spot" passes the raw number through, which would read as a loss the
-      // size of the whole invoice. No rate means no opinion: settle at the
-      // document's own rate and post no difference.
-      const amountSpot = unratedCurrency(docCurrency, null, payRates)
-        ? amountBase
-        : docAmountInAed(amount, docCurrency, null, payRates);
-      const fxDiff = Number((amountSpot - amountBase).toFixed(2));
-      const ref = `Invoice ${docRow?.number ?? invoiceId} Payment`;
-      const cashId = await findOrCreateCashAccount();
-      const arId = await findOrCreateArAccount();
-      if (cashId > 0) {
-        await sInsert("transactions", {
-          account_id: cashId,
-          txn_type: "debit",
-          amount: amountSpot,
-          description: `${ref} — Cash/Bank`,
-          ref,
-          source: "payment",
-          invoice_id: invoiceId,
-          txn_date: paidAt,
-        });
-        await adjustAccountBalance(cashId, ledgerDelta("asset", "debit", amountSpot));
-      }
-      if (Math.abs(fxDiff) >= 0.01) {
-        // Cash came in worth more than the receivable (gain, credit) or less
-        // (loss, debit). Either way this is the entry that keeps debits and
-        // credits equal once the two legs are valued at different rates.
-        const fxId = await findOrCreateFxAccount();
-        if (fxId > 0) {
-          const gain = fxDiff > 0;
-          await sInsert("transactions", {
-            account_id: fxId,
-            txn_type: gain ? "credit" : "debit",
-            amount: Math.abs(fxDiff),
-            description: `${ref} — exchange ${gain ? "gain" : "loss"}`,
-            ref,
-            source: "payment",
+      const record = async (client: any) => {
+        // Validate and read before inserting: a missing/inaccessible invoice must
+        // never leave an orphan payment behind or turn a failed read into 'paid'.
+        const [{ data: doc, error: docError }, items, pays] = await Promise.all([
+          client.from("invoice_docs").select("*").eq("id", invoiceId).single(),
+          sChildren<any>("invoice_doc_items", "invoice_id", invoiceId, undefined, client),
+          sChildren<InvoicePayment>("invoice_payments", "invoice_id", invoiceId, undefined, client),
+        ]);
+        if (docError) throw docError;
+        if (!doc) throw new Error("Invoice not found or access denied.");
+        const docRow = doc as InvoiceDoc;
+        if (!isPostedStatus(docRow.status))
+          throw new Error(
+            "Finalize this invoice before recording a payment. Use an advance for a prepayment.",
+          );
+        const isPurchase = docRow.doc_type === "purchase";
+        const total = docTotal(docRow, items);
+        const paid = pays.reduce((sum, payment) => sum + Number(payment.amount), amount);
+        const { data: pay, error: paymentError } = await client
+          .from("invoice_payments")
+          .insert({
             invoice_id: invoiceId,
-            txn_date: paidAt,
-          });
+            amount,
+            method: method ?? null,
+            paid_at: paidAt,
+          })
+          .select("id")
+          .single();
+        if (paymentError) throw paymentError;
+        const paymentId = (pay as { id: number } | null)?.id;
+
+        // Auto-mark the invoice paid once the balance is cleared.
+        const status = paid >= total - 0.005 ? "paid" : docRow.status === "paid" ? "sent" : docRow.status;
+        if (status !== docRow.status) await sUpdate("invoice_docs", invoiceId, { status }, client);
+
+        // Customer receipts debit Cash and credit AR. Supplier bill payments
+        // credit Cash and debit AP; paying a supplier must never increase cash.
+        // The payment is entered in the INVOICE's currency, and the ledger is in
+        // the base one. Posting face value credited AR by 500 against a debit of
+        // 1,836 for the same $500 — so the receivable never cleared however much
+        // the customer paid, and cash was understated by the exchange rate.
+        const docCurrency = (docRow as { currency?: string } | null)?.currency;
+        const docFx = (docRow as { fx_rate?: number } | null)?.fx_rate;
+        // AR was raised at the rate on the date of supply, so it must be RELIEVED
+        // at that same rate or the receivable never reaches zero.
+        const amountBase = docAmountInAed(amount, docCurrency, docFx, payRates);
+        // Cash, though, is worth what it was worth on the day it arrived. When
+        // those differ the gap is a real gain or loss, not a rounding artefact —
+        // it posts to Foreign Exchange Gain/Loss so the books still balance.
+        // Pegged currencies produce zero here and no account is ever created.
+        // …but only when a spot rate actually exists. Without one, converting
+        // "spot" passes the raw number through, which would read as a loss the
+        // size of the whole invoice. No rate means no opinion: settle at the
+        // document's own rate and post no difference.
+        const amountSpot = unratedCurrency(docCurrency, null, payRates)
+          ? amountBase
+          : docAmountInAed(amount, docCurrency, null, payRates);
+        const fxDiff = Number((amountSpot - amountBase).toFixed(2));
+        const ref = `Invoice payment #${paymentId}`;
+        const cashId = await findOrCreateCashAccount(client);
+        const arId = await (isPurchase ? findOrCreateApAccount(client) : findOrCreateArAccount(client));
+        if (cashId > 0) {
+          await sInsert(
+            "transactions",
+            {
+              account_id: cashId,
+              txn_type: isPurchase ? "credit" : "debit",
+              amount: amountSpot,
+              description: `${ref} — Cash/Bank`,
+              ref,
+              source: "payment",
+              invoice_id: invoiceId,
+              txn_date: paidAt,
+            },
+            client,
+          );
           await adjustAccountBalance(
-            fxId,
-            ledgerDelta("expense", gain ? "credit" : "debit", Math.abs(fxDiff))
+            cashId,
+            ledgerDelta("asset", isPurchase ? "credit" : "debit", amountSpot),
+            client,
           );
         }
-      }
-      if (arId > 0) {
-        await sInsert("transactions", {
-          account_id: arId,
-          txn_type: "credit",
-          amount: amountBase,
-          description: `${ref} — AR reduction`,
-          ref,
-          source: "payment",
-          invoice_id: invoiceId,
-          txn_date: paidAt,
-        });
-        await adjustAccountBalance(arId, ledgerDelta("asset", "credit", amountBase));
-      }
-      return paymentId;
+        if (Math.abs(fxDiff) >= 0.01) {
+          // Cash came in worth more than the receivable (gain, credit) or less
+          // (loss, debit). Either way this is the entry that keeps debits and
+          // credits equal once the two legs are valued at different rates.
+          const fxId = await findOrCreateFxAccount(client);
+          if (fxId > 0) {
+            const gain = isPurchase ? fxDiff < 0 : fxDiff > 0;
+            await sInsert(
+              "transactions",
+              {
+                account_id: fxId,
+                txn_type: gain ? "credit" : "debit",
+                amount: Math.abs(fxDiff),
+                description: `${ref} — exchange ${gain ? "gain" : "loss"}`,
+                ref,
+                source: "payment",
+                invoice_id: invoiceId,
+                txn_date: paidAt,
+              },
+              client,
+            );
+            await adjustAccountBalance(
+              fxId,
+              ledgerDelta("expense", gain ? "credit" : "debit", Math.abs(fxDiff)),
+              client,
+            );
+          }
+        }
+        if (arId > 0) {
+          await sInsert(
+            "transactions",
+            {
+              account_id: arId,
+              txn_type: isPurchase ? "debit" : "credit",
+              amount: amountBase,
+              description: `${ref} — ${isPurchase ? "AP" : "AR"} reduction`,
+              ref,
+              source: "payment",
+              invoice_id: invoiceId,
+              txn_date: paidAt,
+            },
+            client,
+          );
+          await adjustAccountBalance(
+            arId,
+            ledgerDelta(isPurchase ? "liability" : "asset", isPurchase ? "debit" : "credit", amountBase),
+            client,
+          );
+        }
+        return paymentId;
+      };
+      return isLocalMode() ? withLocalTransaction(record) : record(sb());
     }),
   removePayment: (id: number) =>
     online(async () => {
-      const { data: p, error } = await sb()
-        .from("invoice_payments")
-        .select("*")
-        .eq("id", id)
-        .single();
-      if (error) throw error;
-      const invoiceId = (p as { invoice_id?: number } | null)?.invoice_id;
-      await sDelete("invoice_payments", id);
-      if (invoiceId) {
-        // Reverse the accounting entries for this payment.
-        const { data: doc } = await sb()
-          .from("invoice_docs")
-          .select("number,status")
-          .eq("id", invoiceId)
+      const remove = async (client: any) => {
+        const { data: p, error } = await client
+          .from("invoice_payments")
+          .select("*")
+          .eq("id", id)
           .single();
-        const docMeta = doc as { number?: string; status?: string } | null;
-        const ref = `Invoice ${docMeta?.number ?? invoiceId} Payment`;
-        await reverseInvoiceTransactions(invoiceId, ref);
-        // If the invoice was fully paid, move it back to sent.
-        if (docMeta?.status === "paid") {
-          await sUpdate("invoice_docs", invoiceId, { status: "sent" });
+        if (error) throw error;
+        const invoiceId = (p as { invoice_id?: number } | null)?.invoice_id;
+        if (invoiceId) {
+          // Reverse the accounting entries for this payment.
+          const { data: doc, error: docError } = await client
+            .from("invoice_docs")
+            .select("*")
+            .eq("id", invoiceId)
+            .single();
+          if (docError) throw docError;
+          const docMeta = doc as InvoiceDoc;
+          const txns = await sChildren<InvoiceTxn>(
+            "transactions",
+            "invoice_id",
+            invoiceId,
+            undefined,
+            client,
+          );
+          let selected = txns.filter((t) => t.ref === `Invoice payment #${id}`);
+          if (!selected.length) {
+            // Older versions gave every receipt the same ref. Recover each receipt's
+            // cash / optional FX / AR bundle, never the invoice's sale or COGS legs.
+            const legacy = txns
+              .filter((t) => t.source === "payment" && / Payment$/.test(t.ref ?? ""))
+              .sort((a, b) => a.id - b.id);
+            const bundles: InvoiceTxn[][] = [];
+            let bundle: InvoiceTxn[] = [];
+            for (const t of legacy) {
+              bundle.push(t);
+              if (/— (?:AR|AP) reduction$/.test(t.description ?? "")) {
+                bundles.push(bundle);
+                bundle = [];
+              }
+            }
+            const baseAmount = docAmountInAed(
+              Number(p.amount),
+              docMeta.currency,
+              docMeta.fx_rate,
+              await getExchangeRates().catch(() => ({})),
+            );
+            const matches = bundles.filter(
+              (b) =>
+                b.every((t) => t.txn_date?.slice(0, 10) === String(p.paid_at).slice(0, 10)) &&
+                Math.abs(Number(b[b.length - 1].amount) - baseAmount) < 0.005,
+            );
+            const signature = (b: InvoiceTxn[]) =>
+              JSON.stringify(b.map((t) => [t.account_id, t.txn_type, Number(t.amount)]));
+            if (
+              legacy.length &&
+              (!matches.length || matches.some((b) => signature(b) !== signature(matches[0])))
+            ) {
+              throw new Error(
+                "This older payment cannot be matched safely to its ledger entries. Reconcile it before deleting it.",
+              );
+            }
+            selected = matches[0] ?? [];
+          }
+          await reverseTransactions(selected, client);
+          await sDelete("invoice_payments", id, client);
+          // If the invoice was fully paid, move it back to sent.
+          if (docMeta.status === "paid") {
+            const remaining = await sChildren<InvoicePayment>(
+              "invoice_payments",
+              "invoice_id",
+              invoiceId,
+              undefined,
+              client,
+            );
+            const items = await sChildren<any>(
+              "invoice_doc_items",
+              "invoice_id",
+              invoiceId,
+              undefined,
+              client,
+            );
+            if (
+              remaining.reduce((sum, r) => sum + Number(r.amount), 0) <
+              docTotal(docMeta, items) - 0.005
+            )
+              await sUpdate("invoice_docs", invoiceId, { status: "sent" }, client);
+          }
+        } else {
+          await sDelete("invoice_payments", id, client);
         }
-      }
+      };
+      return isLocalMode() ? withLocalTransaction(remove) : remove(sb());
     }),
   getCompany: () =>
     readCached<CompanyProfile>(
@@ -3807,10 +4454,11 @@ export const billing = {
           const c = rest as unknown as CompanyProfile;
           return {
             ...c,
+            trn: c.trn || c.vat_number,
             tax_type: c.tax_type ?? "VAT",
             currency: c.currency ?? "AED",
             default_tax_rate:
-              c.default_tax_rate == null ? 5 : Number(c.default_tax_rate),
+              c.tax_type === "None" ? 0 : defaultTaxRate(c.currency ?? "AED", c.default_tax_rate == null ? undefined : Number(c.default_tax_rate), c.country_code),
           };
         }
         return {
@@ -3833,9 +4481,13 @@ export const billing = {
         default_tax_rate: 5,
         default_accent: "#222222",
         default_template: "minimal",
-      }
+      }, ["company_profile"]
     ),
   saveCompany: async (input: CompanyProfile) => {
+    validateCountry(input.country_code);
+    const taxError = taxIdError(input.trn, input.country_code);
+    if (taxError) throw new Error(taxError);
+    if (input.default_tax_rate != null && (!Number.isFinite(input.default_tax_rate) || input.default_tax_rate < 0 || input.default_tax_rate > 100)) throw new Error("Default tax rate must be between 0 and 100.");
     if (!isConfigured) throw new Error("Cloud storage is not configured.");
     // Local mode writes straight to the on-device store — no network required.
     if (!isLocalMode() && !onLine())
@@ -3872,7 +4524,9 @@ export const billing = {
         .single();
       if (error) throw error;
     }
-    await cacheSet(`${activeCacheOrg}:company_profile`, input);
+    markWrite();
+    await cacheWrite(`${activeCacheOrg}:company_profile`, input);
+    notifyDataChanged();
   },
 };
 
@@ -3891,6 +4545,7 @@ export interface QuotationItem {
 }
 export interface QuotationSummary {
   id: number;
+  customer_id?: number | null;
   number: string;
   customer_name: string;
   status: string;
@@ -3906,12 +4561,15 @@ export interface QuotationSummary {
   updated_at: string;
 }
 export interface QuotationDoc {
+  /** Frozen jurisdiction; changing currency never changes tax treatment. */
+  tax_country_code?: string;
   id: number;
   number: string;
   status: string;
   template: string;
   accent: string;
   currency: string;
+  fx_rate?: number | null;
   quote_date?: string;
   valid_until?: string;
   sales_person?: string;
@@ -4003,7 +4661,7 @@ export const recurrences = {
         .order("next_run", { ascending: true });
       if (error) throw error;
       return (data ?? []) as Recurrence[];
-    }),
+    }, false),
   create: (baseInvoiceId: number, interval: Recurrence["interval"]) =>
     online(() =>
       sInsert("invoice_recurrence", {
@@ -4027,37 +4685,50 @@ export const recurrences = {
       const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
       let made = 0;
       for (const r of due) {
-        const base = await billing.getDoc(r.base_invoice_id).catch(() => null);
+        let base: InvoiceDoc | null = null;
+        try {
+          base = await billing.getDoc(r.base_invoice_id);
+        } catch (e: any) {
+          // Only "that invoice is gone" retires a recurrence. Any other
+          // failure — offline, RLS hiccup, timeout — is temporary, and
+          // cancelling on one silently ends a subscription the user set up,
+          // with no way back from the UI. Skip this run and try next time.
+          const gone =
+            e?.code === "PGRST116" || /no rows/i.test(e?.message ?? String(e));
+          if (!gone) continue;
+        }
         if (!base) {
           await sUpdate("invoice_recurrence", r.id, { active: false });
           continue;
         }
+        // Carry the WHOLE base document and override only what a new
+        // occurrence must change. Listing the fields by hand is how this
+        // drifted: unit_price_formula, each line's `custom` (manual amounts,
+        // per-line discounts and formulas) and round_off were all left behind,
+        // so a recurring invoice could bill a different figure than the
+        // invoice it recurs from — silently, every month.
+        const {
+          id: _id,
+          created_at: _created,
+          updated_at: _updated,
+          // Inheriting these would date the new invoice to the old cycle and
+          // re-link it to a quotation it did not come from.
+          due_date: _due,
+          quotation_id: _quote,
+          ...carried
+        } = base;
         const input: InvoiceDocInput = {
+          ...carried,
           number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
           status: "draft",
-          template: base.template,
-          accent: base.accent,
-          currency: base.currency,
-          seller_name: base.seller_name,
-          seller_address: base.seller_address,
-          seller_trn: base.seller_trn,
-          seller_email: base.seller_email,
-          seller_phone: base.seller_phone,
-          logo: base.logo,
-          customer_id: base.customer_id,
-          customer_name: base.customer_name,
-          customer_address: base.customer_address,
-          customer_trn: base.customer_trn,
-          customer_email: base.customer_email,
           issue_date: today,
-          notes: base.notes,
-          terms: base.terms,
-          tax_rate: base.tax_rate,
-          discount: base.discount,
           items: base.items.map((it) => ({
             description: it.description,
             qty: it.qty,
             unit_price: it.unit_price,
+            unit: it.unit,
+            custom: it.custom,
+            tax_category: it.tax_category,
             product_id: it.product_id,
           })),
         };
@@ -4079,8 +4750,11 @@ export const recurrences = {
     }),
 };
 
-const quoteTotal = (items: QuotationItem[]) =>
-  quotationTotals(items).total;
+const quoteTotal = (items: QuotationItem[], doc: QuotationDoc) =>
+  applyRoundOff(lineAwareTotals(items.map(it => ({
+    ...splitItemMeta(it.custom), description: it.product, qty: it.qty, unit_price: it.rate,
+    discount: it.discount, tax: it.tax,
+  })), doc.discount ?? 0, doc.tax_rate ?? 0, doc.unit_price_formula), !!doc.round_off).total;
 
 /** One quotation line, converted for an invoice. Returns the money fields only
  *  — the caller owns identity and position.
@@ -4112,7 +4786,7 @@ function convertedLine(
   const qty = Number(it.qty) || 0;
   return {
     unit_price: qty ? r2(line / qty) : line,
-    custom: mergeItemMeta({ custom, calcMode: "manual", amount: line }),
+    custom: mergeItemMeta({ custom, calcMode: "manual", amount: line, tax: Number(it.tax || 0) }),
   };
 }
 
@@ -4137,11 +4811,12 @@ export const quotes = {
         return docs.map((d) => ({
           id: d.id,
           number: d.number,
+          customer_id: d.customer_id,
           customer_name: d.customer_name,
           status: d.status,
           template: d.template,
           shared: d.shared ?? false,
-          total: quoteTotal(byDoc.get(d.id) ?? []),
+          total: quoteTotal(byDoc.get(d.id) ?? [], d),
           // The list used to render every quote's total in the COMPANY's
           // currency, so a quote written in dollars was displayed as dirhams
           // at the same number.
@@ -4191,45 +4866,44 @@ export const quotes = {
     ),
   saveDoc: (input: QuotationInput) =>
     online(async () => {
+      const local = isLocalMode(), scope = activeCacheOrg;
       const { items, id, ...docFields } = input;
       const row = clean(docFields as Record<string, unknown>);
-      let docId: number;
-      if (id && id > 0) {
-        await sUpdate("quotations", id, row);
-        const { error } = await sb()
-          .from("quotation_items")
-          .delete()
-          .eq("quotation_id", id);
-        if (error) throw error;
-        docId = id;
-      } else {
-        docId = await sInsert("quotations", row);
+      if (!id && !row.tax_country_code) {
+        const company = await billing.getCompany();
+        if (company.country_code) row.tax_country_code = company.country_code;
       }
-      if (items.length) {
-        const { error } = await sb()
-          .from("quotation_items")
-          .insert(
-            items.map((it, i) => ({
-              quotation_id: docId,
-              product: it.product,
-              sku: it.sku ?? null,
-              product_id: it.product_id ?? null,
-              qty: it.qty,
-              rate: it.rate,
-              discount: it.discount,
-              tax: it.tax,
-              unit: it.unit ?? null,
-              custom: it.custom ?? null,
-              position: i,
-            }))
-          );
-        if (error) throw error;
+      validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
+      if (row.currency !== "AED" && !row.fx_rate) {
+        if (id) {
+          const { data: saved, error } = await sb().from("quotations").select("currency,fx_rate").eq("id", id).single();
+          if (error) throw error;
+          if (saved?.currency === row.currency && Number(saved.fx_rate) > 0) row.fx_rate = saved.fx_rate;
+        }
       }
+      if (row.currency !== "AED" && !row.fx_rate) {
+        const rates = await getExchangeRates();
+        if (rates[String(row.currency)] > 0) row.fx_rate = rates[String(row.currency)];
+      }
+      if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation before saving.");
+      const docId = await saveDocumentLines("quotations", "quotation_items", "quotation_id", row,
+        items.map(it => ({
+          product: it.product, sku: it.sku ?? null, product_id: it.product_id ?? null,
+          qty: it.qty, rate: it.rate, discount: it.discount, tax: it.tax,
+          unit: it.unit ?? null, custom: it.custom ?? null,
+        })), id);
       return docId;
     }),
   deleteDoc: (docId: number) =>
     write({ k: "delete", t: "quotations", id: docId }, () =>
       sDelete("quotations", docId), undefined
+    ),
+  /** Bulk-select delete: one statement for the whole selection. */
+  deleteDocs: (docIds: number[]) =>
+    writeMany(
+      docIds.map((id) => ({ k: "delete" as const, t: "quotations", id })),
+      () => sDeleteMany("quotations", docIds),
+      undefined
     ),
   setStatus: (docId: number, status: string) =>
     write(
@@ -4261,77 +4935,62 @@ export const quotes = {
   },
   convertToInvoice: (quotationId: number) =>
     online(async () => {
-      const { data: q, error } = await sb()
-        .from("quotations")
-        .select("*")
-        .eq("id", quotationId)
-        .single();
-      if (error) throw error;
-      const qd = q as QuotationDoc;
-      const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [
-        { col: "position", asc: true },
-      ]);
-      const company = await billing.getCompany().catch(() => null);
-      const y = new Date().getFullYear();
-      const number = `INV-${y}-${String(
-        Math.floor(Math.random() * 9000) + 1000
-      )}`;
-      const issue = todayYmd();
-      const due = new Date(Date.now() + 30 * 86400000)
-        .toISOString()
-        .slice(0, 10);
-      await checkFreeInvoiceCap(invoicesThisMonth);
-      const docId = await sInsert("invoice_docs", {
-        number,
-        status: "draft",
-        template: company?.default_template ?? "minimal",
-        accent: company?.default_accent ?? "#0A0A0A",
-        currency: qd.currency,
-        seller_name: company?.name ?? "",
-        seller_address: company?.address ?? null,
-        seller_trn: company?.trn ?? null,
-        seller_email: company?.email ?? null,
-        seller_phone: company?.phone ?? null,
-        logo: company?.logo ?? null,
-        customer_id: qd.customer_id ?? null,
-        customer_name: qd.customer_name,
-        customer_address: qd.customer_address ?? null,
-        customer_trn: qd.customer_trn ?? null,
-        customer_email: qd.customer_email ?? null,
-        issue_date: issue,
-        due_date: due,
-        notes: null,
-        terms: qd.terms ?? null,
-        tax_rate: company?.default_tax_rate ?? 5,
-        discount: 0,
-        quotation_id: quotationId,
-      });
-      if (items.length) {
-        const { error: itemsErr } = await sb()
-          .from("invoice_doc_items")
-          .insert(
-            items.map((it, i) => ({
-              invoice_id: docId,
-              product_id: it.product_id ?? null,
-              description: it.sku
-                ? `${it.product} (${it.sku})`
-                : it.product,
-              qty: it.qty,
-              unit: it.unit ?? null,
-              // The invoice must bill exactly what the customer accepted on the
-              // quote. This used to recompute qty × rate × (1 - discount),
-              // which silently changed the figure on any line the quote had set
-              // to a manual amount or a formula. Carrying the computed line
-              // across as a manual amount keeps the two documents in agreement,
-              // and keeps the customer's own custom columns with it.
-              ...convertedLine(it, qd.unit_price_formula),
-              position: i,
-            }))
-          );
-        if (itemsErr) throw itemsErr;
-      }
-      await sUpdate("quotations", quotationId, { status: "accepted" });
-      return docId;
+      if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
+      const client = sb(), local = isLocalMode(), scope = activeCacheOrg;
+      const company = await billing.getCompany();
+      const { pickDocNumber, loadDocFormats } = await import("./numberFormat");
+      const formats = await loadDocFormats();
+      const convert = async (tx: { from: (table: string) => any }) => {
+        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        const { data: q, error } = await tx.from("quotations").select("*").eq("id", quotationId).single();
+        if (error || !q) throw error || new Error("Quotation not found.");
+        const existing = await sChildren<{ id: number }>("invoice_docs", "quotation_id", quotationId, [{ col: "id", asc: true }], tx);
+        if (existing.length) return existing[0].id;
+        const qd = q as QuotationDoc;
+        const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [{ col: "position", asc: true }], tx);
+        if (!items.length || items.length > 500) throw new Error("A quotation needs between 1 and 500 lines before conversion.");
+        const numbers = await sList<{ number: string }>("invoice_docs", undefined, "number", tx);
+        const due = new Date(); due.setDate(due.getDate() + 30);
+        const header = {
+          number: pickDocNumber("invoice", numbers.map(row => row.number), formats),
+          status: "draft", doc_type: "invoice", quotation_id: quotationId,
+          template: qd.template || company.default_template || "minimal",
+          accent: qd.accent || company.default_accent || "#0A0A0A",
+          currency: qd.currency, fx_rate: qd.fx_rate ?? null, tax_country_code: qd.tax_country_code,
+          seller_name: qd.seller_name || company.name, seller_address: qd.seller_address ?? null,
+          seller_trn: qd.seller_trn ?? null, seller_email: qd.seller_email ?? null,
+          seller_phone: qd.seller_phone ?? null, logo: qd.logo ?? null,
+          customer_id: qd.customer_id ?? null, customer_name: qd.customer_name,
+          customer_address: qd.customer_address ?? null, customer_trn: qd.customer_trn ?? null,
+          customer_email: qd.customer_email ?? null, issue_date: todayYmd(), due_date: localYmd(due),
+          notes: qd.notes ?? null, terms: qd.terms ?? null, tax_rate: qd.tax_rate ?? 0,
+          discount: qd.discount ?? 0, round_off: qd.round_off ?? false,
+          custom_columns: qd.custom_columns ?? [], show_stamp: qd.show_stamp ?? false,
+          show_signature: qd.show_signature ?? false,
+        };
+        const lines = items.map((it, position) => ({
+          product_id: it.product_id ?? null,
+          description: it.sku ? `${it.product} (${it.sku})` : it.product,
+          qty: it.qty, unit: it.unit ?? null, ...convertedLine(it, qd.unit_price_formula), position,
+        }));
+        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        await checkFreeInvoiceCap(invoicesThisMonth);
+        if (!local) {
+          const { data, error: conversionError } = await client.rpc("filey_convert_quotation", {
+            p_id: quotationId, p_header: header, p_items: lines,
+            p_updated_at: (q as { updated_at?: string }).updated_at ?? null,
+          });
+          if (conversionError?.code === "PGRST202") throw new Error("Cloud quotation conversion needs the CRM sales workflow database update. Ask your administrator to apply the 2026-09-12 migration, then retry.");
+          if (conversionError) throw conversionError;
+          if (!Number.isSafeInteger(Number(data)) || Number(data) <= 0) throw new Error("The conversion result could not be confirmed. Refresh sales documents before retrying.");
+          return Number(data);
+        }
+        const id = await sInsert("invoice_docs", clean(header), tx);
+        await sInsertMany("invoice_doc_items", lines.map(line => ({ ...line, invoice_id: id })), tx);
+        await sUpdate("quotations", quotationId, { status: "accepted" }, tx);
+        return id;
+      };
+      return local ? withLocalTransaction(convert) : convert(client);
     }),
 };
 
@@ -4419,6 +5078,8 @@ export interface PoPayment {
   paid_at: string;
 }
 export interface PoSummary {
+  /** AED per document currency unit, frozen when saved. */
+  fx_rate?: number | null;
   id: number;
   po_number: string;
   supplier_id?: number;
@@ -4437,6 +5098,10 @@ export interface PoSummary {
   tax_rate?: number;
 }
 export interface PurchaseOrder {
+  /** AED per document currency unit, frozen when saved. */
+  fx_rate?: number | null;
+  /** Frozen jurisdiction; changing currency never changes tax treatment. */
+  tax_country_code?: string;
   id: number;
   po_number: string;
   supplier_id?: number;
@@ -4554,20 +5219,17 @@ export const pos = {
             { col: "id", asc: false },
           ]),
           sList<Supplier>("suppliers"),
-          // One batched fetch of just the FK, counted in JS below — the
-          // local shim has no embedded count/join, so a subquery select
-          // wouldn't work offline (same pattern as pos.get).
-          sList<{ po_id: number | string }>(
-            "purchase_order_items",
-            undefined,
-            "po_id"
+          sList<PoItem & { po_id: number | string }>(
+            "purchase_order_items", undefined, "po_id,description,quantity,unit_cost,custom"
           ),
         ]);
         const byId = new Map(supRows.map((s) => [s.id, s]));
-        const itemCounts = new Map<number, number>();
+        const itemsByPo = new Map<number, PoItem[]>();
         for (const it of itemRows) {
           const k = Number(it.po_id);
-          itemCounts.set(k, (itemCounts.get(k) ?? 0) + 1);
+          const group = itemsByPo.get(k) ?? [];
+          group.push(it);
+          itemsByPo.set(k, group);
         }
         return rows.map((r) => ({
           id: r.id,
@@ -4577,8 +5239,9 @@ export const pos = {
           status: r.status,
           template: r.template ?? "uae",
           currency: r.currency ?? "AED",
-          total: Number(r.total),
-          items_count: itemCounts.get(Number(r.id)) ?? 0,
+          fx_rate: r.fx_rate,
+          total: purchaseTotals(r, itemsByPo.get(Number(r.id)) ?? []).total,
+          items_count: itemsByPo.get(Number(r.id))?.length ?? 0,
           order_date: r.order_date,
           expected_date: r.expected_date ?? undefined,
           shared: r.shared ?? false,
@@ -4620,7 +5283,7 @@ export const pos = {
           po_number: d.po_number,
           supplier_id: d.supplier_id ?? undefined,
           status: d.status,
-          total: Number(d.total),
+          total: purchaseTotals(d, filtered).total,
           order_date: d.order_date,
           expected_date: d.expected_date ?? undefined,
           notes: d.notes ?? undefined,
@@ -4634,42 +5297,22 @@ export const pos = {
   save: (input: PoInput) =>
     online(async () => {
       const { items, id, ...fields } = input;
-      // Trust the caller's precomputed total (it accounts for unit_price_formula
-      // line amounts); only recompute the naive qty*cost when none was passed.
-      const total =
-        (input as { total?: number }).total != null
-          ? Number((input as { total?: number }).total)
-          : items.reduce((s, it) => s + it.quantity * it.unit_cost, 0);
+      const total = purchaseTotals(input, items).total;
       const row = clean({ ...fields, total } as Record<string, unknown>);
-      let poId: number;
-      if (id && id > 0) {
-        await sUpdate("purchase_orders", id, row);
-        const { error } = await sb()
-          .from("purchase_order_items")
-          .delete()
-          .eq("po_id", id);
-        if (error) throw error;
-        poId = id;
-      } else {
-        poId = await sInsert("purchase_orders", row);
+      if (row.currency !== "AED" && !row.fx_rate) {
+        const rates = await getExchangeRates().catch(() => ({} as Record<string, number>));
+        if (rates[String(row.currency)] > 0) row.fx_rate = rates[String(row.currency)];
       }
-      if (items.length) {
-        const { error } = await sb()
-          .from("purchase_order_items")
-          .insert(
-            items.map((it, i) => ({
-              po_id: poId,
-              product_id: it.product_id ?? null,
-              description: it.description,
-              quantity: it.quantity,
-              unit_cost: it.unit_cost,
-              unit: it.unit ?? null,
-              custom: it.custom ?? null,
-              position: i,
-            }))
-          );
-        if (error) throw error;
+      if (!id && !row.tax_country_code) {
+        const company = await billing.getCompany();
+        if (company.country_code) row.tax_country_code = company.country_code;
       }
+      validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
+      const poId = await saveDocumentLines("purchase_orders", "purchase_order_items", "po_id", row,
+        items.map(it => ({
+          product_id: it.product_id ?? null, description: it.description, quantity: it.quantity,
+          unit_cost: it.unit_cost, unit: it.unit ?? null, custom: it.custom ?? null,
+        })), id);
       // Post to Accounting once the PO is received/done; clear it otherwise.
       const saved = { ...row, id: poId };
       if (PO_DONE((row as Record<string, unknown>).status))
@@ -4720,6 +5363,18 @@ export const pos = {
   receive: (poId: number) =>
     online(async () => {
       const po = await pos.get(poId);
+      if (String(po.status).toLowerCase() === "received" || (po as unknown as { stock_received?: boolean }).stock_received) {
+        await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
+        return;
+      }
+      if (!isLocalMode()) {
+        const rates = await getExchangeRates();
+        const fx = docAmountInAed(1, po.currency, undefined, rates);
+        const { error } = await sb().rpc("filey_receive_purchase_order", { p_id: poId, p_fx: fx });
+        if (error) throw error;
+        await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
+        return;
+      }
       // Same rule as a supplier bill: stock is valued in the base currency, so
       // a PO raised in USD converts before it moves the average cost.
       const poRates = await getExchangeRates().catch(() => ({}));
@@ -4739,7 +5394,7 @@ export const pos = {
           ref: po.po_number ? `PO ${po.po_number}` : `PO #${poId}`,
         });
       }
-      await sUpdate("purchase_orders", poId, { status: "received" });
+      await sUpdate("purchase_orders", poId, { status: "received", stock_received: true });
       // Receiving = done → post Purchases / Accounts Payable to Accounting.
       await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
     }),
@@ -4759,8 +5414,8 @@ export const pos = {
     readCached<{ po_id: number; amount: number }[]>(
       "po_payments:all",
       async () => {
-        const { data } = await sb().from("po_payments").select("po_id,amount");
-        return ((data ?? []) as { po_id: number | string; amount: number | string }[]).map(
+        const data = await sList<{ po_id: number | string; amount: number | string }>("po_payments", undefined, "id,po_id,amount");
+        return data.map(
           (p) => ({ po_id: Number(p.po_id), amount: Number(p.amount) || 0 })
         );
       },
@@ -4883,12 +5538,12 @@ export const advances = {
     online(async () => {
       const tag = `applied:inv#${invoiceId}`;
       const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
+      // Matched on the tag alone, not the party. The tag already names one
+      // invoice, so scoping the purge by party_id only meant that changing an
+      // invoice's customer stranded the old consumption on the old customer —
+      // credit permanently eaten by an invoice that is no longer theirs.
       for (const r of rows)
-        if (
-          r.party_type === "customer" &&
-          String(r.party_id) === String(partyId) &&
-          r.note === tag
-        )
+        if (r.party_type === "customer" && r.note === tag)
           await sDelete("advances", r.id);
       if (amount > 0)
         await sInsert("advances", {
@@ -4914,8 +5569,16 @@ export const advances = {
     invoiceId?: number
   ): Promise<number> => {
     const rows = await advances.forParty("customer", partyId);
+    // `tag &&` is load-bearing. A deposit entered without a note is stored with
+    // note = null, and on a NEW invoice there is no id, so the tag was null
+    // too — `a.note === tag` matched every plain deposit and excluded it. The
+    // editor asked how much credit was available before the invoice had been
+    // saved and was told zero, however much the customer had on account.
     const tag = invoiceId ? `applied:inv#${invoiceId}` : null;
-    return rows.reduce((s, a) => s + (a.note === tag ? 0 : Number(a.amount)), 0);
+    return rows.reduce(
+      (s, a) => s + (tag && a.note === tag ? 0 : Number(a.amount)),
+      0
+    );
   },
 };
 
@@ -4927,6 +5590,7 @@ export interface ReceiptSummary {
   status: string;
   template: string;
   amount: number;
+  currency?: string;
   payment_date: string;
   payment_method?: string;
   shared?: boolean;
@@ -4934,6 +5598,7 @@ export interface ReceiptSummary {
 }
 
 export interface ReceiptDoc {
+  tax_country_code?: string;
   id: number;
   number: string;
   status: string;
@@ -4964,6 +5629,8 @@ export interface ReceiptDoc {
   show_stamp?: boolean;
   show_logo?: boolean;
   show_signature?: boolean;
+  stamp?: Record<string, unknown> | null;
+  signature?: Record<string, unknown> | null;
   shared?: boolean;
   share_token?: string;
   created_at: string;
@@ -4989,6 +5656,7 @@ export const receipts = {
           template: r.template,
           amount: Number(r.amount),
           payment_date: r.issue_date,
+          currency: r.currency,
           payment_method: r.payment_method,
           shared: r.shared ?? false,
           updated_at: r.updated_at,
@@ -5014,6 +5682,11 @@ export const receipts = {
     online(async () => {
       const { id, ...fields } = input;
       const row = clean(fields as Record<string, unknown>);
+      if (!id && !row.tax_country_code) {
+        const company = await billing.getCompany();
+        if (company.country_code) row.tax_country_code = company.country_code;
+      }
+      validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
       if (id && id > 0) {
         await sUpdate("payment_receipts", id, row);
         return id;
@@ -5104,7 +5777,13 @@ export interface Invitation {
   modules?: string[] | null;
   status: string;
   created_at: string;
+  expires_at: string;
+  email_status: "not_sent" | "sending" | "accepted" | "failed" | "unknown";
+  last_sent_at?: string | null;
+  email_error?: string | null;
+  workspace_name?: string;
 }
+export interface TeamWorkspace { id: string; name: string; role: string }
 
 // ===== Company message board =====
 export interface OrgMessage {
@@ -5119,6 +5798,45 @@ export interface OrgMessage {
 }
 
 export const messages = {
+  /** Page conversations rather than truncating replies away from their parent. */
+  page: async (channel: string, before?: number): Promise<{ rows: OrgMessage[]; next: number | null }> => {
+    if (isLocalMode()) {
+      const rows = (await sList<OrgMessage>("org_messages", [{ col: "id", asc: false }]))
+        .filter(m => (m.channel ?? "general") === channel);
+      const activity = new Map<number,number>();
+      rows.forEach(m => activity.set(m.parent_id || m.id, Math.max(activity.get(m.parent_id || m.id) || 0,m.id)));
+      const roots = rows.filter(m => !m.parent_id && (before == null || activity.get(m.id)! < before)).sort((a,b) => activity.get(b.id)!-activity.get(a.id)!).slice(0,30);
+      const ids = new Set(roots.map(m => m.id));
+      return {rows:rows.filter(m => ids.has(m.id) || ids.has(m.parent_id ?? -1)).map(localMessage),next:roots.length === 30 ? activity.get(roots[roots.length-1].id)! : null};
+    }
+    const [{data,error},members] = await Promise.all([
+      cdb().rpc("filey_message_page",{p_channel:channel,p_before:before ?? null,p_limit:30}), org.members(),
+    ]);
+    if (error) throw error;
+    const names = new Map(members.map(m => [m.user_id,m.name]));
+    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"})),next:data.next};
+  },
+  thread: async (channel: string, id: number): Promise<OrgMessage[]> => {
+    if (!Number.isSafeInteger(id) || id <= 0) return [];
+    if (isLocalMode()) return (await sList<OrgMessage>("org_messages")).filter(m => (m.channel ?? "general") === channel && (m.id === id || m.parent_id === id)).map(localMessage);
+    const [{data,error},members] = await Promise.all([
+      cdb().from("org_messages").select("*").eq("channel",channel).or(`id.eq.${id},parent_id.eq.${id}`).order("id"),org.members(),
+    ]);
+    if (error) throw error;
+    const names = new Map(members.map(m => [m.user_id,m.name]));
+    return ((data ?? []) as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"}));
+  },
+  unread: async (): Promise<Record<string,number>> => {
+    if (isLocalMode()) return {};
+    const {data,error} = await cdb().rpc("filey_unread_channels");
+    if (error) throw error;
+    return Object.fromEntries((data ?? []).map((r: {channel:string;unread:number}) => [r.channel,Number(r.unread)]));
+  },
+  markRead: async (channel: string, last: number) => {
+    if (isLocalMode()) return;
+    const {error} = await cdb().rpc("filey_mark_channel_read",{p_channel:channel,p_last:last});
+    if (error) throw error;
+  },
   /** Messages in one channel, or every channel when omitted. */
   list: (channel?: string) =>
     readCached<OrgMessage[]>(
@@ -5136,7 +5854,7 @@ export const messages = {
           : rows;
         return mine.slice(0, 200).map((r) => ({
           id: r.id,
-          user_id: r.user_id,
+          user_id: r.user_id ?? (isLocalMode() ? localWorkspaceOwner() || "local-user" : ""),
           body: r.body,
           author: byId.get(r.user_id)?.name ?? "Team member",
           parent_id: r.parent_id ?? null,
@@ -5146,8 +5864,14 @@ export const messages = {
       },
       []
     ),
-  post: (body: string, parentId?: number | null, channel = "general") => {
-    const row: Record<string, unknown> = { body, channel };
+  post: async (body: string, parentId?: number | null, channel = "general") => {
+    if (!body.trim() || body.trim().length > 10000) throw new Error("Messages must contain 1 to 10,000 characters.");
+    if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(channel)) throw new Error("Invalid channel name.");
+    if (parentId && isLocalMode()) {
+      const parents = await sList<OrgMessage>("org_messages");
+      if (!parents.some(m => m.id === parentId && !m.parent_id && (m.channel ?? "general") === channel)) throw new Error("Reply must belong to this channel.");
+    }
+    const row: Record<string, unknown> = { body:body.trim(), channel };
     if (parentId) row.parent_id = parentId;
     return write({ k: "insert", t: "org_messages", row }, () =>
       sInsert("org_messages", row).then(() => undefined), undefined
@@ -5158,6 +5882,10 @@ export const messages = {
       sDelete("org_messages", id), undefined
     ),
 };
+
+function localMessage(message: OrgMessage): OrgMessage {
+  return {...message,user_id:message.user_id || localWorkspaceOwner() || "local-user",author:message.author || "You",channel:message.channel || "general"};
+}
 
 // ===== Notifications (per-user inbox) =====
 export interface Notification {
@@ -5180,7 +5908,7 @@ export const notifs = {
         .limit(50);
       if (error) throw error;
       return (data ?? []) as Notification[];
-    }),
+    }, false),
   markRead: (id: number) =>
     online(async () => {
       const { error } = await sb()
@@ -5204,8 +5932,12 @@ export const org = {
     readCached<Organization | null>(
       "organization",
       async () => {
-        const rows = await sList<Organization>("organizations", undefined, "*", cdb());
-        return rows[0] ?? null;
+        const {data:id,error:orgError} = await cdb().rpc("current_org");
+        if (orgError) throw orgError;
+        if (!id || id === "default") return null;
+        const {data,error} = await cdb().from("organizations").select("*").eq("id",id).maybeSingle();
+        if (error) throw error;
+        return data as Organization | null;
       },
       null
     ),
@@ -5213,30 +5945,32 @@ export const org = {
     readCached<OrgMember[]>(
       "org_members",
       async () => {
-        const [mems, profs] = await Promise.all([
-          sList<any>("org_members", [{ col: "id", asc: true }], "*", cdb()),
-          sList<any>("profiles", undefined, "*", cdb()),
-        ]);
-        const byId = new Map(profs.map((p) => [p.id, p]));
-        return mems.map((m) => ({
-          id: m.id,
-          org_id: m.org_id,
-          user_id: m.user_id,
-          role: m.role,
-          modules: m.modules ?? null,
-          name: byId.get(m.user_id)?.name ?? "—",
-          email: byId.get(m.user_id)?.email ?? "",
-        })) as OrgMember[];
+        const {data,error} = await cdb().rpc("filey_team_members");
+        if (error) throw error;
+        return (data ?? []) as OrgMember[];
       },
       []
     ),
   /** Create a new organization; returns its id. */
   create: (name: string) =>
     online(async () => {
-      const id = await sInsert("organizations", { name }, cdb());
-      await sInsert("org_members", { org_id: String(id), role: "owner" }, cdb());
-      return String(id);
+      const {data,error} = await cdb().rpc("filey_create_workspace",{p_name:name});
+      if (error) throw error;
+      return data as string;
     }),
+  workspaces: () => online(async () => {
+    const {data,error} = await cdb().rpc("filey_workspaces");
+    if (error) throw error;
+    return (data ?? []) as TeamWorkspace[];
+  },false),
+  switchWorkspace: (id: string) => online(async () => {
+    const client = cdb();
+    setWorkspaceTransition(true);
+    try {
+      const {error} = await client.rpc("filey_switch_workspace",{p_id:id});
+      if (error) throw error;
+    } finally { setWorkspaceTransition(false); }
+  }),
   setRole: (memberId: number, role: string) =>
     write(
       { k: "update", t: "org_members", id: memberId, row: { role } },
@@ -5257,44 +5991,53 @@ export const org = {
   invites: () =>
     readCached<Invitation[]>(
       "invitations",
-      () =>
-        sList<Invitation>(
-          "invitations",
-          [{ col: "created_at", asc: false }],
-          "*",
-          cdb()
-        ),
+      async () => {
+        const {data:id,error:orgError} = await cdb().rpc("current_org");
+        if (orgError) throw orgError;
+        const {data,error} = await cdb().from("invitations").select("*").eq("org_id",id).eq("status","pending").order("created_at",{ascending:false});
+        if (error) throw error;
+        return (data ?? []) as Invitation[];
+      },
       []
     ),
   invite: (email: string, role: string, modules: string[] | null) =>
-    online(() =>
-      sInsert(
-        "invitations",
-        { email: email.trim().toLowerCase(), role, modules },
-        cdb()
-      ).then(() => undefined)
-    ),
+    online(() => sendTeamInvitation({email:email.trim().toLowerCase(),role,modules})),
+  resendInvite: (id: string, resend: boolean) => online(() => sendTeamInvitation({invite:id,resend})),
   revokeInvite: (id: string) =>
     online(async () => {
-      const { error } = await cdb().from("invitations").delete().eq("id", id);
+      const { error } = await cdb().rpc("filey_revoke_invitation",{p_id:id});
       if (error) throw error;
     }),
   /** Pending invitations addressed to the signed-in user's email. */
   myInvites: () =>
     online(async () => {
-      const { data, error } = await cdb()
-        .from("invitations")
-        .select("*")
-        .eq("status", "pending");
+      const {data,error} = await cdb().rpc("filey_my_invitations");
       if (error) throw error;
       return (data ?? []) as Invitation[];
-    }),
+    }, false),
   acceptInvite: (id: string) =>
     online(async () => {
-      const { error } = await cdb().rpc("accept_invitation", { invite: id });
-      if (error) throw error;
+      const client = cdb();
+      setWorkspaceTransition(true);
+      try {
+        const { error } = await client.rpc("accept_invitation", { invite: id });
+        if (error) throw error;
+      } finally { setWorkspaceTransition(false); }
     }),
 };
+
+async function sendTeamInvitation(body: Record<string,unknown>): Promise<{id:string;status:string;error?:string}> {
+  // Provider idempotency is handled by the invitation's persistent attempt id.
+  const {data,error} = await invokeFn(cdb(),"team-invite",{body},0);
+  if (error) {
+    const response = (error as {context?:Response}).context;
+    const detail = response ? await response.json().catch(() => null) : null;
+    throw new Error(detail?.error || (error as Error).message || "Could not prepare invitation.");
+  }
+  const result = data as {id:string;status:string;error?:string};
+  if (!result?.id) throw new Error(result?.error || "Could not prepare invitation.");
+  return result;
+}
 
 /* ===== Links =====
  *
@@ -5325,6 +6068,12 @@ export const links = {
             .eq("to_type", type)
             .eq("to_id", id),
         ]);
+        // A read that FAILED is not evidence there are no links. Swallowing the
+        // error rendered "nothing linked here", and readCached would then store
+        // that empty list as this record’s truth. Throw instead — readCached
+        // falls back to the last good copy.
+        if (out.error) throw out.error;
+        if (inc.error) throw inc.error;
         const rows = [
           ...((out.data ?? []) as any[]).map((r) => ({ r, direction: "outgoing" as const })),
           ...((inc.data ?? []) as any[]).map((r) => ({ r, direction: "incoming" as const })),
@@ -5396,7 +6145,7 @@ export const links = {
       // constraint error. Postgres has a unique index for this, but the
       // offline shim has neither that nor upsert's onConflict — so the check
       // is done here, where both modes get it.
-      const { data: dupe } = await sb()
+      const { data: dupe, error: dupeError } = await sb()
         .from("entity_links")
         .select("id")
         .eq("from_type", row.from_type)
@@ -5404,6 +6153,10 @@ export const links = {
         .eq("to_type", row.to_type)
         .eq("to_id", row.to_id)
         .eq("kind", row.kind);
+      // A failed check read as "no duplicate" and fell through to the insert.
+      // Offline that is the only guard there is — the shim has no unique index —
+      // so one failed read left a second identical edge on the graph.
+      if (dupeError) throw dupeError;
       const existing = ((dupe ?? []) as { id: number }[])[0];
       if (existing) return existing.id;
 
@@ -5427,7 +6180,10 @@ export const links = {
     const col = ENTITY_LABEL_COL[type];
     let q = sb().from(ENTITY_TABLE[type]).select(`id, ${col}`).limit(limit);
     if (term.trim()) q = q.ilike(col, `%${term.trim()}%`);
-    const { data } = await q;
+    const { data, error } = await q;
+    // "Nothing found" and "the search broke" look identical to someone staring
+    // at an empty picker. The caller catches this and can say which it was.
+    if (error) throw error;
     return ((data ?? []) as any[]).map((r) => ({
       id: Number(r.id),
       label: String(r[col] ?? "").trim() || `#${r.id}`,
@@ -5463,7 +6219,7 @@ export const channels = {
     const clean = name.trim().toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/^-+|-+$/g, "");
     // Rejects rather than throwing synchronously: this reads as async, and a
     // caller's .catch() would never see a sync throw.
-    if (!clean) throw new Error("Give the channel a name.");
+    if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(clean)) throw new Error("Use a channel name of 1 to 80 letters or numbers.");
     const row = { name: clean, purpose: purpose?.trim() || null, shared: true };
     return write({ k: "insert", t: "org_channels", row }, async () => {
       const existing = await sList<OrgChannel>("org_channels");
@@ -5495,13 +6251,9 @@ export const emailLog = {
   /** Everything sent, newest first. */
   list: (limit = 100) =>
     readCached<EmailMessage[]>(
-      "email_messages",
-      async () =>
-        (await sList<EmailMessage>("email_messages", [{ col: "sent_at", asc: false }])).slice(
-          0,
-          limit
-        ),
-      []
+      `email_messages:recent:${limit}`,
+      () => sList<EmailMessage>("email_messages", [{ col: "sent_at", asc: false }], "*", null, limit),
+      [], ["email_messages"]
     ),
   /** Correspondence about one record — what a customer page shows. */
   forEntity: (entityType: string, entityId: number) =>
@@ -5562,10 +6314,9 @@ export interface CallLog {
 export const callLog = {
   list: (limit = 100) =>
     readCached<CallLog[]>(
-      "call_logs",
-      async () =>
-        (await sList<CallLog>("call_logs", [{ col: "started_at", asc: false }])).slice(0, limit),
-      []
+      `call_logs:recent:${limit}`,
+      () => sList<CallLog>("call_logs", [{ col: "started_at", asc: false }], "*", null, limit),
+      [], ["call_logs"]
     ),
   forEntity: (entityType: string, entityId: number) =>
     readCached<CallLog[]>(
@@ -5611,4 +6362,28 @@ export const callLog = {
     write({ k: "delete", t: "call_logs", id }, () =>
       sDelete("call_logs", id), undefined
     ),
+};
+
+
+/** Project delivery and customer service share the same acknowledged, versioned record. */
+export const work = {
+  list: () => readCached<WorkItem[]>("work_items", () => sList<WorkItem>("work_items", [{ col: "updated_at", asc: false }]), []),
+  save: async (input: WorkInput, id?: number, revision?: number): Promise<number> => {
+    const row = validateWorkItem(input);
+    const result = await online(async () => {
+      for (const [table, linkedId] of [["crm_customers", row.customer_id], ["invoice_docs", row.invoice_id]] as const) {
+        if (linkedId === null) continue;
+        const { data, error } = await sb().from(table).select("id").eq("id", linkedId).single();
+        if (error || !data) throw new Error("A linked customer or invoice is unavailable. Reload and select it again.");
+      }
+      const updated_at = new Date().toISOString();
+      if (id === undefined) return sInsert("work_items", { ...row, revision: 1, updated_at });
+      if (!Number.isSafeInteger(revision) || revision! < 1) throw new Error("Reload this record before saving.");
+      const { data, error } = await sb().from("work_items").update({ ...row, revision: revision! + 1, updated_at }).eq("id", id).eq("revision", revision).eq("kind", row.kind).select("id").single();
+      if (error || !data) throw new Error("This record changed or access was removed. Close and reopen it before applying your edits.");
+      return Number(data.id);
+    });
+    markWrite(); notifyDataChanged();
+    return result;
+  },
 };

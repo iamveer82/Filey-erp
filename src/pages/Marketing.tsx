@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Copy, Download, Globe, Sparkles, UserSearch } from "lucide-react";
 
-import { crm, billing, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
+import { crm, billing, getCacheScope, type CrmCustomer } from "../lib/api";
 import {
   buildLeads,
   leadStats,
@@ -11,12 +11,15 @@ import {
   HOT_SCORE,
   type Lead,
 } from "../lib/marketing";
+import { getExchangeRates } from "../lib/exchange-rates";
+import { effectiveDataMode } from "../lib/dataMode";
 import { downloadCsv } from "../lib/csv";
 import CampaignsPanel from "../components/CampaignsPanel";
 import OptOutsPanel from "../components/OptOutsPanel";
 import { enrichFromWebsite, type CompanyDetails } from "../lib/scout";
 import { reachReady } from "../lib/reach";
 import { useUI } from "../lib/ui";
+import { useLiveSync } from "../lib/realtime";
 import { aed, errMsg, todayYmd } from "../lib/format";
 import {
   PageHeader,
@@ -29,9 +32,7 @@ import {
   MetricCard,
 } from "../components/ui";
 
-/* Marketing: who to contact next, ranked from the books. The scoring is
- * deterministic (lib/marketing → lib/scout); the only network call on this page
- * is the optional per-lead enrichment, which reads a company's own website. */
+/* Rankings use the same frozen document exchange rates as Reports. */
 
 const tone = (score: number) =>
   score >= HOT_SCORE ? "success" : score >= 30 ? "warn" : "info";
@@ -39,8 +40,8 @@ const tone = (score: number) =>
 export default function Marketing() {
   const { toast, confirm } = useUI();
   const nav = useNavigate();
-  const [customers, setCustomers] = useState<CrmCustomer[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceDocSummary[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const request = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -48,23 +49,31 @@ export default function Marketing() {
   const [enrichFor, setEnrichFor] = useState<Lead | null>(null);
   const [tab, setTab] = useState<"leads" | "campaigns" | "optouts">("leads");
 
-  const load = () => {
+  const load = useCallback(async () => {
+    const version = ++request.current;
+    const scope = getCacheScope();
+    const mode = effectiveDataMode();
+    const current = () => version === request.current && scope === getCacheScope() && mode === effectiveDataMode();
+    setLoading(true);
     setError("");
-    return Promise.all([
-      crm.customers().then(setCustomers),
-      billing.listDocs("sales").then(setInvoices),
-    ])
-      .catch((e) => setError(`Could not load leads: ${errMsg(e)}`))
-      .finally(() => setLoading(false));
-  };
-  useEffect(() => {
-    load();
+    try {
+      const [customers, invoices, rates] = await Promise.all([crm.customers(), billing.listDocs("sales"), getExchangeRates()]);
+      const next = buildLeads(customers, invoices, todayYmd(), rates);
+      if (current()) setLeads(next);
+    } catch (error) {
+      if (current()) { setLeads([]); setError(`Could not load leads: ${errMsg(error)}`); }
+    } finally {
+      if (current()) setLoading(false);
+    }
   }, []);
+  useEffect(() => {
+    void load();
+    // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { request.current++; };
+  }, [load]);
+  useLiveSync(load);
 
-  const leads = useMemo(
-    () => buildLeads(customers, invoices, todayYmd()),
-    [customers, invoices]
-  );
   const stats = useMemo(() => leadStats(leads), [leads]);
   const duplicates = useMemo(() => findDuplicates(leads), [leads]);
 
@@ -90,7 +99,7 @@ export default function Marketing() {
             <button
               className="btn-ghost"
               disabled={!leads.length}
-              onClick={() => downloadCsv("leads", leadsToCsvRows(shown))}
+              onClick={() => downloadCsv("leads", leadsToCsvRows(shown)).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))}
             >
               <Download size={15} /> Export CSV
             </button>
@@ -206,7 +215,7 @@ export default function Marketing() {
             pageSize={10}
             rowKey={(l) => l.customer.id}
             empty={
-              customers.length === 0
+              leads.length === 0
                 ? "No customers yet - add one and they'll be ranked here"
                 : "No leads match your search or filters"
             }
@@ -266,7 +275,7 @@ export default function Marketing() {
                 label: "Actions",
                 render: (l) => (
                   <button
-                    className="btn-ghost h-7 px-2 text-[12.5px]"
+                    className="btn-ghost"
                     disabled={!l.domain || !reachReady()}
                     title={
                       !reachReady()
@@ -353,6 +362,7 @@ function EnrichModal({
   const [details, setDetails] = useState<CompanyDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!lead?.domain) return;
@@ -382,29 +392,33 @@ function EnrichModal({
   const fields = Object.keys(patch) as (keyof CrmCustomer)[];
 
   const apply = async () => {
-    const ok = await confirm({
-      title: `Update ${c.name}`,
-      message: `Save ${fields.join(", ")} from ${details?.source}?`,
-      confirmLabel: "Save",
-    });
-    if (!ok) return;
+    if (saving || busy || !fields.length) return;
+    setSaving(true);
     try {
+      const ok = await confirm({
+        title: `Update ${c.name}`,
+        message: `Save ${fields.join(", ")} from ${details?.source}?`,
+        confirmLabel: "Save",
+      });
+      if (!ok) return;
       await crm.updateCustomer(c.id, patch);
       toast.success(`Updated ${c.name}.`);
       onSaved();
     } catch (e) {
       toast.error(errMsg(e) || "Could not save");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <Modal open onClose={onClose} title={`Enrich ${c.name}`}>
+    <Modal open onClose={() => { if (!saving) onClose(); }} title={`Enrich ${c.name}`}>
       <p className="text-[12.5px] text-brand-500">
         Reading {lead.domain} - only what the company publishes on its own site.
       </p>
 
       {busy && <p className="mt-4 text-sm text-brand-500">Reading their website…</p>}
-      {failed && <p className="mt-4 text-sm text-danger">{failed}</p>}
+      {failed && <p role="alert" className="mt-4 text-sm text-danger">{failed}</p>}
 
       {details && (
         <div className="mt-4 space-y-2 text-sm">
@@ -421,13 +435,12 @@ function EnrichModal({
         </div>
       )}
 
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-ghost" onClick={onClose}>
+      <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+        <button className="btn-ghost" disabled={saving} onClick={onClose}>
           Close
         </button>
-        <button className="btn-primary" disabled={fields.length === 0} onClick={apply}>
-          Save{" "}
-          {fields.length ? `${fields.length} field${fields.length > 1 ? "s" : ""}` : ""}
+        <button className="btn-primary" disabled={busy || saving || fields.length === 0} onClick={apply}>
+          {saving ? "Saving…" : `Save${fields.length ? ` ${fields.length} field${fields.length > 1 ? "s" : ""}` : ""}`}
         </button>
       </div>
     </Modal>

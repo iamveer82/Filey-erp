@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useModules } from "../../lib/modules";
 import { useUI } from "../../lib/ui";
-import { cn } from "../../lib/format";
+import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
+import { Toggle } from "./PreferencesPanel";
 import AppIcon from "../../components/AppIcon";
 
 /* ---------------- Apps & Modules ----------------
@@ -15,7 +16,10 @@ const GROUP_ORDER = [
   "Purchases",
   "Inventory",
   "Accounting",
+  "Service",
+  "Team",
   "Tools",
+  "System",
 ];
 
 /** Presentation grouping only — the registry itself stays flat. */
@@ -23,7 +27,13 @@ const GROUP_BY_ID: Record<string, string> = {
   agent: "Assistant",
   overview: "Business",
   reports: "Business",
-  settings: "Business",
+  settings: "System",
+  integrations: "System",
+  marketing: "Sales",
+  projects: "Service",
+  helpdesk: "Service",
+  team: "Team",
+  comms: "Team",
   orders: "Sales",
   invoicing: "Sales",
   quoting: "Sales",
@@ -66,103 +76,65 @@ export default function AppsManager() {
   const enabled = modules.filter((m) => isEnabled(m.id)).length;
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <div className="px-6 pt-5 pb-4 border-b border-border flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[15px] font-semibold text-ink">
-            Apps &amp; Modules
-          </div>
-          <div className="text-[13px] text-muted-foreground mt-1">
-            Turn off modules you don&apos;t use to keep your sidebar focused.
-            Turn them back on any time.
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[12.5px] text-muted-foreground">
-            {enabled} of {modules.length} enabled
-          </span>
+    <SettingsPanel>
+      <SettingsSection
+        title="Your workspace"
+        description="Choose which modules appear in the sidebar. You can turn them back on at any time."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{enabled}</span> of{" "}
+            {modules.length} modules enabled
+          </p>
           <button
             onClick={() => {
               enableAll();
               toast.success("All modules enabled");
             }}
-            className="h-8 px-3 rounded-md text-[12.5px] border border-border hover:bg-hover text-foreground cursor-pointer transition-colors"
+            className="btn-ghost"
           >
             Enable all
           </button>
         </div>
-      </div>
-
-      <div className="p-6 space-y-6">
-        {groups.map(([group, items]) => (
-          <div key={group}>
-            <div className="text-[12px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-              {group}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {items.map((m) => {
-                const on = isEnabled(m.id);
-                return (
-                  <div
-                    key={m.id}
-                    className={cn(
-                      "rounded-lg border p-3 flex items-center gap-3 transition-colors",
-                      on ? "border-border bg-card" : "border-border bg-hover/40"
+      </SettingsSection>
+      {groups.map(([group, items]) => (
+        <SettingsSection key={group} title={group}>
+          <div className="divide-y divide-border">
+            {items.map((module) => (
+              <div
+                key={module.id}
+                className="flex min-w-0 items-center gap-3 py-3 first:pt-0 last:pb-0"
+              >
+                <AppIcon
+                  name={module.icon}
+                  className="h-5 w-5 shrink-0 text-muted-foreground"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {module.label}
+                    {module.core && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        Always on
+                      </span>
                     )}
-                  >
-                    <div
-                      className={cn(
-                        "h-8 w-8 rounded-md grid place-items-center shrink-0",
-                        on
-                          ? "bg-primary-500/10 text-primary-600 dark:text-primary-400"
-                          : "bg-hover text-muted-foreground"
-                      )}
-                    >
-                      <AppIcon name={m.icon} className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13.5px] font-medium text-foreground truncate">
-                        {m.label}
-                      </div>
-                      {m.core && (
-                        <div className="text-[11px] text-muted-foreground">
-                          Core module
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      role="switch"
-                      aria-checked={on}
-                      aria-label={`Toggle ${m.label}`}
-                      onClick={() => !m.core && toggle(m.id)}
-                      disabled={m.core}
-                      title={
-                        m.core
-                          ? "Core module cannot be disabled"
-                          : on
-                            ? "Disable"
-                            : "Enable"
-                      }
-                      className={cn(
-                        "h-5 w-9 rounded-full transition-colors shrink-0",
-                        on ? "bg-primary-400" : "bg-border",
-                        m.core ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "block h-4 w-4 rounded-full bg-white shadow transition-transform",
-                          on ? "translate-x-4" : "translate-x-0.5"
-                        )}
-                      />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
+                  </p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                    {module.desc}
+                  </p>
+                </div>
+                <Toggle
+                  label={`Toggle ${module.label}`}
+                  on={isEnabled(module.id)}
+                  onChange={() => {
+                    if (!module.core) toggle(module.id);
+                  }}
+                  disabled={module.core}
+                />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
+        </SettingsSection>
+      ))}
+    </SettingsPanel>
   );
 }

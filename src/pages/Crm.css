@@ -1,0 +1,42 @@
+.crm-workspace {
+  min-width: 0;
+}
+.crm-navigation {
+  scrollbar-width: thin;
+  flex-wrap: nowrap;
+}
+.crm-toolbar .input,
+.crm-toolbar .select {
+  font-size: 13px;
+}
+.crm-board {
+  scrollbar-width: thin;
+  align-items: flex-start;
+}
+.crm-board-column {
+  min-height: 22rem;
+}
+.crm-record-sheet :is(input, select, textarea) {
+  scroll-margin-block: 5rem;
+}
+.crm-record-sheet a,
+.crm-record-sheet dd {
+  overflow-wrap: anywhere;
+}
+.crm-record-sheet {
+  max-height: 100dvh;
+}
+@media (max-width: 639px) {
+  .crm-toolbar > label {
+    max-width: none;
+    flex-basis: 100%;
+  }
+  .crm-toolbar > .select {
+    flex: 1;
+    max-width: none;
+    min-width: 0;
+  }
+  .crm-board-column {
+    width: min(17rem, 84vw);
+  }
+}

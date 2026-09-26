@@ -70,9 +70,9 @@ describe("publicHttpUrl rejects non-public targets", () => {
     await refuses("http://[::ffff:a00:1]/x"); // mapped 10.0.0.1
   });
 
-  it("still allows genuinely public URLs", () => {
-    expect(() => readUrl("https://example.com/supplier")).not.toThrow();
-    // Note: not awaited — the guard runs synchronously before any fetch; an
-    // actual network call would only fail on fetch itself, never ReachError.
+  it("still allows public URLs through to the mocked reader", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("Title: Public supplier\n\nPublic details"));
+    await expect(readUrl("https://example.com/supplier")).resolves.toMatchObject({ title: "Public supplier" });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,6 +14,12 @@
 import { aiFetch } from "./ai";
 import { cloudConfigured } from "./supabase";
 import { platformCall, platformAvailable, type KeySource } from "./integrations";
+import { getCacheScope } from "./api";
+import {
+  agentStorageScope,
+  requireAgentStorageScope,
+  AGENT_STORAGE_EVENT,
+} from "./agentStorage";
 
 const STORE_KEY = "filey_zernio_config";
 const BASE = "https://zernio.com/api/v1";
@@ -27,11 +33,24 @@ export interface ZernioConfig {
 
 const DEFAULTS: ZernioConfig = { apiKey: "", enabled: false };
 
+/** Credentials follow the account/company across local and cloud modes. The
+ * old global key has no known owner; leave it untouched and require reconnect. */
+function configKey(): string | null {
+  const account = agentStorageScope() ? getCacheScope() : null;
+  return account ? `${STORE_KEY}:${encodeURIComponent(account)}` : null;
+}
+
 export function getZernioConfig(): ZernioConfig {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const key = configKey();
+    const raw = key ? localStorage.getItem(key) : null;
     if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ZernioConfig>) };
+    const saved = JSON.parse(raw) as Partial<ZernioConfig> | null;
+    return {
+      apiKey: typeof saved?.apiKey === "string" ? saved.apiKey : "",
+      enabled: saved?.enabled === true,
+      ...(typeof saved?.profileId === "string" ? { profileId: saved.profileId } : {}),
+    };
   } catch {
     console.error("Failed to parse Zernio config from localStorage");
     return { ...DEFAULTS };
@@ -39,66 +58,92 @@ export function getZernioConfig(): ZernioConfig {
 }
 
 export function setZernioConfig(patch: Partial<ZernioConfig>): ZernioConfig {
+  const scope = requireAgentStorageScope();
+  const key = configKey();
+  if (!key) throw new ZernioError("Sign in before connecting social publishing.");
   const next = { ...getZernioConfig(), ...patch };
-  localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  localStorage.setItem(key, JSON.stringify(next));
+  window.dispatchEvent(
+    new CustomEvent(AGENT_STORAGE_EVENT, { detail: { scope, key: STORE_KEY } })
+  );
   return next;
 }
 
 /** This install has its OWN Zernio key and bypasses Filey's. */
 export function usingOwnZernioKey(cfg: ZernioConfig = getZernioConfig()): boolean {
-  return cfg.enabled && !!cfg.apiKey.trim();
+  return (
+    !!agentStorageScope() &&
+    cfg.enabled &&
+    typeof cfg.apiKey === "string" &&
+    !!cfg.apiKey.trim() &&
+    cfg.apiKey === getZernioConfig().apiKey
+  );
 }
 
 /** Kept for the many callers that only ask "can I publish": own key, or
  *  Filey's via the proxy. Synchronous, so the platform answer is optimistic —
  *  a call without a session fails with a message telling the user to sign in. */
 export function zernioReady(cfg: ZernioConfig = getZernioConfig()): boolean {
-  return usingOwnZernioKey(cfg) || cloudConfigured;
+  return !!agentStorageScope() && (usingOwnZernioKey(cfg) || cloudConfigured);
 }
 
 /** Which key pays for this install's publishing. */
 export async function zernioKeySource(): Promise<KeySource> {
+  const scope = agentStorageScope();
+  if (!scope) return "none";
   if (usingOwnZernioKey()) return "own";
-  return (await platformAvailable()) ? "platform" : "none";
+  const available = await platformAvailable("zernio");
+  return scope === agentStorageScope() && available ? "platform" : "none";
 }
 
 export class ZernioError extends Error {}
 
-/** Route a read/write through Filey's key when the user hasn't supplied one.
- *  Returns undefined when the caller should fall through to the direct path. */
+/** The proxy verifies the caller's own configured social account credentials. */
 async function viaPlatform<T>(
   action: string,
   payload: Record<string, unknown> = {}
 ): Promise<T> {
-  return platformCall<T>("zernio", action, payload);
+  const scope = requireAgentStorageScope();
+  return platformCall<T>("zernio", action, payload, scope);
 }
 
-async function call<T>(
-  path: string,
-  init: RequestInit = {},
-  cfg: ZernioConfig = getZernioConfig()
-): Promise<T> {
+async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const scope = requireAgentStorageScope();
+  const cfg = getZernioConfig();
   if (!usingOwnZernioKey(cfg))
     throw new ZernioError(
       "Social publishing is off. Add your Zernio key on the Integrations page."
     );
-  const res = await aiFetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${cfg.apiKey.trim()}`,
-      accept: "application/json",
-      ...(init.body ? { "content-type": "application/json" } : {}),
-      ...(init.headers as Record<string, string>),
-    },
-  });
-  const text = await res.text();
-  if (!text) return undefined as T;
+  const method = (init.method ?? "GET").toUpperCase();
   try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new ZernioError(
-      `Zernio returned something that isn't JSON: ${text.slice(0, 200)}`
+    const res = await aiFetch(
+      `${BASE}${path}`,
+      {
+        ...init,
+        headers: {
+          authorization: `Bearer ${cfg.apiKey.trim()}`,
+          accept: "application/json",
+          ...(init.body ? { "content-type": "application/json" } : {}),
+          ...(init.headers as Record<string, string>),
+        },
+      },
+      { retries: method === "GET" || method === "HEAD" ? 3 : 0 }
     );
+    requireAgentStorageScope(scope);
+    const text = await res.text();
+    requireAgentStorageScope(scope);
+    if (!text) return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new ZernioError(
+        `Zernio returned something that isn't JSON: ${text.slice(0, 200)}`
+      );
+    }
+  } catch (error) {
+    // A late provider error may contain account information too.
+    requireAgentStorageScope(scope);
+    throw error;
   }
 }
 

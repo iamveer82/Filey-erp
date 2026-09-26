@@ -37,11 +37,11 @@ export const CORE_TOOLS = [
   "revise_invoice",
   "create_quote",
   "create_customer",
-  "create_product",
   "list_templates",
   // memory and procedure
   "remember",
   "recall",
+  "search_conversations",
   "list_skills",
   "use_skill",
   // reach for more
@@ -51,14 +51,25 @@ export const CORE_TOOLS = [
 
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
+  video: {
+    about: "Create brand/product videos from a brief or attached photo with the configured media provider. Own-key mode uses fal; the user approves generation in the chat card. Track persistent jobs",
+    tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],
+  },
+  service: {
+    about: "Projects, delivery tasks, time entries and support tickets",
+    tools: ["list_work_items", "save_work_item"],
+  },
   sales: {
-    about: "Send invoices, mark them paid, recurring billing, orders, receipts, templates",
+    about:
+      "Invoice appearance, logos, saved stamps/signatures, templates, sending, payments, recurring billing, orders and receipts",
     tools: [
       "send_invoice",
+      "export_invoice_pdf",
       "email_invoice",
       "mark_invoice_paid",
       "set_recurring",
       "set_invoice_template",
+      "update_invoice_appearance",
       "create_order",
       "create_payment_receipt",
       "list_payment_receipts",
@@ -80,11 +91,12 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: ["find_links", "link_records"],
   },
   inventory: {
-    about: "Stock levels and adjustments",
-    tools: ["adjust_stock"],
+    about: "Create products, stock levels and adjustments",
+    tools: ["create_product", "adjust_stock"],
   },
   logistics: {
-    about: "Delivery challans, goods received notes and returns — what physically moved, to whom",
+    about:
+      "Delivery challans, goods received notes and returns — what physically moved, to whom",
     tools: ["create_delivery_challan", "list_delivery_challans"],
   },
   accounting: {
@@ -111,6 +123,9 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "set_deal_stage",
       "list_deals",
       "crm_pipeline",
+      "crm_records",
+      "save_crm_record",
+      "convert_lead",
       "log_activity",
       "list_activities",
       "get_deal_contacts",
@@ -146,6 +161,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "send_gmail",
       "send_whatsapp",
       "send_whatsapp_file",
+      "send_invoice_whatsapp",
+      "prepare_invoice_whatsapp",
       "list_whatsapp_messages",
       "connect_whatsapp",
       "composio_run",
@@ -156,7 +173,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     ],
   },
   web: {
-    about: "Read and search the public web, research companies and prospects",
+    about:
+      "Keyless market data, holidays and licensed images; public web research and Filey browser windows",
     tools: [
       "read_web_page",
       "search_web",
@@ -164,6 +182,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "enrich_company_website",
       "find_prospects",
       "browser",
+      "workspace_browser",
+      "work_service",
       "read_github",
       "read_github_file",
       "search_github",
@@ -171,6 +191,11 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "read_rss",
       "read_social_page",
     ],
+  },
+  computer: {
+    about:
+      "Use a private agent browser workspace, or observe and operate Windows desktop apps",
+    tools: ["computer_use", "agent_computer"],
   },
   social: {
     about: "Post and schedule to connected social accounts",

@@ -40,6 +40,7 @@ headroom_memory.db
 *.db
 
 # Local dev scratch / CLI temp
+output/
 dev-output.txt
 dev-error.txt
 claude_cmds.sh
@@ -53,3 +54,6 @@ src-tauri/filey-key.pub
 
 # WhatsApp bridge sidecar binary (built via `bun build --compile`, see build.ps1)
 src-tauri/binaries/
+
+# Source art for tool covers — the shipped .webp live in public/tool-covers
+art/

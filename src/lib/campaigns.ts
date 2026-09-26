@@ -156,9 +156,23 @@ export async function sendCampaign(opts: SendOptions): Promise<{
 
   // Re-read the opt-out list at send time, not at build time: someone may have
   // unsubscribed between drafting the campaign and pressing send.
-  const optedOut = new Set(
-    (await crm.optOuts()).map((o) => normalizeEmail(o.email)).filter(Boolean)
-  );
+  //
+  // Strict read, deliberately: the cached one returns an empty list when the
+  // server cannot be reached, which is indistinguishable from "nobody has
+  // unsubscribed" — and that reading mails every address that ever opted out.
+  // An unreadable list stops the send.
+  let optedOut: Set<string>;
+  try {
+    optedOut = new Set(
+      (await crm.optOutsStrict()).map((o) => normalizeEmail(o.email)).filter(Boolean)
+    );
+  } catch (e) {
+    throw new Error(
+      `Could not read the unsubscribe list, so nothing was sent: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
+  }
 
   const footer = unsubscribeFooter(fromName, replyTo);
   const tally = (): SendProgress => ({

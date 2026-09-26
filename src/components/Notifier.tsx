@@ -94,7 +94,7 @@ async function check(toast: Toast, firstPass: boolean) {
     if (localStorage.getItem("notif.weekly.week") !== week) {
       toast.notify({
         title: "Weekly summary",
-        message: "Your weekly activity digest is ready in Reports.",
+        message: "Review this week's sales, stock and payments in Reports.",
         to: "/reports",
       });
       localStorage.setItem("notif.weekly.week", week);
@@ -109,6 +109,6 @@ export default function Notifier() {
     // toast is recreated each render — intentionally excluded from deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useLiveSync(() => void check(toast, false).catch(() => {}));
+  useLiveSync(() => void check(toast, false).catch(() => {}), ["orders", "quotations", "quotation_items", "app_settings"]);
   return null;
 }

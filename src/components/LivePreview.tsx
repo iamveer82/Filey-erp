@@ -1,12 +1,10 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
+
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { PDFDocument } from "pdf-lib";
 import type { Tool } from "./PdfToolbox";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /* Live preview for page-visual PDF tools. Rather than re-implementing each
  * effect, it runs the *real* tool on a one-page copy of the uploaded file
@@ -130,7 +128,7 @@ export default function LivePreview({
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
         {note ||
-          `Live preview of “${tool.name}” on page 1 - Run to apply to every page and download.`}
+          `Live preview of “${tool.name}” on page 1 — changes will be included in your download.`}
       </p>
     </div>
   );

@@ -1,3 +1,4 @@
+import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   Upload,
@@ -6,21 +7,17 @@ import {
   X,
   PenLine,
   Eraser,
-  Loader2,
   Check,
   FileText,
   ChevronLeft,
   ChevronRight,
   RotateCcw,
 } from "lucide-react";
-import * as pdfjs from "pdfjs-dist";
 import * as safePdf from "../lib/pdfjsSafe";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useUI } from "../lib/ui";
-import type { OutFile } from "../lib/pdfTools";
+import { ensurePdf, placeStamp, downloadFile, type OutFile } from "../lib/pdfTools";
 import { SelectMenu } from "./ui-menu";
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 type Mode = "draw-only" | "upload-both" | "upload-draw";
 
@@ -49,12 +46,15 @@ export default function ESignStudio({
   const [signImg, setSignImg] = useState<string>(""); // data URL of uploaded sign
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const loadRevision = useRef(0);
 
   // Drawing state
   const [drawColor, setDrawColor] = useState("#000000");
-  const [drawWidth, setDrawWidth] = useState(3);
+  const [drawWidth, setDrawWidth] = useState(4);
   const [drawTool, setDrawTool] = useState<"pen" | "eraser">("pen");
   const [hasDrawing, setHasDrawing] = useState(false);
+  const [drawingRevision, setDrawingRevision] = useState(0);
 
   // Position of signature on document (percentages)
   const [signX, setSignX] = useState(50);
@@ -79,11 +79,13 @@ export default function ESignStudio({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    canvas.width = 600;
-    canvas.height = 200;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = drawTool === "eraser" ? "#ffffff" : drawColor;
+    if (canvas.width !== 600 || canvas.height !== 200) {
+      canvas.width = 600;
+      canvas.height = 200;
+      setHasDrawing(false);
+    }
+    ctx.globalCompositeOperation = drawTool === "eraser" ? "destination-out" : "source-over";
+    ctx.strokeStyle = drawColor;
     ctx.lineWidth = drawTool === "eraser" ? drawWidth * 3 : drawWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -128,6 +130,7 @@ export default function ESignStudio({
   };
 
   const endDraw = () => {
+    if (isDrawing.current) setDrawingRevision((revision) => revision + 1);
     isDrawing.current = false;
   };
 
@@ -136,9 +139,9 @@ export default function ESignStudio({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasDrawing(false);
+    setDrawingRevision((revision) => revision + 1);
   };
 
   const getDrawnSign = (): string => {
@@ -147,11 +150,16 @@ export default function ESignStudio({
 
   // Load document (PDF or image)
   const loadDocument = async (file: File) => {
+    const revision = ++loadRevision.current;
     setLoading(true);
+    setDocPages([]);
+    setDone(false);
     try {
       const pages: DocPage[] = [];
-      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-        const data = new Uint8Array(await file.arrayBuffer());
+      const normalized = await ensurePdf(file);
+      if (revision !== loadRevision.current) return;
+      {
+        const data = new Uint8Array(await normalized.arrayBuffer());
         const pdf = await safePdf.getDocument({ data }).promise;
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i);
@@ -159,7 +167,8 @@ export default function ESignStudio({
           const c = document.createElement("canvas");
           c.width = vp.width;
           c.height = vp.height;
-          const ctx = c.getContext("2d")!;
+          const ctx = c.getContext("2d");
+          if (!ctx) throw new Error("Canvas is unavailable. Reopen this tool and try again.");
           await page.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise;
           pages.push({
             img: c.toDataURL("image/png"),
@@ -167,23 +176,16 @@ export default function ESignStudio({
             height: vp.height,
           });
         }
-      } else if (file.type.startsWith("image/")) {
-        const url = URL.createObjectURL(file);
-        const img = await new Promise<HTMLImageElement>((res, rej) => {
-          const i = new Image();
-          i.onload = () => res(i);
-          i.onerror = rej;
-          i.src = url;
-        });
-        pages.push({ img: url, width: img.naturalWidth, height: img.naturalHeight });
       }
+      if (revision !== loadRevision.current) return;
+      setDocFile(normalized);
       setDocPages(pages);
       setCurrentPage(0);
     } catch (e) {
-      toast.error("Failed to load document.");
-      console.warn("Failed to load document:", e);
+      if (revision === loadRevision.current)
+        toast.error(e instanceof Error ? e.message : "Failed to load document.");
     } finally {
-      setLoading(false);
+      if (revision === loadRevision.current) setLoading(false);
     }
   };
 
@@ -203,20 +205,26 @@ export default function ESignStudio({
   };
 
   // Combine document + signature
-  const applySign = useCallback(() => {
-    if (docPages.length === 0) return;
-    const page = docPages[currentPage];
-
+  const applySign = useCallback(async () => {
     // For draw-only mode: just download the drawn signature
     if (mode === "draw-only") {
-      const dataUrl = getDrawnSign();
-      const bytes = dataURLtoBytes(dataUrl);
-      const out: OutFile = { name: "signature.png", bytes };
-      onApply?.(out);
-      setDone(true);
-      toast.success("Signature downloaded.");
+      if (!hasDrawing || saving) return;
+      setSaving(true);
+      try {
+        const out: OutFile = { name: "signature.png", bytes: dataURLtoBytes(getDrawnSign()) };
+        if (onApply) onApply(out);
+        else if (await downloadFile(out)) toast.success("Signature downloaded.");
+        setDone(true);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not save this signature.");
+      } finally {
+        setSaving(false);
+      }
       return;
     }
+
+    if (!docFile || docPages.length === 0 || saving) return;
+    const page = docPages[currentPage];
 
     // For upload-both and upload-draw: stamp sign onto document
     const signSrc = mode === "upload-draw" ? getDrawnSign() : signImg;
@@ -225,39 +233,42 @@ export default function ESignStudio({
       return;
     }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = page.width;
-    canvas.height = page.height;
-    const ctx = canvas.getContext("2d")!;
-
-    // Draw document page
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, page.width, page.height);
-
-      // Draw signature
-      const sign = new Image();
-      sign.onload = () => {
-        const sw = (page.width * signScale) / 100;
-        const sh = (sign.naturalHeight / sign.naturalWidth) * sw;
-        const sx = (page.width * signX) / 100 - sw / 2;
-        const sy = (page.height * signY) / 100 - sh / 2;
-        ctx.drawImage(sign, sx, sy, sw, sh);
-
-        // Create output
-        canvas.toBlob(async (blob) => {
-          if (!blob) return;
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          const outName = docFile?.name.replace(/\.\w+$/, "") ?? "document";
-          const out: OutFile = { name: `${outName}-signed.png`, bytes };
-          onApply?.(out);
-          setDone(true);
-          toast.success("Signed document downloaded.");
-        }, "image/png");
-      };
-      sign.src = signSrc;
-    };
-    img.src = page.img;
+    setSaving(true);
+    try {
+      const sign = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Could not read this signature image."));
+        image.src = signSrc;
+      });
+      const width = page.width * signScale / 100;
+      const height = width * sign.naturalHeight / sign.naturalWidth;
+      let signature = signSrc;
+      if (!/^data:image\/(png|jpeg);/i.test(signature)) {
+        const canvas = document.createElement("canvas");
+        canvas.width = sign.naturalWidth;
+        canvas.height = sign.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Canvas is unavailable. Try a PNG signature.");
+        context.drawImage(sign, 0, 0);
+        signature = canvas.toDataURL("image/png");
+      }
+      const stamped = await placeStamp(docFile, signature, {
+        xFrac: (signX - signScale / 2) / 100,
+        yFrac: signY / 100 - height / (2 * page.height),
+        wFrac: signScale / 100,
+        opacity: 1,
+        pageIndex: currentPage,
+      });
+      const out = { ...stamped, name: `${docFile.name.replace(/\.pdf$/i, "")}-signed.pdf` };
+      if (onApply) onApply(out);
+      else if (await downloadFile(out)) toast.success("Signed document downloaded.");
+      setDone(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not sign this document.");
+    } finally {
+      setSaving(false);
+    }
   }, [
     docPages,
     currentPage,
@@ -269,6 +280,8 @@ export default function ESignStudio({
     docFile,
     onApply,
     toast,
+    saving,
+    hasDrawing,
   ]);
 
   // Auto-applied preview canvas: show a live composite on previewRef
@@ -279,7 +292,8 @@ export default function ESignStudio({
     const page = docPages[currentPage];
     canvas.width = page.width;
     canvas.height = page.height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     const img = new Image();
     img.onload = () => {
       ctx.drawImage(img, 0, 0, page.width, page.height);
@@ -292,7 +306,7 @@ export default function ESignStudio({
         const sx = (page.width * signX) / 100 - sw / 2;
         const sy = (page.height * signY) / 100 - sh / 2;
         // Draw highlight box
-        ctx.strokeStyle = "#3b82f6";
+        ctx.strokeStyle = "#b8860b";
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 4]);
         ctx.strokeRect(sx, sy, sw, sh);
@@ -305,7 +319,7 @@ export default function ESignStudio({
       sign.src = signSrc;
     };
     img.src = page.img;
-  }, [docPages, currentPage, mode, signImg, signX, signY, signScale]);
+  }, [docPages, currentPage, mode, signImg, signX, signY, signScale, drawingRevision]);
 
   // Drag handling on preview
   const handlePreviewMouseDown = (e: React.MouseEvent) => {
@@ -362,12 +376,12 @@ export default function ESignStudio({
           { id: "draw-only" as Mode, label: "Make a Sign", desc: "Draw your signature" },
           {
             id: "upload-both" as Mode,
-            label: "Upload Doc + Sign",
+            label: "Use a signature image",
             desc: "Combine document & signature",
           },
           {
             id: "upload-draw" as Mode,
-            label: "Upload Doc + Draw",
+            label: "Draw on a document",
             desc: "Draw sign on document",
           },
         ].map((m) => (
@@ -377,10 +391,10 @@ export default function ESignStudio({
               reset();
               setMode(m.id);
             }}
-            className={`flex-1 min-w-[140px] rounded-xl border-2 p-3 text-left transition-all cursor-pointer ${
+            className={`flex-1 min-w-[140px] rounded-xl border p-3 text-left transition-colors cursor-pointer ${
               mode === m.id
-                ? "border-primary-500 bg-primary-50 dark:bg-primary-500/10"
-                : "border-brand-200 hover:border-brand-300 bg-white dark:bg-white/8"
+                ? "border-foreground bg-muted"
+                : "border-border hover:border-foreground/50 bg-card"
             }`}
           >
             <p className="text-sm font-medium text-ink">{m.label}</p>
@@ -395,27 +409,32 @@ export default function ESignStudio({
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-1 rounded-xl bg-brand-100 p-1">
               <button
+                aria-label="Draw signature"
+                aria-pressed={drawTool === "pen"}
                 onClick={() => setDrawTool("pen")}
-                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
+                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
               >
                 <PenLine size={16} />
               </button>
               <button
+                aria-label="Erase signature"
+                aria-pressed={drawTool === "eraser"}
                 onClick={() => setDrawTool("eraser")}
-                className={`rounded-md p-1.5 cursor-pointer ${drawTool === "eraser" ? "bg-white text-ink" : "text-brand-400"}`}
+                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
               >
                 <Eraser size={16} />
               </button>
             </div>
             <input
               type="color"
+              aria-label="Signature colour"
               value={drawColor}
               onChange={(e) => setDrawColor(e.target.value)}
-              className="w-8 h-8 rounded border border-brand-200 cursor-pointer p-0.5"
+              className="h-10 w-10 rounded-full border border-border cursor-pointer p-1"
               disabled={drawTool === "eraser"}
             />
             <SelectMenu
-              size="sm"
+              ariaLabel="Signature line width"
               className="w-auto"
               value={String(drawWidth)}
               onChange={(v) => setDrawWidth(Number(v))}
@@ -445,8 +464,8 @@ export default function ESignStudio({
             />
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={applySign} disabled={!hasDrawing} className="btn-primary">
-              <Download size={14} /> Download Signature
+            <button onClick={applySign} disabled={!hasDrawing || saving} className="btn-primary">
+              <Download size={14} /> {onApply ? "Create signature" : "Download signature"}
             </button>
             {done && (
               <span className="flex items-center gap-1 text-xs font-medium text-success">
@@ -468,7 +487,7 @@ export default function ESignStudio({
               <p className="text-xs text-brand-400">PDF or image (PNG, JPG, WebP)</p>
               <input
                 type="file"
-                accept="application/pdf,image/png,image/jpeg,image/webp"
+                accept="application/pdf,image/*,.docx,.xls,.xlsx,.pptx,.rtf,.txt,.csv"
                 className="hidden"
                 onChange={handleDocUpload}
               />
@@ -564,7 +583,7 @@ export default function ESignStudio({
                       <Upload size={14} /> Upload Signature Image
                       <input
                         type="file"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/webp,image/bmp,image/gif,image/svg+xml"
                         className="hidden"
                         onChange={handleSignUpload}
                       />
@@ -580,26 +599,31 @@ export default function ESignStudio({
                   <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex items-center gap-1 rounded-xl bg-brand-100 p-1">
                       <button
-                        onClick={() => setDrawTool("pen")}
-                        className={`rounded-md p-1 cursor-pointer ${drawTool === "pen" ? "bg-white text-ink" : "text-brand-400"}`}
+                        aria-label="Draw signature"
+                aria-pressed={drawTool === "pen"}
+                onClick={() => setDrawTool("pen")}
+                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
                       >
                         <PenLine size={14} />
                       </button>
                       <button
-                        onClick={() => setDrawTool("eraser")}
-                        className={`rounded-md p-1 cursor-pointer ${drawTool === "eraser" ? "bg-white text-ink" : "text-brand-400"}`}
+                        aria-label="Erase signature"
+                aria-pressed={drawTool === "eraser"}
+                onClick={() => setDrawTool("eraser")}
+                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
                       >
                         <Eraser size={14} />
                       </button>
                     </div>
                     <input
                       type="color"
+              aria-label="Signature colour"
                       value={drawColor}
                       onChange={(e) => setDrawColor(e.target.value)}
-                      className="w-6 h-6 rounded border cursor-pointer p-0"
+                      className="h-10 w-10 rounded-full border border-border cursor-pointer p-1"
                     />
                     <SelectMenu
-                      size="sm"
+                      ariaLabel="Signature line width"
                       className="w-auto"
                       value={String(drawWidth)}
                       onChange={(v) => setDrawWidth(Number(v))}
@@ -635,12 +659,14 @@ export default function ESignStudio({
                 <button
                   onClick={applySign}
                   disabled={
+                    saving || loading ||
                     (mode === "upload-both" && !signImg) ||
                     (mode === "upload-draw" && !hasDrawing)
                   }
                   className="btn-primary"
                 >
-                  <Download size={14} /> Sign & Download
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  {saving ? "Signing…" : onApply ? "Create signed PDF" : "Download signed PDF"}
                 </button>
                 {done && (
                   <span className="flex items-center gap-1 text-xs font-medium text-success">

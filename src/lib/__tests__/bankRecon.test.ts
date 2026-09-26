@@ -66,3 +66,48 @@ describe("matchStatement", () => {
     expect(r.unmatchedLines).toHaveLength(1);
   });
 });
+
+describe("direction-aware matching", () => {
+  // The ledger stores every amount as a positive number with the direction in
+  // txn_type, so a 500 payment and a 500 receipt are indistinguishable by
+  // amount alone. Reconciling the wrong one stamps reconciled_at on both.
+  const sameDay: BookTxn[] = [
+    { id: 1, description: "Refund paid out", date: "2026-03-02", amount: 500, direction: "out" },
+    { id: 2, description: "Customer receipt", date: "2026-03-03", amount: 500, direction: "in" },
+  ];
+
+  it("prefers the entry going the same way, even when it is further off in date", () => {
+    const lines = [{ date: "2026-03-02", description: "Deposit", amount: 500 }];
+    const r = matchStatement(lines, sameDay);
+    // id 1 is the same-day candidate but money went the other way.
+    expect(r.matched[0].txnId).toBe(2);
+  });
+
+  it("still matches the nearest date when directions agree", () => {
+    const lines = [{ date: "2026-03-02", description: "Paid out", amount: -500 }];
+    const r = matchStatement(lines, sameDay);
+    expect(r.matched[0].txnId).toBe(1);
+  });
+
+  it("falls back to an opposite-direction entry rather than matching nothing", () => {
+    const onlyOut: BookTxn[] = [
+      { id: 9, description: "Paid out", date: "2026-03-02", amount: 500, direction: "out" },
+    ];
+    const lines = [{ date: "2026-03-02", description: "Deposit", amount: 500 }];
+    // Statements that state every amount as a positive are common; refusing
+    // these outright would reconcile nothing at all.
+    expect(matchStatement(lines, onlyOut).matched[0].txnId).toBe(9);
+  });
+});
+
+describe("num parsing", () => {
+  it("reads a trailing minus as negative", () => {
+    const csv = ["Date,Description,Amount", "2026-04-01,SAP export,\"1,234.56-\""].join("\n");
+    expect(parseStatementCsv(csv)[0].amount).toBe(-1234.56);
+  });
+
+  it("leaves an ordinary amount positive", () => {
+    const csv = ["Date,Description,Amount", "2026-04-01,Deposit,\"1,234.56\""].join("\n");
+    expect(parseStatementCsv(csv)[0].amount).toBe(1234.56);
+  });
+});

@@ -9,12 +9,13 @@
 // *Detail/:id) are intentionally not here yet — they need canvas/worker shims or
 // route params. Add them as the harness grows.
 
-import { describe, it, vi } from "vitest";
-import { render } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { AuthProvider } from "../../lib/auth";
+import { billing, quotes } from "../../lib/api";
 
 // ── Mock the data boundary: a chainable, awaitable stub that always yields
 // {data:[], error:null}. Covers pages that call sb() directly and via lib/api. ──
@@ -50,10 +51,13 @@ vi.mock("../../lib/supabase", () => {
 });
 
 // Force local mode so anything reading the data mode behaves deterministically.
-vi.mock("../../lib/dataMode", () => ({
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
   isLocalMode: () => true,
   getDataMode: () => "local",
+  effectiveDataMode: () => "local" as const,
   setDataMode: () => {},
+  assertWorkspaceCurrent: () => {},
 }));
 
 // Tauri isn't present in jsdom — make invoke a no-op resolve.
@@ -106,8 +110,10 @@ import Comms from "../Comms";
 import LinkedRecords from "../../components/LinkedRecords";
 import Login from "../Login";
 import NotFound from "../NotFound";
+import Work from "../Work";
 
 const pages: [string, () => ReactElement][] = [
+  ["Work", () => <Work />],
   ["Customers", () => <Customers />],
   ["Team", () => <Team />],
   ["Comms", () => <Comms />],
@@ -153,6 +159,52 @@ describe("page render smoke", () => {
       const { unmount } = wrap(make());
       unmount();
     });
+  }
+});
+
+function ReportDestination() {
+  const location = useLocation();
+  return <p>{location.pathname}{location.search}</p>;
+}
+
+it.each(["/crm", "/crm?view=reports"])("%s keeps insights in central Reports", async (path) => {
+  const view = render(
+    <MemoryRouter initialEntries={[path]}>
+      <AuthProvider>
+        <UIProvider>
+          <Routes>
+            <Route path="/crm" element={<Crm />} />
+            <Route path="/reports" element={<ReportDestination />} />
+          </Routes>
+        </UIProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+  if (path === "/crm") {
+    expect(view.queryByRole("button", { name: "Reports" })).toBeNull();
+    expect(view.getByRole("heading", { name: "CRM overview" })).toBeTruthy();
+  } else {
+    expect(await view.findByText("/reports?tab=insights&section=deals")).toBeTruthy();
+  }
+  view.unmount();
+});
+
+it.each([
+  { name: "documents", api: billing, page: <Invoicing /> },
+  { name: "quotations", api: quotes, page: <Quoting /> },
+])("$name keep visible load errors and recover on retry", async ({ name, api, page }) => {
+  const list = vi.spyOn(api, "listDocs").mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue([]);
+  const view = wrap(page);
+  try {
+    const message = `Could not refresh ${name}. Displayed records may be incomplete.`;
+    expect(await view.findByText(message)).toBeTruthy();
+    const readsBeforeRetry = list.mock.calls.length;
+    fireEvent.click(view.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(view.queryByText(message)).toBeNull());
+    expect(list.mock.calls.length).toBeGreaterThan(readsBeforeRetry);
+  } finally {
+    view.unmount();
+    list.mockRestore();
   }
 });
 

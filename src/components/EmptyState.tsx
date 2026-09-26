@@ -38,11 +38,11 @@ export function EmptyState({
         <p className="mt-1 max-w-[36ch] text-sm text-brand-500">{description}</p>
       )}
       {(primaryAction || secondaryAction) && (
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
           {primaryAction && (
             <button
               onClick={primaryAction.onClick}
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary-400 px-4 py-2 text-sm font-medium text-ink shadow-sm transition-colors hover:bg-primary-500"
+              className="btn-primary"
             >
               {primaryAction.icon}
               {primaryAction.label}
@@ -51,7 +51,7 @@ export function EmptyState({
           {secondaryAction && (
             <button
               onClick={secondaryAction.onClick}
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-brand-500 transition-colors hover:bg-brand-50 dark:hover:bg-white/10"
+              className="btn-ghost"
             >
               {secondaryAction.label}
             </button>

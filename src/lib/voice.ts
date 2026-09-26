@@ -8,7 +8,7 @@
 //   TTS: OpenAI  → /v1/audio/speech (tts-1) — Groq has no TTS yet.
 //   Browser fallback: Web Speech API (Chromium) for mic input, speechSynthesis
 //   for read-aloud — free, no keys, desktop-only.
-import { getAiConfig } from "./ai";
+import { getAiConfig, getAiRequestConfig } from "./ai";
 
 /** Which cloud STT engine the configured provider unlocks, if any. Groq runs
  *  through the openai-compatible provider with a Groq base URL. */
@@ -35,7 +35,7 @@ export async function transcribeAudio(
 ): Promise<string> {
   const engine = sttEngine();
   if (!engine) throw new Error("no-speech-provider");
-  const { baseUrl, apiKey } = getAiConfig();
+  const { baseUrl, apiKey } = await getAiRequestConfig();
   const base = baseUrl || "https://api.openai.com/v1";
   const form = new FormData();
   // A copy: the caller's view may be a slice of a larger buffer, which
@@ -50,6 +50,7 @@ export async function transcribeAudio(
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -61,7 +62,7 @@ export async function transcribeAudio(
 
 /** TTS is OpenAI-only for now (Groq ships no speech endpoint). */
 export function ttsAvailable(): boolean {
-  return getAiConfig().provider === "openai";
+  return sttEngine() === "openai";
 }
 
 /** Render text to mp3 bytes for a WhatsApp voice note. */
@@ -69,9 +70,9 @@ export async function textToSpeech(
   text: string,
   opts: { voice?: string } = {}
 ): Promise<Uint8Array> {
-  const { baseUrl, apiKey } = getAiConfig();
-  if (getAiConfig().provider !== "openai")
+  if (!ttsAvailable())
     throw new Error("no-tts-provider");
+  const { baseUrl, apiKey } = await getAiRequestConfig();
   const res = await fetch(
     `${(baseUrl || "https://api.openai.com/v1").replace(/\/$/, "")}/audio/speech`,
     {
@@ -86,6 +87,7 @@ export async function textToSpeech(
         input: text.slice(0, 4000),
         response_format: "mp3",
       }),
+      signal: AbortSignal.timeout(60_000),
     }
   );
   if (!res.ok) {
