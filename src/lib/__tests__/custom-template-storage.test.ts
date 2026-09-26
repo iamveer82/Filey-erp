@@ -98,7 +98,7 @@ it("does not reinterpret failed or malformed reads as an empty list to overwrite
 it("rejects a save from a designer opened in a different workspace", async () => {
   const originalScope = `local:${identity.scope}`;
   cloud();
-  await expect(saveCustomTemplate(template(), originalScope)).rejects.toThrow("workspace changed");
+  await expect(saveCustomTemplate(template(), originalScope)).rejects.toThrow("account changed");
   expect(localStorage.getItem("localdb:app_settings")).toBeNull();
 });
 
@@ -142,6 +142,6 @@ it("discards a late cloud response after switching accounts", async () => {
   await vi.waitFor(() => expect(read).toHaveBeenCalled());
   cloud("next-account");
   finish({ data: { id: 1, value: JSON.stringify([template("previous-account")]) }, error: null });
-  await expect(pending).rejects.toThrow("workspace changed");
+  await expect(pending).rejects.toThrow("account changed");
   expect(loadCustomTemplates()).toEqual([]);
 });

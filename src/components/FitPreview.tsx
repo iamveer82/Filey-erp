@@ -4,6 +4,19 @@ import { Minus, Plus } from "lucide-react";
 /** A4 portrait at 96dpi: 210mm × 297mm = 794 × 1123 px (ratio 1:√2). */
 const A4_RATIO = 297 / 210; // ≈ 1.4142
 
+/** Below this the A4 body type stops being readable (11px × 0.5 ≈ 5px). A phone
+ *  in portrait fits ~47% of the sheet, which is why the default there is to
+ *  open at a legible zoom and let the reader pan, rather than showing a whole
+ *  page of unreadable text. "Fit width" stays one tap away. */
+const LEGIBLE_SCALE = 0.8;
+
+/** The reading zoom that makes `fitScale` legible. A wide desktop panel is
+ *  already at 1:1 and is left alone. */
+const legibleZoom = (fitScale: number) =>
+  fitScale >= LEGIBLE_SCALE
+    ? 100
+    : Math.min(250, Math.ceil((LEGIBLE_SCALE / fitScale) * 100));
+
 /**
  * Renders the invoice/quote "paper" at true A4 portrait dimensions, then
  * scales it to fit the available panel width so it sits neatly inside its
@@ -40,7 +53,10 @@ export default function FitPreview({
   const boxRef = useRef<HTMLDivElement>(null);
   const a4Height = Math.round(baseWidth * A4_RATIO);
   const [fitW, setFitW] = useState(baseWidth);
-  const [readingZoom, setReadingZoom] = useState(100);
+  // null = "not chosen yet", so the first legible zoom follows the measured
+  // panel instead of being frozen at fit-width on a phone. Any explicit press
+  // of Fit width / - / + takes over from here.
+  const [readingZoom, setReadingZoom] = useState<number | null>(null);
 
   useEffect(() => {
     const box = boxRef.current;
@@ -78,7 +94,11 @@ export default function FitPreview({
   // Shrink the A4 sheet to the panel width (never enlarge past 1:1), then
   // apply the user's zoom on top of that fit.
   const fitScale = Math.min(1, fitW / baseWidth);
-  const scale = Math.max(0.2, fitScale * ((zoomable ? readingZoom : zoom) / 100));
+  // The reading viewer opens legible on a narrow panel; the editor keeps the
+  // zoom its owner passed in.
+  const shownZoom = zoomable ? readingZoom ?? legibleZoom(fitScale) : zoom;
+  const scale = Math.max(0.2, fitScale * (shownZoom / 100));
+  const atFitWidth = shownZoom === 100;
 
   return (
     <>
@@ -92,7 +112,7 @@ export default function FitPreview({
             type="button"
             className="btn-ghost min-h-11"
             onClick={() => setReadingZoom(100)}
-            aria-pressed={readingZoom === 100}
+            aria-pressed={atFitWidth}
           >
             Fit width
           </button>
@@ -100,8 +120,8 @@ export default function FitPreview({
             type="button"
             className="btn-ghost min-h-11 w-11 p-0"
             aria-label="Zoom out on document"
-            disabled={readingZoom <= 100}
-            onClick={() => setReadingZoom((value) => Math.max(100, value - 50))}
+            disabled={atFitWidth}
+            onClick={() => setReadingZoom((value) => Math.max(100, (value ?? legibleZoom(fitScale)) - 50))}
           >
             <Minus size={16} />
           </button>
@@ -109,14 +129,14 @@ export default function FitPreview({
             className="min-w-10 text-center text-xs tabular-nums text-muted-foreground"
             aria-label="Document zoom level"
           >
-            {readingZoom}%
+            {shownZoom}%
           </output>
           <button
             type="button"
             className="btn-ghost min-h-11 w-11 p-0"
             aria-label="Zoom in on document"
-            disabled={readingZoom >= 400}
-            onClick={() => setReadingZoom((value) => Math.min(400, value + 50))}
+            disabled={shownZoom >= 400}
+            onClick={() => setReadingZoom((value) => Math.min(400, (value ?? legibleZoom(fitScale)) + 50))}
           >
             <Plus size={16} />
           </button>

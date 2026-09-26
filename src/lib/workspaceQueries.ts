@@ -1,7 +1,7 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
 import { erp, billing, crm, getCacheScope, type Product, type Order, type InvoiceDocSummary, type CrmCustomer } from "./api";
-import { getDataMode, assertWorkspaceCurrent } from "./dataMode";
+import { effectiveDataMode, assertWorkspaceCurrent } from "./dataMode";
 
 export type WorkspaceDataset = {
   products: Product[];
@@ -10,7 +10,7 @@ export type WorkspaceDataset = {
   customers: CrmCustomer[];
 };
 export const emptyDataset: WorkspaceDataset = { products: [], orders: [], invoices: [], customers: [] };
-export const workspaceQueryScope = () => `${getDataMode()}:${getCacheScope() ?? "signed-out"}`;
+export const workspaceQueryScope = () => `${effectiveDataMode()}:${getCacheScope() ?? "signed-out"}`;
 
 // One subscription-backed snapshot for the search and notification consumers.
 // Query arguments include identity and allowed modules; nothing is persisted.

@@ -9,7 +9,10 @@ const invite = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/auth", () => ({
   useAuth: () => ({ profile: { org_id: "org-1", name: "Owner" }, user: { id: "owner-1" }, updateProfile: vi.fn() }),
 }));
-vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => false }));
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
+  isLocalMode: () => false,
+}));
 vi.mock("../../lib/supabase", () => ({ supabase: null }));
 vi.mock("../../lib/api", () => ({
   org: {

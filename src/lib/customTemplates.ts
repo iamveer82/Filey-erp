@@ -1,5 +1,5 @@
 import { getCacheScope } from "./api";
-import { assertWorkspaceCurrent, getDataMode } from "./dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode } from "./dataMode";
 import { sb, supabase } from "./supabase";
 import { notifyDataChanged } from "./realtime";
 import type { CustomTemplate } from "../components/TemplateDesigner";
@@ -17,13 +17,16 @@ let writes = Promise.resolve();
 /** Never infer an account from the legacy template blob. It has no provenance. */
 export function customTemplateScope(): string | null {
   assertWorkspaceCurrent();
-  const mode = getDataMode();
+  // effectiveDataMode(), not getDataMode(): the hosted web build never shows the
+  // storage picker, so the stored mode is normally absent there. Reading the
+  // raw value yielded a null scope and told signed-in web users to sign in.
+  const mode = effectiveDataMode();
   const account = getCacheScope();
-  return mode && account ? `${mode}:${account}` : null;
+  return account ? `${mode}:${account}` : null;
 }
 
 export function hasUnscopedCustomTemplates(): boolean {
-  return getDataMode() === "local" && !!localStorage.getItem(LEGACY_KEY);
+  return effectiveDataMode() === "local" && !!localStorage.getItem(LEGACY_KEY);
 }
 
 /** Synchronous renderer snapshot, populated only by this identity's verified read. */
@@ -67,8 +70,16 @@ function publish(scope: string, templates: CustomTemplate[]) {
 
 function requireScope(expected?: string): string {
   const scope = customTemplateScope();
-  if (!scope) throw new Error("Sign in to this workspace before loading or saving templates.");
-  if (expected && expected !== scope) throw new Error("Your workspace changed. Reopen the template picker before continuing.");
+  // Reached only when there is no account identity at all. Say which account is
+  // missing — "sign in to this workspace" read as a second sign-in on the web
+  // build, where one account sign-in already exists and no workspace picker does.
+  if (!scope)
+    throw new Error(
+      effectiveDataMode() === "local"
+        ? "Sign in to your account on this device to load or save templates."
+        : "Sign in to your Filey account to load or save templates."
+    );
+  if (expected && expected !== scope) throw new Error("Your account changed. Reopen the template picker before continuing.");
   return scope;
 }
 
@@ -169,4 +180,26 @@ export function saveCustomTemplate(template: CustomTemplate, expectedScope?: str
 
 export function deleteCustomTemplate(id: string): Promise<CustomTemplate[]> {
   return changeTemplates((templates) => templates.filter((item) => item.id !== id));
+}
+
+/** Templates saved before per-account scoping existed. They have no owner, so
+ *  they are never loaded on their own — but on a device workspace they are the
+ *  only copy, and a user who cannot get them back has effectively lost them.
+ *  Adopting moves them into THIS account's store, keeping the original blob
+ *  until the write succeeds. */
+export async function adoptLegacyCustomTemplates(): Promise<CustomTemplate[]> {
+  const raw = localStorage.getItem(LEGACY_KEY);
+  if (!raw) return [];
+  // parseTemplates throws on damaged data — surface it as a rejection so a
+  // click handler can catch it, and never overwrite the original.
+  const legacy = parseTemplates(raw);
+  if (!legacy.length) return [];
+  const templates = await changeTemplates((current) => {
+    const byId = new Map(current.map((item) => [item.id, item]));
+    for (const item of legacy) if (!byId.has(item.id)) byId.set(item.id, item);
+    return [...byId.values()];
+  });
+  // Only now that the scoped copy exists is the original redundant.
+  localStorage.removeItem(LEGACY_KEY);
+  return templates;
 }

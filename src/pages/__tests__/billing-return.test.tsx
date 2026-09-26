@@ -20,7 +20,10 @@ vi.mock("../../lib/api", () => ({
   crm: { customers: async () => [] }, quotes: { listDocs: async () => [] },
   billing: { listDocs: async () => [] }, invoicesThisMonth: async () => 2,
 }));
-vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => false }));
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
+  isLocalMode: () => false,
+}));
 vi.mock("../../lib/supabase", () => ({ supabase: null }));
 
 beforeEach(() => {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { sb } from "./supabase";
 import { useAuth } from "./auth";
 import { getCacheScope } from "./api";
-import { assertWorkspaceCurrent, getDataMode, isLocalMode } from "./dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode, isLocalMode } from "./dataMode";
 import { notifyDataChanged, useLiveSync } from "./realtime";
 import { errMsg } from "./format";
 
@@ -26,7 +26,7 @@ export function legacyAssets(): SavedAsset[] {
   } catch { return []; }
 }
 
-const scope = () => `${getDataMode()}:${getCacheScope()}`;
+const scope = () => `${effectiveDataMode()}:${getCacheScope()}`;
 function checkScope(expected: string) {
   assertWorkspaceCurrent();
   if (scope() !== expected) throw new Error("Your workspace changed. Please try again.");

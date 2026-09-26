@@ -25,7 +25,7 @@ it("rejects a late load after switching accounts", async () => {
   const pending = syncCustomFields("customers");
   state.scope = "org:user:bob";
   finish([{ key: "custom_fields_customers", value: JSON.stringify([field]) }]);
-  await expect(pending).rejects.toThrow("workspace changed");
+  await expect(pending).rejects.toThrow("account changed");
   expect(listCustomFields("customers")).toEqual([]);
 });
 it("loads canonical definitions and clears an obsolete scoped cache when the setting is absent", async () => {

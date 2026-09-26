@@ -8,7 +8,12 @@ vi.mock("../../lib/auth", () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => { providers.auth(); return children; },
   useAuth: () => ({ loading: false, configured: true, user: providers.user }),
 }));
-vi.mock("../../lib/dataMode", () => ({ getDataMode: () => providers.mode, isLocalMode: () => providers.mode === "local" }));
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
+  getDataMode: () => providers.mode,
+  effectiveDataMode: () => providers.mode,
+  isLocalMode: () => providers.mode === "local",
+}));
 vi.mock("../../lib/modules", () => ({ ModulesProvider: () => null, useModules: () => ({ modules: [], isEnabled: () => true }) }));
 vi.mock("../Layout", () => ({ default: () => null }));
 vi.mock("../CommandPalette", () => ({ default: () => null }));

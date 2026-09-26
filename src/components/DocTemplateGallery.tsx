@@ -6,7 +6,7 @@ import { Modal, FilterChip, SearchInput } from "./ui";
 import { useUI } from "../lib/ui";
 import { cn, errMsg } from "../lib/format";
 import { type CustomTemplate } from "./TemplateDesigner";
-import { deleteCustomTemplate, hasUnscopedCustomTemplates, useCustomTemplates } from "../lib/customTemplates";
+import { adoptLegacyCustomTemplates, deleteCustomTemplate, hasUnscopedCustomTemplates, useCustomTemplates } from "../lib/customTemplates";
 
 export interface DocTemplateGalleryProps {
   value: string;
@@ -81,7 +81,22 @@ export default function DocTemplateGallery({
       </div>}
       {loading && <p role="status" className="mb-3 text-xs text-muted-foreground">Loading this workspace’s saved templates…</p>}
       {loadError && <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger"><span>Could not load saved templates: {loadError}</span><button type="button" className="btn-ghost" onClick={reload}>Retry</button></div>}
-      {!loading && !loadError && !customTemplates.length && hasUnscopedCustomTemplates() && <p className="mb-3 text-xs text-muted-foreground">An older template cache is preserved on this device. It is not loaded automatically because its workspace owner cannot be verified.</p>}
+      {!loading && !loadError && !customTemplates.length && hasUnscopedCustomTemplates() && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-hover px-3 py-2 text-xs text-muted-foreground">
+          <span>Templates you saved on this device before accounts were added are still here.</span>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              void adoptLegacyCustomTemplates()
+                .then((adopted) => { if (adopted.length) toast.success(`Restored ${adopted.length} template${adopted.length === 1 ? "" : "s"}.`); })
+                .catch((error) => toast.error("Could not restore them: " + errMsg(error)));
+            }}
+          >
+            Restore my templates
+          </button>
+        </div>
+      )}
       <div className="flex min-w-0 items-center gap-4" aria-label="Selected document template">
         {selected && <div className="w-14 shrink-0 overflow-hidden rounded-md border border-border" aria-hidden="true"><TemplateTilePreview templateId={selected.id} customTemplates={customTemplates} docType={docType} /></div>}
         <div className="min-w-0 flex-1"><p className="text-sm font-medium break-words">{selected?.name || "Choose your document layout"}</p><p className="mt-1 text-xs text-muted-foreground">{selected ? "Selected layout" : "No layout selected"} · {options.length} templates available</p></div>

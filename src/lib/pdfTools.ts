@@ -2862,6 +2862,113 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
     });
   };
 
+  type MarkShot = {
+    src: string;
+    /** Position/size in the CAPTURE space (already multiplied by pixelRatio). */
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    opacity: number;
+    blend: GlobalCompositeOperation;
+    /** clip-path inset() percentages, in the order the CSS uses. */
+    crop: [number, number, number, number] | null;
+  };
+
+  const loadImage = (src: string) =>
+    new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error("Could not load a document mark."));
+      im.src = src;
+    });
+
+  const parseInset = (value: string): [number, number, number, number] | null => {
+    const m = /inset\(([^)]*)\)/.exec(value);
+    if (!m) return null;
+    const parts = m[1].trim().split(/\s+/).map((n) => parseFloat(n));
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+    return parts as [number, number, number, number];
+  };
+
+  /* iOS WebKit silently drops <img> inside the SVG <foreignObject> that
+   * html-to-image builds, so a stamp/signature captured that way is simply
+   * absent from the exported PDF — desktop Chrome renders it fine, which is
+   * why this only ever showed up on phones. Lift the marks out of the
+   * foreignObject entirely: measure them in the clone, hide them so the
+   * capture cannot lose them, then draw them onto the rasterised page with
+   * plain canvas calls, which every browser including iOS implements.
+   * Returns a restore() so the caller's clone is left as it found it. */
+  const extractMarks = (root: HTMLElement) => {
+    const shots: MarkShot[] = [];
+    const rootRect = root.getBoundingClientRect();
+    for (const host of Array.from(root.querySelectorAll<HTMLElement>("[data-doc-mark]"))) {
+      const img = host.querySelector("img");
+      // A mark whose source never resolved has nothing to draw; leaving it
+      // hidden is correct, because there was nothing visible to lose.
+      if (!img?.src) continue;
+      const r = img.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const cs = getComputedStyle(img);
+      shots.push({
+        src: img.src,
+        x: r.left - rootRect.left,
+        y: r.top - rootRect.top,
+        w: r.width,
+        h: r.height,
+        opacity: parseFloat(cs.opacity) || 1,
+        blend: cs.mixBlendMode === "multiply" ? "multiply" : "source-over",
+        crop: parseInset(cs.clipPath || img.style.clipPath || ""),
+      });
+      host.style.visibility = "hidden";
+    }
+    return {
+      shots,
+      restore: () => {
+        root.querySelectorAll<HTMLElement>("[data-doc-mark]").forEach((el) => {
+          el.style.visibility = "";
+        });
+      },
+    };
+  };
+
+  const paintMarks = async (base: HTMLImageElement, shots: MarkShot[]) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = base.naturalWidth || base.width;
+    canvas.height = base.naturalHeight || base.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return base;
+    ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+    for (const shot of shots) {
+      let mark: HTMLImageElement;
+      try {
+        mark = await loadImage(shot.src);
+      } catch {
+        // One unreadable mark must not cost the customer the whole invoice.
+        continue;
+      }
+      const { x, y, w, h, crop } = shot;
+      ctx.save();
+      ctx.globalAlpha = shot.opacity;
+      ctx.globalCompositeOperation = shot.blend;
+      if (crop) {
+        const [top, right, bottom, left] = crop;
+        // inset() percentages resolve against the element's own box.
+        ctx.beginPath();
+        ctx.rect(
+          x + (w * left) / 100,
+          y + (h * top) / 100,
+          (w * (100 - left - right)) / 100,
+          (h * (100 - top - bottom)) / 100
+        );
+        ctx.clip();
+      }
+      ctx.drawImage(mark, x, y, w, h);
+      ctx.restore();
+    }
+    return canvas;
+  };
+
   const capturePage = async (node: HTMLElement) => {
     // Use the page's own explicit A4 size; if it has none, fall back to our
     // A4 constants. The source element is expected to already be sized at true
@@ -2923,6 +3030,10 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
       await new Promise((resolve) => requestAnimationFrame(resolve));
       await new Promise((resolve) => setTimeout(resolve, 120));
 
+      // Measured after the clone is in the document, so the rects are real.
+      // Marks are hidden here and painted onto the page below.
+      const marks = extractMarks(clone);
+
       const imgData = await toPng(clone, {
         quality: 0.95,
         pixelRatio: 1, // we already scaled the clone ourselves
@@ -2936,7 +3047,20 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
           transformOrigin: "top left",
         },
       });
-      const img = await pdfDoc.embedPng(imgData);
+      let pagePng = imgData;
+      try {
+        if (marks.shots.length) {
+          const base = await loadImage(imgData);
+          const painted = await paintMarks(base, marks.shots);
+          if (painted instanceof HTMLCanvasElement)
+            pagePng = painted.toDataURL("image/png");
+        }
+      } finally {
+        // Never leave a mark hidden, even if compositing failed: a thrown
+        // export is recoverable, a silently blank stamp is not.
+        marks.restore();
+      }
+      const img = await pdfDoc.embedPng(pagePng);
       const page = pdfDoc.addPage([ptW, ptH]);
       // Fill the page white first so a transparent PNG never appears black.
       page.drawRectangle({

@@ -25,7 +25,10 @@ vi.mock("../supabase", () => ({
   },
 }));
 
-vi.mock("../dataMode", () => ({ isLocalMode: () => false }));
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
+  isLocalMode: () => false,
+}));
 
 describe("claiming a Freedom licence after checkout", () => {
   beforeEach(() => {

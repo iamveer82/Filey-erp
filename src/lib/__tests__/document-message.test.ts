@@ -4,7 +4,10 @@ import { billing } from "../api";
 import { isLocalMode } from "../dataMode";
 
 vi.mock("../api", () => ({ billing: { publicLink: vi.fn(async () => "token/123") } }));
-vi.mock("../dataMode", () => ({ isLocalMode: vi.fn(() => false) }));
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
+  isLocalMode: vi.fn(() => false),
+}));
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.mocked(isLocalMode).mockReturnValue(false); });
 
 it("validates international recipients and safely encodes message drafts", () => {

@@ -1,7 +1,10 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ licensed: false, grandfathered: false, used: 5 }));
-vi.mock("../dataMode", () => ({ isLocalMode: () => false }));
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
+  isLocalMode: () => false,
+}));
 vi.mock("../supabase", () => ({
   supabase: {
     rpc: async (name: string) => ({ data: name === "current_org" ? "workspace" : state.licensed, error: null }),

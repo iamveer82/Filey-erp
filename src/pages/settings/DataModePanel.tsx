@@ -1,7 +1,7 @@
 import { FileySpinner } from "../../components/FileySpinner";
-import { useEffect, useState } from "react";
-import { Cloud, HardDrive, Check, Download, Upload, FolderOpen } from "lucide-react";
-import { getDataMode, type DataMode } from "../../lib/dataMode";
+import { useCallback, useEffect, useState } from "react";
+import { Cloud, Check, Download, Upload, FolderOpen, ShieldCheck } from "lucide-react";
+import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
 import { CLOUD_RECONNECT_MESSAGE } from "../../lib/cloudSession";
 import { switchWorkspace } from "../../lib/switchWorkspace";
@@ -47,7 +47,8 @@ import { todayYmd } from "../../lib/format";
 import { pendingCloudWrites } from "../../lib/api";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import SyncConflictReview from "../../components/SyncConflictReview";
-import { Modal } from "../../components/ui";
+import { Modal, Switch } from "../../components/ui";
+import { useUI } from "../../lib/ui";
 
 // Cloud sync card (local mode only): connect a cloud account and this device
 // syncs both ways — local changes upload within a second, and edits from your
@@ -297,10 +298,12 @@ function CloudSyncCard() {
   );
 }
 
-// Switch where data lives. Changing mode reloads the app; it does NOT migrate
-// data — local data stays on this device, cloud data stays in your account.
+// Where the user's records live. One switch: off keeps everything on this
+// device, on puts it in their Filey account so it follows them between devices.
+// Turning it ON is the upload, so it asks first; turning it OFF never uploads.
 export default function DataModePanel() {
-  const mode: DataMode = getDataMode() ?? (cloudConfigured ? "cloud" : "local");
+  const mode: DataMode = effectiveDataMode();
+  const { confirm, toast } = useUI();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MigrateResult[] | null>(null);
   const [err, setErr] = useState("");
@@ -309,6 +312,10 @@ export default function DataModePanel() {
   const [pendingWrites, setPendingWrites] = useState(0);
   const [progress, setProgress] = useState("");
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  /** Live cloud session, independent of which store is currently open. In local
+   *  mode the app user is the DEVICE account, so only Supabase can say whether
+   *  there is an account to upload to. */
+  const [cloudSession, setCloudSession] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -319,6 +326,15 @@ export default function DataModePanel() {
     void pendingCloudWrites()
       .then((rows) => { if (active) setPendingWrites(rows.length); })
       .catch(() => {});
+    if (supabase) {
+      void supabase.auth.getSession()
+        .then(({ data }) => { if (active) setCloudSession(data.session?.user.email ?? null); })
+        .catch(() => {});
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (active) setCloudSession(session?.user.email ?? null);
+      });
+      return () => { active = false; sub.subscription.unsubscribe(); };
+    }
     return () => { active = false; };
   }, []);
 
@@ -405,8 +421,6 @@ export default function DataModePanel() {
   };
 
   const { user } = useAuth();
-  const [destination, setDestination] = useState<DataMode | null>(null);
-  const [copyCloud, setCopyCloud] = useState(false);
   const [localExists, setLocalExists] = useState<boolean | null>(null);
   useEffect(() => {
     void hasLocalData()
@@ -416,17 +430,91 @@ export default function DataModePanel() {
       );
   }, []);
 
-  const switchTo = async () => {
-    if (!destination || busy) return;
-    setBusy(true);
-    setErr("");
-    try {
-      await switchWorkspace(destination, copyCloud);
+  /** Reload into the destination store. Only reached once the user has agreed
+   *  (cloud) or the move is purely local, so the reload itself is unconditional. */
+  const openStore = useCallback(
+    async (target: DataMode) => {
+      await switchWorkspace(target, false);
       window.location.reload();
+    },
+    []
+  );
+
+  /** The whole local <-> cloud switch. One click, one pass.
+   *
+   *  ON  = upload. Consent first, then one batched push of the tables that
+   *        actually hold rows, then reopen on the cloud. Nothing is pulled
+   *        back down and nothing is polled afterwards: cloud mode reads and
+   *        writes the account directly, so the transfer is the only billable
+   *        work this causes.
+   *  OFF = private. No upload, no consent, one profile read to check the
+   *        device is allowed to hold this account's copy. */
+  const toggleStorage = async (next: boolean) => {
+    const target: DataMode = next ? "cloud" : "local";
+    if (target === mode || busy) return;
+    if (isMigrating()) {
+      setErr("Wait for the current transfer to finish before switching.");
+      return;
+    }
+    setErr("");
+    setResult(null);
+    if (!next) {
+      setBusy(true);
+      try {
+        await openStore("local");
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (!cloudConfigured) {
+      setErr("Cloud storage isn't available in this build.");
+      return;
+    }
+    // The device account is not the cloud account. Without a live session there
+    // is nowhere to upload to, so send them to the connect card rather than
+    // half-switching into an empty store.
+    if (!cloudSession) {
+      setErr(
+        mode === "local"
+          ? "Connect your Filey account below first, then flip this switch to upload."
+          : "Sign in to your Filey account, then flip this switch to upload."
+      );
+      return;
+    }
+    const hasDeviceData = localExists === true;
+    if (
+      !(await confirm({
+        title: "Store your data in your Filey account?",
+        message: hasDeviceData
+          ? `Turning this on uploads the records saved on this device — invoices, customers, products and files — to ${cloudSession}, and Filey then works from your account on every device you sign in to. Your device keeps its own copy. You can switch back at any time; turning it off does not delete anything from your account.`
+          : `Turning this on stores your records in your Filey account (${cloudSession}) so they follow you to every device you sign in to. You can switch back to this device at any time.`,
+        confirmLabel: "Upload and turn on",
+      }))
+    )
+      return;
+    setBusy(true);
+    setMigrating(true);
+    try {
+      if (hasDeviceData) {
+        const res = await migrateLocalToCloud(setProgress);
+        setResult(res);
+        const failed = res.filter((r) => r.error);
+        if (failed.length)
+          throw new Error(
+            `Upload incomplete for: ${failed.map((r) => r.table).join(", ")}. Nothing was switched — your records are still on this device.`
+          );
+      }
+      await openStore("cloud");
+      toast.success("Your data is now in your Filey account.");
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+      setMigrating(false);
+      setProgress("");
     }
   };
 
@@ -484,136 +572,51 @@ export default function DataModePanel() {
     }
   };
 
-  const Card = ({
-    m,
-    icon: Icon,
-    title,
-    desc,
-    disabled,
-  }: {
-    m: DataMode;
-    icon: typeof Cloud;
-    title: string;
-    desc: string;
-    disabled?: boolean;
-  }) => {
-    const active = mode === m;
-    return (
-      <button
-        onClick={() => {
-          setDestination(m);
-          setCopyCloud(false);
-          setErr("");
-        }}
-        disabled={disabled || busy || active}
-        aria-pressed={active}
-        className={`w-full min-w-0 text-left rounded-lg border p-4 transition-colors ${
-          active ? "border-foreground/30 bg-hover" : "border-border hover:bg-hover"
-        } ${disabled ? "opacity-50 cursor-not-allowed" : active ? "cursor-default" : "cursor-pointer"}`}
-      >
-        <div className="flex items-start gap-3">
-          <Icon size={18} className="mt-0.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-foreground flex flex-wrap items-center gap-2">
-              {title}
-              {active && (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                  <Check size={14} /> Active
-                </span>
-              )}
-            </p>
-            <p className="text-sm text-brand-500 mt-0.5">{desc}</p>
-          </div>
-        </div>
-      </button>
-    );
-  };
+  const cloudOn = mode === "cloud";
 
   return (
     <SettingsPanel>
       <SettingsSection
-        title="Workspace storage"
-        description="Choose where this workspace reads and saves your business records."
+        title="Data and storage"
+        description="Keep your records private on this device, or store them in your Filey account to use them on every device."
       >
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Local and cloud are separate stores. Switching keeps your account signed in and
-          never uploads or replaces records automatically.
-        </p>
-        <p className="text-sm mt-3 text-foreground break-words">
-          <span className="font-medium">
-            {mode === "cloud" ? "Cloud workspace" : "Local workspace"}
+        <div className="flex items-start gap-3 rounded-xl border border-border p-4">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-muted-foreground"
+          >
+            {cloudOn ? <Cloud size={18} /> : <ShieldCheck size={18} />}
           </span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {user?.email || "Account not connected"}
-          </span>
-        </p>
-        <div className="grid gap-3 xl:grid-cols-2" aria-label="Workspace storage">
-          <Card
-            m="cloud"
-            icon={Cloud}
-            title="Filey Cloud"
-            desc="Live account records, shared across your signed-in devices. Requires internet for changes."
-            disabled={!cloudConfigured}
-          />
-          <Card
-            m="local"
-            icon={HardDrive}
-            title="This device"
-            disabled={localExists === null}
-            desc={
-              "Device records, available offline. Cloud sync is optional and controlled separately." +
-              " Basic is free: the whole ERP and CRM, 5 invoices a month."
-            }
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-foreground">Store in my Filey account</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {cloudOn ? (
+                <>
+                  On. Your records live in {cloudSession || user?.email || "your Filey account"} and
+                  follow you to every device you sign in to. Needs internet to make changes.
+                </>
+              ) : (
+                <>
+                  Off. Your records stay on this device only — nothing is uploaded, and Filey
+                  works with no internet. Basic is free: the whole ERP and CRM, 5 invoices a month.
+                </>
+              )}
+            </p>
+          </div>
+          <Switch
+            checked={cloudOn}
+            busy={busy}
+            disabled={!cloudConfigured || localExists === null}
+            onChange={(next) => void toggleStorage(next)}
+            label="Store my data in my Filey account"
+            className="mt-1"
           />
         </div>
-        {destination && destination !== mode && (
-          <section
-            className="border-t border-border pt-4 space-y-3"
-            aria-label="Review workspace switch"
-          >
-            <h3 className="font-medium">
-              Switch to {destination === "cloud" ? "Filey Cloud" : "this device"}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {destination === "cloud"
-                ? "You will see the records currently saved in your cloud account. Unsynced device changes stay on this device; use Cloud sync below first if you want to transfer them."
-                : localExists
-                  ? "Resume your saved device records. They may differ from your cloud records. Your automatic cloud sync preference is kept."
-                  : "This device has no saved business records yet. Start an empty local workspace or choose to copy your cloud records below."}{" "}
-              The app reloads after checking the destination. Finish any unsaved work in
-              other tabs first.
-            </p>
-            {destination === "local" && !localExists && (
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  className="mt-1"
-                  type="checkbox"
-                  checked={copyCloud}
-                  disabled={busy}
-                  onChange={(e) => setCopyCloud(e.target.checked)}
-                />
-                Copy my cloud records to this empty device workspace
-              </label>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="btn-primary"
-                disabled={busy}
-                onClick={() => void switchTo()}
-              >
-                {busy ? "Checking workspace…" : "Switch workspace"}
-              </button>
-              <button
-                className="btn-ghost"
-                disabled={busy}
-                onClick={() => setDestination(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-        )}
+        <p className="text-sm text-muted-foreground">
+          {cloudOn
+            ? "Turning this off switches back to the records saved on this device. It does not delete anything from your account."
+            : "Turning this on uploads this device's records to your account, once. You can turn it off again at any time."}
+        </p>
         {err && (
           <p
             role="alert"
@@ -625,7 +628,7 @@ export default function DataModePanel() {
 
         {busy && (
           <p role="status" className="text-sm text-muted-foreground">
-            {progress || "Checking workspace…"}
+            {progress || "Switching…"}
           </p>
         )}
         {pendingWrites > 0 && (

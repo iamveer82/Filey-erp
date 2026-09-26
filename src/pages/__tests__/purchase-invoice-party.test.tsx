@@ -36,7 +36,14 @@ vi.mock("../../lib/supabase", () => {
     supabase: null, isConfigured: true, cloudConfigured: false,
   };
 });
-vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => true, getDataMode: () => "local", setDataMode: () => {}, assertWorkspaceCurrent: () => {} }));
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
+  isLocalMode: () => true,
+  getDataMode: () => "local" as const,
+  effectiveDataMode: () => "local" as const,
+  setDataMode: () => {},
+  assertWorkspaceCurrent: () => {},
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => null }));
 
 const invoice = {
@@ -77,20 +84,29 @@ beforeEach(() => {
 afterEach(() => { cleanup(); setCacheOrg(null); vi.restoreAllMocks(); });
 
 describe("purchase invoice parties", () => {
-  it("fits the invoice preview to a phone without reflowing or saving the A4 document", async () => {
+  it("opens the invoice preview legible on a phone, and still fits the A4 sheet without reflowing it", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(326);
     const view = await openPurchase();
     fireEvent.click(view.getByRole("button", { name: "Preview" }));
     const dialog = view.getByRole("dialog", { name: invoice.number });
     expect(dialog).toHaveClass("filey-document-dialog");
     const paper = () => dialog.querySelector<HTMLElement>(".invoice-print")!;
-    await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "294px" }));
+    // A 326px panel fits 294/794 = 37% of the sheet, so the viewer opens at a
+    // legible zoom instead of a whole page of ~4px text.
+    await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "638px" }));
     expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px", padding: "48px" });
     expect(within(dialog).getByRole("columnheader", { name: /Amount/ })).toBeVisible();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in on document" }));
-    expect(paper().parentElement).toHaveStyle({ width: "441px" });
+    expect(within(dialog).getByRole("button", { name: "Fit width" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    );
+    // One tap returns the whole page, which is what fit-width means.
     fireEvent.click(within(dialog).getByRole("button", { name: "Fit width" }));
     expect(paper().parentElement).toHaveStyle({ width: "294px" });
+    // …and the sheet itself is never reflowed or re-measured by either mode.
+    expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px", padding: "48px" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Zoom in on document" }));
+    expect(paper().parentElement).toHaveStyle({ width: "441px" });
     expect(billing.saveDoc).not.toHaveBeenCalled();
   });
 

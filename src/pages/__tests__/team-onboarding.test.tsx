@@ -24,7 +24,10 @@ vi.mock("../../lib/ui", () => ({
     confirm: async () => true,
   }),
 }));
-vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => false }));
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
+  isLocalMode: () => false,
+}));
 vi.mock("../../lib/license", () => ({ clearEntitlementCache: vi.fn() }));
 vi.mock("../../lib/api", () => ({
   org: {

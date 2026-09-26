@@ -171,6 +171,11 @@ function DraggableMark({
         }
       }}
       title={`Drag to position ${alt.toLowerCase()}`}
+      // Marks are composited onto the PDF canvas by hand (see pdfTools): iOS
+      // WebKit drops <img> inside the SVG foreignObject that html-to-image
+      // builds, so a stamp captured that way is simply missing from the file.
+      // This attribute is how the export finds exactly these, and only these.
+      data-doc-mark={alt}
       style={{
         position: "absolute",
         left: `${mark.x}%`,

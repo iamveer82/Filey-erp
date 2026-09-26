@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Basic's five-creation limit applies locally as well as on the web.
-vi.mock("../dataMode", () => ({
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
   isLocalMode: () => true,
+  effectiveDataMode: () => "local" as const,
   assertWorkspaceCurrent: () => {},
 }));
 

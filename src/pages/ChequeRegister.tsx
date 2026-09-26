@@ -25,7 +25,7 @@ import {
 } from "../components/RowActions";
 import { DateField } from "../components/DatePicker";
 import { tools, getCacheScope } from "../lib/api";
-import { assertWorkspaceCurrent, getDataMode } from "../lib/dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
 import { useLiveSync } from "../lib/realtime";
 import { saveOutput, listFiles, fileObjectUrl } from "../lib/files";
 import { SelectMenu } from "../components/ui-menu";
@@ -39,7 +39,7 @@ const CHEQUE_SETTING_KEY = "cheque_register"; // app_settings - synced + backed 
 const cacheKey = () => {
   try { assertWorkspaceCurrent(); } catch { return null; }
   const scope = getCacheScope();
-  return scope ? `${CHEQUE_KEY}:${encodeURIComponent(`${getDataMode() ?? "cloud"}:${scope}`)}` : null;
+  return scope ? `${CHEQUE_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
 };
 
 interface Cheque {

@@ -158,7 +158,7 @@ it("isolates jobs and discards responses across account changes; key removal rea
       return reply({ request_id: "request-2" });
     })
   );
-  await expect(startMedia(job.id)).rejects.toThrow(/workspace/);
+  await expect(startMedia(job.id)).rejects.toThrow(/account changed/);
   expect(listMediaJobs()).toEqual([]);
   expect(() => getMediaJob(job.id)).toThrow(/current workspace/);
   await saveMediaConfig(

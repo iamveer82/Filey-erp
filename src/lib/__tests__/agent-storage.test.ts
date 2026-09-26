@@ -72,8 +72,8 @@ it("rejects late task and chat results after the workspace changes", () => {
   const task = addTask({ name: "A", goal: "Private goal", schedule: { type: "daily", time: "09:00" } });
   const scope = agentStorageScope()!;
   identity.scope = "org:user:bob";
-  expect(() => updateTask(task.id, { lastResult: "private result" }, scope)).toThrow(/workspace changed/);
-  expect(() => addSkill({ name: "Private imported skill", description: "Private", instructions: "Keep Alice's procedure" }, scope)).toThrow(/workspace changed/);
+  expect(() => updateTask(task.id, { lastResult: "private result" }, scope)).toThrow(/account changed/);
+  expect(() => addSkill({ name: "Private imported skill", description: "Private", instructions: "Keep Alice's procedure" }, scope)).toThrow(/account changed/);
   const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
   expect(saveChats([{ ...newChat(), turns: [{ role: "assistant", text: "private result" }] }], scope)).toBe(false);
   quiet.mockRestore();

@@ -64,9 +64,11 @@ vi.mock("../../lib/supabase", () => {
 });
 
 // Force local mode so anything reading the data mode behaves deterministically.
-vi.mock("../../lib/dataMode", () => ({
+vi.mock("../../lib/dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/dataMode")>()),
   isLocalMode: () => true,
   getDataMode: () => "local",
+  effectiveDataMode: () => "local" as const,
   setDataMode: () => {},
   assertWorkspaceCurrent: () => {},
 }));

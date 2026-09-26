@@ -5,7 +5,11 @@ vi.mock("../api", () => ({
   erp: { products: fixtures.read, orders: fixtures.read },
   billing: { listDocs: fixtures.read }, crm: { customers: fixtures.read },
 }));
-vi.mock("../dataMode", () => ({ getDataMode: () => fixtures.mode, assertWorkspaceCurrent: () => {} }));
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
+  effectiveDataMode: () => fixtures.mode,
+  assertWorkspaceCurrent: () => {},
+}));
 import { createWorkspaceStore, workspaceQueries, workspaceQueryScope } from "../workspaceQueries";
 
 beforeEach(() => { fixtures.scope = "org:user:alice"; fixtures.mode = "cloud"; fixtures.read.mockReset().mockResolvedValue([]); });

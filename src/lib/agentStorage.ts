@@ -1,5 +1,5 @@
 import { getCacheScope } from "./api";
-import { assertWorkspaceCurrent, getDataMode } from "./dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode } from "./dataMode";
 
 export const AGENT_STORAGE_EVENT = "filey:agent-storage";
 
@@ -12,17 +12,17 @@ export function agentStorageScope(): string | null {
     return null;
   }
   const account = getCacheScope();
-  // Hosted cloud sessions skip the desktop storage picker, so an absent mode
-  // means cloud there (the data API uses the same convention).
-  const mode = getDataMode() ?? "cloud";
+  // effectiveDataMode() resolves the mode the data layer actually uses, so this
+  // agrees with customTemplates/assets on web builds that stored no mode.
+  const mode = effectiveDataMode();
   return account ? `${mode}:${account}` : null;
 }
 
 export function requireAgentStorageScope(expected?: string): string {
   const scope = agentStorageScope();
-  if (!scope) throw new Error("Sign in to this workspace before saving assistant data.");
+  if (!scope) throw new Error("Sign in to your Filey account before saving assistant data.");
   if (expected && expected !== scope)
-    throw new Error("Your workspace changed. Start the assistant task again.");
+    throw new Error("Your account changed. Start the assistant task again.");
   return scope;
 }
 

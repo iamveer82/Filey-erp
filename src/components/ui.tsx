@@ -87,6 +87,51 @@ export function ShareToggle({
   );
 }
 
+/** A real on/off control. role="switch" + aria-checked so it announces as one,
+ *  and the label is part of the button so the whole row is the hit target. */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  busy,
+  label,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  busy?: boolean;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled || busy}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        checked ? "bg-primary-500" : "bg-border",
+        disabled || busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+        className
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none block h-5 w-5 rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-5" : "translate-x-0.5"
+        )}
+      />
+    </button>
+  );
+}
+
 export function PageHeader({
   title,
   subtitle,

@@ -12,7 +12,7 @@ import {
   type Lead,
 } from "../lib/marketing";
 import { getExchangeRates } from "../lib/exchange-rates";
-import { getDataMode } from "../lib/dataMode";
+import { effectiveDataMode } from "../lib/dataMode";
 import { downloadCsv } from "../lib/csv";
 import CampaignsPanel from "../components/CampaignsPanel";
 import OptOutsPanel from "../components/OptOutsPanel";
@@ -52,8 +52,8 @@ export default function Marketing() {
   const load = useCallback(async () => {
     const version = ++request.current;
     const scope = getCacheScope();
-    const mode = getDataMode();
-    const current = () => version === request.current && scope === getCacheScope() && mode === getDataMode();
+    const mode = effectiveDataMode();
+    const current = () => version === request.current && scope === getCacheScope() && mode === effectiveDataMode();
     setLoading(true);
     setError("");
     try {

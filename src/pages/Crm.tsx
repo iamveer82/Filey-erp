@@ -53,7 +53,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { aed, cn, fmtDate, todayYmd, errMsg } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import { getDataMode, isLocalMode } from "../lib/dataMode";
+import { effectiveDataMode, isLocalMode } from "../lib/dataMode";
 import { downloadText } from "../lib/localPaths";
 import { PageHeader, DataTable, ErrorBanner, Badge, Spinner } from "../components/ui";
 import ImportCsvModal from "../components/ImportCsvModal";
@@ -104,9 +104,11 @@ const DESCRIPTIONS: Record<View, string> = {
   reports: "Pipeline values and forecast assumptions, explained.",
 };
 function workspaceViewKey(userId?: string): string | null {
-  const mode = getDataMode();
+  // effectiveDataMode(), not getDataMode(): the web build stores no mode, and a
+  // null mode here silently disabled saved views for every signed-in web user.
+  const mode = effectiveDataMode();
   const scope = getCacheScope();
-  if (!mode || !userId || !scope?.endsWith(`:user:${userId}`)) return null;
+  if (!userId || !scope?.endsWith(`:user:${userId}`)) return null;
   // The old anonymous v1 key has no provable owner. Preserve it without exposing it.
   return `filey.crm.workspace.views.v2:${encodeURIComponent(JSON.stringify([mode, scope]))}`;
 }

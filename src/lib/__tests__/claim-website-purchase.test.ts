@@ -18,7 +18,11 @@ vi.mock("../supabase", () => ({
   invokeFn: async () => ({ data: {}, error: null }),
 }));
 
-vi.mock("../dataMode", () => ({ isLocalMode: () => false, assertWorkspaceCurrent: () => {} }));
+vi.mock("../dataMode", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dataMode")>()),
+  isLocalMode: () => false,
+  assertWorkspaceCurrent: () => {},
+}));
 
 describe("claiming a purchase made on the website", () => {
   beforeEach(() => {

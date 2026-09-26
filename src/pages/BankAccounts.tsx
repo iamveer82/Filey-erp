@@ -21,7 +21,7 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { fin, tools, getCacheScope } from "../lib/api";
-import { assertWorkspaceCurrent, getDataMode } from "../lib/dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
 import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
 import {
@@ -36,7 +36,7 @@ const BANK_SETTING_KEY = "bank_accounts"; // app_settings - synced + backed up
 const cacheKey = () => {
   try { assertWorkspaceCurrent(); } catch { return null; }
   const scope = getCacheScope();
-  return scope ? `${BANK_KEY}:${encodeURIComponent(`${getDataMode() ?? "cloud"}:${scope}`)}` : null;
+  return scope ? `${BANK_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
 };
 
 interface BankAccount {

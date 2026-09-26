@@ -150,7 +150,7 @@ describe("invoice WhatsApp tools", () => {
       setCacheOrg("another-org", "another-user");
       return { name: "mock.pdf", bytes: PDF };
     });
-    expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ error: expect.stringMatching(/workspace changed/i) });
+    expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ error: expect.stringMatching(/account changed/i) });
     expect(deliverFile).not.toHaveBeenCalled();
     expect(sendWaFile).not.toHaveBeenCalled();
     expect(billing.setStatus).not.toHaveBeenCalled();
@@ -168,7 +168,7 @@ describe("invoice WhatsApp tools", () => {
 
   it("keeps acceptance but avoids another workspace's ledger after the provider responds", async () => {
     vi.mocked(sendWaFile).mockImplementationOnce(async () => { setCacheOrg("another-org", "another-user"); return "provider-id"; });
-    expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ ok: true, status: "accepted", warning: expect.stringMatching(/workspace changed/i) });
+    expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ ok: true, status: "accepted", warning: expect.stringMatching(/account changed/i) });
     expect(billing.setStatus).not.toHaveBeenCalled();
     expect(waLogAdd).not.toHaveBeenCalled();
   });
@@ -316,7 +316,7 @@ describe("social publishing boundaries", () => {
       setCacheOrg("another-org", "another-user");
       return [{ id: "social-1", platform: "instagram" }];
     });
-    expect(await call("schedule_social_post", args)).toMatchObject({ error: expect.stringMatching(/workspace changed/i) });
+    expect(await call("schedule_social_post", args)).toMatchObject({ error: expect.stringMatching(/account changed/i) });
     expect(zernio.createPost).not.toHaveBeenCalled();
   });
 

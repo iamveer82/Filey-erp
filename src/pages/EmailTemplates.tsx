@@ -4,7 +4,7 @@ import { useUI } from "../lib/ui";
 import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
 import { RowActions } from "../components/RowActions";
 import { tools, getCacheScope } from "../lib/api";
-import { assertWorkspaceCurrent, getDataMode } from "../lib/dataMode";
+import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
 import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
 
@@ -14,7 +14,7 @@ const SETTING_KEY = "email_templates";
 const cacheKey = () => {
   try { assertWorkspaceCurrent(); } catch { return null; }
   const scope = getCacheScope();
-  return scope ? `${TMPL_KEY}:${encodeURIComponent(`${getDataMode() ?? "cloud"}:${scope}`)}` : null;
+  return scope ? `${TMPL_KEY}:${encodeURIComponent(`${effectiveDataMode()}:${scope}`)}` : null;
 };
 
 function subscribeScope(changed: () => void) {
