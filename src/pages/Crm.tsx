@@ -1247,8 +1247,8 @@ function CrmWorkspace({
           onOpen={open}
           onAdd={add}
           mutationDisabled={loading || !!error}
-          onSave={async (draft) => {
-            await saveCrmRecord(editor.kind, draft, data, editor.row);
+          onSave={async (draft, original) => {
+            await saveCrmRecord(editor.kind, draft, data, original);
             returnToRecord();
             toast.success("Record saved");
             await load();

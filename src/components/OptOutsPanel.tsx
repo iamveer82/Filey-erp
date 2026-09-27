@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ShieldCheck, Trash2 } from "lucide-react";
 
 import { crm, type EmailOptOut } from "../lib/api";
@@ -15,47 +15,55 @@ export default function OptOutsPanel() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
 
-  const load = () =>
+  const load = useCallback(() =>
     crm
       .optOuts()
       .then(setRows)
       .catch((e) => toast.error(errMsg(e)))
-      .finally(() => setLoading(false));
+      .finally(() => setLoading(false)), [toast]);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   const add = async () => {
+    if (pending.current) return;
     const value = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
       return toast.error("Enter a valid email address.");
     if (rows.some((r) => r.email.toLowerCase() === value))
       return toast.error("Already on the list.");
+    pending.current = true;
     setBusy(true);
     try {
       await crm.addOptOut(value, "manual");
       setEmail("");
       toast.success(`${value} will not be emailed again.`);
-      load();
+      await load();
     } catch (e) {
       toast.error(errMsg(e) || "Could not add");
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   };
 
   const remove = async (r: EmailOptOut) => {
+    if (pending.current) return;
     const ok = await confirm({
       title: "Remove from opt-out list",
       message: `${r.email} will start receiving campaigns again. Only do this if they asked to be put back on, or you added them by mistake.`,
       danger: true,
       confirmLabel: "Remove",
     });
-    if (!ok) return;
-    await crm.removeOptOut(r.id);
-    load();
+    if (!ok || pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    try { await crm.removeOptOut(r.id); await load(); }
+    catch (e) { toast.error(errMsg(e) || "Could not remove this opt-out. Please try again."); }
+    finally { pending.current = false; setBusy(false); }
   };
 
   return (
@@ -70,6 +78,9 @@ export default function OptOutsPanel() {
 
       <div className="mb-4 flex flex-wrap gap-2">
         <input
+          type="email"
+          aria-label="Email address to opt out"
+          disabled={busy}
           className="input w-full sm:max-w-xs"
           placeholder="someone@example.com"
           value={email}
@@ -113,6 +124,7 @@ export default function OptOutsPanel() {
             label: "Actions",
             render: (r) => (
               <button
+                disabled={busy}
                 className="btn-ghost h-7 px-2 text-[12.5px] text-danger"
                 onClick={() => remove(r)}
               >

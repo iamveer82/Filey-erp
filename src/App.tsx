@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { HashRouter } from "react-router-dom";
 import { cloudConfigured } from "./lib/supabase";
 import { getDataMode } from "./lib/dataMode";
@@ -43,10 +43,18 @@ function DeviceLimitScreen() {
   const { retryDeviceRegistration, signOut } = useAuth();
   const [devices, setDevices] = useState<OrgDevice[]>([]);
   const [busy, setBusy] = useState(false);
-  const load = () => {
-    listOrgDevices().then(setDevices).catch(() => {});
-  };
-  useEffect(load, []);
+  const [error, setError] = useState("");
+  const pending = useRef(false);
+  const load = useCallback(async () => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try { setDevices(await listOrgDevices()); }
+    catch { setError("Couldn't load your devices. Check your connection and try again."); }
+    finally { pending.current = false; setBusy(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="card max-w-md w-full space-y-4">
@@ -55,6 +63,8 @@ function DeviceLimitScreen() {
           Your workspace already has {CLOUD_DEVICE_LIMIT} devices connected.
           Release one below to use Filey on this device.
         </p>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        {busy && <p role="status" className="text-sm text-muted-foreground">Updating devices…</p>}
         <ul className="space-y-1.5">
           {devices.map((d) => (
             <li key={d.id} className="text-sm flex items-center justify-between gap-2">
@@ -63,12 +73,18 @@ function DeviceLimitScreen() {
                 className="text-xs text-danger hover:underline cursor-pointer shrink-0"
                 disabled={busy}
                 onClick={async () => {
+                  if (pending.current) return;
+                  pending.current = true;
                   setBusy(true);
+                  setError("");
                   try {
                     await releaseOrgDevice(d.id);
                     await retryDeviceRegistration();
-                    load();
+                    setDevices(await listOrgDevices());
+                  } catch {
+                    setError("Couldn't release this device. Refresh the list and try again.");
                   } finally {
+                    pending.current = false;
                     setBusy(false);
                   }
                 }}
@@ -78,7 +94,8 @@ function DeviceLimitScreen() {
             </li>
           ))}
         </ul>
-        <button className="btn-ghost w-full" onClick={() => void signOut()}>
+        <button className="btn-ghost w-full" disabled={busy} onClick={() => void load()}>Refresh devices</button>
+        <button className="btn-ghost w-full" disabled={busy} onClick={() => void signOut()}>
           Sign out
         </button>
       </div>
@@ -86,7 +103,7 @@ function DeviceLimitScreen() {
   );
 }
 
-function ProfileLoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ProfileLoadError({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="min-h-screen grid place-items-center p-6 bg-canvas">
       <div className="card max-w-sm w-full text-center space-y-3">
@@ -95,7 +112,6 @@ function ProfileLoadError({ message, onRetry }: { message: string; onRetry: () =
           You're signed in, but we couldn't read your account details. This is
           usually a connection problem — your data is untouched.
         </p>
-        <p className="text-xs text-brand-400 break-words">{message}</p>
         <button
           className="btn-primary"
           onClick={onRetry}
@@ -146,7 +162,7 @@ function Gate() {
   // A failed profile READ must never fall through to ProfileSetup — completing
   // that form upserts over the real name and company.
   if (profileError)
-    return <ProfileLoadError message={profileError} onRetry={() => void reloadProfile()} />;
+    return <ProfileLoadError onRetry={() => void reloadProfile()} />;
   if (needsProfile) return <ProfileSetup />;
   if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 

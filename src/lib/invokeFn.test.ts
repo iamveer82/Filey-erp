@@ -12,6 +12,11 @@ function fakeClient(results: { data?: unknown; error?: unknown }[]) {
 const httpErr = (status: number) => ({ context: { status }, message: "non-2xx" });
 
 describe("invokeFn", () => {
+  it("does not replay writes by default after ambiguous server failures", async () => {
+    const { client, invoke } = fakeClient([{ data: null, error: httpErr(503) }]);
+    expect((await invokeFn(client, "integrations", { body: { action: "execute" } })).error).toBeTruthy();
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
   it("returns immediately on success (no retry)", async () => {
     const { client, invoke } = fakeClient([{ data: { url: "ok" }, error: null }]);
     const r = await invokeFn(client, "stripe", { body: {} });
@@ -24,7 +29,7 @@ describe("invokeFn", () => {
       { data: null, error: httpErr(404) },
       { data: { url: "warm" }, error: null },
     ]);
-    const r = await invokeFn(client, "stripe", { body: {} });
+    const r = await invokeFn(client, "stripe", { body: {} }, 2);
     expect((r.data as { url: string }).url).toBe("warm");
     expect(invoke).toHaveBeenCalledTimes(2);
   });

@@ -50,7 +50,7 @@ export default function RecordEditor({
   data: CrmData;
   initial?: Record<string, string>;
   onClose: () => void;
-  onSave: (draft: Record<string, string>) => Promise<void>;
+  onSave: (draft: Record<string, string>, original?: CrmRow) => Promise<void>;
   onDelete: () => Promise<void>;
   onConvert: () => Promise<void>;
   onOpen: (kind: CrmObject, row: CrmRow) => void;
@@ -60,6 +60,9 @@ export default function RecordEditor({
   mutationDisabled?: boolean;
 }) {
   const spec = CRM_OBJECTS[kind];
+  // Live refreshes may replace row while the user edits. Save against the
+  // revision actually opened, not a newer row the draft never incorporated.
+  const original = useRef(row);
   const [draft, setDraft] = useState<Record<string, string>>(() => ({
     ...recordDraft(kind, row),
     ...(kind === "deals" && initial?.stage && STAGE_PROB[initial.stage] != null
@@ -285,7 +288,7 @@ export default function RecordEditor({
                   ])
                 )
               );
-            void run(async () => { await onSave(submitted); setDirty(false); setDiscarding(false); });
+            void run(async () => { await onSave(submitted, original.current); setDirty(false); setDiscarding(false); });
           }}
         >
           <fieldset
@@ -563,6 +566,7 @@ export default function RecordEditor({
               <button
                 className="btn-ghost"
                 onClick={() => {
+                  original.current = row;
                   setDraft(recordDraft(kind, row));
                   setError("");
                   setEditing(true);

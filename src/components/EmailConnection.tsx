@@ -32,8 +32,8 @@ export default function EmailConnection() {
       if (result?.error) throw new Error(result.error);
       setStatus(
         result?.configured
-          ? `Resend is configured. Sender: ${result.from}. Delivery still depends on the sender domain and available quota.`
-          : "The administrator needs to configure RESEND_API_KEY and EMAIL_FROM in Supabase secrets."
+          ? `Email is connected${result.from ? `. Sender: ${result.from}` : ""}. Sending limits apply.`
+          : "Email isn't set up yet. Ask your workspace administrator to complete the email setup guide."
       );
     } catch (error) {
       if (scope === agentStorageScope()) setStatus(error instanceof Error ? error.message : String(error));
@@ -46,17 +46,17 @@ export default function EmailConnection() {
       <div className="flex items-start gap-3">
         <Mail size={20} className="mt-1" />
         <div className="flex-1">
-          <h2 className="text-base font-semibold">Transactional email · Resend</h2>
+          <h2 className="text-base font-semibold">Email delivery</h2>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Send invoices and quotations from their document actions. Credentials stay on
-            the server; each send is recorded in Communications.
+            Send invoices and quotations from their document actions. See sent messages
+            in Communication history.
           </p>
         </div>
       </div>
       <div className="mt-4 flex gap-2 flex-wrap">
         <button className="btn-secondary" onClick={() => void check()} disabled={busy}>
           <RefreshCw size={14} className={busy ? "animate-spin" : ""} />
-          {busy ? "Checking…" : "Check configuration"}
+          {busy ? "Checking…" : "Check connection"}
         </button>
         <Link className="btn-ghost" to="/comms">
           Communication history
@@ -71,8 +71,7 @@ export default function EmailConnection() {
         </p>
       )}
       <p className="text-xs text-muted-foreground mt-3">
-        Checking configuration sends no email. Resend free-tier quotas and Filey's daily
-        sending limits apply. The workspace administrator supplies and pays for the Resend account.
+        Checking the connection sends no email. Your workspace's email service and daily sending limits apply.
       </p>
     </section>
   );

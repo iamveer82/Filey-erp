@@ -115,7 +115,8 @@ function RecordContext({ targetType, targetId, className }: Props) {
           status: done ? "done" : "open",
           completed_at: done ? new Date().toISOString() : null,
         },
-        task.id
+        task.id,
+        task.updated_at || null
       );
     });
   const remove = (kind: Tab, id: number) =>

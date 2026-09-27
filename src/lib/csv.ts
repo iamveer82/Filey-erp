@@ -72,6 +72,7 @@ export function parseCsvMatrix(text: string): string[][] {
   let row: string[] = [];
   let cur = "";
   let q = false;
+  let closed = false;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (q) {
@@ -79,19 +80,28 @@ export function parseCsvMatrix(text: string): string[][] {
         if (s[i + 1] === '"') {
           cur += '"';
           i++;
-        } else q = false;
+        } else { q = false; closed = true; }
       } else cur += c;
-    } else if (c === '"') q = true;
+    } else if (c === '"') {
+      if (cur.trim() || closed) throw new Error("Unexpected quote in CSV. Put quotes around the entire field.");
+      cur = "";
+      q = true;
+    }
     else if (c === ",") {
       row.push(cur);
       cur = "";
+      closed = false;
     } else if (c === "\n") {
       row.push(cur);
       rows.push(row);
       row = [];
       cur = "";
+      closed = false;
+    } else if (closed) {
+      if (c.trim()) throw new Error("Unexpected text after a quoted CSV field.");
     } else cur += c;
   }
+  if (q) throw new Error("A quoted CSV field is missing its closing quote.");
   if (cur.length || row.length) {
     row.push(cur);
     rows.push(row);
@@ -107,10 +117,12 @@ export function parseCsvObjects(text: string): {
   const matrix = parseCsvMatrix(text);
   if (!matrix.length) return { headers: [], rows: [] };
   const headers = matrix[0].map((h) => h.trim());
+  if (headers.some(h => !h)) throw new Error("Every CSV column needs a header.");
+  if (new Set(headers.map(h => h.toLowerCase())).size !== headers.length)
+    throw new Error("CSV column headers must be unique. Rename duplicate columns and try again.");
   const rows = matrix.slice(1).map((r) => {
-    const obj: Record<string, string> = {};
-    headers.forEach((h, i) => (obj[h] = (r[i] ?? "").trim()));
-    return obj;
+    if (r.length > headers.length) throw new Error("A CSV row has more values than column headers. Check commas and quoted fields.");
+    return Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? "").trim()]));
   });
   return { headers, rows };
 }

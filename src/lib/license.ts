@@ -228,18 +228,20 @@ export async function registerCloudDevice(): Promise<RegisterResult> {
 /** The org's registered devices (RLS-scoped to the member's org). */
 export async function listOrgDevices(): Promise<OrgDevice[]> {
   if (!supabase) return [];
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("org_devices")
     .select("*")
     .order("last_seen", { ascending: false });
+  if (error) throw new Error("Could not load your devices. Please try again.");
   return (data ?? []) as OrgDevice[];
 }
 
 /** Release an org device slot (own device, or any if org admin — RLS). */
 export async function releaseOrgDevice(id: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { error } = await supabase.from("org_devices").delete().eq("id", id);
+  const { data, error } = await supabase.from("org_devices").delete().eq("id", id).select("id").single();
   if (error) throw new Error(error.message);
+  if (!data) throw new Error("This device could not be released. Refresh the list and try again.");
 }
 
 /** Buy the one-time Freedom licence (Dodo Payments hosted checkout — Dodo is

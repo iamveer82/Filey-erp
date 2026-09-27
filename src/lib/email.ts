@@ -73,7 +73,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
       html: msg.html,
       attachments: msg.attachments,
     },
-  })) as { data: { error?: string } | null; error: unknown };
+  }, 2)) as { data: { error?: string } | null; error: unknown };
 
   const failure = error
     ? await edgeErrorMessage(error)

@@ -1,0 +1,26 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import OptOutsPanel from "../OptOutsPanel";
+const mock = vi.hoisted(() => ({ add: vi.fn(), remove: vi.fn(), list: vi.fn(), error: vi.fn(), success: vi.fn(), confirm: vi.fn() }));
+vi.mock("../../lib/api", () => ({ crm: { addOptOut: mock.add, removeOptOut: mock.remove, optOuts: mock.list } }));
+vi.mock("../../lib/ui", () => { const toast = { error: mock.error, success: mock.success }; return { useUI: () => ({ toast, confirm: mock.confirm }) }; });
+afterEach(() => { cleanup(); vi.resetAllMocks(); });
+it("locks repeated Enter submissions and reports a failed removal", async () => {
+  mock.list.mockResolvedValue([{ id: 1, email: "existing@example.test", reason: "manual" }]);
+  mock.confirm.mockResolvedValue(true);
+  mock.remove.mockRejectedValue(new Error("Connection lost"));
+  let complete!: () => void;
+  mock.add.mockImplementation(() => new Promise<void>(resolve => { complete = resolve; }));
+  render(<OptOutsPanel />);
+  await screen.findByText("existing@example.test");
+  const input = screen.getByRole("textbox", { name: "Email address to opt out" });
+  fireEvent.change(input, { target: { value: "new@example.test" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(mock.add).toHaveBeenCalledOnce();
+  await act(async () => complete());
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await waitFor(() => expect(mock.error).toHaveBeenCalledWith("Connection lost"));
+  expect(screen.getByText("existing@example.test")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
+});

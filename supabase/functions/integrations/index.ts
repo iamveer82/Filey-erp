@@ -16,6 +16,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
 import { cachedCatalog } from "../_shared/catalog-cache.ts";
+import { rateLimit } from "../_shared/rateLimit.ts";
 
 const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
 const ZERNIO_BASE = "https://zernio.com/api/v1";
@@ -70,12 +71,13 @@ Deno.serve(async (req) => {
     // readable only). When they have, this call spends their credits, not
     // ours — so it skips the platform's daily ceiling entirely, the same way
     // the desktop's own-key path bypasses this function altogether.
-    const { data: ownRow } = await supa
+    const { data: ownRow, error: keyError } = await supa
       .from("integration_keys")
       .select("api_key")
       .eq("user_id", userId)
       .eq("provider", provider)
       .maybeSingle();
+    if (keyError) return json({ error: "Could not load your integration settings. Please try again." }, 503);
     const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
 
     if (action === "status" && !payload?.connected_account_id) return json({
@@ -99,14 +101,9 @@ Deno.serve(async (req) => {
           (status === "active" || status === "trialing" || status === "past_due");
       }
       const limit = paid ? PAID_DAILY_ACTIONS : FREE_DAILY_ACTIONS;
-      const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
-      const { count } = await supa
-        .from("audit_log")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("action", "integration_action")
-        .gte("created_at", dayAgo);
-      if ((count ?? 0) >= limit)
+      // Reserve before the provider call. Counting past audit rows lets
+      // simultaneous calls overspend and fails open when that read fails.
+      if (!await rateLimit(supa, userId, "integration_action", limit, 86400))
         return json(
           {
             error: `Daily integration limit reached (${limit}/day).${

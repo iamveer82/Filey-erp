@@ -82,3 +82,13 @@ test("offline: create folder, save file, move it, read bytes back", async () => 
   await files.deleteFolder(clients!.id);
   expect((await files.listFolders()).find((x) => x.id === clients!.id)).toBeUndefined();
 });
+
+test("same-name uploads are filed by their new identity without moving older files", async () => {
+  const files = await import("../files");
+  await files.createFolder("Upload target", null);
+  const folder = (await files.listFolders()).find(f => f.name === "Upload target")!;
+  const first = await files.uploadUserFile(new File(["old"], "same.txt"));
+  const second = await files.uploadUserFile(new File(["new"], "same.txt"), undefined, folder.id);
+  expect((await files.getSavedFile(first)).folderId).toBeNull();
+  expect((await files.getSavedFile(second)).folderId).toBe(folder.id);
+});

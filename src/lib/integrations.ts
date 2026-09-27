@@ -51,12 +51,14 @@ export async function platformCall<T>(
     ...(expectedScope ? { headers: { Authorization: `Bearer ${sess.session.access_token}` } } : {}),
     ...(controller ? { signal: controller.signal } : {}),
   };
-  const writesSocial = provider === "zernio" && (action === "create_post" || action === "delete_post");
+  const readOnly = (provider === "composio"
+    ? ["status", "list", "toolkits", "tools"]
+    : ["status", "accounts", "profiles", "posts", "usage"]).includes(action);
   // A failed response is ambiguous after a publication. Never publish again
   // merely because the function's response was lost.
   let response: Awaited<ReturnType<typeof invokeFn>>;
   try {
-    response = await invokeFn(supabase, "integrations", request, writesSocial ? 0 : 2);
+    response = await invokeFn(supabase, "integrations", request, readOnly ? 2 : 0);
   } catch (error) {
     assertCurrent();
     throw error;

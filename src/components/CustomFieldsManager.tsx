@@ -87,11 +87,18 @@ export function CustomFieldsManager({
   const [attempt, setAttempt] = useState(0);
   const scope = useRef<string | null>(null);
   const inFlight = useRef(false);
+  const saved = useRef("[]");
+  const closing = useRef(false);
+  const [optionText, setOptionText] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!open) return;
     let active = true;
     scope.current = agentStorageScope();
     setDefs([]);
+    setNewLabel("");
+    setNewOptions("");
+    setNewType("text");
+    setOptionText({});
     setLoading(true);
     setLoaded(false);
     setError("");
@@ -99,6 +106,7 @@ export function CustomFieldsManager({
       .then((value) => {
         if (active) {
           setDefs(value);
+          saved.current = JSON.stringify(value);
           setLoaded(true);
         }
       })
@@ -126,8 +134,20 @@ export function CustomFieldsManager({
     };
   }, [open, module, attempt]);
 
+  const close = async () => {
+    if (inFlight.current || closing.current) return;
+    closing.current = true;
+    try {
+      if (loaded && (newLabel.trim() || newOptions.trim() || JSON.stringify(defs) !== saved.current) &&
+          !await confirm({ title: "Discard unsaved fields?", message: "Your field changes haven't been saved.",
+            confirmLabel: "Discard changes", cancelLabel: "Keep editing", danger: true })) return;
+      onOpenChange(false);
+    } finally { closing.current = false; }
+  };
+
   const save = async () => {
     if (inFlight.current || loading || !loaded) return;
+    if (newLabel.trim()) { setError("Choose Add field to include your new field before saving."); return; }
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -220,7 +240,8 @@ export function CustomFieldsManager({
     <Sheet
       open={open}
       onOpenChange={(value) => {
-        if (!inFlight.current) onOpenChange(value);
+        if (!value) void close();
+        else onOpenChange(true);
       }}
     >
       <SheetContent side="right" className="flex flex-col w-full sm:max-w-lg">
@@ -234,7 +255,7 @@ export function CustomFieldsManager({
 
         {error && <ErrorBanner message={error} />}
         {loading && !error && <p role="status">Loading fields…</p>}
-        {error && (
+        {error && !loaded && (
           <button
             className="btn-ghost"
             disabled={busy}
@@ -287,15 +308,16 @@ export function CustomFieldsManager({
                           <input
                             className="input text-xs"
                             aria-label={`Choices for ${def.label}`}
-                            value={def.options.join(", ")}
-                            onChange={(e) =>
+                            value={optionText[def.id] ?? def.options.join(", ")}
+                            onChange={(e) => {
+                              setOptionText(text => ({ ...text, [def.id]: e.target.value }));
                               update(def.id, {
                                 options: e.target.value
                                   .split(",")
                                   .map((s) => s.trim())
                                   .filter(Boolean),
-                              })
-                            }
+                              });
+                            }}
                             placeholder="Option 1, Option 2, …"
                           />
                         )}
@@ -419,7 +441,7 @@ export function CustomFieldsManager({
           <button
             className="btn-ghost"
             disabled={busy}
-            onClick={() => onOpenChange(false)}
+            onClick={() => void close()}
           >
             Cancel
           </button>

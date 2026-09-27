@@ -2,10 +2,27 @@ import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/re
 import { afterEach, expect, it, vi } from "vitest";
 import { CustomFieldsManager } from "../CustomFieldsManager";
 import { saveCustomFields, syncCustomFields } from "../../lib/customFields";
+const confirmation = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../../lib/agentStorage", () => ({ agentStorageScope: () => "test", requireAgentStorageScope: () => "test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
 vi.mock("../../lib/customFields", async original => ({ ...await original<object>(), saveCustomFields: vi.fn(), syncCustomFields: vi.fn() }));
-vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: vi.fn(), error: vi.fn() }, confirm: vi.fn(async () => true) }) }));
+vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: vi.fn(), error: vi.fn() }, confirm: confirmation }) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it("keeps commas while editing choices and protects unsaved field changes", async () => {
+  vi.mocked(syncCustomFields).mockResolvedValue([{ id: "one", key: "region", label: "Region", module: "tasks", type: "select", options: ["North"], position: 0, createdAt: "2026-09-28" }]);
+  const close = vi.fn();
+  render(<CustomFieldsManager open onOpenChange={close} module="tasks" />);
+  const choices = await screen.findByLabelText("Choices for Region");
+  fireEvent.change(choices, { target: { value: "North," } });
+  expect(choices).toHaveValue("North,");
+  fireEvent.change(choices, { target: { value: "North, South" } });
+  confirmation.mockResolvedValueOnce(false);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(confirmation).toHaveBeenCalled());
+  expect(close).not.toHaveBeenCalled();
+  expect(choices).toHaveValue("North, South");
+  fireEvent.click(screen.getByRole("button", { name: "Save fields" }));
+  await waitFor(() => expect(saveCustomFields).toHaveBeenCalledWith("tasks", [expect.objectContaining({ options: ["North", "South"] })], "test"));
+});
 it("keeps failed loads from replacing definitions and preserves editable fields after a failed save", async () => {
   vi.mocked(syncCustomFields).mockRejectedValueOnce(new Error("Offline")).mockResolvedValue([]);
   const close = vi.fn(); render(<CustomFieldsManager open onOpenChange={close} module="contacts"/>);

@@ -321,6 +321,7 @@ export interface CrmTask {
   assignee?: string;
   completed_at?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 export interface Opportunity {
   id: number;
@@ -945,11 +946,20 @@ async function sChildren<T>(
   order?: { col: string; asc: boolean }[],
   client: any = null
 ): Promise<T[]> {
-  let q: any = (client ?? sb()).from(table).select("*").eq(fk, id);
-  for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as T[];
+  const rows: T[] = [];
+  const remote = !isLocalMode();
+  for (let offset = 0; ; offset += 500) {
+    let q: any = (client ?? sb()).from(table).select("*").eq(fk, id);
+    for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
+    if (remote) {
+      if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
+      q = q.range(offset, offset + 499);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!remote || (data ?? []).length < 500) return rows;
+  }
 }
 
 async function sInsert(

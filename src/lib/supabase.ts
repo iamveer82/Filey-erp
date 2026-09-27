@@ -79,11 +79,8 @@ export function sb(): SupabaseClient {
   return supabase;
 }
 
-// Edge functions on a free-tier project cold-start: after idle the runtime
-// evicts the code blob, and the first hit misses (404 NOT_FOUND_FUNCTION_BLOB
-// or a 5xx boot error) even though the function is deployed. Retry the
-// transient ones — real function errors (business 4xx, or a 200 body with
-// {error}) are not retried. Route every functions.invoke through this.
+// Retries are opt-in for reads or operations with a provider idempotency key.
+// A timeout/5xx can arrive after an action succeeded; writes must not repeat.
 function transientStatus(error: unknown): boolean {
   if (!error) return false;
   const e = error as { context?: { status?: number }; message?: string };
@@ -97,7 +94,7 @@ export async function invokeFn(
   client: SupabaseClient,
   name: string,
   options?: { body?: unknown },
-  retries = 2
+  retries = 0
 ): Promise<{ data: unknown; error: unknown }> {
   let last: { data: unknown; error: unknown } = { data: null, error: null };
   for (let attempt = 0; attempt <= retries; attempt++) {

@@ -105,3 +105,10 @@ it("preserves the existing unscoped connector call contract", async () => {
   });
   expect(state.invokeFn.mock.calls[0][3]).toBe(2);
 });
+
+it("never retries connector executions, connection creation or unknown actions", async () => {
+  for (const action of ["execute", "connect", "future_action"]) {
+    await platformCall("composio", action);
+    expect(state.invokeFn.mock.lastCall?.[3]).toBe(0);
+  }
+});

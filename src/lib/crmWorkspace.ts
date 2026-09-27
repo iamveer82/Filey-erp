@@ -344,7 +344,7 @@ export async function saveCrmStatus(
           closed_at: ["won", "lost"].includes(value) ? row.closed_at || now : null,
           ...(!["won", "lost"].includes(value) ? { close_reason: null } : {}),
         };
-  await persistCrmRecord(CRM_OBJECTS[kind].table, patch, row.id);
+  await persistCrmRecord(CRM_OBJECTS[kind].table, patch, row.id, text(row.updated_at) || null);
 }
 
 export function recordDraft(kind: CrmObject, row?: CrmRow): Record<string, string> {
@@ -518,7 +518,8 @@ export async function saveCrmRecord(
       );
     requireAgentStorageScope(scope);
   }
-  return persistCrmRecord(CRM_OBJECTS[kind].table, patch, previous?.id);
+  return persistCrmRecord(CRM_OBJECTS[kind].table, patch, previous?.id,
+    previous ? text(previous.updated_at) || null : undefined);
 }
 
 export async function deleteCrmRecord(kind: CrmObject, row: CrmRow, data: CrmData) {
