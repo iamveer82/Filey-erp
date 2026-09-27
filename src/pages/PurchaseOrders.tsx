@@ -150,7 +150,7 @@ function blankForm(
   formats?: DocFormats
 ): Form {
   // New POs use the display currency; company country controls tax independently.
-  const currency = getDisplayCurrency() || c.currency || "AED";
+  const currency = c.currency || getDisplayCurrency() || "AED";
   return {
     po_number: pickDocNumber("purchase_order", existing, formats),
     status: "draft",
@@ -2089,7 +2089,7 @@ function Editor({
                         y={bankY}
                         onMove={(x, y) => { setBankX(x); setBankY(y); }}
                       >
-                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                       </DraggableBlock>
                     )}
                     </div>
@@ -2195,7 +2195,7 @@ function Editor({
                     />
                     {isLast && form.show_bank && (
                       <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                       </DraggableBlock>
                     )}
                   </div>
@@ -2240,7 +2240,7 @@ function Editor({
                     />
                     {isLastViewPage && form.show_bank && (
                       <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
-                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                       </DraggableBlock>
                     )}
                   </div>

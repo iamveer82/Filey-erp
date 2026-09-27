@@ -283,7 +283,9 @@ export default function Login() {
     setErr(null);
     setBusy(true);
     try {
-      await verifyOtp(cred, token, otpPurpose);
+      await verifyOtp(cred, token, otpPurpose, otpPurpose === "signup" ? password : undefined);
+      setPassword("");
+      setConfirm("");
     } catch (e2: any) {
       setErr(humanError(e2));
     } finally {

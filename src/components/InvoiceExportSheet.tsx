@@ -17,6 +17,7 @@ export const A4_W = 794;
 export const A4_H = 1123;
 
 export interface InvoiceExportForm {
+  tax_country_code?: string | null;
   items: DocItem[];
   show_stamp?: boolean;
   show_signature?: boolean;
@@ -97,7 +98,7 @@ export default function InvoiceExportSheet({
               />
               {isLast && form.show_bank && (
                 <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                  <BankDetailsBlock bank={bank} accent={form.accent} />
+                  <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                 </DraggableBlock>
               )}
             </div>

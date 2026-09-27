@@ -106,9 +106,9 @@ export function bankFieldsFor(countryCode?: string | null): BankFieldSpec[] {
   const code = norm(countryCode);
 
   const core: BankFieldSpec[] = [
-    { key: "bank_name", label: "Bank Name", placeholder: "Emirates NBD" },
-    { key: "branch", label: "Branch Name", placeholder: "Business Bay" },
-    { key: "account_name", label: "Account Name", placeholder: "Your Company L.L.C" },
+    { key: "bank_name", label: "Bank Name", placeholder: code === "IN" ? "HDFC Bank" : code === "AE" ? "Emirates NBD" : "Your bank" },
+    { key: "branch", label: "Branch Name", placeholder: code === "IN" ? "Mumbai Main Branch" : code === "AE" ? "Business Bay" : "Your branch" },
+    { key: "account_name", label: "Account Name", placeholder: "Account holder name" },
     { key: "account_number", label: "Account Number", placeholder: "01234567890" },
   ];
 
@@ -128,8 +128,8 @@ export function bankFieldsFor(countryCode?: string | null): BankFieldSpec[] {
       ];
     if (IBAN_COUNTRIES.has(code))
       return [
-        { key: "iban", label: "IBAN", placeholder: "AE00 0000 0000 0000 0000 000", wide: true, validate: ibanError },
-        { key: "swift", label: "SWIFT / BIC", placeholder: "EBILAEAD", validate: swiftError },
+        { key: "iban", label: "IBAN", placeholder: code === "AE" ? "AE00 0000 0000 0000 0000 000" : `${code}…`, wide: true, validate: ibanError },
+        { key: "swift", label: "SWIFT / BIC", placeholder: code === "AE" ? "EBILAEAD" : "Your bank's SWIFT / BIC", validate: swiftError },
       ];
     // Singapore, Japan, South Africa and anything unlisted: a SWIFT code is
     // the only identifier that is reliably meaningful.

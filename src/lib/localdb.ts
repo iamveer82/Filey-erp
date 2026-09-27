@@ -433,6 +433,44 @@ export async function journalVersion(): Promise<number> {
   return (await journalLoad()).v;
 }
 
+/** Commit a complete downloaded workspace and its clean journal together. */
+export function replaceWorkspaceSnapshot(tables: Map<string, Row[]>, expectedVersion: number): Promise<void> {
+  return serializeWrite(async () => {
+    const journal = await journalSnapshot();
+    if (journal.v !== expectedVersion)
+      throw new Error("Local records changed during the copy. Finish editing and retry.");
+    const entries: [string, string][] = [];
+    for (const [table, rows] of tables) {
+      entries.push(["localdb:" + table, await dehydrate(rows)]);
+      delete journal.tables[table];
+    }
+    journal.v++;
+    entries.push([JOURNAL_KEY, JSON.stringify(journal)]);
+    if (hasTauri) {
+      // Existing native command wraps every entry in one SQLite transaction.
+      await invoke("cache_set_many", { entries });
+    } else {
+      // ponytail: localStorage has no crash-atomic transactions; use IndexedDB
+      // if browser-local workspaces need the desktop's crash guarantees.
+      const originals = entries.map(([key]) => [key, localStorage.getItem(key)] as const);
+      try {
+        for (const [key, value] of entries) localStorage.setItem(key, value);
+      } catch (error) {
+        let restored = true;
+        for (const [key, value] of originals) {
+          try {
+            if (value === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, value);
+          } catch { restored = false; }
+        }
+        if (!restored) throw new Error("Device storage is unavailable. Keep using Filey Cloud until storage has been repaired.");
+        throw error;
+      }
+    }
+    clearLocalCache();
+  });
+}
+
 /** Remember a successful upload without overwriting edits made during the request. */
 export function rememberSyncRevision(coll: string, id: string | number, revision: number): Promise<void> {
   return rememberSyncRevisions(coll, new Map([[id, revision]]));

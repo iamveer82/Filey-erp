@@ -789,6 +789,16 @@ it("does not re-upload an unchanged read-only teammate record during reconciliat
   expect((await localClient.from("products").select()).data).toEqual([row]);
 });
 
+it("a toggle's device preference leaves unchanged owned rows on their newer cloud version", async () => {
+  localStorage.setItem("filey_cloud_seeded", "1");
+  await replaceColl("products", [{id: 9, name: "Old cached value", user_id: UID, sync_revision: 1}]);
+  const latest = {id: 9, name: "Edited on web", user_id: UID, sync_revision: 2};
+  const {client, calls} = fakeCloud({pull: {products: [latest]}});
+  expect(await resolveSyncConflicts(true, client, {pendingOnly: true})).toBe(true);
+  expect(calls.some(call => call.op === "upsert")).toBe(false);
+  expect((await localClient.from("products").select()).data).toEqual([latest]);
+});
+
 it("preserves every device record if a cloud choice cannot read one of the overlapping records", async () => {
   await localClient.from("products").insert([{ id: 1, name: "One" }, { id: 2, name: "Two" }]);
   await localClient.from("sync_conflicts").insert([1, 2].map(recordId => ({ id: `products:${recordId}`, table: "products", recordId })));

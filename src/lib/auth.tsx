@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase, isConfigured } from "./supabase";
+import { supabase, isConfigured, createSignupClient } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
@@ -180,7 +180,7 @@ interface AuthValue {
   signUpWithPassword: (c: Credential, password: string) => Promise<{ needsOtp: boolean }>;
   /** Passwordless: sends a login code to an existing account. */
   sendLoginOtp: (c: Credential) => Promise<void>;
-  verifyOtp: (c: Credential, token: string, purpose: "signup" | "login") => Promise<void>;
+  verifyOtp: (c: Credential, token: string, purpose: "signup" | "login", password?: string) => Promise<void>;
   resendOtp: (c: Credential, purpose: "signup" | "login") => Promise<void>;
   signOut: () => Promise<void>;
   createProfile: (firstName: string, lastName: string, company: string) => Promise<void>;
@@ -210,6 +210,11 @@ const norm = (c: Credential) =>
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const local = isLocalMode();
+  const pendingSignup = useRef<{
+    client: ReturnType<typeof createSignupClient>;
+    credential: Credential;
+    session: Session | null;
+  } | null>(null);
   const [loading, setLoading] = useState(!local);
   // Offline installs require a real email account too. The device is only
   // "signed in" once an account has claimed it AND the session flag is set, so
@@ -467,6 +472,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   const signInWithPassword = async (c: Credential, password: string) => {
+    pendingSignup.current = null;
     const email = c.value.trim().toLowerCase();
     if (local) {
       // Why the cloud could not confirm the password, when we asked it. Drives
@@ -554,12 +560,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
+  const finishSignup = async (password: string) => {
+    const pending = pendingSignup.current;
+    if (!supabase || !pending?.session) throw new Error("Verify your account before saving its password.");
+    const { client, credential, session: verified } = pending;
+    const address = credential.channel === "email" ? verified.user.email : verified.user.phone;
+    if (address?.trim().toLowerCase() !== credential.value.trim().toLowerCase())
+      throw new Error("The verified account changed. Start signup again.");
+    if (local) assertLocalAccount(verified.user.id);
+    // Repeated signup for an unconfirmed account does not replace its old
+    // password. Only set the chosen password after proof of email/phone ownership.
+    const { error } = await client.auth.updateUser({ password });
+    if (error && error.code !== "same_password")
+      throw new Error("Your account is verified, but we couldn't save your password. Please try Verify again.");
+    const { data, error: sessionError } = await client.auth.getSession();
+    if (sessionError || !data.session || data.session.user.id !== verified.user.id)
+      throw new Error("Your verification session expired. Start signup again.");
+    if (pendingSignup.current !== pending) throw new Error("Signup changed. Please try again.");
+    const { error: signInError } = await supabase.auth.setSession(data.session);
+    if (signInError) throw signInError;
+    if (credential.channel === "email")
+      await rememberLocalCredential(credential.value, verified.user.id, password);
+    pendingSignup.current = null;
+    if (local) {
+      await pullCloudProfile(verified.user.id, credential.value.trim().toLowerCase());
+      completeLocalSignIn(localUserFrom({ email: credential.value.trim().toLowerCase(), userId: verified.user.id }));
+    }
+  };
+
   const signUpWithPassword = async (c: Credential, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");
     // Must match Supabase's password_min_length, or the server rejects with a
     // raw "weak_password" error after the form has already accepted it.
     if (password.length < 8) throw new Error("Password must be at least 8 characters.");
-    const { data, error } = await supabase.auth.signUp({
+    const pending = pendingSignup.current;
+    if (pending?.session && pending.credential.channel === c.channel &&
+      pending.credential.value.trim().toLowerCase() === c.value.trim().toLowerCase()) {
+      await finishSignup(password);
+      return { needsOtp: false };
+    }
+    pendingSignup.current = null;
+    const client = createSignupClient();
+    const { data, error } = await client.auth.signUp({
       ...norm(c),
       password,
     } as any);
@@ -569,20 +611,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Without this check the UI parks the user on the OTP screen forever.
     if (isExistingAccount(data.user))
       throw new Error("An account with this email already exists. Sign in instead.");
-    // Claim this device for the new account so an offline install can sign in
-    // again without a connection.
-    if (data.user?.id && c.channel === "email")
-      await rememberLocalCredential(c.value, data.user.id, password);
-    if (local && data.session) {
-      assertLocalAccount(data.session.user.id);
-      completeLocalSignIn(localUserFrom({ email: c.value.trim().toLowerCase(), userId: data.user!.id }));
-    }
+    pendingSignup.current = { client, credential: { ...c }, session: data.session };
+    if (data.session) await finishSignup(password);
     // A session here means email confirmation is disabled → straight in.
     // Otherwise an OTP (email code / SMS) was sent and must be verified.
     return { needsOtp: !data.session };
   };
 
   const sendLoginOtp = async (c: Credential) => {
+    pendingSignup.current = null;
     if (!supabase) throw new Error("Supabase not configured");
     const { error } = await supabase.auth.signInWithOtp({
       ...norm(c),
@@ -591,12 +628,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const verifyOtp = async (c: Credential, token: string, purpose: "signup" | "login") => {
+  const verifyOtp = async (c: Credential, token: string, purpose: "signup" | "login", password?: string) => {
     if (!supabase) throw new Error("Supabase not configured");
+    if (purpose === "signup") {
+      const pending = pendingSignup.current;
+      if (!pending || pending.credential.channel !== c.channel ||
+        pending.credential.value.trim().toLowerCase() !== c.value.trim().toLowerCase() || !password || password.length < 8)
+        throw new Error("Return to Create your account and enter your password again.");
+      // If saving fails after verification, retry with the verified session;
+      // the one-time code has already been consumed.
+      if (!pending.session) {
+        const { data, error } = await pending.client.auth.verifyOtp({
+          ...norm(c), token: token.trim(), type: c.channel === "phone" ? "sms" : "signup",
+        } as any);
+        if (error) throw error;
+        if (!data.session) throw new Error("Verification did not complete. Request a new code.");
+        if (pendingSignup.current !== pending) throw new Error("Signup changed. Please try again.");
+        pending.session = data.session;
+      }
+      await finishSignup(password);
+      return;
+    }
     // For email login: verify the 6-digit numeric OTP with type "email".
     // "magiclink" is for full magic-link tokens, not numeric codes.
     const type =
-      c.channel === "phone" ? "sms" : purpose === "signup" ? "signup" : "email";
+      c.channel === "phone" ? "sms" : "email";
     const { data, error } = await supabase.auth.verifyOtp({
       ...norm(c),
       token: token.trim(),
@@ -642,6 +698,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    pendingSignup.current = null;
     if (local) {
       // End the on-device session AND the underlying cloud session. Without
       // this, a shared computer's next user inherits the previous account's

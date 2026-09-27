@@ -36,6 +36,19 @@ export function createRecoveryClient(): SupabaseClient {
   });
 }
 
+/** Keep verification private until signup has saved the chosen password. */
+export function createSignupClient(): SupabaseClient {
+  if (!cloudConfigured) throw new Error("Account creation is not configured.");
+  return createClient(url, anonKey, {
+    auth: {
+      storageKey: "filey-signup",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
+
 /** Supabase Auth owns recovery tokens/rate limits; Resend supplies its SMTP. */
 export async function requestPasswordResetEmail(email: string): Promise<void> {
   const address = email.trim().toLowerCase();

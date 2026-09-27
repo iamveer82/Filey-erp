@@ -2,6 +2,8 @@ import { Field } from "./ui";
 import { SelectMenu } from "./ui-menu";
 import type { CompanyProfile } from "../lib/api";
 import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
+import { changeCompanyCountry } from "../lib/companyCountry";
+import { CURRENCIES } from "../lib/format";
 
 /** Shared by document company dialogs and the full settings page. */
 export default function CountryTaxFields({
@@ -18,15 +20,7 @@ export default function CountryTaxFields({
         <SelectMenu
           value={c.country_code || ""}
           onChange={(country_code) =>
-            onChange({
-              ...c,
-              country_code,
-              country_subdivision: "",
-              tax_type:
-                c.tax_type === "None"
-                  ? "None"
-                  : taxRegimeFor(c.currency, country_code).taxLabel,
-            })
+            onChange(changeCompanyCountry(c, country_code))
           }
           options={[
             { value: "", label: "Not set — legacy currency defaults" },
@@ -38,9 +32,16 @@ export default function CountryTaxFields({
         {c.country_code
           ? `${regime.country} · ${regime.taxLabel}.`
           : "Select the country where this business is registered."}{" "}
-        New documents keep their tax country when you change currency. Existing documents
-        stay unchanged.
+        Changing country selects its currency for new documents. You can choose another
+        currency below. Existing documents stay unchanged.
       </p>
+      <Field label="Default currency">
+        <SelectMenu
+          value={c.currency || "AED"}
+          onChange={(currency) => onChange({ ...c, currency })}
+          options={CURRENCIES.map(({ code, name }) => ({ value: code, label: `${code} — ${name}` }))}
+        />
+      </Field>
       <div className="flex items-end gap-2">
         <div className="flex-1">
           <Field label="Default tax rate (%)">

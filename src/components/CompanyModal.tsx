@@ -1,5 +1,7 @@
 import CountryTaxFields from "./CountryTaxFields";
 import { taxRegimeFor } from "../lib/taxRegimes";
+import { companyCountry, companyPhoneHint } from "../lib/companyCountry";
+import IndiaRegistrationFields, { loadIndiaRegistration, saveIndiaRegistration, registrationError, type IndiaRegistration } from "./IndiaRegistrationFields";
 import { useEffect, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
 import { Modal, Field } from "./ui";
@@ -43,11 +45,21 @@ export default function CompanyModal({
   const { templates: customTemplates, error: templateError } = useCustomTemplates(open);
   const [c, setC] = useState<CompanyProfile>(company);
   const [preset, setPreset] = useState("");
+  const [registration, setRegistration] = useState<IndiaRegistration | null>();
+  const india = companyCountry(c) === "IN";
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) setC(company);
   }, [open, company]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setRegistration(undefined);
+    loadIndiaRegistration().then(value => { if (active) setRegistration(value); }).catch(() => { if (active) setRegistration(null); });
+    return () => { active = false; };
+  }, [open]);
 
   useEffect(() => {
     if (open && docType) {
@@ -76,8 +88,10 @@ export default function CompanyModal({
 
   const save = async () => {
     try {
+      if (india && (!registration || registrationError(registration))) throw new Error(registration ? registrationError(registration) : "Reopen company settings to load your Indian registration details before saving.");
       if (docType && preset) await saveDocPreset(docType, preset);
       await billing.saveCompany(c);
+      if (india && registration) await saveIndiaRegistration(registration);
       // Re-fetch so the page applies exactly what the server persisted (server
       // defaults, RLS-trimmed columns) and not just the locally-edited copy.
       let fresh: CompanyProfile;
@@ -117,17 +131,24 @@ export default function CompanyModal({
             <input
               className="input"
               value={c.trn ?? ""}
-              onChange={(e) => setC({ ...c, trn: e.target.value, vat_number:e.target.value })}
+              onChange={(e) => {
+                const value = india ? e.target.value.toUpperCase() : e.target.value;
+                setC({ ...c, trn: value, vat_number: value });
+              }}
             />
           </Field>
           <Field label="Phone">
             <input
               className="input"
+              type="tel"
+              autoComplete="tel"
+              placeholder={companyPhoneHint(companyCountry(c))}
               value={c.phone ?? ""}
               onChange={(e) => setC({ ...c, phone: e.target.value })}
             />
           </Field>
         </div>
+        {india && <IndiaRegistrationFields value={registration} onChange={setRegistration} />}
         <Field label="Email">
           <input
             className="input"

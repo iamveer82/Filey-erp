@@ -14,6 +14,12 @@ General document templates and receipt vouchers use the snapshot for VAT/GST/Tax
 
 Indian GSTINs are no longer rejected by a blanket UAE 15-digit rule. The new customer's country controls quick-add tax-ID format checks. These are format checks, not registration verification. Company settings show State / Province outside UAE and hide UAE WPS fields.
 
+Company profile update (27 September 2026): India shows GSTIN, IFSC, Indian phone examples, PIN code, State / Union territory and Indian business types. Optional PAN, CIN / LLPIN, Udyam and an Aadhaar last-four-digits reference are saved through the existing synced `company_registration_in` setting. The same registration editor is available in document company dialogs. Hidden UAE bank and registration values are retained when switching countries. The optional Indian references are not automatically printed on documents, and a full Aadhaar number is rejected. These are format checks and recordkeeping fields, not identity verification or statutory filing support.
+
+Identifier references: [GST invoice particulars](https://cbic-gst.gov.in/gst-invoice-rules.html), [Income Tax Department PAN information](https://www.incometaxindia.gov.in/en/pan), [Udyam registration number format](https://www.udyamregistration.gov.in/Udyam_Login.aspx), and [UIDAI sharing guidance](https://www.uidai.gov.in/images/pressrelease/Clarification_on_Aadhaar_sharing_issue_by_UIDAI_29_05_22.pdf).
+
+Company documents are private file uploads, separate from invoice content. Settings → Company Details supports GST certificates, PAN documents, masked Aadhaar copies, Udyam certificates, UAE VAT certificates/trade licences and general registration documents. PDF, PNG, JPEG and WebP files up to 10 MB use the existing owner-scoped My Files storage and local/cloud sync. Saved files remain accessible when the country changes. Uploads save immediately; the section provides previews, downloads and confirmed deletion. Masking an Aadhaar copy is the user's responsibility; Filey does not verify or redact the uploaded document. The optional number fields do not replace the stored copies.
+
 Quote lists now use the same formula, discounts, tax and rounding as the editor. Conversion retains the quote's jurisdiction, document rate, line rates, discount and rounding instead of applying today's company tax default. The shared totals calculation allocates document discounts across explicit line tax rates as well as document-rated lines. Purchase-order totals now include their header discount and tax; API saves recompute the amount from items instead of trusting a stale caller total. Purchase postings recalculate net and tax from saved lines and convert them to AED, preventing VAT from being added twice. New foreign-currency POs freeze an available FX rate; the editor retains it until currency changes. Existing posted transactions require reconciliation before any reposting or release.
 
 ## Sources and preset scope
@@ -30,9 +36,17 @@ Presets were checked on 6 September 2026. They are editable suggestions; they do
 
 Apply `supabase/2026-09-06-international-business.sql` before enabling country persistence in cloud or transferring country-tagged local documents. The migration adds nullable columns only and leaves organization/owner RLS intact. It does not relabel or backfill historical invoices. Native local rows are schemaless and retain the fields through the existing database backup and explicit transfer paths.
 
-The initial management request failed, but this migration was subsequently applied on September 10 and its columns rechecked on September 12. See [the deployment log](SUPABASE_DEPLOY.md#applied-migration-log). Country settings and records belong to the selected local or cloud workspace; changing storage mode does not automatically merge them.
+The initial management request failed, but this migration was subsequently applied on September 10 and its columns rechecked on September 12. See [the deployment log](SUPABASE_DEPLOY.md#applied-migration-log). Country settings and records belong to the selected workspace. The storage toggle now transfers saved data before switching: on uploads device changes, off downloads the current cloud snapshot and files. Device edits win conflicts when enabling cloud; untouched and cloud-only records are retained. Failed transfers keep the current mode open. These toggle changes still require a release.
 
 ## Remaining release work
+
+Company country now selects the matching default document currency (editable), phone
+prefix hint and bank fields. India exposes GSTIN, optional PAN/CIN/Udyam and an Aadhaar
+last-four reference; document uploads remain private files for safekeeping. Saved
+phone numbers, identifiers and existing invoice currencies are never rewritten.
+Invoices, quotes, purchase orders and receipts use the company currency for new
+documents, independently of the dashboard display currency. All supported countries
+have a currency option, including the [Bulgarian euro changeover in January 2026](https://www.ecb.europa.eu/euro/changeover/bulgaria/html/index.en.html).
 
 - The accounting ledger and FX anchor are still AED. A company/display currency selection does not convert the underlying ledger to a new functional currency. Statutory accounts in INR/EUR or another functional currency require a ledger migration, opening-balance reconciliation and accountant validation.
 - India: place-of-supply rules, CGST/SGST/UTGST split, HSN/SAC classification, cess, e-invoice IRN/QR, e-way bills and GST returns are not implemented by this change.

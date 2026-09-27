@@ -10,13 +10,20 @@ const fixture = vi.hoisted(() => ({
   signIn: vi.fn(),
   signUp: vi.fn(),
   verifyOtp: vi.fn(),
+  updateUser: vi.fn(async () => ({ error: null })),
+  setSession: vi.fn(async () => ({ error: null })),
   scope: "previous-org:previous-user",
   onAuth: undefined as undefined | ((event: string, session: { user: { id: string; email: string } } | null) => void),
 }));
 vi.mock("../../lib/supabase", () => ({
   isConfigured: true,
+  createSignupClient: () => ({ auth: {
+    signUp: fixture.signUp, verifyOtp: fixture.verifyOtp,
+    updateUser: fixture.updateUser, getSession: fixture.getSession,
+  } }),
   supabase: {
     auth: {
+      setSession: fixture.setSession,
       getSession: fixture.getSession,
       onAuthStateChange: (callback: typeof fixture.onAuth) => { fixture.onAuth = callback; return { data: { subscription: { unsubscribe() {} } } }; },
       signOut: fixture.signOut,

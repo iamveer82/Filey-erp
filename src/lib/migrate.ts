@@ -9,10 +9,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
-import { prepareSyncRows, pushCollection, pullPaged, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
+import { prepareSyncRows, pushCollection, pullPaged, pullManifest, pullIncremental, inRealOrg, pushFileBlobs, pullFileBlobs, type SyncFailure } from "./sync";
 import {
   loadColl,
-  replaceColl,
+  replaceWorkspaceSnapshot,
   clearLocalCache,
   journalSnapshot,
   journalCommit,
@@ -22,57 +22,19 @@ import {
 
 import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
 import { pendingProfile, syncProfile } from "./profileSync";
+import { assertWorkspaceCurrent } from "./dataMode";
 
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
 // profiles, invitations…) is harmless — the local shim just stores them.
 const TABLES = [
-  "company_profile",
-  "app_settings",
+  ...PUSH_TABLES,
   "app_users",
   "profiles",
   "organizations",
-  "suppliers",
-  "crm_customers",
-  "products",
-  "orders",
-  "order_items",
-  "invoice_docs",
-  "invoice_doc_items",
-  "work_items",
-  "invoice_payments",
-  "invoice_recurrence",
-  "quotations",
-  "quotation_items",
-  "quotation_templates",
-  "purchase_orders",
-  "purchase_order_items",
-  "po_payments",
-  "payment_receipts",
-  "accounts",
-  "expenses",
-  "transactions",
-  "advances",
-  "stock_movements",
-  "employees",
-  "attendance",
-  "payroll",
-  "crm_leads",
-  "crm_people",
-  "crm_opportunities",
-  "crm_activities",
-  "crm_notes",
-  "crm_tasks",
-  "follow_ups",
   "notifications",
-  "tool_runs",
   "tool_jobs",
-  "user_folders",
-  "user_files",
-  "user_assets",
-  "email_optouts",
-  "campaigns",
 ];
 
 async function localSet(key: string, value: string): Promise<void> {
@@ -220,14 +182,17 @@ export async function migrateCloudToLocal(
   assertLocalAccount(uid);
   const before = await journalSnapshot();
   const staged = new Map<string, Record<string, any>[]>();
-  const originals = new Map<string, Record<string, any>[]>();
   const out: MigrateResult[] = [];
 
   // Read the complete source first. No record is replaced on a failed cloud read.
+  // Reuse unchanged row bodies (including logos/stamps), while the manifest
+  // still detects deletions. Files already on disk are not downloaded again.
+  const manifest = await pullManifest(supabase, PUSH_TABLES);
   for (const t of TABLES) {
     onProgress?.(`Reading ${t}…`);
-    staged.set(t, await pullPaged(supabase, t, "*"));
-    originals.set(t, await loadColl(t));
+    staged.set(t, manifest[t] && !before.tables[t]
+      ? await pullIncremental(supabase, t, "sync_revision", manifest[t])
+      : await pullPaged(supabase, t, "*"));
     out.push({ table: t, rows: staged.get(t)!.length });
   }
 
@@ -244,34 +209,17 @@ export async function migrateCloudToLocal(
     throw new Error(
       "The cloud account changed during the copy. Local records have not been replaced."
     );
+  assertWorkspaceCurrent();
 
-  const committed: string[] = [];
+  claimLocalWorkspace(uid);
+  await replaceWorkspaceSnapshot(staged, before.v);
+  // This marker is an optimization, not part of committing the data. If the
+  // browser's preference storage is full, the next sync safely rechecks rows.
   try {
-    // ponytail: compensation handles write errors; process-crash atomicity needs a SQLite transaction.
-    for (const [table, rows] of staged) {
-      committed.push(table);
-      await replaceColl(table, rows);
-    }
-    claimLocalWorkspace(uid);
-    await journalCommit(before.v, TABLES);
-    // An imported snapshot must not be re-uploaded as legacy local data.
     localStorage.setItem("filey_cloud_seeded", "1");
   } catch (error) {
-    const failures: string[] = [];
-    for (const table of committed.reverse()) {
-      try {
-        await replaceColl(table, originals.get(table)!);
-      } catch {
-        failures.push(table);
-      }
-    }
-    if (failures.length)
-      throw new Error(
-        `Local storage failed; restore your backup for: ${failures.join(", ")}.`
-      );
-    throw error;
+    console.warn("Could not save the cloud-copy marker", error);
   }
-  clearLocalCache();
   window.dispatchEvent(new Event("filey:remote-update"));
   return out;
 }

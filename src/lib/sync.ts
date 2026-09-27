@@ -253,7 +253,7 @@ async function clearConflict(table: string, recordId: string | number): Promise<
 }
 /** Apply one preference to the saved workspace, then reconcile both ways.
  * Fresh revisions remain compare-and-swap bases; never force a cloud write. */
-export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null): Promise<boolean> {
+export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null, opts?: { pendingOnly?: boolean }): Promise<boolean> {
   const supa = client ?? supabase;
   if (!isLocalMode() || !supa) throw new Error("Open this device's workspace and connect your cloud account first.");
   if (running || migrating) throw new Error("Wait for the current sync to finish, then choose again.");
@@ -302,7 +302,7 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
       const pending = journal.tables[table];
       // Cached teammate records remain governed by cloud permissions. Do not
       // re-upload untouched read-only records just because they are visible.
-      const ids = new Set([...rows.values()].filter(row => !row.user_id || row.user_id === uid
+      const ids = new Set([...rows.values()].filter(row => (!opts?.pendingOnly && (!row.user_id || row.user_id === uid))
         || pending?.all || pending?.changed.includes(row.id) || knownConflicts.has(`${table}:${row.id}`)).map(row => row.id));
       for (const id of journal.tables[table]?.deleted ?? []) ids.add(id);
       for (const conflict of conflicts.filter(c => c.table === table)) ids.add(conflict.recordId);
@@ -702,7 +702,7 @@ export async function pullPaged(
  *  id list still defines membership, so remote deletes propagate as before.
  *  This is what stops a 24/7 poll re-downloading base64 logos and signatures
  *  on every beat — the free-tier egress blowout. */
-async function pullIncremental(
+export async function pullIncremental(
   supa: SupabaseClient,
   t: string,
   version = "updated_at",
@@ -735,7 +735,7 @@ async function pullIncremental(
 
 /** Batch only metadata; unchanged image/document bodies never leave Supabase.
  * A partial/error response must not be interpreted as remote deletions. */
-async function pullManifest(supa: SupabaseClient, tables: string[]): Promise<Record<string, Record<string, any>[]>> {
+export async function pullManifest(supa: SupabaseClient, tables: string[]): Promise<Record<string, Record<string, any>[]>> {
   const result: Record<string, Record<string, any>[]> = Object.fromEntries(tables.map(t => [t, []]));
   let pending = tables;
   for (let offset = 0; pending.length; offset += 1000) {

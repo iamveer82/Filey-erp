@@ -90,7 +90,7 @@ function blankForm(
     template: "voucher",
     accent: c.default_accent || "#3E7C3A",
     // Receipts follow the active display currency like every other document.
-    currency: getDisplayCurrency() || c.currency || "AED",
+    currency: c.currency || getDisplayCurrency() || "AED",
     logo: c.logo,
     seller_name: c.name,
     tax_country_code: c.country_code,
