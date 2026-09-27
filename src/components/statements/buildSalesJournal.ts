@@ -31,6 +31,7 @@ export interface JournalSummary {
 
 export interface SalesJournal {
   company: {
+    country_code?: string;
     name: string;
     address?: string;
     trn?: string;
@@ -74,6 +75,7 @@ export async function buildSalesJournal(opts: {
     .filter((d): d is InvoiceDoc => d !== null);
 
   const companyInfo = {
+    country_code: company?.country_code,
     name: company?.name || "Company",
     address: [company?.address, company?.city].filter(Boolean).join("\n") || undefined,
     trn: company?.trn || undefined,

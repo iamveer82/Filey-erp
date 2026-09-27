@@ -59,6 +59,17 @@ Broader competitor readiness is tracked in [platform-readiness.md](platform-read
 
 ## Validation
 
+Visible country labels also apply to customer/supplier forms, document editors,
+receipts, payslips, statements and tax summaries in the shared desktop/web UI.
+India uses GSTIN, GST, State / Union territory and PIN code; bank accounts store
+IFSC separately from IBAN. Indian and UAE customer mobile numbers can be normalized
+from local formats, while explicit international numbers retain their country.
+New non-UAE declaration letters start with generic editable wording rather than
+the UAE hydrocarbon declaration. Saved letters retain their country and currency.
+Non-UAE tax summaries omit the UAE form boxes and figures derived from a fixed 5%
+rate. They remain account summaries, not statutory returns. Existing AED ledger
+amounts and saved document snapshots are not relabeled or converted.
+
 143 test files / 983 tests passed. After the final legacy-PO read correction, the 10 focused country and purchase-accounting tests passed again. TypeScript and the final production build passed. Lint across the changed files reported 0 errors and 125 warnings. Browser review confirmed the shared country selector, India's GSTIN/state fields and removal of UAE-only WPS fields without saving changes to the real company. Cloud writes, national gateway submission and a packaged desktop release were not validated.
 
 ## Capability matrix (September 2026)

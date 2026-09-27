@@ -2,7 +2,10 @@ import { useEffect, useState, useRef } from "react";
 import { Plus, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { nextLocalId } from "../lib/recordId";
-import { aed, fmtDate, money, numInput, plural } from "../lib/format";
+import { aed, fmtDate, money, numInput, plural, CURRENCIES } from "../lib/format";
+import { bankFieldsFor } from "../lib/bankFields";
+import { companyCountry, companyCountryCurrency } from "../lib/companyCountry";
+import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
 import {
   PageHeader,
   MetricCard,
@@ -20,7 +23,7 @@ import {
   shareVia,
   type ShareKind,
 } from "../components/RowActions";
-import { fin, tools, getCacheScope } from "../lib/api";
+import { billing, fin, tools, getCacheScope, type CompanyProfile } from "../lib/api";
 import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
 import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
@@ -45,6 +48,10 @@ interface BankAccount {
   account_name: string;
   account_number: string;
   iban: string;
+  ifsc?: string;
+  routing_code?: string;
+  swift?: string;
+  country_code?: string;
   currency: string;
   opening_balance: number;
   current_balance: number;
@@ -90,6 +97,7 @@ async function syncBankAccounts(): Promise<BankAccount[]> {
 }
 
 export default function BankAccounts() {
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
   const { toast, confirm } = useUI();
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [screenScope] = useState(cacheKey);
@@ -156,6 +164,9 @@ export default function BankAccounts() {
       `Account: ${a.account_name}`,
       a.account_number ? `Account #: ${a.account_number}` : null,
       a.iban ? `IBAN: ${a.iban}` : null,
+      a.ifsc ? `IFSC: ${a.ifsc}` : null,
+      a.routing_code ? `Routing code: ${a.routing_code}` : null,
+      a.swift ? `SWIFT / BIC: ${a.swift}` : null,
       `Currency: ${a.currency}`,
     ]
       .filter(Boolean)
@@ -166,8 +177,8 @@ export default function BankAccounts() {
   const q = search.trim().toLowerCase();
   const filtered = q
     ? accounts.filter((a) =>
-        [a.bank_name, a.account_name, a.account_number, a.iban].some((v) =>
-          v.toLowerCase().includes(q)
+        [a.bank_name, a.account_name, a.account_number, a.iban, a.ifsc, a.routing_code, a.swift].some((v) =>
+          v?.toLowerCase().includes(q)
         )
       )
     : accounts;
@@ -196,9 +207,12 @@ export default function BankAccounts() {
             </button>
             <button
               className="btn-primary"
-              onClick={() => {
-                setEdit(null);
-                setOpen(true);
+              onClick={async () => {
+                try {
+                  setCompany(await billing.getCompany());
+                  setEdit(null);
+                  setOpen(true);
+                } catch { toast.error("Could not load company settings. Try again."); }
               }}
             >
               <Plus size={16} /> Add account
@@ -234,7 +248,7 @@ export default function BankAccounts() {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search by bank, account, number or IBAN…"
+          placeholder="Search by bank, account or bank identifier…"
           className="max-w-xs"
         />
       </div>
@@ -273,9 +287,9 @@ export default function BankAccounts() {
           },
           {
             key: "iban",
-            label: "IBAN",
+            label: "Bank identifier",
             render: (a) => (
-              <span className="font-mono text-xs text-brand-500">{a.iban || "—"}</span>
+              <span className="font-mono text-xs text-brand-500">{a.ifsc ? `IFSC ${a.ifsc}` : a.iban ? `IBAN ${a.iban}` : a.routing_code || a.swift || "—"}</span>
             ),
           },
           {
@@ -314,6 +328,7 @@ export default function BankAccounts() {
       />
       {open && (
         <BankModal
+          company={company}
           open={open}
           edit={edit}
           saving={saving}
@@ -355,7 +370,10 @@ export default function BankAccounts() {
                     label: "Account number",
                     value: quickView.account_number || "—",
                   },
-                  { label: "IBAN", value: quickView.iban || "—" },
+                  ...(quickView.iban ? [{ label: "IBAN", value: quickView.iban }] : []),
+                  ...(quickView.ifsc ? [{label: "IFSC Code", value: quickView.ifsc}] : []),
+                  ...(quickView.routing_code ? [{label: "Routing code", value: quickView.routing_code}] : []),
+                  ...(quickView.swift ? [{label: "SWIFT / BIC", value: quickView.swift}] : []),
                   { label: "Currency", value: quickView.currency },
                   {
                     label: "Opening balance",
@@ -597,12 +615,14 @@ function ReconList({
 }
 
 function BankModal({
+  company,
   open,
   edit,
   onClose,
   onSaved,
   saving,
 }: {
+  company: CompanyProfile | null;
   open: boolean;
   edit: BankAccount | null;
   onClose: () => void | Promise<void>;
@@ -616,12 +636,15 @@ function BankModal({
         account_name: "",
         account_number: "",
         iban: "",
-        currency: "AED",
+        currency: company?.currency || "AED",
+        country_code: company ? companyCountry(company) : "",
         opening_balance: 0,
         current_balance: 0,
       } as Omit<BankAccount, "id" | "created_at">)
   );
-  const valid = f.bank_name.trim() && f.account_name.trim();
+  const identifiers = bankFieldsFor(f.country_code || companyCountry(f)).filter(field => ["iban", "ifsc", "routing_code", "swift"].includes(field.key));
+  const bankError = identifiers.map(field => { const value = f[field.key as "iban" | "ifsc" | "routing_code" | "swift"]?.trim(); return value ? field.validate?.(value) : ""; }).find(Boolean);
+  const valid = f.bank_name.trim() && f.account_name.trim() && !bankError;
   return (
     <Modal
       open={open}
@@ -634,7 +657,7 @@ function BankModal({
             className="input"
             value={f.bank_name}
             onChange={(e) => setF({ ...f, bank_name: e.target.value })}
-            placeholder="Emirates NBD"
+            placeholder="Your bank"
           />
         </Field>
         <Field label="Account Name *">
@@ -652,24 +675,26 @@ function BankModal({
             onChange={(e) => setF({ ...f, account_number: e.target.value })}
           />
         </Field>
-        <Field label="IBAN">
+        <Field label="Bank country">
+          <SelectMenu value={f.country_code || companyCountry(f)}
+            onChange={country_code => setF({...f, country_code, currency: companyCountryCurrency(country_code) || f.currency})}
+            options={[{value: "", label: "Select country"}, ...COUNTRY_OPTIONS]} />
+        </Field>
+        {identifiers.map(field => <Field key={field.key} label={field.label}>
           <input
             className="input"
-            value={f.iban}
-            onChange={(e) => setF({ ...f, iban: e.target.value })}
+            value={f[field.key as "iban" | "ifsc" | "routing_code" | "swift"] || ""}
+            placeholder={field.placeholder}
+            onChange={(e) => setF({ ...f, [field.key]: e.target.value })}
           />
-        </Field>
+        </Field>)}
+        {bankError && <p role="alert" className="text-sm text-danger sm:col-span-2">{bankError}</p>}
         <Field label="Currency">
           <SelectMenu
             ariaLabel="Currency"
             value={f.currency}
             onChange={(currency) => setF({ ...f, currency })}
-            options={[
-              { value: "AED", label: "AED" },
-              { value: "USD", label: "USD" },
-              { value: "EUR", label: "EUR" },
-              { value: "GBP", label: "GBP" },
-            ]}
+            options={CURRENCIES.map(c => ({value: c.code, label: `${c.code} — ${c.name}`}))}
           />
         </Field>
         <Field label="Opening Balance">

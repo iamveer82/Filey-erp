@@ -1,4 +1,5 @@
 import SummaryBox from "./StatementSummary";
+import { taxRegimeFor } from "../../lib/taxRegimes";
 import type { SalesJournal } from "./buildSalesJournal";
 
 export interface SalesJournalTemplateProps {
@@ -16,6 +17,7 @@ const num = (n: number) =>
  *  SL/Date/Description/Unit/Qty/Rate/Amount/VAT/Total/InvoiceNo/Received. */
 export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
   const { company, customer, period, summary, transactions } = data;
+  const regime = taxRegimeFor("AED", company.country_code);
 
   return (
     <div
@@ -33,7 +35,7 @@ export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
           </div>
         )}
         {company.trn && (
-          <div className="text-neutral-600 text-[9px]">TRN: {company.trn}</div>
+          <div className="text-neutral-600 text-[9px]">{regime.trnLabel}: {company.trn}</div>
         )}
       </div>
 
@@ -71,7 +73,7 @@ export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
             <th className="px-1.5 py-1 text-right w-10">Qty</th>
             <th className="px-1.5 py-1 text-right w-10">Rate</th>
             <th className="px-1.5 py-1 text-right w-14">Amount</th>
-            <th className="px-1.5 py-1 text-right w-10">VAT</th>
+            <th className="px-1.5 py-1 text-right w-10">{regime.taxLabel}</th>
             <th className="px-1.5 py-1 text-right w-14">Total</th>
             <th className="px-1.5 py-1 w-20">Invoice No.</th>
             <th className="px-1.5 py-1 text-right w-14">Received</th>

@@ -548,7 +548,7 @@ export default function DocView({
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>{docTitle.toUpperCase()}</p>
             <p className="text-sm font-medium mt-1">{form.number}</p>
-            {form.seller_trn && <p className="text-xs text-neutral-500 mt-1">TRN {form.seller_trn}</p>}
+            {form.seller_trn && <p className="text-xs text-neutral-500 mt-1">{trnLbl} {form.seller_trn}</p>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm mt-6">

@@ -41,6 +41,7 @@ export interface StatementDocRef {
 }
 
 export interface StatementPartyRef {
+  country_code?: string;
   id: number;
   name: string;
   contact?: string;
@@ -251,6 +252,7 @@ export default function StatementModal({
     return buildStatement({
       kind: partyType,
       company: {
+        country_code: company?.country_code,
         name: company?.name || "Company",
         address:
           [company?.address, company?.city].filter(Boolean).join("\n") || undefined,
@@ -259,6 +261,7 @@ export default function StatementModal({
         phone: company?.phone || undefined,
       },
       party: {
+        country_code: party.country_code,
         name: party.name,
         contact: party.contact,
         trn: party.trn,

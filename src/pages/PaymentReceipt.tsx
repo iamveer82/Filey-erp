@@ -1,4 +1,5 @@
 import { FileySpinner } from "../components/FileySpinner";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -1056,7 +1057,7 @@ export default function PaymentReceipt() {
                             onChange={(e) => update({ seller_name: e.target.value })}
                           />
                         </Field>
-                        <Field label="TRN">
+                        <Field label={taxRegimeFor(form.currency, form.tax_country_code).trnLabel}>
                           <input
                             className="input"
                             value={form.seller_trn || ""}

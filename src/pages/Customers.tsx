@@ -12,7 +12,9 @@ import {
   Search,
   ArrowUpDown,
 } from "lucide-react";
-import { crm, type CrmCustomer } from "../lib/api";
+import { billing, crm, type CrmCustomer } from "../lib/api";
+import { companyCountry, companyPhoneHint, customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
+import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
@@ -46,21 +48,14 @@ import {
 } from "../components/RowActions";
 import { Users } from "lucide-react";
 
-// Local re-export so the form doesn't need a separate import.
-const toE164Local = (raw: string): string | null => {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("971")) return "+" + digits;
-  if (digits.startsWith("0") && digits.length === 10) return "+971" + digits.slice(1);
-  return null;
-};
-
 type SortKey = "company" | "trn" | "email" | "phone" | "segment";
 
 export default function Customers() {
   const { toast, confirm } = useUI();
   const nav = useNavigate();
   const [rows, setRows] = useState<CrmCustomer[]>([]);
+  const [country, setCountry] = useState("");
+  const taxIdLabel = taxRegimeFor(undefined, country).trnLabel;
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -75,18 +70,19 @@ export default function Customers() {
   const [params, setParams] = useSearchParams();
 
   useEffect(() => {
-    if (params.get("new") === "1") {
+    if (!loading && !error && params.get("new") === "1") {
       setEdit(null);
       setOpen(true);
       setParams({}, { replace: true });
     }
-  }, [params, setParams]);
+  }, [params, setParams, loading, error]);
 
   const load = () => {
     setError("");
-    return crm
-      .customers()
-      .then(setRows)
+    return Promise.all([
+      crm.customers().then(setRows),
+      billing.getCompany().then(c => setCountry(companyCountry(c))),
+    ])
       .catch((e) =>
         setError(`Could not load customers: ${e instanceof Error ? e.message : e}`)
       )
@@ -95,7 +91,7 @@ export default function Customers() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load, ["crm_customers"]);
+  useLiveSync(load, ["crm_customers", "company_profile"]);
 
   // Persisted "saved view": the active filter set survives reloads.
   const [vw, setVw] = useState<{ email: boolean; trn: boolean }>(() => {
@@ -162,7 +158,7 @@ export default function Customers() {
     <div>
       <PageHeader
         title="Customers"
-        subtitle="Your customer directory: names, TRN and addresses pulled onto invoices & quotations"
+        subtitle={`Your customer directory: names, ${taxIdLabel} and addresses pulled onto invoices & quotations`}
         action={
           <div className="flex gap-2 flex-wrap">
             <button
@@ -182,7 +178,7 @@ export default function Customers() {
                   [
                     { key: "name", label: "Contact" },
                     { key: "company", label: "Company" },
-                    { key: "trn", label: "TRN" },
+                    { key: "trn", label: taxIdLabel },
                     { key: "email", label: "Email" },
                     { key: "phone", label: "Phone" },
                     { key: "address", label: "Address" },
@@ -201,6 +197,7 @@ export default function Customers() {
             </button>
             <button
               className="btn-primary"
+              disabled={loading || !!error}
               onClick={() => {
                 setEdit(null);
                 setOpen(true);
@@ -233,11 +230,11 @@ export default function Customers() {
           changeTone="up"
         />
         <MetricCard
-          label="With TRN"
+          label={`With ${taxIdLabel}`}
           value={num(withTrn)}
           change={
             rows.length - withTrn > 0
-              ? `${num(rows.length - withTrn)} missing TRN`
+              ? `${num(rows.length - withTrn)} missing ${taxIdLabel}`
               : rows.length ? "All registered" : "No customers yet"
           }
           changeTone={rows.length - withTrn > 0 ? "warn" : "up"}
@@ -262,8 +259,8 @@ export default function Customers() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              aria-label="Search name, company, TRN"
-              placeholder="Search name, company, TRN…"
+              aria-label={`Search name, company, ${taxIdLabel}`}
+              placeholder={`Search name, company, ${taxIdLabel}…`}
               className="pl-8 pr-3 h-8 rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground text-[13px] w-[300px] outline-none focus:border-muted-foreground"
             />
           </div>
@@ -274,7 +271,7 @@ export default function Customers() {
             Has email
           </ToggleChip>
           <ToggleChip active={vw.trn} onClick={() => setVw((v) => ({ ...v, trn: !v.trn }))}>
-            Has TRN
+            Has {taxIdLabel}
           </ToggleChip>
           {hasFilter && (
             <button
@@ -417,6 +414,7 @@ export default function Customers() {
       </div>
 
       <CustomerModal
+        defaultCountry={country}
         open={open}
         edit={edit}
         onClose={() => setOpen(false)}
@@ -464,7 +462,7 @@ export default function Customers() {
                     {[
                       { label: "Name", value: detail.name },
                       { label: "Company", value: detail.company },
-                      { label: "TRN", value: detail.trn, mono: true },
+                      { label: taxRegimeFor(undefined, detail.country_code || country).trnLabel, value: detail.trn, mono: true },
                       { label: "Email", value: detail.email, mono: true },
                       { label: "Phone", value: detail.phone, mono: true },
                       { label: "Phone (E.164)", value: detail.phone_e164, mono: true },
@@ -543,7 +541,7 @@ export default function Customers() {
         onClose={() => setQuickView(null)}
         data={
           quickView
-            ? customerQuickView(quickView, () => {
+            ? customerQuickView(quickView, country, () => {
                 nav(`/customers/${quickView.id}`);
                 setQuickView(null);
               })
@@ -617,19 +615,21 @@ function TH({
 /** DEMO parity: map a customer record onto the shared QuickViewModal shape. */
 function customerQuickView(
   c: CrmCustomer,
+  defaultCountry: string,
   onFullPage: () => void
 ): QuickViewData {
-  const emirate = EMIRATES.find(
+  const country = c.country_code || defaultCountry;
+  const emirate = country === "AE" ? EMIRATES.find(
     (e) => e.code === normalizeEmirate(c.country_subdivision)
-  )?.label;
+  )?.label : c.country_subdivision;
   const meta = [
-    { label: "TRN", value: c.trn },
+    { label: taxRegimeFor(undefined, country).trnLabel, value: c.trn },
     { label: "Email", value: c.email },
     { label: "Phone", value: c.phone },
     { label: "Phone (E.164)", value: c.phone_e164 },
     { label: "Address", value: c.address },
     { label: "City", value: c.city },
-    { label: "Emirate", value: emirate },
+    { label: subdivisionLabel(country), value: emirate },
     { label: "Country", value: c.country_code },
     {
       label: "Credit limit (AED)",
@@ -665,11 +665,13 @@ function customerQuickView(
 }
 
 function CustomerModal({
+  defaultCountry,
   open,
   edit,
   onClose,
   onSaved,
 }: {
+  defaultCountry: string;
   open: boolean;
   edit: CrmCustomer | null;
   onClose: () => void;
@@ -697,7 +699,7 @@ function CustomerModal({
     address: "",
     city: "",
     country_subdivision: "",
-    country_code: "AE",
+    country_code: defaultCountry,
     email: "",
     phone: "",
     credit_limit: "",
@@ -729,8 +731,8 @@ function CustomerModal({
         trn: edit.trn ?? "",
         address: edit.address ?? "",
         city: edit.city ?? "",
-        country_subdivision: normalizeEmirate(edit.country_subdivision),
-        country_code: edit.country_code ?? "AE",
+        country_subdivision: (edit.country_code || defaultCountry) === "AE" ? normalizeEmirate(edit.country_subdivision) : edit.country_subdivision || "",
+        country_code: edit.country_code || defaultCountry,
         email: edit.email ?? "",
         phone: edit.phone ?? "",
         credit_limit: edit.credit_limit != null ? String(edit.credit_limit) : "",
@@ -769,7 +771,7 @@ function CustomerModal({
     setSaving(true);
     try {
       // Also populate phone_e164 from phone for OTP / SMS
-      const e164 = toE164Local(f.phone);
+      const e164 = customerPhoneE164(f.phone, f.country_code);
       const payload: Record<string, unknown> = {
         name: f.name.trim(),
         company: f.company.trim() || undefined,
@@ -825,15 +827,15 @@ function CustomerModal({
             className="input"
             value={f.company}
             onChange={(e) => setF({ ...f, company: e.target.value })}
-            placeholder="Gulf Line Trading LLC"
+            placeholder="Company name"
           />
         </Field>
-        <Field label="TRN">
+        <Field label={taxRegimeFor(undefined, f.country_code).trnLabel}>
           <input
             className="input"
             value={f.trn}
             onChange={(e) => setF({ ...f, trn: e.target.value })}
-            placeholder="100000000000003"
+            placeholder={taxRegimeFor(undefined, f.country_code).trnLabel}
           />
         </Field>
         <Field label="Email">
@@ -850,7 +852,8 @@ function CustomerModal({
             className="input"
             value={f.phone}
             onChange={(e) => setF({ ...f, phone: e.target.value })}
-            placeholder="+971 50 123 4567"
+            type="tel"
+            placeholder={companyPhoneHint(f.country_code)}
           />
         </Field>
       </div>
@@ -870,12 +873,12 @@ function CustomerModal({
               className="input"
               value={f.city}
               onChange={(e) => setF({ ...f, city: e.target.value })}
-              placeholder="Dubai"
+              placeholder="City"
             />
           </Field>
-          <Field label="Emirate">
-            <SelectMenu
-              ariaLabel="Emirate"
+          <Field label={subdivisionLabel(f.country_code)}>
+            {f.country_code === "AE" ? <SelectMenu
+              ariaLabel={subdivisionLabel(f.country_code)}
               value={f.country_subdivision}
               onChange={(country_subdivision) =>
                 setF({ ...f, country_subdivision })
@@ -884,16 +887,13 @@ function CustomerModal({
                 { value: "", label: "Select…" },
                 ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
               ]}
-            />
+            /> : <input className="input" value={f.country_subdivision} onChange={e => setF({...f, country_subdivision: e.target.value})} />}
           </Field>
           <Field label="Country">
-            <input
-              className="input"
+            <SelectMenu
               value={f.country_code}
-              onChange={(e) =>
-                setF({ ...f, country_code: e.target.value.toUpperCase() })
-              }
-              placeholder="AE"
+              onChange={country_code => setF({...f, country_code, country_subdivision: ""})}
+              options={[{value: "", label: "Select country"}, ...COUNTRY_OPTIONS]}
             />
           </Field>
         </div>

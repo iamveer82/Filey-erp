@@ -92,9 +92,13 @@ describe("purchase invoice parties", () => {
     await view.findByText("PINV-PARTY");
     fireEvent.click(view.getByRole("button", {name: "New purchase invoice"}));
     expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
+    expect(view.getByText("Supplier Email / GSTIN", {selector: "label"})).toBeVisible();
+    expect(view.getByLabelText("Supplier State / Union territory").tagName).toBe("INPUT");
+    expect(view.queryByLabelText("Supplier Emirate")).toBeNull();
     view.unmount();
     const existing = await openPurchase();
     expect(existing.getByLabelText("Currency")).toHaveTextContent("AED");
+    expect(existing.getByText("Supplier Email / TRN", {selector: "label"})).toBeVisible();
     expect(billing.saveDoc).not.toHaveBeenCalled();
   });
 

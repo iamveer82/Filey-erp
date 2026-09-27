@@ -549,7 +549,7 @@ function EmployeeModal({
           affects the rest of the app. */}
       <details className="mt-4 group">
         <summary className="cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground">
-          Payroll (WPS) details - optional
+          UAE payroll (WPS) details - optional
         </summary>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Labour card no. (14 digits)">

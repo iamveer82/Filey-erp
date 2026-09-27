@@ -1,4 +1,5 @@
 import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -274,6 +275,7 @@ export default function SupplierDetail() {
     return buildStatement({
       kind: "supplier",
       company: {
+        country_code: company?.country_code,
         name: company?.name || "Company",
         address:
           [company?.address, company?.city].filter(Boolean).join("\n") ||
@@ -578,7 +580,7 @@ export default function SupplierDetail() {
                 {supplier?.name || "—"}
               </div>
               <div className="text-[11.5px] text-muted-foreground truncate">
-                TRN {supplier?.tax_id || "—"}
+                {taxRegimeFor(company?.currency, company?.country_code).trnLabel} {supplier?.tax_id || "—"}
               </div>
             </div>
           </div>
@@ -659,7 +661,7 @@ export default function SupplierDetail() {
           />
           <Info icon={Mail} label="Email" value={supplier?.email || "—"} />
           <Info icon={Phone} label="Phone" value={supplier?.phone || "—"} />
-          <Info icon={BadgeCheck} label="TRN" value={supplier?.tax_id || "—"} />
+          <Info icon={BadgeCheck} label={taxRegimeFor(company?.currency, company?.country_code).trnLabel} value={supplier?.tax_id || "—"} />
           <Info icon={MapPin} label="Address" value={supplier?.address || "—"} />
 
           {/* Notes */}
@@ -1084,6 +1086,7 @@ export default function SupplierDetail() {
       )}
 
       <EditSupplierModal
+        taxIdLabel={taxRegimeFor(company?.currency, company?.country_code).trnLabel}
         supplier={supplier ?? null}
         open={editOpen}
         onClose={() => setEditOpen(false)}
@@ -1099,11 +1102,13 @@ export default function SupplierDetail() {
 /** Compact edit form for the header "Edit" action — same save path
  *  (suppliers.update) and payload idioms as the Suppliers page modal. */
 function EditSupplierModal({
+  taxIdLabel,
   supplier,
   open,
   onClose,
   onSaved,
 }: {
+  taxIdLabel: string;
   supplier: Supplier | null;
   open: boolean;
   onClose: () => void;
@@ -1201,7 +1206,7 @@ function EditSupplierModal({
             onChange={(e) => setF({ ...f, phone: e.target.value })}
           />
         </Field>
-        <Field label="Tax ID / TRN">
+        <Field label={taxIdLabel}>
           <input
             className="input"
             value={f.tax_id}

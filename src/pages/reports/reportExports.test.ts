@@ -19,4 +19,10 @@ it("exports active report rows, balances, units and scope instead of the same su
   expect(rows("suppliers")[0]).toMatchObject({Supplier:"Vendor",Outstanding:"50"});
   expect(rows("financial").find(row=>row.Account==="Net Profit")).toMatchObject({Amount:"150",Currency:"AED",Section:"Profit & Loss"});
   expect(rows("dashboard").find(row=>row.Metric==="Customers")).toMatchObject({Amount:"0",Unit:"Count"});
+  data.company = { name: "Indian company", country_code: "IN", currency: "INR" } as ReportsData["company"];
+  const taxRows = rows("financial").filter(row => row.Section === "GST account summary");
+  expect(taxRows.map(row => row.Account)).toEqual(["Output GST", "Zero-rated supplies", "Exempt supplies", "Input GST", "Net GST balance"]);
+  expect(rows("financial").some(row => row.Account === "Standard-rated supplies")).toBe(false);
+  // Country labels never relabel the AED ledger amounts as INR.
+  expect(taxRows.every(row => row.Currency === "AED")).toBe(true);
 });

@@ -1472,7 +1472,7 @@ function Editor({
                   <Field label="Supplier Name">
                     <input
                       className="input"
-                      placeholder="Emirates Steel Supplies LLC"
+                      placeholder="Supplier company name"
                       value={form.supplier_name}
                       onChange={(e) => set("supplier_name", e.target.value)}
                     />
@@ -1486,7 +1486,7 @@ function Editor({
                       onChange={(e) => set("supplier_address", e.target.value)}
                     />
                   </Field>
-                  <Field label="Supplier Email / TRN">
+                  <Field label={`Supplier Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         className="input"
@@ -2371,7 +2371,7 @@ function SupplierQuickAdd({
             rows={2}
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="Dubai, UAE"
+            placeholder="City, country"
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">

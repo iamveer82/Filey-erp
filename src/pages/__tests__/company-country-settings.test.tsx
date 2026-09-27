@@ -42,6 +42,10 @@ it("switches the real company form to India and preserves registration and bank 
   expect(screen.getByLabelText("Phone Number")).toHaveAttribute("type", "tel");
   expect(screen.getByLabelText("Phone Number")).toHaveValue("+971501234567"); // never rewrite customer values
   expect(screen.getByLabelText("PIN code")).toHaveAttribute("inputmode", "numeric");
+  expect(screen.getByText("PIN code", {selector: "label"})).toBeVisible();
+  expect(screen.getByText("GST settings")).toBeVisible();
+  expect(screen.getByText("Default GST rate (%)", {selector: "label"})).toBeVisible();
+  expect(screen.getByText("State / Union territory", {selector: "label"})).toBeVisible();
   expect(screen.queryByLabelText("MOHRE establishment ID")).toBeNull();
   expect(screen.queryByLabelText("Legal Registration ID")).toBeNull();
   fireEvent.change(screen.getByLabelText("PAN"), { target: {value: "abcde1234f"} });
@@ -53,6 +57,9 @@ it("switches the real company form to India and preserves registration and bank 
   render(<CompanyDetails />);
   expect(await screen.findByLabelText("PAN")).toHaveValue("ABCDE1234F");
   await chooseCountry("United Arab Emirates");
+  expect(screen.getByText("VAT settings")).toBeVisible();
+  expect(screen.getByText("Default VAT rate (%)", {selector: "label"})).toBeVisible();
+  expect(screen.queryByText("PIN code", {selector: "label"})).toBeNull();
   expect(screen.getByLabelText("IBAN")).toHaveValue("AE070331234567890123456");
   expect(screen.queryByLabelText("PAN")).toBeNull();
   await chooseCountry("India");

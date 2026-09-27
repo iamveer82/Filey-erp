@@ -13,6 +13,27 @@ export function companyPhoneHint(country: string): string {
     || `+${CALLING_CODES[country] || "country code"} phone number`;
 }
 
+export function subdivisionLabel(country?: string | null): string {
+  const code = country?.trim().toUpperCase();
+  return code === "AE" ? "Emirate" : code === "IN" ? "State / Union territory" : "State / Province";
+}
+
+/** Preserve international numbers; infer local numbers only for known formats. */
+export function customerPhoneE164(raw: string, country?: string | null): string | null {
+  const phone = raw.trim().replace(/[\s().-]/g, "").replace(/^00/, "+");
+  if (/^\+[1-9]\d{6,14}$/.test(phone)) return phone;
+  if (country === "IN") {
+    const national = phone.replace(/^0(?=[6-9]\d{9}$)/, "");
+    if (/^[6-9]\d{9}$/.test(national)) return "+91" + national;
+    if (/^91[6-9]\d{9}$/.test(phone)) return "+" + phone;
+  }
+  if (country === "AE") {
+    if (/^971\d{8,9}$/.test(phone)) return "+" + phone;
+    if (/^0\d{8,9}$/.test(phone)) return "+971" + phone.slice(1);
+  }
+  return null;
+}
+
 const CALLING_CODES: Record<string, string> = {
   AT: "43", BE: "32", BG: "359", HR: "385", CY: "357", CZ: "420", DK: "45",
   EE: "372", FI: "358", GR: "30", HU: "36", IE: "353", IT: "39", LV: "371",

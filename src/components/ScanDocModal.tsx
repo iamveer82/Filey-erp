@@ -1,4 +1,5 @@
 import { FileySpinner as Loader2 } from "./FileySpinner";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, Sparkles, FileText } from "lucide-react";
@@ -99,7 +100,8 @@ export default function ScanDocModal({
         status: "draft",
         template: co?.default_template || "classic",
         accent: co?.default_accent || "#FFD600",
-        currency: data.currency || getDisplayCurrency(),
+        currency: data.currency || co?.currency || getDisplayCurrency(),
+        tax_country_code: co?.country_code,
         seller_name: co?.name || "",
         seller_address: co?.address,
         seller_trn: co?.trn,
@@ -112,7 +114,7 @@ export default function ScanDocModal({
         // UAE e-invoice fields lifted off the scan (user reviews in the editor).
         buyer_city: data.buyer_city,
         buyer_country_subdivision: data.buyer_country_subdivision,
-        buyer_country_code: data.buyer_country_code || "AE",
+        buyer_country_code: data.buyer_country_code || co?.country_code,
         invoice_type_code: data.invoice_type_code || "380",
         payment_means_code: data.payment_means_code || undefined,
         issue_date: data.issue_date || today,
@@ -200,7 +202,7 @@ export default function ScanDocModal({
                 onChange={(e) => setData({ ...data, customer_name: e.target.value })}
               />
             </Labeled>
-            <Labeled label={`${partyLabel} TRN`}>
+            <Labeled label={`${partyLabel} ${taxRegimeFor(data?.currency, data?.buyer_country_code).trnLabel}`}>
               <input
                 className="input"
                 value={data.customer_trn ?? ""}

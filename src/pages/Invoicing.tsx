@@ -76,6 +76,7 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
+import { subdivisionLabel } from "../lib/companyCountry";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { startingTemplate } from "../components/DocPresetBar";
@@ -539,7 +540,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
-        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
+        buyer_country_code: d.buyer_country_code || d.tax_country_code || UAE_COUNTRY_CODE,
         stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
         signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
@@ -627,7 +628,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
-        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
+        buyer_country_code: d.buyer_country_code || d.tax_country_code || UAE_COUNTRY_CODE,
         stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
         signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
@@ -2561,7 +2562,7 @@ function Editor({
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
-                <Field label={`${partyLabel} Email / TRN`}>
+                <Field label={`${partyLabel} Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
                   <div className="grid grid-cols-2 gap-2">
                     <input aria-label={`${partyLabel} email`}
                       className="input"
@@ -2577,7 +2578,7 @@ function Editor({
                     />
                   </div>
                 </Field>
-                <Field label={`${partyLabel} City / Emirate / Country`}>
+                <Field label={`${partyLabel} City / ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)} / Country`}>
                   <div className="grid grid-cols-3 gap-2">
                     <input aria-label={`${partyLabel} city`}
                       className="input"
@@ -2585,17 +2586,24 @@ function Editor({
                       value={form.buyer_city ?? ""}
                       onChange={(e) => set("buyer_city", e.target.value)}
                     />
-                    <SelectMenu
+                    {(form.buyer_country_code || form.tax_country_code) === "AE" ? <SelectMenu
+                      ariaLabel={`${partyLabel} Emirate`}
                       value={form.buyer_country_subdivision ?? ""}
                       onChange={(v) => set("buyer_country_subdivision", v)}
                       options={[
                         { value: "", label: "Emirate…" },
                         ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
                       ]}
-                    />
+                    /> : <input
+                      aria-label={`${partyLabel} ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)}`}
+                      className="input"
+                      placeholder={subdivisionLabel(form.buyer_country_code || form.tax_country_code)}
+                      value={form.buyer_country_subdivision ?? ""}
+                      onChange={e => set("buyer_country_subdivision", e.target.value)}
+                    />}
                     <input aria-label={`${partyLabel} country code`}
                       className="input"
-                      placeholder="AE"
+                      placeholder="Country code"
                       value={form.buyer_country_code ?? ""}
                       onChange={(e) =>
                         set("buyer_country_code", e.target.value.toUpperCase())
@@ -2708,7 +2716,7 @@ function Editor({
                   />
                 </Field>
                 {(form.currency || "AED") !== "AED" && (
-                  <Field label="Exchange Rate to AED (e-invoice)">
+                  <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Exchange Rate to AED (e-invoice)" : "Exchange Rate to AED (accounting)"}>
                     <input aria-label="Exchange rate to AED"
                       type="number"
                       step="0.0001"
@@ -2728,7 +2736,7 @@ function Editor({
               </div>
             </div>
             <details className="group mt-3 border-t border-border pt-2">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">E-invoice details<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">{isUaeRegime(form.currency, form.tax_country_code) ? "E-invoice details" : "Additional details"}<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
                 <Field label="Document Title">
                   <input aria-label="Document title"
@@ -2772,7 +2780,7 @@ function Editor({
                     onChange={(v) => set("po_date", v)}
                   />
                 </Field>
-                <Field label="Invoice Type Code (e-invoice)">
+                <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Invoice Type Code (e-invoice)" : "Document type"}>
                   <SelectMenu
                     value={form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE}
                     onChange={(v) => set("invoice_type_code", v)}
@@ -2804,7 +2812,7 @@ function Editor({
                     </Field>
                   </>
                 )}
-                <Field label="Payment Means (e-invoice)">
+                <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Payment Means (e-invoice)" : "Payment method"}>
                   <SelectMenu
                     value={form.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE}
                     onChange={(v) => set("payment_means_code", v)}
@@ -2814,7 +2822,7 @@ function Editor({
                     }))}
                   />
                 </Field>
-                <Field label="Transaction Type (e-invoice)">
+                {isUaeRegime(form.currency, form.tax_country_code) && <Field label="Transaction Type (e-invoice)">
                   <div className="grid grid-cols-2 gap-1.5">
                     {TRANSACTION_TYPE_FLAGS.map((f) => (
                       <label
@@ -2834,7 +2842,7 @@ function Editor({
                       </label>
                     ))}
                   </div>
-                </Field>
+                </Field>}
                 <Field label="Tax category, applied to all lines">
                   {/* Bulk-set every line's category (the common single-rate case).
                       Mixed-rate invoices override per line in the items table. */}

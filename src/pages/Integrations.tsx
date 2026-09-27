@@ -338,7 +338,7 @@ export default function Integrations() {
       {
         key: "leads",
         name: "Lead enrichment",
-        desc: "Fill in a company's contact details and TRN from their own website, and rank leads from your trading history.",
+        desc: "Fill in a company's contact details and tax ID from their own website, and rank leads from your trading history.",
         category: "CRM",
         icon: <UserSearch className="h-5 w-5" />,
         to: "/integrations/lead-enrichment",

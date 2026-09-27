@@ -12,6 +12,7 @@ import {
   suppliers,
   pos,
   Product,
+  type CompanyProfile,
   Order,
   Account,
   Txn,
@@ -35,6 +36,7 @@ import {
 import { useLiveSync } from "../../lib/realtime";
 
 export interface ReportsData {
+  company?: CompanyProfile | null;
   products: Product[];
   orders: Order[];
   accounts: Account[];
@@ -56,6 +58,7 @@ export interface ReportsData {
 }
 
 export function useReportsData(): ReportsData {
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -78,7 +81,7 @@ export function useReportsData(): ReportsData {
     setError("");
     setLoading(true);
     try {
-      const [p, o, a, t, e, i, c, r, su, po, pay, invoicePay, rates, bills] = await Promise.all([
+      const [p, o, a, t, e, i, c, r, su, po, pay, invoicePay, rates, bills, co] = await Promise.all([
         erp.products(),
         erp.orders(),
         fin.accounts(),
@@ -93,6 +96,7 @@ export function useReportsData(): ReportsData {
         billing.allPayments(),
         getExchangeRates(),
         billing.listDocs("purchase"),
+        billing.getCompany(),
       ]);
       const invoices = i.map((row) =>
         reportMoney(row, ["total", "paid", "balance"], rates)
@@ -115,6 +119,7 @@ export function useReportsData(): ReportsData {
       // Commit one coherent snapshot, rather than mixing successful and failed reads.
       if (version !== request.current) return;
       setProducts(p);
+      setCompany(co);
       setOrders(o);
       setAccounts(a);
       setTxns(t);
@@ -146,6 +151,7 @@ export function useReportsData(): ReportsData {
   useLiveSync(load);
 
   return {
+    company,
     products,
     orders,
     accounts,
