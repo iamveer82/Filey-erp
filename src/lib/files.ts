@@ -5,6 +5,7 @@ import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
 import type { OutFile } from "./pdfTools";
 import { errMsg } from "./format";
 import { useLiveSync } from "./realtime";
+import { validateDocumentUpload } from "./documentUpload";
 
 const fileToDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -325,7 +326,19 @@ export async function shareFileLink(
 
 /** Document folders surfaced in My Files, mapped from each file's `tool` key.
  * Anything not listed (or with no tool) lands in "Other files". */
+export const COMPANY_DOCUMENT_TYPES = [
+  { key: "company-gst", label: "GST certificate", country: "IN" },
+  { key: "company-pan", label: "PAN document", country: "IN" },
+  { key: "company-aadhaar", label: "Masked Aadhaar copy", country: "IN" },
+  { key: "company-udyam", label: "Udyam certificate", country: "IN" },
+  { key: "company-vat", label: "VAT certificate", country: "AE" },
+  { key: "company-license", label: "Trade licence", country: "AE" },
+  { key: "company-registration", label: "Company registration", country: null },
+  { key: "company-other", label: "Other business document", country: null },
+] as const;
+
 export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
+  ...COMPANY_DOCUMENT_TYPES.map(({key, label}) => ({key, label, route: "/settings?section=company"})),
   { key: "invoice", label: "Invoices", route: "/invoicing" },
   { key: "quotation", label: "Quotations", route: "/quoting" },
   { key: "receipt", label: "Payment Receipts", route: "/payment-receipts" },
@@ -342,10 +355,12 @@ export function folderOf(f: SavedFile): string {
 
 /** Upload a user-selected file directly to My Files. */
 export async function uploadUserFile(file: File, tool?: string): Promise<string> {
+  const documentType = COMPANY_DOCUMENT_TYPES.find(t => t.key === tool);
+  const documentMime = documentType ? validateDocumentUpload(file) : undefined;
   const uid = await userId();
   if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
-  const mime = file.type || mimeOf(file.name);
+  const mime = documentMime || file.type || mimeOf(file.name);
   const path = `${uid}/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
   const bytes = new Uint8Array(buf);
@@ -369,9 +384,11 @@ export async function uploadUserFile(file: File, tool?: string): Promise<string>
 }
 
 export async function deleteFile(f: SavedFile): Promise<void> {
-  if (!isConfigured) return;
-  await sb().storage.from(BUCKET).remove([f.storagePath]);
-  await sb().from("user_files").delete().eq("id", f.id);
+  if (!isConfigured) throw new Error("File storage is not configured.");
+  const { error: storageError } = await sb().storage.from(BUCKET).remove([f.storagePath]);
+  if (storageError) throw storageError;
+  const { error } = await sb().from("user_files").delete().eq("id", f.id);
+  if (error) throw error;
 }
 
 

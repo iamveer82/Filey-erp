@@ -334,8 +334,8 @@ function blankForm(
   mode: DocMode = "sales",
   formats?: DocFormats
 ): Form {
-  // Display currency chooses denomination; company country chooses tax jurisdiction.
-  const currency = getDisplayCurrency() || c.currency || "AED";
+  // New documents follow the company's default, independently of dashboard display.
+  const currency = c.currency || getDisplayCurrency() || "AED";
   return {
     number: pickInvoiceNumber(mode, existing, formats),
     status: "draft",
@@ -3631,7 +3631,7 @@ function Editor({
                         setBankY(y);
                       }}
                     >
-                      <BankDetailsBlock bank={bank} accent={form.accent} />
+                      <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                     </DraggableBlock>
                   )}
                   </div>
@@ -3758,7 +3758,7 @@ function Editor({
                           setBankY(y);
                         }}
                       >
-                        <BankDetailsBlock bank={bank} accent={form.accent} />
+                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                       </DraggableBlock>
                     )}
                   </div>

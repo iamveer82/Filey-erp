@@ -1,5 +1,5 @@
 import { FileySpinner } from "../../components/FileySpinner";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Cloud, Check, Download, Upload, FolderOpen, ShieldCheck } from "lucide-react";
 import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
@@ -10,7 +10,6 @@ import {
   autoSyncEnabled,
   setAutoSyncEnabled,
   getSyncStatus,
-  syncStatusMessage,
   syncNow,
   syncCycle,
   markAllForSync,
@@ -26,7 +25,6 @@ import {
   type MigrateResult,
 } from "../../lib/migrate";
 import { setMigrating, isMigrating } from "../../lib/sync";
-import { hasLocalData } from "../../lib/license";
 import {
   hasTauri,
   pickFolder,
@@ -48,7 +46,9 @@ import { pendingCloudWrites } from "../../lib/api";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import SyncConflictReview from "../../components/SyncConflictReview";
 import { Modal, Switch } from "../../components/ui";
-import { useUI } from "../../lib/ui";
+import { log } from "../../lib/log";
+
+const RETRY_MESSAGE = "Couldn't finish syncing. Your saved data is safe.";
 
 // Cloud sync card (local mode only): connect a cloud account and this device
 // syncs both ways — local changes upload within a second, and edits from your
@@ -126,6 +126,17 @@ function CloudSyncCard() {
     setConnected(null);
   };
 
+  const retrySync = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      if (!await syncCycle(null, { manual: true })) setErr(RETRY_MESSAGE);
+    } catch (error) {
+      log.warn("sync", "Sync retry failed", error);
+      setErr(RETRY_MESSAGE);
+    } finally { setBusy(false); }
+  };
+
   const uploadAll = async () => {
     if (
       !window.confirm(
@@ -156,7 +167,7 @@ function CloudSyncCard() {
       : sync.state === "error"
         ? sync.error?.includes(CLOUD_RECONNECT_MESSAGE)
           ? CLOUD_RECONNECT_MESSAGE
-          : syncStatusMessage(sync)
+          : RETRY_MESSAGE
         : sync.at
           ? `Last synced ${new Date(sync.at).toLocaleString()}`
           : "Waiting for changes to sync.";
@@ -198,14 +209,9 @@ function CloudSyncCard() {
             <button
               className="btn-ghost"
               disabled={busy || sync.state === "syncing"}
-              onClick={() => {
-                setErr("");
-                void syncCycle(null, { manual: true }).catch(() =>
-                  setErr("Couldn't finish syncing. Your saved data is safe. Check your connection and try again.")
-                );
-              }}
+              onClick={() => void retrySync()}
             >
-              Sync now
+              {sync.state === "error" ? "Try again" : "Sync now"}
             </button>
             <button className="btn-ghost" disabled={busy || sync.state === "syncing"} onClick={uploadAll}>
               Upload all local data
@@ -300,13 +306,13 @@ function CloudSyncCard() {
 
 // Where the user's records live. One switch: off keeps everything on this
 // device, on puts it in their Filey account so it follows them between devices.
-// Turning it ON is the upload, so it asks first; turning it OFF never uploads.
+// Switching transfers the current workspace first and preserves the account.
 export default function DataModePanel() {
   const mode: DataMode = effectiveDataMode();
-  const { confirm, toast } = useUI();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MigrateResult[] | null>(null);
   const [err, setErr] = useState("");
+  const [retryAction, setRetryAction] = useState<DataMode | "import" | "push" | null>(null);
   const [dataDir, setDataDirState] = useState("");
   const [exportDir, setExportDirState] = useState(getExportDir());
   const [pendingWrites, setPendingWrites] = useState(0);
@@ -421,54 +427,21 @@ export default function DataModePanel() {
   };
 
   const { user } = useAuth();
-  const [localExists, setLocalExists] = useState<boolean | null>(null);
-  useEffect(() => {
-    void hasLocalData()
-      .then(setLocalExists)
-      .catch(() =>
-        setErr("Could not check the device workspace. Reload before switching.")
-      );
-  }, []);
-
-  /** Reload into the destination store. Only reached once the user has agreed
-   *  (cloud) or the move is purely local, so the reload itself is unconditional. */
-  const openStore = useCallback(
-    async (target: DataMode) => {
-      await switchWorkspace(target, false);
-      window.location.reload();
-    },
-    []
-  );
-
-  /** The whole local <-> cloud switch. One click, one pass.
-   *
-   *  ON  = upload. Consent first, then one batched push of the tables that
-   *        actually hold rows, then reopen on the cloud. Nothing is pulled
-   *        back down and nothing is polled afterwards: cloud mode reads and
-   *        writes the account directly, so the transfer is the only billable
-   *        work this causes.
-   *  OFF = private. No upload, no consent, one profile read to check the
-   *        device is allowed to hold this account's copy. */
+  const transferFailed = (error: unknown) => {
+    log.warn("sync", "Workspace transfer failed", error);
+    setErr(RETRY_MESSAGE);
+  };
+  /** The helper owns transfer ordering and locks; the switch owns only its UI. */
   const toggleStorage = async (next: boolean) => {
     const target: DataMode = next ? "cloud" : "local";
     if (target === mode || busy) return;
+    setRetryAction(target);
     if (isMigrating()) {
       setErr("Wait for the current transfer to finish before switching.");
       return;
     }
     setErr("");
     setResult(null);
-    if (!next) {
-      setBusy(true);
-      try {
-        await openStore("local");
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
     if (!cloudConfigured) {
       setErr("Cloud storage isn't available in this build.");
       return;
@@ -484,60 +457,41 @@ export default function DataModePanel() {
       );
       return;
     }
-    const hasDeviceData = localExists === true;
-    if (
-      !(await confirm({
-        title: "Store your data in your Filey account?",
-        message: hasDeviceData
-          ? `Turning this on uploads the records saved on this device — invoices, customers, products and files — to ${cloudSession}, and Filey then works from your account on every device you sign in to. Your device keeps its own copy. You can switch back at any time; turning it off does not delete anything from your account.`
-          : `Turning this on stores your records in your Filey account (${cloudSession}) so they follow you to every device you sign in to. You can switch back to this device at any time.`,
-        confirmLabel: "Upload and turn on",
-      }))
-    )
-      return;
     setBusy(true);
-    setMigrating(true);
     try {
-      if (hasDeviceData) {
-        const res = await migrateLocalToCloud(setProgress);
-        setResult(res);
-        const failed = res.filter((r) => r.error);
-        if (failed.length)
-          throw new Error(
-            `Upload incomplete for: ${failed.map((r) => r.table).join(", ")}. Nothing was switched — your records are still on this device.`
-          );
-      }
-      await openStore("cloud");
-      toast.success("Your data is now in your Filey account.");
+      await switchWorkspace(target, setProgress);
+      window.location.reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      transferFailed(e);
     } finally {
       setBusy(false);
-      setMigrating(false);
       setProgress("");
     }
   };
 
-  const runImport = async () => {
+  const runImport = async (retry = false) => {
+    if (busy) return;
     if (isMigrating()) {
       setErr("Wait for the active transfer to finish before importing.");
       return;
     }
     if (
-      !window.confirm(
+      !retry && !window.confirm(
         "Copy your cloud data onto this device? This replaces any existing local data. You must be signed in to your cloud account."
       )
     )
       return;
+    setRetryAction("import");
     setBusy(true);
     setErr("");
     setResult(null);
     setMigrating(true);
     try {
-      const res = await migrateCloudToLocal(setProgress);
+      const res = await migrateCloudToLocal(() => setProgress("Saving cloud data on this device…"));
       setResult(res);
+      if (res.some(r => r.error)) transferFailed(res.filter(r => r.error));
     } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      transferFailed(e);
     } finally {
       setBusy(false);
       setMigrating(false);
@@ -545,26 +499,29 @@ export default function DataModePanel() {
     }
   };
 
-  const runPush = async () => {
+  const runPush = async (retry = false) => {
+    if (busy) return;
     if (isMigrating()) {
       setErr("Wait for the active transfer to finish before uploading.");
       return;
     }
     if (
-      !window.confirm(
-        "Upload this device's local data to your cloud account? The web version will then show the same data. Cloud records with the same id are OVERWRITTEN - this device wins. You must be signed in."
+      !retry && !window.confirm(
+        "Upload this device's local data to your cloud account? Newer cloud edits are preserved as conflicts. You must be signed in."
       )
     )
       return;
+    setRetryAction("push");
     setBusy(true);
     setErr("");
     setResult(null);
     setMigrating(true);
     try {
-      const res = await migrateLocalToCloud(setProgress);
+      const res = await migrateLocalToCloud(() => setProgress("Saving device data to Filey Cloud…"));
       setResult(res);
+      if (res.some(r => r.error)) transferFailed(res.filter(r => r.error));
     } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      transferFailed(e);
     } finally {
       setBusy(false);
       setMigrating(false);
@@ -573,6 +530,11 @@ export default function DataModePanel() {
   };
 
   const cloudOn = mode === "cloud";
+  const retryTransfer = () => {
+    if (retryAction === "import") void runImport(true);
+    else if (retryAction === "push") void runPush(true);
+    else if (retryAction) void toggleStorage(retryAction === "cloud");
+  };
 
   return (
     <SettingsPanel>
@@ -597,8 +559,8 @@ export default function DataModePanel() {
                 </>
               ) : (
                 <>
-                  Off. Your records stay on this device only — nothing is uploaded, and Filey
-                  works with no internet. Basic is free: the whole ERP and CRM, 5 invoices a month.
+                  Off. You're working with the records saved on this device, available offline.
+                  {autoSyncEnabled() ? " Optional background sync is enabled in Advanced sync." : " New changes stay here until you turn cloud on."}
                 </>
               )}
             </p>
@@ -606,7 +568,7 @@ export default function DataModePanel() {
           <Switch
             checked={cloudOn}
             busy={busy}
-            disabled={!cloudConfigured || localExists === null}
+            disabled={!cloudConfigured}
             onChange={(next) => void toggleStorage(next)}
             label="Store my data in my Filey account"
             className="mt-1"
@@ -614,16 +576,17 @@ export default function DataModePanel() {
         </div>
         <p className="text-sm text-muted-foreground">
           {cloudOn
-            ? "Turning this off switches back to the records saved on this device. It does not delete anything from your account."
-            : "Turning this on uploads this device's records to your account, once. You can turn it off again at any time."}
+            ? "Turn off to save the latest cloud data and files on this device, then work offline. Your cloud copy stays safe."
+            : "Turn on to save your device changes to your account and continue in Filey Cloud. Your edited versions are kept if the same record changed in both places."}
         </p>
         {err && (
-          <p
+          <div
             role="alert"
-            className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2"
+            className="flex flex-wrap items-center justify-between gap-3 text-sm bg-hover rounded-lg px-3 py-2"
           >
-            {err}
-          </p>
+            <p>{err}</p>
+            {retryAction && <button type="button" className="btn-ghost" onClick={retryTransfer} disabled={busy}>Try again</button>}
+          </div>
         )}
 
         {busy && (
@@ -641,30 +604,10 @@ export default function DataModePanel() {
             </p>
           </div>
         )}
-        {result && (
-          <details
-            open={result.some((r) => r.error)}
-            className="text-sm border-t border-border pt-4"
-          >
-            <summary className="font-medium cursor-pointer">
-              {result.some((r) => r.error)
-                ? "Transfer needs attention"
-                : "Transfer complete — view details"}
-            </summary>
-            <ul className="mt-2 space-y-1">
-              {result.map((r) => (
-                <li
-                  key={r.table}
-                  className={r.error ? "text-danger" : "text-muted-foreground"}
-                >
-                  {r.table}: {r.error || `${r.rows} records copied`}
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
       </SettingsSection>
-      {mode === "local" && cloudConfigured && <CloudSyncCard />}
+      {mode === "local" && cloudConfigured && (cloudSession
+        ? <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Advanced sync</summary><CloudSyncCard /></details>
+        : <CloudSyncCard />)}
 
       {hasTauri && (
         <>
@@ -809,7 +752,7 @@ export default function DataModePanel() {
                   Replaces existing local data.
                 </p>
               </div>
-              <button onClick={runImport} disabled={busy} className="btn-ghost">
+              <button onClick={() => void runImport()} disabled={busy} className="btn-ghost">
                 Import cloud data
               </button>
 
@@ -823,16 +766,14 @@ export default function DataModePanel() {
                   Newer cloud edits are preserved as conflicts for you to review.
                 </p>
               </div>
-              <button onClick={runPush} disabled={busy} className="btn-ghost">
+              <button onClick={() => void runPush()} disabled={busy} className="btn-ghost">
                 Push local data to cloud
               </button>
-              {result && (
+              {result && !result.some(r => r.error) && (
                 <p
-                  className={`text-sm font-medium ${result.some((r) => r.error) ? "text-danger" : "text-success"}`}
+                  className="text-sm font-medium text-success"
                 >
-                  {result.some((r) => r.error)
-                    ? "Transfer incomplete. Review the transfer details above."
-                    : "Transfer completed. Storage mode has not changed."}
+                  Transfer completed. Storage mode has not changed.
                 </p>
               )}
             </>

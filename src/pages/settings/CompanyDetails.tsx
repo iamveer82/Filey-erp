@@ -1,7 +1,9 @@
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import CountryTaxFields from "../../components/CountryTaxFields";
+import CompanyDocuments from "../../components/CompanyDocuments";
+import IndiaRegistrationFields, { loadIndiaRegistration, saveIndiaRegistration, registrationError, type IndiaRegistration } from "../../components/IndiaRegistrationFields";
+import { companyCountry, companyPhoneHint } from "../../lib/companyCountry";
 import { taxRegimeFor, taxIdError, isUaeRegime } from "../../lib/taxRegimes";
-import { CURRENCIES } from "../../lib/format";
 import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
@@ -63,6 +65,7 @@ export default function CompanyDetails() {
   const { toast } = useUI();
   const [c, setC] = useState<CompanyProfile | null>(null);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
+  const [registration, setRegistration] = useState<IndiaRegistration | null>();
   const [lh, setLh] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
   const [stampSig, setStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [docFmts, setDocFmts] = useState<DocFormats>({});
@@ -91,6 +94,7 @@ export default function CompanyDetails() {
     loadBankInfo()
       .then(setBank)
       .catch((e) => console.warn("Failed to load bank details", e));
+    loadIndiaRegistration().then(setRegistration).catch(() => setRegistration(null));
     loadLetterhead()
       .then(setLh)
       .catch((e) => console.warn("Failed to load letterhead", e));
@@ -138,6 +142,9 @@ export default function CompanyDetails() {
 
   const regime = taxRegimeFor(c.currency, c.country_code);
   const uae = isUaeRegime(c.currency, c.country_code);
+  const country = companyCountry(c);
+  const india = country === "IN";
+  const phoneHint = companyPhoneHint(country);
   const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) => {
     setC({ ...c, [k]: v });
     setSaved(false);
@@ -179,7 +186,11 @@ export default function CompanyDetails() {
     if (hasErr) return;
     // A mistyped IFSC or IBAN is worth catching here: it is printed on
     // invoices, and the bank rejects it days later when a payment fails.
-    if (!checkBank(c.country_code)) return;
+    if (!checkBank(country)) return;
+    if (india && (!registration || registrationError(registration))) {
+      toast.error(registration ? registrationError(registration) : "Reopen company settings to load your Indian registration details before saving.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -187,10 +198,11 @@ export default function CompanyDetails() {
       // Bank, letterhead, stamp and doc formats are independent targets —
       // run them in parallel and report which ones failed, rather than
       // aborting on the first error and leaving the user guessing.
-      const [bankR, lhR, stampR] = await Promise.allSettled([
+      const [bankR, lhR, stampR, registrationR] = await Promise.allSettled([
         saveBankInfo(bank),
         saveLetterhead(lh),
         saveCompanyStampSig(stampSig),
+        india && registration ? saveIndiaRegistration(registration) : Promise.resolve(),
       ]);
       const fmtResults = await Promise.allSettled(
         DOC_NUMBER_KINDS.filter((spec) => docFmts[spec.kind] !== undefined).map((spec) =>
@@ -201,6 +213,7 @@ export default function CompanyDetails() {
         ...(bankR.status === "rejected" ? ["bank details"] : []),
         ...(lhR.status === "rejected" ? ["letterhead"] : []),
         ...(stampR.status === "rejected" ? ["stamp/signature"] : []),
+        ...(registrationR.status === "rejected" ? ["Indian registration details"] : []),
         ...fmtResults
           .map((r, i) =>
             r.status === "rejected" ? DOC_NUMBER_KINDS[i].label.toLowerCase() : null
@@ -218,7 +231,7 @@ export default function CompanyDetails() {
       } catch (e) {
         console.warn("Failed to load company details after save", e);
       }
-      setSaved(true);
+      setSaved(!failures.length);
       if (!failures.length) toast.success("Company details saved.");
     } catch (e) {
       const msg =
@@ -300,17 +313,21 @@ export default function CompanyDetails() {
               onChange={(v) => set("business_type", v)}
               options={[
                 { value: "", label: "Select…" },
-                ...BUSINESS_TYPES.map((b) => ({ value: b, label: b })),
+                ...Array.from(new Set([
+                  ...(india ? ["Sole Proprietorship", "Partnership", "LLP", "Private Limited", "Public Limited", "One Person Company", "HUF", "Trust / Society"] : BUSINESS_TYPES),
+                  ...(c.business_type ? [c.business_type] : []),
+                ])).map((b) => ({ value: b, label: b })),
               ]}
             />
           </FormField>
-          <FormField label={regime.trnLabel} error={fieldErrors.trn}>
+          <FormField label={regime.trnLabel} error={fieldErrors.trn} hint={india ? "Enter GSTIN if your business is GST-registered." : undefined}>
             <input
               className="input"
               placeholder={regime.trnLabel}
               value={c.trn ?? ""}
               onChange={(e) => {
-                setC({ ...c, trn: e.target.value, vat_number: e.target.value });
+                const value = india ? e.target.value.toUpperCase() : e.target.value;
+                setC({ ...c, trn: value, vat_number: value });
                 setSaved(false);
               }}
             />
@@ -335,15 +352,17 @@ export default function CompanyDetails() {
             <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
               <input
                 className="input"
-                aria-label="City, Country"
-                placeholder="City, Country"
+                aria-label="City"
+                placeholder="City"
                 value={c.city ?? ""}
                 onChange={(e) => set("city", e.target.value)}
               />
               <input
                 className="input"
-                aria-label="Zip / Postal Code"
-                placeholder="Zip / Postal Code"
+                aria-label={india ? "PIN code" : "Zip / Postal Code"}
+                placeholder={india ? "6-digit PIN code" : "Zip / Postal Code"}
+                inputMode={india ? "numeric" : "text"}
+                autoComplete="postal-code"
                 value={c.zip ?? ""}
                 onChange={(e) => set("zip", e.target.value)}
               />
@@ -351,10 +370,12 @@ export default function CompanyDetails() {
           </>
         </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Phone Number" hint="+971 50 123 4567">
+          <FormField label="Phone Number" hint={phoneHint}>
             <input
               className="input"
-              placeholder="+971 50 123 4567"
+              type="tel"
+              autoComplete="tel"
+              placeholder={phoneHint}
               value={c.phone ?? ""}
               onChange={(e) => set("phone", e.target.value)}
             />
@@ -392,7 +413,8 @@ export default function CompanyDetails() {
           <input
             className="input"
             inputMode="tel"
-            placeholder="+971 52 950 5734"
+            type="tel"
+            placeholder={phoneHint}
             value={c.whatsapp ?? ""}
             onChange={(e) => set("whatsapp", e.target.value)}
           />
@@ -406,21 +428,13 @@ export default function CompanyDetails() {
           company={c}
           onChange={(next) => {
             setC(next);
+            clearFieldErrors();
+            setBankErr({});
             setSaved(false);
           }}
         />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {" "}
-          <FormField label="Currency">
-            <SelectMenu
-              value={c.currency ?? "AED"}
-              onChange={(v) => set("currency", v)}
-              options={CURRENCIES.map((cur) => ({
-                value: cur.code,
-                label: `${cur.code} — ${cur.name}`,
-              }))}
-            />
-          </FormField>{" "}
           <FormField label="Tax collection">
             <SelectMenu
               value={c.tax_type === "None" ? "none" : "rates"}
@@ -441,11 +455,13 @@ export default function CompanyDetails() {
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Registration & payroll"
+        title={uae ? "Registration & payroll" : "Business registration"}
         description="Legal registration details and country-specific payroll settings."
       >
+        {india && <IndiaRegistrationFields value={registration} onChange={next => { setRegistration(next); setSaved(false); }} />}
         {/* UAE e-invoice: seller legal registration + emirate (entered once). */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {!india && <>
           <FormField
             label="Legal Registration ID"
             hint={
@@ -454,7 +470,7 @@ export default function CompanyDetails() {
           >
             <input
               className="input"
-              placeholder="CN-1234567"
+              placeholder={uae ? "CN-1234567" : "Company registration number"}
               value={c.legal_id ?? ""}
               onChange={(e) => set("legal_id", e.target.value)}
             />
@@ -471,7 +487,8 @@ export default function CompanyDetails() {
               />
             </FormField>
           )}
-          <FormField label={uae ? "Emirate" : "State / Province"}>
+          </>}
+          <FormField label={uae ? "Emirate" : india ? "State / Union territory" : "State / Province"}>
             {uae ? (
               <SelectMenu
                 value={c.country_subdivision ?? ""}
@@ -526,6 +543,9 @@ export default function CompanyDetails() {
       >
         <DocPresetsPanel />
       </SettingsSection>
+      <SettingsSection title="Company documents" description="Keep copies of your business and registration documents for your own records.">
+        <CompanyDocuments country={country} />
+      </SettingsSection>
       <SettingsSection
         title="Stamp & Signature"
         description="Upload once, then turn on the stamp or signature in any document."
@@ -543,7 +563,7 @@ export default function CompanyDetails() {
         description="Payment details you can include on invoices and other documents."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {bankFields(c.country_code).map((f) => (
+          {bankFields(country).map((f) => (
             <FormField
               key={f.key}
               label={f.label}

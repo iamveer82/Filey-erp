@@ -98,7 +98,7 @@ beforeEach(() => {
   mode.value = "local";
   setImplicitDataMode(null);
   cloud.session = "owner@example.test";
-  cloud.switchWorkspace.mockClear();
+  cloud.switchWorkspace.mockReset().mockResolvedValue();
   cloud.migrateLocalToCloud.mockClear().mockResolvedValue([]);
   cloud.hasLocalData.mockClear().mockResolvedValue(true);
   confirm.mockClear().mockResolvedValue(true);
@@ -111,7 +111,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it("shows the store as off while the records are on this device", async () => {
   render(<DataModePanel />);
   expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "false");
-  expect(screen.getByText(/stay on this device only/i)).toBeInTheDocument();
+  expect(screen.getByText(/records saved on this device, available offline/i)).toBeInTheDocument();
 });
 
 it("shows the store as on and names the account holding the records", async () => {
@@ -121,36 +121,53 @@ it("shows the store as on and names the account holding the records", async () =
   expect(screen.getByText(/owner@example\.test/)).toBeInTheDocument();
 });
 
-it("asks before uploading, and uploads only after the user agrees", async () => {
+it("starts the transfer with one click and no confirmation popup", async () => {
   render(<DataModePanel />);
   await flip();
 
-  expect(confirm).toHaveBeenCalledOnce();
-  expect(confirm.mock.calls[0][0]).toMatchObject({ confirmLabel: "Upload and turn on" });
-  expect(confirm.mock.calls[0][0].message).toMatch(/uploads the records saved on this device/i);
-  expect(cloud.migrateLocalToCloud).toHaveBeenCalledOnce();
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", false));
+  expect(confirm).not.toHaveBeenCalled();
+  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled(); // helper owns transfer and locking
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", expect.any(Function)));
   expect(cloud.reload).toBe(true);
 });
 
-it("cancelling the consent prompt leaves the records on this device", async () => {
-  confirm.mockResolvedValue(false);
+it("stays put and explains when the upload only partly succeeded", async () => {
+  cloud.switchWorkspace.mockRejectedValue(new Error("Couldn't finish saving to Filey Cloud. Your device data is safe."));
   render(<DataModePanel />);
   await flip();
 
-  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
+  expect(await screen.findByRole("alert")).toHaveTextContent(/your saved data is safe/i);
   expect(cloud.reload).toBe(false);
 });
 
-it("stays put and explains when the upload only partly succeeded", async () => {
-  cloud.migrateLocalToCloud.mockResolvedValue([{ table: "orders", rows: 0, error: "denied" }]);
+it.each(["local", "cloud"] as const)("retries the failed %s workspace switch without exposing its internal error", async (source) => {
+  mode.value = source;
+  cloud.switchWorkspace.mockRejectedValueOnce(new Error("invoice_docs: permission denied; SQLSTATE 42501"));
   render(<DataModePanel />);
   await flip();
-
-  expect(await screen.findByRole("alert")).toHaveTextContent(/upload incomplete for: orders/i);
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
+  expect(screen.queryByText(/invoice_docs|SQLSTATE|permission denied/i)).toBeNull();
   expect(cloud.reload).toBe(false);
+  fireEvent.click(screen.getByRole("button", {name: "Try again"}));
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledTimes(2));
+  expect(cloud.switchWorkspace).toHaveBeenLastCalledWith(source === "local" ? "cloud" : "local", expect.any(Function));
+  await waitFor(() => expect(cloud.reload).toBe(true));
+});
+
+it("retries a partial upload without displaying the table failure list or repeating confirmation", async () => {
+  const confirmation = vi.spyOn(window, "confirm").mockReturnValue(true);
+  cloud.migrateLocalToCloud.mockResolvedValueOnce([{table: "invoice_docs", rows: 2, error: "SQLSTATE 42501"}]);
+  try {
+    render(<DataModePanel />);
+    fireEvent.click(screen.getByRole("button", {name: "Push local data to cloud"}));
+    await screen.findByRole("button", {name: "Try again"});
+    expect(screen.queryByText(/invoice_docs|SQLSTATE|Transfer needs attention|view details/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", {name: "Try again"}));
+    await waitFor(() => expect(cloud.migrateLocalToCloud).toHaveBeenCalledTimes(2));
+    expect(confirmation).toHaveBeenCalledTimes(1);
+    await screen.findByText("Transfer completed. Storage mode has not changed.");
+    expect(screen.queryByRole("button", {name: "Try again"})).toBeNull();
+    expect(cloud.reload).toBe(false);
+  } finally { confirmation.mockRestore(); }
 });
 
 it("turning the store off never uploads and never asks", async () => {
@@ -160,7 +177,7 @@ it("turning the store off never uploads and never asks", async () => {
 
   expect(confirm).not.toHaveBeenCalled();
   expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("local", false));
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("local", expect.any(Function)));
 });
 
 it("sends the user to connect an account rather than opening an empty store", async () => {
@@ -178,15 +195,15 @@ it("skips the upload entirely when this device holds no records", async () => {
   render(<DataModePanel />);
   await flip();
 
-  expect(confirm).toHaveBeenCalledOnce();
+  expect(confirm).not.toHaveBeenCalled();
   expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", false));
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", expect.any(Function)));
 });
 
 it("keeps the switch still while a transfer is running", async () => {
   let release!: () => void;
-  cloud.migrateLocalToCloud.mockImplementation(() => new Promise((resolve) => {
-    release = () => resolve([]);
+  cloud.switchWorkspace.mockImplementation(() => new Promise((resolve) => {
+    release = () => resolve();
   }));
   render(<DataModePanel />);
   await flip();

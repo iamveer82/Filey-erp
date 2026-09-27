@@ -7,6 +7,7 @@ import { advances, billing, crm, recurrences, suppliers, setCacheOrg, type Compa
 import * as files from "../../lib/files";
 import * as exchangeRates from "../../lib/exchange-rates";
 import Invoicing from "../Invoicing";
+import { setDisplayCurrency } from "../../lib/format";
 
 // Keep the real editor and picker; thumbnail rendering has its own gallery
 // suite and adds four unrelated document trees to every party interaction.
@@ -81,24 +82,35 @@ beforeEach(() => {
   vi.spyOn(files, "autoSaveDocument").mockResolvedValue(false);
   vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1 });
 });
-afterEach(() => { cleanup(); setCacheOrg(null); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); setCacheOrg(null); setDisplayCurrency("AED"); vi.restoreAllMocks(); });
 
 describe("purchase invoice parties", () => {
-  it("opens the invoice preview legible on a phone, and still fits the A4 sheet without reflowing it", async () => {
+  it("uses company currency for new invoices without relabelling saved invoices", async () => {
+    setDisplayCurrency("USD");
+    vi.mocked(billing.getCompany).mockResolvedValue({ name: "Indian company", currency: "INR", country_code: "IN", default_template: "classic" } as CompanyProfile);
+    const view = render(<MemoryRouter><AuthProvider><UIProvider><Invoicing mode="purchase" /></UIProvider></AuthProvider></MemoryRouter>);
+    await view.findByText("PINV-PARTY");
+    fireEvent.click(view.getByRole("button", {name: "New purchase invoice"}));
+    expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
+    view.unmount();
+    const existing = await openPurchase();
+    expect(existing.getByLabelText("Currency")).toHaveTextContent("AED");
+    expect(billing.saveDoc).not.toHaveBeenCalled();
+  });
+
+  it("opens the invoice preview at fit width on a phone without reflowing the A4 sheet", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(326);
     const view = await openPurchase();
     fireEvent.click(view.getByRole("button", { name: "Preview" }));
     const dialog = view.getByRole("dialog", { name: invoice.number });
     expect(dialog).toHaveClass("filey-document-dialog");
     const paper = () => dialog.querySelector<HTMLElement>(".invoice-print")!;
-    // A 326px panel fits 294/794 = 37% of the sheet, so the viewer opens at a
-    // legible zoom instead of a whole page of ~4px text.
-    await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "638px" }));
+    await waitFor(() => expect(paper().parentElement).toHaveStyle({ width: "294px" }));
     expect(paper()).toHaveStyle({ width: "794px", minHeight: "1123px", padding: "48px" });
     expect(within(dialog).getByRole("columnheader", { name: /Amount/ })).toBeVisible();
     expect(within(dialog).getByRole("button", { name: "Fit width" })).toHaveAttribute(
       "aria-pressed",
-      "false"
+      "true"
     );
     // One tap returns the whole page, which is what fit-width means.
     fireEvent.click(within(dialog).getByRole("button", { name: "Fit width" }));

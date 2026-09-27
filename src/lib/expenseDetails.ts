@@ -47,9 +47,4 @@ export function validateExpense(category: string, amount: number, date: string, 
     throw new Error("Attach a PDF, PNG, JPG or WebP receipt up to 10 MB.");
 }
 
-export function validateReceipt(file: File): string {
-  const mime = ({ pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" } as Record<string, string>)[file.name.split(".").pop()?.toLowerCase() || ""];
-  if (!mime || (file.type && file.type !== mime) || !file.size || file.size > 10 * 1024 * 1024)
-    throw new Error("Choose a PDF, PNG, JPG or WebP receipt up to 10 MB.");
-  return mime;
-}
+export { validateDocumentUpload as validateReceipt } from "./documentUpload";

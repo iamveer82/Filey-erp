@@ -36,6 +36,34 @@ async function freshClient() {
 beforeEach(() => store.clear());
 
 describe("localdb desktop read cache", () => {
+  it("keeps a workspace and its journal intact after a failed snapshot transaction, then retries", async () => {
+    const client = await freshClient();
+    const { replaceWorkspaceSnapshot, journalSnapshot } = await import("../localdb");
+    await client.from("products").insert({id: 1, name: "Device product"});
+    await client.from("orders").insert({id: 2, name: "Device order"});
+    const before = await journalSnapshot();
+    const snapshot = new Map([
+      ["products", [{id: 1, name: "Cloud product"}]],
+      ["orders", [{id: 2, name: "Cloud order"}]],
+    ]);
+    const savedInvoke = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "cache_set_many") throw new Error("Disk full");
+      return savedInvoke(cmd, args);
+    });
+    try {
+      await expect(replaceWorkspaceSnapshot(snapshot, before.v)).rejects.toThrow("Disk full");
+      expect((await client.from("products").select().single()).data.name).toBe("Device product");
+      expect((await client.from("orders").select().single()).data.name).toBe("Device order");
+      expect(await journalSnapshot()).toEqual(before);
+    } finally { invoke.mockImplementation(savedInvoke); }
+    await replaceWorkspaceSnapshot(snapshot, before.v);
+    const reopened = await freshClient();
+    expect((await reopened.from("products").select().single()).data.name).toBe("Cloud product");
+    expect((await reopened.from("orders").select().single()).data.name).toBe("Cloud order");
+    expect((await (await import("../localdb")).journalSnapshot()).tables).toEqual({});
+  });
+
   it("commits a sync choice with its upload queue atomically and preserves both after a failed write", async () => {
     const client = await freshClient();
     const { resolveLocalSyncConflicts, journalSnapshot } = await import("../localdb");

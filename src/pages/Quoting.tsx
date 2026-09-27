@@ -179,7 +179,7 @@ function blankForm(
 ): Form {
   // Same rule as invoicing: new quotes adopt the active display currency and
   // company country controls tax independently.
-  const currency = getDisplayCurrency() || c.currency || "AED";
+  const currency = c.currency || getDisplayCurrency() || "AED";
   return {
     number: pickQuoteNumber(existing, formats),
     status: "draft",
@@ -2079,7 +2079,7 @@ export default function Quoting() {
                               setBankY(y);
                             }}
                           >
-                            <BankDetailsBlock bank={bank} accent={form.accent} />
+                            <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                           </DraggableBlock>
                         )}
                       </div>
@@ -2167,7 +2167,7 @@ export default function Quoting() {
                                     y={bankY}
                                     onMove={() => {}}
                                   >
-                                    <BankDetailsBlock bank={bank} accent={form.accent} />
+                                    <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                                   </DraggableBlock>
                                 )}
                               </div>
@@ -2277,7 +2277,7 @@ export default function Quoting() {
                               setBankY(y);
                             }}
                           >
-                            <BankDetailsBlock bank={bank} accent={form.accent} />
+                            <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
                           </DraggableBlock>
                         )}
                       </div>

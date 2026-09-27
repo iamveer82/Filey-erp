@@ -52,6 +52,12 @@ export const CURRENCIES: { code: string; name: string }[] = [
   { code: "AUD", name: "Australian Dollar" },
   { code: "NZD", name: "New Zealand Dollar" },
   { code: "SGD", name: "Singapore Dollar" },
+  { code: "BHD", name: "Bahraini Dinar" },
+  { code: "OMR", name: "Omani Rial" },
+  { code: "QAR", name: "Qatari Riyal" },
+  { code: "KWD", name: "Kuwaiti Dinar" },
+  { code: "ZAR", name: "South African Rand" },
+  { code: "JPY", name: "Japanese Yen" },
 ];
 
 /** Format an AED-denominated value in the org's display currency, converting
@@ -82,7 +88,6 @@ export function money(value: number, currency = "AED"): string {
     return new Intl.NumberFormat("en", {
       style: "currency",
       currency: currency || "AED",
-      maximumFractionDigits: 2,
     }).format(value || 0);
   } catch (e) {
     console.warn("Failed to format currency; falling back", e);

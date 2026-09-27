@@ -2,7 +2,7 @@
 // Proves My Files + user folders work fully offline (local data mode): the
 // localdb shim must back tables (user_files/user_folders), file bytes (storage),
 // and the local-user session — no Supabase, no network.
-import { beforeAll, test, expect } from "vitest";
+import { beforeAll, test, expect, vi } from "vitest";
 
 beforeAll(() => {
   localStorage.clear();
@@ -20,6 +20,29 @@ beforeAll(() => {
       });
     };
   }
+});
+
+test("private company documents round-trip locally and reject unsupported uploads before saving", async () => {
+  const files = await import("../files");
+  const file = new File(["%PDF-1.7\nfixture"], "GST certificate.pdf", {type: "application/pdf"});
+  const id = await files.uploadUserFile(file, "company-gst");
+  const saved = await files.getSavedFile(id);
+  expect(saved).toMatchObject({name: file.name, tool: "company-gst", mime: "application/pdf"});
+  expect(Array.from((await files.fileBytes(saved))!)).toEqual(Array.from(new Uint8Array(await file.arrayBuffer())));
+  expect(files.folderOf(saved)).toBe("company-gst");
+  await expect(files.uploadUserFile(new File(["<script>bad</script>"], "PAN.html", {type:"text/html"}), "company-pan")).rejects.toThrow("PDF");
+  await expect(files.uploadUserFile(new File(["data"], "PAN.pdf", {type:"text/html"}), "company-pan")).rejects.toThrow("PDF");
+  const large = new File(["data"], "large.pdf", {type:"application/pdf"});
+  Object.defineProperty(large, "size", {value: 11 * 1024 * 1024});
+  await expect(files.uploadUserFile(large, "company-gst")).rejects.toThrow("10 MB");
+  // Storage denial must leave metadata visible for retry, not claim deletion.
+  const {sb} = await import("../supabase");
+  const storage = vi.spyOn(sb().storage, "from").mockReturnValue({remove: async () => ({error: new Error("Storage denied")})} as never);
+  await expect(files.deleteFile(saved)).rejects.toThrow("Storage denied");
+  storage.mockRestore();
+  expect((await files.listFiles()).some(f => f.id === id)).toBe(true);
+  await files.deleteFile(saved);
+  expect((await files.listFiles()).some(f => f.id === id)).toBe(false);
 });
 
 test("offline: create folder, save file, move it, read bytes back", async () => {
