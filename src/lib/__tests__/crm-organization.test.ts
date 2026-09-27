@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from "vitest";
 import { setCacheOrg, tools } from "../api";
 import { localClient } from "../localdb";
 import { bulkUpdateCrm, crmDuplicates } from "../crmOrganization";
-import { emptyCrmData, recordDraft, saveCrmRecord, type CrmRow } from "../crmWorkspace";
+import { emptyCrmData, recordDraft, saveCrmRecord, CRM_OBJECTS, OBJECT_KEYS, crmCustomModule, type CrmRow } from "../crmWorkspace";
 
 beforeEach(() => {
   localStorage.clear();
@@ -85,4 +85,25 @@ it("saves validated custom values while preserving fields whose definitions were
     (await localClient.from("crm_people").select().eq("id", 1).single()).data
       .custom_fields
   ).toEqual({ region: "North", legacy: "keep" });
+});
+
+it("persists custom fields for every CRM object and keeps removed-field values on later edits", async () => {
+  const data = emptyCrmData();
+  data.companies = [{ id: 900, company: "Sample" }];
+  await localClient.from("crm_customers").insert(data.companies);
+  for (const kind of OBJECT_KEYS) {
+    const module = crmCustomModule(kind);
+    await tools.setSetting(`custom_fields_${module}`, JSON.stringify([{
+      id: `cf-${kind}`, module, key: "territory", label: "Territory", type: "text",
+      required: true, position: 0, createdAt: "2026-09-28",
+    }]));
+    const draft = { ...recordDraft(kind), name: "Sam", company: "Sample", title: "Call", body: "Note", subject: "Meeting", customer_id: "900", target: "company:900", custom_fields: JSON.stringify({ territory: "North" }) };
+    const id = await saveCrmRecord(kind, draft, data);
+    const table = CRM_OBJECTS[kind].table;
+    const saved = (await localClient.from(table).select().eq("id", id).single()).data;
+    expect(saved.custom_fields).toEqual({ territory: "North" });
+    await tools.setSetting(`custom_fields_${module}`, "[]");
+    await saveCrmRecord(kind, { ...recordDraft(kind, saved), custom_fields: "{}" }, data, saved);
+    expect((await localClient.from(table).select().eq("id", id).single()).data.custom_fields).toEqual({ territory: "North" });
+  }
 });

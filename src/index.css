@@ -99,18 +99,19 @@
   .workspace-sidebar {
     position: fixed;
     z-index: 50;
-    top: calc(var(--filey-viewport-top, 0px) + env(safe-area-inset-top) + 8px);
-    left: max(8px, env(safe-area-inset-left));
-    width: min(336px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
-    height: calc(var(--filey-viewport-height, 100dvh) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
-    border: 1px solid hsl(var(--border));
-    border-radius: 24px;
-    box-shadow: 0 16px 60px rgb(0 0 0 / .16);
-    transform: translate3d(calc(-100% - 24px - env(safe-area-inset-left)), 0, 0);
+    top: var(--filey-viewport-top, 0px);
+    left: 0;
+    width: min(336px, calc(100vw - 48px - env(safe-area-inset-right)));
+    height: var(--filey-viewport-height, 100dvh);
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+    border: 0;
+    border-radius: 0 20px 20px 0;
+    box-shadow: none;
+    transform: translate3d(-100%, 0, 0);
     will-change: transform;
     transition: transform 220ms cubic-bezier(.32,.72,0,1);
   }
-  .workspace-sidebar[data-open="true"] { transform: translate3d(0, 0, 0); transition-duration: 260ms; }
+  .workspace-sidebar[data-open="true"] { transform: translate3d(0, 0, 0); transition-duration: 260ms; box-shadow: 8px 0 32px rgb(0 0 0 / .12); }
   .workspace-sidebar-close { display: grid; }
   .workspace-sidebar-header { padding: 12px 12px 10px; }
   .workspace-nav-search { min-height: 44px; }
@@ -367,6 +368,41 @@
   input[type="checkbox"],
   input[type="radio"] {
     accent-color: hsl(var(--primary-400));
+  }
+  /* Native inputs retain keyboard/form semantics; only their paint is custom. */
+  input[type="checkbox"]:not([role="switch"]):not(.sr-only) {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    flex-shrink: 0;
+    vertical-align: middle;
+    border: 1.5px solid hsl(var(--muted-foreground) / .55);
+    border-radius: 5px;
+    background: hsl(var(--card)) center / 14px 14px no-repeat;
+    cursor: pointer;
+    transition: background-color 140ms ease-out, border-color 140ms ease-out;
+  }
+  input[type="checkbox"]:not([role="switch"]):not(.sr-only):is(:checked, :indeterminate) {
+    border-color: hsl(var(--primary-400));
+    background-color: hsl(var(--primary-400));
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3.2 3.2L13 4.5' fill='none' stroke='%23181818' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+  input[type="checkbox"]:not([role="switch"]):not(.sr-only):indeterminate {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='%23181818' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
+  @media (prefers-reduced-motion: reduce) {
+    input[type="checkbox"] { transition: none !important; }
+  }
+  @media (forced-colors: active) {
+    input[type="checkbox"]:not([role="switch"]):not(.sr-only) {
+      appearance: auto;
+      -webkit-appearance: auto;
+      background-image: none;
+    }
   }
   /* Accessible focus ring — 2px primary-blue ring, 2px offset. Blue (not ink)
      so keyboard focus reads as an interactive affordance app-wide. */

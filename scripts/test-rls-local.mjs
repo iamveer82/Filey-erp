@@ -37,6 +37,13 @@ try {
   const output = run('psql', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
     sql('scripts/fixtures/rls-setup.sql') + '\n' + migration + '\n' + migration + '\n' + syncMigration + '\n' + syncMigration + '\n' + sql('scripts/fixtures/rls-checks.sql') + '\n' + sql('scripts/fixtures/sync-checks.sql') + '\n' + sql('scripts/fixtures/module-checks.sql') + '\n' + moduleMigration + '\n' + moduleMigration + '\n' + sql('scripts/fixtures/module-assertions.sql'));
   console.log(output.trim());
+  const customFieldsMigration = sql('supabase/2026-09-28-crm-custom-fields.sql');
+  const crmArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+  run('psql', crmArgs, customFieldsMigration + '\n' + customFieldsMigration);
+  assert.equal(run('psql', [...crmArgs, '-tAc', "select count(*) from information_schema.columns where table_schema='public' and table_name in ('crm_leads','crm_opportunities','crm_tasks','crm_notes','crm_activities') and column_name='custom_fields' and data_type='jsonb'"]).trim(), '5');
+  run('psql', crmArgs, "update crm_tasks set custom_fields='{\"region\":\"North\"}' where id=1;\n" + customFieldsMigration);
+  assert.equal(run('psql', [...crmArgs, '-tAc', "select custom_fields->>'region' from crm_tasks where id=1"]).trim(), 'North');
+  console.log('PASS: CRM custom-field migration is additive, repeatable and preserves saved values.');
   console.log(run('psql', ['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-X','-q','-v','ON_ERROR_STOP=1'],
     sql('supabase/2026-09-22-batched-sync.sql')+'\n'+sql('supabase/2026-09-22-batched-sync.sql')+'\n'+sql('scripts/fixtures/sync-batch-checks.sql')).trim());
   const manifestMigration = sql('supabase/2026-09-20-sync-manifest.sql');

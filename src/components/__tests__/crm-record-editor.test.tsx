@@ -74,6 +74,7 @@ it("updates stage probability and locks a pending save against duplicate submiss
   fireEvent.change(screen.getByLabelText("Stage"), { target: { value: "proposal" } });
   expect(screen.getByLabelText("Probability (%)")).toHaveValue(45);
   const form = screen.getByLabelText("Stage").closest("form")!;
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create deal" })).toBeEnabled());
   fireEvent.submit(form);
   fireEvent.submit(form);
   expect(save).toHaveBeenCalledTimes(1);
@@ -107,6 +108,7 @@ it("submits the visible native date value even when browser autofill bypasses Re
   fireEvent.change(screen.getByLabelText("Assignee"), {
     target: { value: "Sales team" },
   });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Create task" })).toBeEnabled());
   fireEvent.submit(date.closest("form")!);
   await waitFor(() =>
     expect(save).toHaveBeenCalledWith(
@@ -142,4 +144,20 @@ it("keeps a failed save editable and blocks mutation after a failed workspace re
   render(<RecordEditor {...props} row={{ id: 4, name: "Sam" }} mutationDisabled />);
   expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Delete contact" })).toBeDisabled();
+});
+
+it("protects unfinished edits when closing the record and keeps them after choosing to continue", () => {
+  const close = vi.fn(), save = vi.fn(async () => {});
+  render(<RecordEditor kind="tasks" data={emptyCrmData()} onSave={save} onClose={close}
+    onDelete={async () => {}} onConvert={async () => {}} onOpen={() => {}} onAdd={() => {}} />);
+  fireEvent.change(screen.getByLabelText("Task title *"), { target: { value: "Call supplier" } });
+  fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+  expect(close).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent("Discard unsaved changes?");
+  fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(screen.getByLabelText("Task title *")).toHaveValue("Call supplier");
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(close).toHaveBeenCalledOnce();
+  expect(save).not.toHaveBeenCalled();
 });

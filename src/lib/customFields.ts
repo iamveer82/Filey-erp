@@ -27,6 +27,10 @@ export interface CustomFieldDef {
     | "purchase_orders"
     | "employees"
     | "leads"
+    | "deals"
+    | "tasks"
+    | "notes"
+    | "activities"
     | "contacts";
   key: string;
   label: string;

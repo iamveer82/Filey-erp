@@ -36,6 +36,7 @@ import { attachSmoothScroll } from "../lib/smoothScroll";
 import { useUI } from "../lib/ui";
 import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { isLocalMode } from "../lib/dataMode";
+import { useSidebarSwipe } from "../lib/useSidebarSwipe";
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
 
@@ -151,11 +152,13 @@ export default function Layout({ children }: { children: ReactNode }) {
     () => localStorage.getItem("sidebar.hidden") === "1"
   );
   const [mobileOpen, setMobileOpen] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const closeMenuRef = useRef<HTMLButtonElement>(null);
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width:1024px)").matches
   );
+  useSidebarSwipe(workspaceRef, sidebarRef, !isDesktop, mobileOpen, setMobileOpen);
   useEffect(() => {
     const m = window.matchMedia("(min-width:1024px)");
     const h = () => setIsDesktop(m.matches);
@@ -396,7 +399,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-      <div className="filey-workspace flex h-full w-full overflow-hidden bg-background">
+      <div ref={workspaceRef} className="filey-workspace flex h-full w-full overflow-hidden bg-background">
         {/* Offline banner */}
         {!isOnline && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">

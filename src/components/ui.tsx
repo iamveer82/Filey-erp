@@ -555,6 +555,7 @@ export function DataTable<T>({
                   <input
                     type="checkbox"
                     aria-label="Select all"
+                    ref={(input) => { if (input) input.indeterminate = selectedRows.length > 0 && !allChecked; }}
                     disabled={running}
                     checked={allChecked}
                     onChange={toggleAll}

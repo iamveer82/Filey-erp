@@ -4,7 +4,7 @@ import { CustomFieldsManager } from "../CustomFieldsManager";
 import { saveCustomFields, syncCustomFields } from "../../lib/customFields";
 vi.mock("../../lib/agentStorage", () => ({ agentStorageScope: () => "test", requireAgentStorageScope: () => "test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
 vi.mock("../../lib/customFields", async original => ({ ...await original<object>(), saveCustomFields: vi.fn(), syncCustomFields: vi.fn() }));
-vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: vi.fn(), error: vi.fn() }, confirm: vi.fn() }) }));
+vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: vi.fn(), error: vi.fn() }, confirm: vi.fn(async () => true) }) }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it("keeps failed loads from replacing definitions and preserves editable fields after a failed save", async () => {
   vi.mocked(syncCustomFields).mockRejectedValueOnce(new Error("Offline")).mockResolvedValue([]);
@@ -19,4 +19,22 @@ it("keeps failed loads from replacing definitions and preserves editable fields 
   fireEvent.click(screen.getByRole("button", { name: "Save fields" }));
   await screen.findByText("Disk full"); expect(close).not.toHaveBeenCalled();
   expect(screen.getByDisplayValue("Territory")).toBeInTheDocument();
+});
+
+it("lets users add, rename, require, reorder and remove fields before saving", async () => {
+  vi.mocked(syncCustomFields).mockResolvedValue([{ id: "one", key: "region", label: "Region", module: "tasks", type: "text", position: 0, createdAt: "2026-09-28" }]);
+  vi.mocked(saveCustomFields).mockResolvedValue();
+  const close = vi.fn();
+  render(<CustomFieldsManager open onOpenChange={close} module="tasks" />);
+  const existing = await screen.findByLabelText("Field label: Region");
+  fireEvent.change(existing, { target: { value: "Territory" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Required" }));
+  fireEvent.change(screen.getByPlaceholderText("Customer rating"), { target: { value: "Reference" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add field" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Move up" })[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Remove Reference field" }));
+  await waitFor(() => expect(screen.queryByLabelText("Field label: Reference")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Save fields" }));
+  await waitFor(() => expect(saveCustomFields).toHaveBeenCalledWith("tasks", [expect.objectContaining({ key: "region", label: "Territory", required: true, position: 0 })], "test"));
+  expect(close).toHaveBeenCalledWith(false);
 });

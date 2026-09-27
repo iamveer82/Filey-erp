@@ -195,6 +195,7 @@ export const CRM_OBJECTS: Record<
   },
 };
 export const OBJECT_KEYS = Object.keys(CRM_OBJECTS) as CrmObject[];
+export const crmCustomModule = (kind: CrmObject) => kind === "companies" ? "customers" : kind;
 export const emptyCrmData = (): CrmData => ({
   companies: [],
   contacts: [],
@@ -486,10 +487,7 @@ export async function saveCrmRecord(
 ): Promise<number> {
   const patch = validateCrmDraft(kind, draft, data, previous);
   if (draft.custom_fields !== undefined) {
-    const module =
-      kind === "companies" ? "customers" : kind === "contacts" ? "contacts" : null;
-    if (!module)
-      throw new Error("Custom fields are supported for companies and contacts.");
+    const module = crmCustomModule(kind);
     const scope = requireAgentStorageScope();
     const values = JSON.parse(draft.custom_fields);
     if (!values || typeof values !== "object" || Array.isArray(values))

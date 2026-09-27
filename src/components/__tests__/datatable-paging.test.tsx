@@ -5,6 +5,18 @@ import { DataTable } from "../ui";
 // This suite renders twice; nothing else unmounts the first tree for us.
 afterEach(cleanup);
 
+it("shows partial selection until every row is selected", () => {
+  render(<DataTable rows={[{ id: 1 }, { id: 2 }]} rowKey={row => row.id}
+    columns={[{ key: "id", label: "ID", render: row => row.id }]}
+    bulkActions={[{ label: "Update", run: () => {} }]} />);
+  const [all, first] = screen.getAllByRole("checkbox") as HTMLInputElement[];
+  fireEvent.click(first);
+  expect(all.indeterminate).toBe(true);
+  fireEvent.click(all);
+  expect(all.indeterminate).toBe(false);
+  expect(all).toBeChecked();
+});
+
 const rows = Array.from({ length: 25 }, (_, i) => ({ id: i + 1 }));
 const table = (
   <DataTable

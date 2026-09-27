@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight, Check, MessageCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   CRM_OBJECTS,
+  crmCustomModule,
   OBJECT_KEYS,
   targetTypes,
   objectForTarget,
@@ -70,9 +71,16 @@ export default function RecordEditor({
   const inFlight = useRef(false);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(!row);
+  const [dirty, setDirty] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  useEffect(() => {
+    if (!editing || !dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [editing, dirty]);
   const [section, setSection] = useState<"details" | "documents" | CrmObject>("details");
-  const customModule =
-    kind === "companies" ? "customers" : kind === "contacts" ? "contacts" : null;
+  const customModule = crmCustomModule(kind);
   const [customDefs, setCustomDefs] = useState<CustomFieldDef[] | null>(null);
   const [customError, setCustomError] = useState("");
   const [customAttempt, setCustomAttempt] = useState(0);
@@ -180,11 +188,21 @@ export default function RecordEditor({
       }
       busy={busy}
       onClose={() => {
-        if (!inFlight.current) onClose();
+        if (inFlight.current) return;
+        if (editing && dirty) setDiscarding(true);
+        else onClose();
       }}
       onBack={!editing ? onBack : undefined}
       backLabel={backLabel}
     >
+      {discarding && <div role="alert" className="sticky top-0 z-20 mb-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+        <p className="text-sm font-semibold">Discard unsaved changes?</p>
+        <p className="mt-1 text-xs text-muted-foreground">Your edits have not been saved to this record.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="btn-primary" autoFocus onClick={() => setDiscarding(false)}>Keep editing</button>
+          <button type="button" className="btn-ghost text-danger" onClick={onClose}>Discard changes</button>
+        </div>
+      </div>}
       {mutationDisabled && (
         <p role="status" className="mb-4 text-sm text-danger">
           Refresh the workspace successfully before changing this record.
@@ -241,6 +259,7 @@ export default function RecordEditor({
       )}
       {editing ? (
         <form
+          onChangeCapture={() => setDirty(true)}
           onSubmit={(e) => {
             e.preventDefault();
             // Read the submitted controls too: browser autofill and native date
@@ -266,7 +285,7 @@ export default function RecordEditor({
                   ])
                 )
               );
-            void run(() => onSave(submitted));
+            void run(async () => { await onSave(submitted); setDirty(false); setDiscarding(false); });
           }}
         >
           <fieldset
@@ -480,6 +499,8 @@ export default function RecordEditor({
               className="btn-ghost"
               disabled={busy}
               onClick={() => {
+                setDirty(false);
+                setDiscarding(false);
                 if (row) {
                   setDraft(recordDraft(kind, row));
                   setError("");
@@ -600,6 +621,14 @@ export default function RecordEditor({
             )}
             {section === "details" && (
               <dl className="crm-properties grid sm:grid-cols-2 gap-x-6 text-[13px] mb-6">
+                {customDefs?.map(def => (
+                  <div key={`custom:${def.key}`} className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] items-start gap-3 border-b border-border py-3">
+                    <dt className="text-xs text-muted-foreground">{def.label}</dt>
+                    <dd className="min-w-0 break-words">{def.type === "checkbox"
+                      ? ([true, "true", 1, "1"].includes(customValues[def.key] as string | number | boolean) ? "Yes" : "No")
+                      : def.type === "date" ? fmtDate(text(customValues[def.key])) : text(customValues[def.key]) || "—"}</dd>
+                  </div>
+                ))}
                 {spec.fields
                   .filter((field) => field.type !== "textarea")
                   .map((field) => (

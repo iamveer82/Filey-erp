@@ -85,6 +85,7 @@ it("saves and restores the actual header sorting and chosen columns", async () =
   fireEvent.click(screen.getByRole("button", { name: "View options" }));
   fireEvent.click(screen.getByLabelText("Phone (international format)"));
   expect(screen.queryByRole("columnheader", { name: /Phone/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("button", { name: "Save view" }));
   await screen.findByRole("button", { name: "Sales focus" });
   expect(JSON.parse(savedViewEntries()[0][1])[0]).toMatchObject({
@@ -123,6 +124,7 @@ it("isolates saved views across accounts, modes, and cloud organizations without
     screen.queryByRole("button", { name: "Legacy private view" })
   ).not.toBeInTheDocument();
   expect(savedViewEntries()).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("button", { name: "Save view" }));
   await screen.findByRole("button", { name: "Sales focus" });
   const [localKey, localValue] = savedViewEntries()[0];
@@ -131,11 +133,14 @@ it("isolates saved views across accounts, modes, and cloud organizations without
   // A pending/stale auth cache may never expose the preceding user's labels.
   mounted.rerender(workspace());
   expect(screen.queryByRole("button", { name: "Sales focus" })).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
   expect(await screen.findByRole("button", { name: "Save view" })).toBeDisabled();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Save view" }), { key: "Escape" });
   setCacheOrg(null, identity.user.id);
   mounted.rerender(workspace());
   await screen.findByRole("button", { name: "Zulu Company" });
   prompt.mockResolvedValue("Account B view");
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("button", { name: "Save view" }));
   await screen.findByRole("button", { name: "Account B view" });
 
@@ -149,6 +154,7 @@ it("isolates saved views across accounts, modes, and cloud organizations without
     screen.queryByRole("button", { name: "Account B view" })
   ).not.toBeInTheDocument();
   prompt.mockResolvedValue("Cloud view");
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("button", { name: "Save view" }));
   await screen.findByRole("button", { name: "Cloud view" });
   setCacheOrg("org-two", identity.user.id);
@@ -176,6 +182,7 @@ it("ignores a Save view prompt completed after the workspace changed", async () 
   );
   const mounted = mount();
   await screen.findByRole("button", { name: "Zulu Company" });
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("button", { name: "Save view" }));
   identity.user = { id: "account-b" };
   setCacheOrg(null, identity.user.id);
@@ -318,4 +325,17 @@ it("opens the linked deal after a successful lead conversion", async () => {
   expect(convertCrmLead).toHaveBeenCalledExactlyOnceWith(11);
   expect(screen.getByRole("button", { name: "Alpha Company" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Prospect" })).toBeInTheDocument();
+});
+
+it("keeps setup actions out of the toolbar and exposes task due filters directly", async () => {
+  data.tasks = [{id: 1, title: "Call supplier", status: "open", due_date: "2026-01-01"}];
+  mount("/crm?view=tasks");
+  await screen.findByRole("button", {name: "Call supplier"});
+  expect(screen.getByLabelText("Task due date")).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Export"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "More actions"}));
+  expect(screen.getByRole("button", {name: "Export"})).toBeVisible();
+  expect(screen.getByRole("button", {name: "Import"})).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("button", {name: "Export"}), {key: "Escape"});
+  expect(screen.queryByRole("button", {name: "Export"})).not.toBeInTheDocument();
 });
