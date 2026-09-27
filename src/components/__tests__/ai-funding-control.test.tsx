@@ -25,7 +25,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("selects named paid and free models without mixing funding, even with zero Paper", async () => {
+it("shows paid models only without changing funding automatically, even with zero Coin", async () => {
   vi.mocked(getCreditStatus).mockResolvedValue({
     account: { available_micros: 0 },
     markup_bps: 0,
@@ -49,19 +49,19 @@ it("selects named paid and free models without mixing funding, even with zero Pa
   );
   fireEvent.click(screen.getByRole("button", { name: "AI payment method" }));
   const search = await screen.findByRole("searchbox", { name: "Search AI models" });
-  expect(screen.getByText("0 Paper available")).toBeInTheDocument();
+  expect(screen.getByText("0 Coin available")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Paid model/ })).toHaveTextContent(
-    "Up to 1 Paper input · 2 Paper output / 1M tokens"
+    "Up to 1 Coin input · 2 Coin output / 1M tokens"
   );
   expect(screen.getByRole("button", { name: /Paid model/ })).toHaveTextContent(
-    "Up to 0.0125 Paper / input image"
+    "Up to 0.0125 Coin / input image"
   );
   expect(
     screen.getByText(/You pay actual usage; these rates are spending estimates/)
   ).toBeInTheDocument();
   fireEvent.change(search, { target: { value: "missing" } });
   expect(screen.queryByRole("button", { name: /Paid model/ })).toBeNull();
-  expect(screen.getByRole("combobox", { name: "Free AI model" })).toBeDisabled();
+  expect(screen.queryByRole("combobox", { name: "Free AI model" })).toBeNull();
   expect(screen.getByRole("status")).toHaveTextContent("No matching models");
   expect(setCreditChoice).not.toHaveBeenCalled();
   fireEvent.change(search, { target: { value: "provider/paid" } });
@@ -71,11 +71,9 @@ it("selects named paid and free models without mixing funding, even with zero Pa
   fireEvent.change(await screen.findByRole("searchbox", { name: "Search AI models" }), {
     target: { value: "free" },
   });
-  fireEvent.change(screen.getByRole("combobox", { name: "Free AI model" }), {
-    target: { value: "provider/free" },
-  });
-  expect(setCreditChoice).toHaveBeenLastCalledWith("free", "provider/free");
-  fireEvent.click(screen.getByRole("button", { name: "AI payment method" }));
+  expect(screen.queryByText("Free model")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent("No matching models");
+  expect(setCreditChoice).toHaveBeenCalledTimes(1);
   fireEvent.click(
     screen.getByRole("button", {
       name: "My API key or local model No Filey usage fee. Provider charges may apply.",
@@ -121,8 +119,8 @@ it("keeps paid Filey AI disabled when only free models are available", async () 
     </MemoryRouter>
   );
   fireEvent.click(screen.getByRole("button", { name: "AI payment method" }));
-  expect(await screen.findByRole("combobox", { name: "Free AI model" })).toBeEnabled();
-  expect(screen.getByText(/Paid models are not available yet/)).toBeInTheDocument();
+  expect(await screen.findByText(/Paid models are not available yet/)).toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Free AI model" })).toBeNull();
   expect(screen.queryByText("Legacy automatic model")).toBeNull();
   expect(screen.queryByRole("button", { name: /Paid model/ })).toBeNull();
   expect(setCreditChoice).not.toHaveBeenCalled();

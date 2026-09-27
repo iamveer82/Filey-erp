@@ -485,7 +485,7 @@ export default function Integrations() {
             <div className="flex-1 min-w-48">
               <h2 className="font-semibold text-sm">AI models</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Set up local Ollama or LM Studio, OpenRouter free models, or another
+                Set up local Ollama or LM Studio, OpenRouter, or another
                 compatible provider.
               </p>
             </div>

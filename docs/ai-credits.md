@@ -1,16 +1,18 @@
-# Filey Paper wallet
+# Filey Coin wallet
 
 Optional on **Basic, Pro and Ultra**, independent of a subscription and owned by
 the signed-in Supabase account. Changing workspace or plan does not move money.
 The default remains the user's own API key/local model. Selecting credits is
-explicit; failed BYOK/free requests never start paid requests. Free models are available on every plan without a wallet balance.
+explicit; failed BYOK/free requests never start paid requests. The current UI
+shows paid OpenRouter models only. Previously saved free selections and older
+clients remain compatible, without automatically switching anyone to paid use.
 
 ## User flow
 
 - Account menu → AI wallet (or Settings → AI Wallet): available balance, one-time top-ups, model rates,
   per-task/daily spending limits, and paginated usage/top-up/refund history.
 - The chat composer and AI settings expose the funding/model selector.
-- Users choose a named OpenRouter model when paying with **Paper**, with its
+- Users choose a named OpenRouter model when paying with **Coin**, with its
   input/output rates and any per-image input fee shown before use. Rates marked
   **Up to** are conservative bounds across applicable peak-hour/context tiers;
   the actual provider-reported cost, including any savings, is what is charged.
@@ -23,15 +25,15 @@ explicit; failed BYOK/free requests never start paid requests. Free models are a
   including delegated rounds. Separate image generation, voice and third-party
   services retain their own connections. Background proactive sweeps do not
   spend credits; explicitly scheduled agent tasks use the selected mode.
-- Free AI lists live, zero-priced OpenRouter models that support function tools,
+- Legacy free funding accepts zero-priced OpenRouter models that support function tools,
   including `openrouter/free` for automatic selection. Each verified account
   gets up to 20 provider requests per 24-hour window, subject to the provider's
   shared quota and availability. Agent tasks may use several requests. Free
   mode never falls back to a paid model or touches the wallet.
-- The wallet display currency is **Paper**, with **1 Paper = US$1**. Balances
+- The wallet display currency is **Coin**, with **1 Coin = US$1**. Balances
   retain six-decimal precision for tiny usage charges. The ledger, payment
   requests and limits stay in USD micro-units; this is not a monetary conversion
-  or a migration of existing balances. Each top-up adds a flat $0.50 service fee: $5.50 buys 5 Paper ($5)
+  or a migration of existing balances. Each top-up adds a flat $0.50 service fee: $5.50 buys 5 Coin ($5)
   of credit, before applicable taxes. The fee is recorded separately and is not
   spendable. Provider usage has no Filey markup and is charged to six
   decimal places, rounded up. Paid credits have no expiration or auto-top-up.
@@ -151,7 +153,7 @@ This also gives up cache-read savings for these requests. See
 [OpenRouter's cache controls](https://openrouter.ai/docs/guides/best-practices/prompt-caching#disabling-prompt-caching).
 When the optional OmniRoute gateway is selected, the paid route uses a concrete
 OpenRouter-backed model and verifies its generation receipt independently before
-settling Paper. Gateway estimates are never wallet charges. Free requests remain
+settling Coin. Gateway estimates are never wallet charges. Free requests remain
 direct and cannot silently switch to paid usage. See the gateway document for
 its internal retry behavior and deployment requirements.
 Refunds can make a previously spent balance negative, blocking further spend;
@@ -260,7 +262,7 @@ configuration described above, deployment of `ai-credits` and `dodo`, and the
 updated frontend. Existing paid-provider readiness checks still apply. No live
 product, secret, payment or customer record was changed for this addition.
 
-The Paper branding, named paid-model picker and optional OmniRoute adapter are
+The Coin branding, named paid-model picker and optional OmniRoute adapter are
 also local changes, not part of 3.0.3. Deploy the updated `ai-credits` function
 with the updated frontend so the catalogue and zero-markup policy match. Clients
 that previously saved `filey-ai` must select a named model; the backend does not

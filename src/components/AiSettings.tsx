@@ -54,16 +54,6 @@ const PRESETS: Preset[] = [
     keyUrl: "https://openrouter.ai/settings/keys",
   },
   {
-    label: "OpenRouter · free models",
-    provider: "openai",
-    baseUrl: "https://openrouter.ai/api/v1",
-    model: "openrouter/free",
-    access: "free-tier",
-    guide: "https://openrouter.ai/docs/guides/routing/routers/free-router",
-    keyUrl: "https://openrouter.ai/settings/keys",
-    note: "Use your own OpenRouter key. The free router selects an available model; capacity, model availability and provider limits can change.",
-  },
-  {
     label: "Groq",
     provider: "openai",
     baseUrl: "https://api.groq.com/openai/v1",
@@ -307,7 +297,7 @@ export default function AiSettings() {
 
   return (
     <SettingsPanel>
-      <SettingsSection title="AI payment method" description="Use your own key or optional Paper on Basic, Pro and Ultra. Paper is never spent automatically if your key fails.">
+      <SettingsSection title="AI payment method" description="Use your own key or optional Coin on Basic, Pro and Ultra. Coin is never spent automatically if your key fails.">
         <AiFundingControl />
       </SettingsSection>
       <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">

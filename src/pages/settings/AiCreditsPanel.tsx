@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, RefreshCw } from "lucide-react";
-import PaperMark from "../../components/PaperMark";
+import CoinMark from "../../components/CoinMark";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { FileySpinner } from "../../components/FileySpinner";
 import PaymentReview from "../../components/PaymentReview";
@@ -10,8 +10,9 @@ import {
   buyAiCredits,
   creditHistory,
   creditMoney,
-  creditPaper,
+  creditCoin,
   getCreditStatus,
+  isPaidCreditModel,
   saveCreditLimits,
   type CreditStatus,
 } from "../../lib/aiCredits";
@@ -81,8 +82,8 @@ export default function AiCreditsPanel() {
     if (!state) return;
     setNotice(
       state === "cancelled"
-        ? "Checkout cancelled. No Paper was added."
-        : "Checkout finished. Paper appears after payment is verified. Refresh if your balance has not updated yet."
+        ? "Checkout cancelled. No Coin was added."
+        : "Checkout finished. Coin appears after payment is verified. Refresh if your balance has not updated yet."
     );
     const next = new URLSearchParams(params);
     next.delete("credit_checkout");
@@ -122,12 +123,12 @@ export default function AiCreditsPanel() {
   }
 
   const customLimits = data?.custom_topup;
-  const modelCount = data?.models.filter((model) => model.id !== "filey-ai").length ?? 0;
+  const modelCount = data?.models.filter(isPaidCreditModel).length ?? 0;
   const modelQuery = modelSearch.trim().toLowerCase();
   const rateModels =
     data?.models.filter(
       (model) =>
-        model.id !== "filey-ai" &&
+        isPaidCreditModel(model) &&
         `${model.name} ${model.id}`.toLowerCase().includes(modelQuery)
     ) ?? [];
   const validCustomCents = (cents: number) =>
@@ -151,17 +152,17 @@ export default function AiCreditsPanel() {
       ? { cents: selectedPack.cents, choice: selectedPack.id }
       : null;
   const customHelp = customLimits
-    ? `Enter ${creditMoney(customLimits.min_cents * 10000)}–${creditMoney(customLimits.max_cents * 10000)} USD, with up to two decimal places. 1 Paper = $1.`
+    ? `Enter ${creditMoney(customLimits.min_cents * 10000)}–${creditMoney(customLimits.max_cents * 10000)} USD, with up to two decimal places. 1 Coin = $1.`
     : "";
   if (selectedTopup && data?.topups_enabled) {
     return (
       <PaymentReview
         key={String(selectedTopup.choice)}
-        title="Add Paper"
-        artwork={<PaperMark size={64} />}
+        title="Add Coin"
+        artwork={<CoinMark size={64} />}
         lines={[
           {
-            label: creditPaper(selectedTopup.cents * 10000),
+            label: creditCoin(selectedTopup.cents * 10000),
             value: creditMoney(selectedTopup.cents * 10000),
           },
           {
@@ -170,7 +171,7 @@ export default function AiCreditsPanel() {
           },
         ]}
         total={`${creditMoney((selectedTopup.cents + (data.topup_fee_cents ?? 0)) * 10000)} USD`}
-        terms="1 Paper = $1 of AI usage. One-time top-up. No subscription or auto-recharge. Paper does not expire and is excluded from the subscription refund program."
+        terms="1 Coin = $1 of AI usage. One-time top-up. No subscription or auto-recharge. Coin does not expire and is excluded from the subscription refund program."
         onBack={() => {
           const next = new URLSearchParams(params);
           next.delete("pack");
@@ -197,11 +198,11 @@ export default function AiCreditsPanel() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
-          <PaperMark size={64} />
+          <CoinMark size={64} />
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold">Paper wallet</h2>
+            <h2 className="text-lg font-semibold">Coin wallet</h2>
             <p className="mt-1 text-[13px] text-muted-foreground">
-              Paper powers Filey AI. Optional on every plan, with your balance saved to your
+              Coin powers Filey AI. Optional on every plan, with your balance saved to your
               account.
             </p>
           </div>
@@ -238,7 +239,7 @@ export default function AiCreditsPanel() {
       {!data && !busy && (
         <SettingsPanel>
           <SettingsSection
-            title="Your Paper"
+            title="Your Coin"
             description="Your balance, top-ups and spending history will appear here when your Filey account is connected."
           >
             <p className="text-sm text-muted-foreground">
@@ -260,27 +261,27 @@ export default function AiCreditsPanel() {
         <SettingsPanel>
           <SettingsSection
             title="Your balance"
-            description="Paper is Filey's AI credit. It is separate from your Basic, Pro or Ultra subscription."
+            description="Coin is Filey's AI credit. It is separate from your Basic, Pro or Ultra subscription."
           >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <PaperMark />
+                  <CoinMark />
                   Available to spend
                 </div>
                 <p className="text-3xl font-semibold tabular-nums">
-                  {creditPaper(Math.max(0, data.account.available_micros), true)}
+                  {creditCoin(Math.max(0, data.account.available_micros), true)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {creditMoney(Math.max(0, data.account.available_micros), true)} USD · 1
-                  Paper = $1
+                  Coin = $1
                 </p>
               </div>
               <AiFundingControl />
             </div>
             {data.account.reserved_micros > 0 && (
               <p className="text-xs text-muted-foreground">
-                {creditPaper(data.account.reserved_micros, true)} reserved for requests in
+                {creditCoin(data.account.reserved_micros, true)} reserved for requests in
                 progress. Unused funds are released when they finish.
               </p>
             )}
@@ -289,8 +290,8 @@ export default function AiCreditsPanel() {
               data.account.available_micros < 1000000 && (
                 <p role="status" className="text-[13px] text-warning">
                   {data.account.available_micros === 0
-                    ? "Add Paper to start using paid Filey AI models."
-                    : "Your balance is below 1 Paper ($1). Top up before your next large task."}
+                    ? "Add Coin to start using paid Filey AI models."
+                    : "Your balance is below 1 Coin ($1). Top up before your next large task."}
                 </p>
               )}
             {data.account.blocked && (
@@ -300,7 +301,7 @@ export default function AiCreditsPanel() {
             )}
             {data.account.balance_micros < 0 && (
               <p role="alert" className="text-sm text-danger">
-                Refund adjustment: {creditPaper(data.account.balance_micros, true)}.
+                Refund adjustment: {creditCoin(data.account.balance_micros, true)}.
                 Top-ups first cover this amount.
               </p>
             )}
@@ -309,11 +310,11 @@ export default function AiCreditsPanel() {
             )}
             {!data.topups_enabled && (
               <p role="status" className="text-sm text-muted-foreground">
-                Paper purchases are not available yet. You can keep using your own API
+                Coin purchases are not available yet. You can keep using your own API
                 key; no payment will be taken.
               </p>
             )}
-            <h3 className="text-sm font-semibold">Add Paper</h3>
+            <h3 className="text-sm font-semibold">Add Coin</h3>
             <p className="text-[13px] text-muted-foreground">
               Choose an amount, review the total, then continue to secure payment.
             </p>
@@ -336,7 +337,7 @@ export default function AiCreditsPanel() {
                   ) : (
                     <ArrowUpRight size={15} />
                   )}
-                  {creditPaper(pack.cents * 10000)} · Pay{" "}
+                  {creditCoin(pack.cents * 10000)} · Pay{" "}
                   {creditMoney((pack.cents + (data.topup_fee_cents ?? 0)) * 10000)}
                 </button>
               ))}
@@ -391,7 +392,7 @@ export default function AiCreditsPanel() {
                 </p>
                 {customValid && (
                   <p className="text-xs text-muted-foreground">
-                    You receive {creditPaper(customCents * 10000)}. The service fee is
+                    You receive {creditCoin(customCents * 10000)}. The service fee is
                     added separately.
                   </p>
                 )}
@@ -399,10 +400,10 @@ export default function AiCreditsPanel() {
             )}
             <p className="text-xs leading-relaxed text-muted-foreground">
               Each top-up includes a {creditMoney((data.topup_fee_cents ?? 0) * 10000)}{" "}
-              Filey service fee, separate from your spendable Paper. No auto-recharge or
-              subscription required. Taxes, if applicable, appear at checkout. Paid Paper
+              Filey service fee, separate from your spendable Coin. No auto-recharge or
+              subscription required. Taxes, if applicable, appear at checkout. Paid Coin
               does not expire and is excluded from the subscription refund program. A
-              stopped request can still use Paper for work already performed.
+              stopped request can still use Coin for work already performed.
             </p>
             <Link
               to="/settings?section=ai"
@@ -453,14 +454,14 @@ export default function AiCreditsPanel() {
           </SettingsSection>
           <SettingsSection
             title="AI rates"
-            description="Chat uses the provider's usage cost, with no Filey usage markup. Free chat models never deduct Paper and have shared availability limits."
+            description="Chat uses the provider's usage cost, with no Filey usage markup. Choose a model and review its rates before starting."
             stacked
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
               <div>
                 <p className="text-sm font-medium">Brand videos · Seedance 2.0</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  0.25 Paper ($0.25) per second · 720p · 4–15 seconds · Charged on
+                  0.25 Coin ($0.25) per second · 720p · 4–15 seconds · Charged on
                   completion
                 </p>
               </div>
@@ -472,8 +473,8 @@ export default function AiCreditsPanel() {
             <div>
               <p className="text-sm font-medium">Choose your model</p>
               <p className="mt-1 text-[13px] text-muted-foreground">
-                Choose a paid or free model in Filey AI. Paid model usage is deducted from
-                your Paper balance. Spending limits apply before requests run.
+                Choose a model in Filey AI. Model usage is deducted from
+                your Coin balance. Spending limits apply before requests run.
               </p>
             </div>
             {!!modelCount && (
@@ -481,13 +482,13 @@ export default function AiCreditsPanel() {
                 <input
                   type="search"
                   aria-label="Search model rates"
-                  placeholder="Search paid and free models"
+                  placeholder="Search models"
                   className="input min-h-11 w-full sm:max-w-sm"
                   value={modelSearch}
                   onChange={(event) => setModelSearch(event.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  {rateModels.length} of {modelCount} models · 1 Paper = $1
+                  {rateModels.length} of {modelCount} models · 1 Coin = $1
                 </p>
               </div>
             )}
@@ -513,22 +514,18 @@ export default function AiCreditsPanel() {
                           <span className="mt-1 block text-xs text-muted-foreground">
                             {model.vision ? "Text & images" : "Text"}
                           </span>
-                          {!model.free && !!model.image && model.image > 0 && (
+                          {!!model.image && model.image > 0 && (
                             <span className="mt-1 block text-xs text-muted-foreground">
-                              Up to {creditPaper(Math.ceil(model.image * 1e6), true)} /
+                              Up to {creditCoin(Math.ceil(model.image * 1e6), true)} /
                               input image
                             </span>
                           )}
                         </td>
                         <td className="td whitespace-nowrap">
-                          {model.free
-                            ? "Free"
-                            : `Up to ${creditPaper(model.input * 1e12, true)}`}
+                          Up to {creditCoin(model.input * 1e12, true)}
                         </td>
                         <td className="td whitespace-nowrap">
-                          {model.free
-                            ? "Free"
-                            : `Up to ${creditPaper(model.output * 1e12, true)}`}
+                          Up to {creditCoin(model.output * 1e12, true)}
                         </td>
                       </tr>
                     ))}
@@ -543,14 +540,14 @@ export default function AiCreditsPanel() {
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              1 Paper = $1. Paper covers chat, vision input and agent reasoning. Separate
+              1 Coin = $1. Coin covers chat, vision input and agent reasoning. Separate
               image-generation, voice and external service fees use their own provider
               connections.
             </p>
           </SettingsSection>
           <SettingsSection
             title="Activity"
-            description="Your top-ups, model usage and refunds. Small usage charges are shown to six decimal places in Paper."
+            description="Your top-ups, model usage and refunds. Small usage charges are shown to six decimal places in Coin."
             stacked
           >
             {data.history.length ? (
@@ -587,7 +584,7 @@ export default function AiCreditsPanel() {
                           </td>
                           <td className="td whitespace-nowrap text-right tabular-nums">
                             {row.amount_micros > 0 ? "+" : ""}
-                            {creditPaper(row.amount_micros, true)}
+                            {creditCoin(row.amount_micros, true)}
                             <span className="block text-xs text-muted-foreground">
                               {creditMoney(row.amount_micros, true)} USD
                             </span>

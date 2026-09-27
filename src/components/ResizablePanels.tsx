@@ -81,7 +81,7 @@ export function ResizablePanels({
     <div ref={containerRef} className="flex flex-col xl:flex-row items-start gap-4 w-full min-w-0">
       <div className="w-full xl:flex-1 min-w-0 overflow-hidden">{left}</div>
       <div
-        className="relative w-full xl:w-[var(--preview-width)] shrink-0 motion-safe:transition-[width] duration-200 ease-out"
+        className="relative xl:sticky xl:top-4 w-full xl:w-[var(--preview-width)] shrink-0 motion-safe:transition-[width] duration-200 ease-out"
         style={{ "--preview-width": `${collapsed ? collapsedWidth : width}px` } as CSSProperties}
       >
         {/* Drag handle */}
@@ -119,7 +119,7 @@ export function ResizablePanels({
         <div
           aria-hidden={collapsed || undefined}
           inert={collapsed || undefined}
-          className={collapsed ? "fixed left-[-99999px] top-0 pointer-events-none" : undefined}
+          className={collapsed ? "fixed left-[-99999px] top-0 pointer-events-none" : "xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto"}
           style={collapsed ? { width: defaultRightWidth } : undefined}
         >
           {right}

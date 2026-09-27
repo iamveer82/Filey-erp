@@ -291,11 +291,11 @@ export default function BillingPanel() {
         </SettingsSection>
 
         <SettingsSection
-          title="Paper wallet"
-          description="Optional Paper for Filey AI on every plan, separate from your subscription."
+          title="Coin wallet"
+          description="Optional Coin for Filey AI on every plan, separate from your subscription."
         >
           <Link className="btn-ghost" to="/settings?section=credits">
-            Open Paper wallet
+            Open Coin wallet
           </Link>
         </SettingsSection>
 

@@ -7,6 +7,15 @@ beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("provide
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 const reply = () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }));
 
+it("hides OpenRouter free models from discovery without filtering another provider's catalogue", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [
+    { id: "provider/paid" }, { id: "openrouter/free" }, { id: "provider/model:free" },
+  ] }))));
+  const config = { provider: "openai" as const, model: "", apiKey: "fixture" };
+  expect(await listAiModels({ ...config, baseUrl: "https://openrouter.ai/api/v1" })).toEqual(["provider/paid"]);
+  expect(await listAiModels({ ...config, baseUrl: "https://example.test/v1" })).toHaveLength(3);
+});
+
 it("derives effort options from the selected OpenRouter model", () => {
   expect(aiEffortLevels({ provider: "openai", model: "openai/gpt-5.2" })).toEqual(["auto", "low", "medium", "high", "xhigh"]);
   expect(openAiGenerationOptions("openai/gpt-5.2", 2048, 0.2, "high")).toEqual({ max_completion_tokens: 32768, reasoning_effort: "high" });

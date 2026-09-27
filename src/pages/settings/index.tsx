@@ -17,7 +17,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
-import PaperMark from "../../components/PaperMark";
+import CoinMark from "../../components/CoinMark";
 import { SettingsPanel } from "../../components/SettingsLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
 import { cloudConfigured } from "../../lib/supabase";
@@ -59,7 +59,7 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
-  { id: "credits", label: "Paper wallet", icon: Wallet },
+  { id: "credits", label: "Coin wallet", icon: Wallet },
   { id: "users", label: "Users & Roles", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
@@ -123,7 +123,7 @@ export default function Settings() {
                   )}
                 >
                   {id === "credits" ? (
-                    <PaperMark />
+                    <CoinMark />
                   ) : (
                     <Icon
                       className={cn("h-3.5 w-3.5 shrink-0", isActive && "text-background")}

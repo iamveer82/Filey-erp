@@ -133,9 +133,12 @@ export async function listAiModels(cfg: AiConfig = getAiConfig(), signal?: Abort
   const body: unknown = await response.json();
   if (!body || typeof body !== "object" || !("data" in body) || !Array.isArray(body.data))
     throw new AiError("The provider returned an invalid model list. Enter the model ID manually.");
-  return [...new Set(body.data.flatMap((item: unknown) =>
+  const models = [...new Set(body.data.flatMap((item: unknown) =>
     item && typeof item === "object" && "id" in item && typeof item.id === "string" && item.id.trim()
       ? [item.id.trim()] : []))].sort();
+  return aiEndpoint(cfg.baseUrl)?.origin === "https://openrouter.ai"
+    ? models.filter(id => id !== "openrouter/free" && !id.endsWith(":free"))
+    : models;
 }
 
 /* ── Persona (set once, remembered permanently in this browser) ───────────── */

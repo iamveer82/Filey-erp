@@ -5,6 +5,8 @@ import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/do
 import { isLocalMode } from "../lib/dataMode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
+import Step from "../components/DocumentStep";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
 import { useSearchParams } from "react-router-dom";
 import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
@@ -1880,7 +1882,7 @@ function Editor({
   form,
   setForm,
   onBack,
-  onSave,
+  onSave: saveDocument,
   onMessage,
   onFinalize,
   onRevertDraft,
@@ -1910,6 +1912,16 @@ function Editor({
   // on screen) and honors manual page breaks + last-page totals.
   const exportRef = useRef<HTMLDivElement>(null);
   const [previewPage, setPreviewPage] = useState(1);
+  const [editorTab, setEditorTab] = useState("details");
+  const onSave = async () => {
+    const id = await saveDocument();
+    if (id == null) {
+      if (!form.number.trim()) setEditorTab("details");
+      else if (!form.items.some(item => item.description.trim())) setEditorTab("items");
+      else if (!form.customer_name.trim() && !form.customer_email?.trim()) setEditorTab("details");
+    }
+    return id;
+  };
   // Group items into A4 pages, honoring per-item manual page breaks.
   const pages = paginateItems(form.items);
   useEffect(() => {
@@ -2445,7 +2457,8 @@ function Editor({
       />
 
       <ResizablePanels
-        defaultCollapsed
+        defaultCollapsed={!window.matchMedia?.("(min-width: 1280px)").matches}
+        defaultRightWidth={400}
         left={
           <div className="no-print space-y-4">
             
@@ -2482,6 +2495,13 @@ function Editor({
             />
           </Step>
 
+          <Tabs value={editorTab} onValueChange={setEditorTab}>
+            <TabsList aria-label="Invoice editor sections" className="grid w-full grid-cols-3">
+              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="items">Items <span className="text-xs tabular-nums text-muted-foreground">{form.items.length}</span></TabsTrigger>
+              <TabsTrigger value="finishing">Finishing touches</TabsTrigger>
+            </TabsList>
+          <TabsContent value="details" forceMount hidden={editorTab !== "details"}>
           {/* Invoice details */}
           <Step title="Invoice details" action={<Badge tone={statusTone(form.status)}>{form.status}</Badge>}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2872,7 +2892,9 @@ function Editor({
               </div>
             </details>
           </Step>
-
+          <div className="mt-4 flex justify-end"><button type="button" className="btn-ghost" onClick={() => setEditorTab("items")}>Continue to items →</button></div>
+          </TabsContent>
+          <TabsContent value="items" forceMount hidden={editorTab !== "items"}>
           {/* Items */}
           <Step title="Items" action={
             <div className="flex flex-wrap items-center gap-3">
@@ -3339,21 +3361,12 @@ function Editor({
               </div>
             )}
           </Step>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
-            <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
-              <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
-              {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
-              <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>
-              {!!invoiceTotals.round_off && <span className="text-muted-foreground">Rounding <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.round_off)}</strong></span>}
-              <span>Total <strong className="ml-1 text-base">{m(invoiceTotals.total)}</strong></span>
-              {(Number(form.advance_applied) || 0) > 0 && <span>After advance <strong className="ml-1 text-base">{m(Math.max(0, invoiceTotals.total - Number(form.advance_applied)))}</strong></span>}
-            </div>
-          </div>
+          <div className="mt-4 flex justify-between gap-2"><button type="button" className="btn-ghost" onClick={() => setEditorTab("details")}>Back to details</button><button type="button" className="btn-ghost" onClick={() => setEditorTab("finishing")}>Finishing touches →</button></div>
+          </TabsContent>
+          <TabsContent value="finishing" forceMount hidden={editorTab !== "finishing"} className="space-y-4">
+          <p className="text-xs text-muted-foreground">Optional details for the finished document. Your company defaults are already included.</p>
           {/* Branding */}
           <Step
-            collapsed
             title="Branding"
             subtitle="Logo, bank details, stamp and signature on the printed invoice"
           >
@@ -3551,6 +3564,20 @@ function Editor({
 
             </div>
           </Step>
+          </TabsContent>
+          </Tabs>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
+            <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
+              <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
+              {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
+              <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>
+              {!!invoiceTotals.round_off && <span className="text-muted-foreground">Rounding <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.round_off)}</strong></span>}
+              <span>Total <strong className="ml-1 text-base">{m(invoiceTotals.total)}</strong></span>
+              {(Number(form.advance_applied) || 0) > 0 && <span>After advance <strong className="ml-1 text-base">{m(Math.max(0, invoiceTotals.total - Number(form.advance_applied)))}</strong></span>}
+            </div>
+          </div>
+
           </div>
         }
         right={
@@ -3774,23 +3801,6 @@ function Editor({
       </Modal>
     </div>
   );
-}
-
-function Step({ title, subtitle, action, children, collapsed = false }: {
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-  collapsed?: boolean;
-}) {
-  const heading = <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-foreground">{title}</h2>{subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}</div>;
-  if (collapsed) return (
-    <details className="group rounded-xl border border-border bg-card">
-      <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 px-5 py-3 [&::-webkit-details-marker]:hidden">{heading}<ChevronDown size={16} className="shrink-0 text-muted-foreground group-open:rotate-180" /></summary>
-      <div className="border-t border-border p-5">{action && <div className="mb-4 flex justify-end">{action}</div>}{children}</div>
-    </details>
-  );
-  return <section className="rounded-xl border border-border bg-card"><div className="flex flex-col items-start gap-3 px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center">{heading}{action}</div><div className="px-5 pb-5">{children}</div></section>;
 }
 
 /* ---------------- Customer modal (UAE FTA) ---------------- */

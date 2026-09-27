@@ -5,7 +5,7 @@ import { supabase } from "../supabase";
 import {
   createCreditFetch,
   creditChoice,
-  creditPaper,
+  creditCoin,
   getCreditStatus,
   setCreditChoice,
 } from "../aiCredits";
@@ -19,12 +19,12 @@ const account = {
   blocked: false,
 };
 const reply = { choices: [{ message: { role: "assistant", content: "done" } }] };
-it("displays USD micros as Paper without losing the smallest usage charge", () => {
-  expect(creditPaper(1_000_000)).toBe("1 Paper");
-  expect(creditPaper(12_510_000)).toBe("12.51 Paper");
-  expect(creditPaper(1, true)).toBe("0.000001 Paper");
-  expect(creditPaper(-100_000, true)).toBe("-0.1 Paper");
-  expect(creditPaper(0)).toBe("0 Paper");
+it("displays USD micros as Coin without losing the smallest usage charge", () => {
+  expect(creditCoin(1_000_000)).toBe("1 Coin");
+  expect(creditCoin(12_510_000)).toBe("12.51 Coin");
+  expect(creditCoin(1, true)).toBe("0.000001 Coin");
+  expect(creditCoin(-100_000, true)).toBe("-0.1 Coin");
+  expect(creditCoin(0)).toBe("0 Coin");
 });
 beforeEach(() => {
   localStorage.clear();

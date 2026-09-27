@@ -1,5 +1,5 @@
-/** Paper's approved mascot. Adjacent text supplies the accessible label. */
-export default function PaperMark({
+/** Coin's approved mascot. Adjacent text supplies the accessible label. */
+export default function CoinMark({
   size = 20,
   className = "",
 }: {

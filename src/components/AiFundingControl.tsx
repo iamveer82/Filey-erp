@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, ChevronDown, KeyRound, Sparkles } from "lucide-react";
-import PaperMark from "./PaperMark";
+import { Check, ChevronDown, KeyRound } from "lucide-react";
+import CoinMark from "./CoinMark";
 import { Popover, PopoverContent, PopoverTrigger } from "./Popover";
 import {
   AI_CREDITS_EVENT,
   creditChoice,
-  creditPaper,
+  creditCoin,
   getCreditStatus,
+  isPaidCreditModel,
   setCreditChoice,
   type AiFunding,
   type CreditStatus,
@@ -80,16 +81,14 @@ export default function AiFundingControl({
     };
   }, [open]);
   const query = search.trim().toLowerCase();
-  const models =
+  const paidModels =
     data?.models.filter(
       (model) =>
-        model.id !== "filey-ai" &&
+        isPaidCreditModel(model) &&
         `${model.name} ${model.id}`.toLowerCase().includes(query)
     ) ?? [];
-  const freeModels = models.filter((model) => model.free);
-  const paidModels = models.filter((model) => !model.free);
   const selectedPaid = data?.models.find(
-    (model) => !model.free && model.id === choice.model
+    (model) => isPaidCreditModel(model) && model.id === choice.model
   );
   const needsPaidChoice =
     choice.funding === "credits" &&
@@ -115,22 +114,20 @@ export default function AiFundingControl({
           aria-label="AI payment method"
           title={
             choice.funding === "free"
-              ? "Free AI"
+              ? "My saved model"
               : choice.funding === "credits"
                 ? paidLabel
                 : "My API key"
           }
         >
-          {choice.funding === "free" ? (
-            <Sparkles size={14} />
-          ) : choice.funding === "credits" ? (
-            <PaperMark />
+          {choice.funding === "credits" ? (
+            <CoinMark />
           ) : (
             <KeyRound size={14} />
           )}
           <span className={compact ? "sr-only" : "max-w-52 truncate"}>
             {choice.funding === "free"
-              ? "Free AI"
+              ? "My saved model"
               : choice.funding === "credits"
                 ? paidLabel
                 : "My API key"}
@@ -163,62 +160,25 @@ export default function AiFundingControl({
           {choice.funding === "byok" && <Check size={16} />}
         </button>
         <div className="my-2 border-t border-border" />
-        {!!data?.models.some((model) => model.id !== "filey-ai") && (
+        {!!data?.models.some(isPaidCreditModel) && (
           <div className="px-2 pb-3">
             <input
               type="search"
               aria-label="Search AI models"
-              placeholder="Search paid and free models"
+              placeholder="Search models"
               className="input min-h-11 w-full"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </div>
         )}
-        {!!data?.models.some((model) => model.free) && (
-          <div className="space-y-2 px-2 pb-3">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <Sparkles size={15} /> Free AI
-              {choice.funding === "free" && <Check size={15} className="ml-auto" />}
-            </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              No Paper or API key needed. Up to {data.free_requests_per_day ?? 20} model
-              requests per 24 hours, subject to shared provider availability. Agent tasks
-              can use several requests.
-            </p>
-            <select
-              aria-label="Free AI model"
-              className="input w-full text-[13px]"
-              value={
-                choice.funding === "free" &&
-                freeModels.some((model) => model.id === choice.model)
-                  ? choice.model
-                  : ""
-              }
-              disabled={!freeModels.length}
-              onChange={(event) => choose("free", event.target.value)}
-            >
-              <option value="" disabled>
-                {freeModels.length ? "Choose a free model" : "No matching free models"}
-              </option>
-              {freeModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.id === "openrouter/free"
-                    ? "Auto · available free model"
-                    : model.name}
-                  {model.vision ? " · Vision" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-1 text-[13px]">
           <span className="flex items-center gap-2 font-medium">
-            <PaperMark /> Pay with Paper
+            <CoinMark /> Pay with Coin
           </span>
           {data && (
             <span className="tabular-nums">
-              {creditPaper(Math.max(0, data.account.available_micros), true)} available
+              {creditCoin(Math.max(0, data.account.available_micros), true)} available
             </span>
           )}
         </div>
@@ -269,12 +229,12 @@ export default function AiFundingControl({
                   {model.vision ? " · Vision" : ""}
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  Up to {creditPaper(model.input * 1e12, true)} input ·{" "}
-                  {creditPaper(model.output * 1e12, true)} output / 1M tokens
+                  Up to {creditCoin(model.input * 1e12, true)} input ·{" "}
+                  {creditCoin(model.output * 1e12, true)} output / 1M tokens
                 </span>
                 {!!model.image && model.image > 0 && (
                   <span className="block text-xs text-muted-foreground">
-                    Up to {creditPaper(Math.ceil(model.image * 1e6), true)} / input image
+                    Up to {creditCoin(Math.ceil(model.image * 1e6), true)} / input image
                   </span>
                 )}
               </span>
@@ -284,13 +244,12 @@ export default function AiFundingControl({
             </button>
           ))}
         </div>
-        {data && !data.models.some((model) => !model.free && model.id !== "filey-ai") && (
+        {data && !data.models.some(isPaidCreditModel) && (
           <p className="p-2 text-xs text-muted-foreground">
-            Paid models are not available yet. You can use an available free model or your
-            own key.
+            Paid models are not available yet. You can use your own API key or a local model.
           </p>
         )}
-        {data && query && !models.length && (
+        {data && query && !paidModels.length && (
           <p role="status" className="p-2 text-xs text-muted-foreground">
             No matching models. Try a provider or model name.
           </p>
@@ -300,7 +259,7 @@ export default function AiFundingControl({
           spending estimates.
         </p>
         <p className="px-2 py-2 text-xs leading-relaxed text-muted-foreground">
-          1 Paper = $1. Available on Basic, Pro and Ultra. Free AI never spends Paper.
+          1 Coin = $1. Available on Basic, Pro and Ultra.
           Paid models use their actual provider cost, with no Filey usage markup. Changes
           apply to new tasks; selecting a model does not charge you.
         </p>
@@ -309,7 +268,7 @@ export default function AiFundingControl({
           to="/settings?section=credits"
           onClick={() => setOpen(false)}
         >
-          <PaperMark /> Add Paper / wallet
+          <CoinMark /> Add Coin / wallet
         </Link>
       </PopoverContent>
     </Popover>
