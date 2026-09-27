@@ -2,7 +2,6 @@ import { ReactNode, useEffect, useRef, useState, type CSSProperties } from "reac
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Bell,
-  ArrowLeft,
   Search,
   LogOut,
   UserRound,
@@ -11,16 +10,14 @@ import {
   Command,
   Menu,
   PanelLeft,
-  ChevronsUpDown,
   ChevronDown,
-  LifeBuoy,
-  BookOpen,
   Languages,
   Cloud,
   HardDrive,
   X,
 } from "lucide-react";
 import WorkspaceNavigation from "./WorkspaceNavigation";
+import SidebarIcon from "./SidebarIcon";
 import Logo from "./Logo";
 import CoinMark from "./CoinMark";
 import ErrorBoundary from "./ErrorBoundary";
@@ -449,17 +446,17 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div className="workspace-sidebar-footer">
               {!("__TAURI_INTERNALS__" in window) && (
                 <a href="https://gofiley.com/" className="workspace-nav-link mb-1">
-                  <ArrowLeft size={18} aria-hidden="true" />
+                  <SidebarIcon name="back" />
                   <span>{t("Back to GoFiley")}</span>
                 </a>
               )}
               <nav className="workspace-support-links" aria-label={t("Support")}>
                 <NavLink to="/help" onClick={() => setMobileOpen(false)}>
-                  <LifeBuoy size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <SidebarIcon name="help" size={16} />
                   <span className="truncate">{t("Help Center")}</span>
                 </NavLink>
                 <NavLink to="/docs" onClick={() => setMobileOpen(false)}>
-                  <BookOpen size={16} strokeWidth={1.75} aria-hidden="true" />
+                  <SidebarIcon name="docs" size={16} />
                   <span className="truncate">{t("Documentation")}</span>
                 </NavLink>
               </nav>
@@ -471,7 +468,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                     {profile?.company || profile?.email || t("Account")}
                   </span>
                 </span>
-                <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <SidebarIcon name="account" size={16} />
               </AccountDropdown>
             </div>
           </aside>

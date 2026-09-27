@@ -75,7 +75,7 @@
 .workspace-nav-group + .workspace-nav-group { margin-top: 10px; }
 .workspace-nav-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: .045em; color: hsl(var(--muted-foreground)); }
 .workspace-nav-heading svg { flex-shrink: 0; transform: rotate(-90deg); transition: transform 160ms ease-out; }
-.workspace-nav-heading svg[data-expanded="true"] { transform: rotate(0); }
+.workspace-nav-heading [data-expanded="true"] svg { transform: rotate(0); }
 .workspace-nav-group nav { display: grid; gap: 3px; }
 .workspace-nav-group nav[hidden] { display: none; }
 .workspace-nav-link { display: flex; align-items: center; gap: 10px; min-height: 38px; border-radius: 999px; padding: 7px 12px; color: hsl(var(--foreground) / .8); font-size: 13.5px; line-height: 20px; transition: background-color 140ms ease-out, color 140ms ease-out; }
