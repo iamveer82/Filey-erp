@@ -4,7 +4,9 @@ import { getTheme, setTheme, type Theme } from "../../lib/theme";
 import { getSmoothScroll, setSmoothScroll } from "../../lib/smoothScroll";
 import { Toggle } from "./PreferencesPanel";
 import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
-import { ORB_PRESETS, setPersona } from "../../lib/ai";
+import { ORB_PRESETS, setPersona, type AiPersona } from "../../lib/ai";
+import { BOT_LOOKS, BOT_MOTIONS } from "../../lib/botAppearance";
+import { useUI } from "../../lib/ui";
 import BloubBot, { useBotSkin } from "../../components/BloubBot";
 import { cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
@@ -131,58 +133,115 @@ export default function AppearancePanel() {
    place shows up in the other. */
 
 function AssistantColor() {
-  const { color } = useBotSkin();
+  const { color, shape, motion } = useBotSkin();
+  const { toast } = useUI();
 
-  const pick = (hex: string) => {
-    setPersona({ orbColor: hex });
-    // Same — the swatch ring is the feedback.
+  const pick = (patch: Partial<AiPersona>) => {
+    try {
+      setPersona(patch);
+    } catch {
+      toast.error("Your assistant appearance could not be saved. Please try again.");
+    }
   };
 
   return (
     <SettingsSection
       title="Filey AI"
-      description="Give your animated assistant its own colour."
+      description="A little personality for your sidebar and chat. Saved on this device."
     >
-      <div className="flex max-w-xl items-center gap-5">
-        {/* A live one, not a swatch: this is exactly what the chat will show. */}
-        <div className="shrink-0">
-          <BloubBot size={64} state="idle" label="Assistant preview" ambient />
+      <div className="max-w-xl space-y-6">
+        <div className="flex items-center gap-5">
+          {/* A live one, not a swatch: this is exactly what the chat will show. */}
+          <div className="shrink-0">
+            <BloubBot size={64} state="idle" label="Assistant preview" ambient />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap gap-2">
+              {ORB_PRESETS.map((hex) => (
+                <button
+                  key={hex}
+                  onClick={() => pick({ orbColor: hex })}
+                  aria-label={`Use ${hex}`}
+                  aria-pressed={color.toLowerCase() === hex.toLowerCase()}
+                  className={cn(
+                    "h-10 w-10 rounded-full border border-border grid place-items-center transition-colors cursor-pointer",
+                    color.toLowerCase() === hex.toLowerCase()
+                      ? "ring-2 ring-foreground ring-offset-2 ring-offset-card"
+                      : "hover:ring-2 hover:ring-border"
+                  )}
+                  style={{ background: hex }}
+                >
+                  {color.toLowerCase() === hex.toLowerCase() && (
+                    <Check
+                      className="h-4 w-4 rounded-full bg-white text-black"
+                      strokeWidth={2.5}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+            <label className="mt-4 flex items-center gap-3 text-[13px] text-muted-foreground">
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => pick({ orbColor: e.target.value })}
+                className="h-10 w-14 cursor-pointer rounded-[8px] border border-border bg-transparent p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Custom assistant colour"
+              />
+              Custom colour
+            </label>
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap gap-2">
-            {ORB_PRESETS.map((hex) => (
+        <div>
+          <p className="mb-3 text-sm font-medium">Look</p>
+          <div
+            role="group"
+            aria-label="Assistant look"
+            className="grid grid-cols-2 min-[400px]:grid-cols-4 gap-2"
+          >
+            {BOT_LOOKS.map((look) => (
               <button
-                key={hex}
-                onClick={() => pick(hex)}
-                aria-label={`Use ${hex}`}
-                aria-pressed={color.toLowerCase() === hex.toLowerCase()}
+                key={look.id}
+                type="button"
+                aria-pressed={shape === look.id}
+                onClick={() => pick({ botShape: look.id })}
                 className={cn(
-                  "h-10 w-10 rounded-full grid place-items-center transition-colors cursor-pointer",
-                  color.toLowerCase() === hex.toLowerCase()
-                    ? "ring-2 ring-foreground ring-offset-2 ring-offset-card"
-                    : "hover:ring-2 hover:ring-border"
+                  "flex min-w-0 flex-col items-center gap-1 rounded-xl border px-3 py-2 text-[13px] transition-colors hover:bg-hover",
+                  shape === look.id ? "border-foreground bg-hover" : "border-border"
                 )}
-                style={{ background: hex }}
               >
-                {color.toLowerCase() === hex.toLowerCase() && (
-                  <Check
-                    className="h-4 w-4 rounded-full bg-white text-black"
-                    strokeWidth={2.5}
-                  />
-                )}
+                <BloubBot size={48} shape={look.id} motion="gentle" animate={false} />
+                {look.name}
               </button>
             ))}
           </div>
-          <label className="mt-4 flex items-center gap-3 text-[13px] text-muted-foreground">
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setPersona({ orbColor: e.target.value })}
-              className="h-10 w-14 cursor-pointer rounded-[8px] border border-border bg-transparent p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="Custom assistant colour"
-            />
-            Custom colour
-          </label>
+        </div>
+        <div>
+          <p className="mb-3 text-sm font-medium">Movement</p>
+          <div
+            role="group"
+            aria-label="Assistant movement"
+            className="flex flex-wrap gap-2"
+          >
+            {BOT_MOTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={motion === option.id}
+                onClick={() => pick({ botMotion: option.id })}
+                className={cn(
+                  "btn-ghost",
+                  motion === option.id && "border-foreground bg-hover"
+                )}
+              >
+                {option.name}
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-[13px] text-muted-foreground" aria-live="polite">
+            {BOT_MOTIONS.find((option) => option.id === motion)?.description}. Your
+            system’s reduced-motion setting takes priority.
+          </p>
         </div>
       </div>
     </SettingsSection>

@@ -25,6 +25,7 @@ import { getCacheScope } from "./api";
 import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
 import { creditChoice, createCreditFetch } from "./aiCredits";
 import { agentProgressRecorder, priorAgentProgress } from "./agentRunState";
+import { botAppearance } from "./botAppearance";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -133,9 +134,12 @@ export async function listAiModels(cfg: AiConfig = getAiConfig(), signal?: Abort
   const body: unknown = await response.json();
   if (!body || typeof body !== "object" || !("data" in body) || !Array.isArray(body.data))
     throw new AiError("The provider returned an invalid model list. Enter the model ID manually.");
-  return [...new Set(body.data.flatMap((item: unknown) =>
+  const models = [...new Set(body.data.flatMap((item: unknown) =>
     item && typeof item === "object" && "id" in item && typeof item.id === "string" && item.id.trim()
       ? [item.id.trim()] : []))].sort();
+  return aiEndpoint(cfg.baseUrl)?.origin === "https://openrouter.ai"
+    ? models.filter(id => id !== "openrouter/free" && !id.endsWith(":free"))
+    : models;
 }
 
 /* ── Persona (set once, remembered permanently in this browser) ───────────── */
@@ -158,6 +162,8 @@ export interface AiPersona {
   assistantName: string;
   /** Accent colour for the orb (hex). */
   orbColor: string;
+  botShape: import("./bloub/skins").ShapeId;
+  botMotion: import("./botAppearance").BotMotion;
 }
 
 const PERSONA_KEY = "filey.ai.persona";
@@ -172,6 +178,8 @@ const PERSONA_DEFAULT: AiPersona = {
   onboarded: false,
   assistantName: "Filey",
   orbColor: "#FFD600",
+  botShape: "cercle",
+  botMotion: "playful",
 };
 
 export function getPersona(): AiPersona {
@@ -179,12 +187,13 @@ export function getPersona(): AiPersona {
     const key = personaKey();
     const raw = key ? localStorage.getItem(key) : null;
     if (!raw) {
-      // Only the cosmetic orb color can carry over from an unattributed legacy
+      // Only cosmetic preferences can carry over from an unattributed legacy
       // profile. Names and business roles must never leak to the next account.
       const legacy = JSON.parse(localStorage.getItem(PERSONA_KEY) || "{}");
-      return { ...PERSONA_DEFAULT, ...(/^#[0-9a-f]{6}$/i.test(legacy?.orbColor) ? { orbColor: legacy.orbColor } : {}) };
+      return { ...PERSONA_DEFAULT, ...botAppearance(legacy ?? {}) };
     }
-    return { ...PERSONA_DEFAULT, ...(JSON.parse(raw) as Partial<AiPersona>) };
+    const saved = JSON.parse(raw) as Partial<AiPersona>;
+    return { ...PERSONA_DEFAULT, ...saved, ...botAppearance(saved ?? {}) };
   } catch {
     console.error("Failed to parse AI persona from localStorage");
     return { ...PERSONA_DEFAULT };
@@ -192,11 +201,12 @@ export function getPersona(): AiPersona {
 }
 
 export function setPersona(patch: Partial<AiPersona>): AiPersona {
-  const next = { ...getPersona(), ...patch };
+  const merged = { ...getPersona(), ...patch };
+  const next = { ...merged, ...botAppearance(merged) };
   const key = personaKey();
-  if (!key && Object.keys(patch).some(name => name !== "orbColor"))
+  if (!key && Object.keys(patch).some(name => !["orbColor", "botShape", "botMotion"].includes(name)))
     throw new Error("Sign in before personalizing your assistant.");
-  if (!safeSetItem(key ?? PERSONA_KEY, JSON.stringify(key ? next : { orbColor: next.orbColor })))
+  if (!safeSetItem(key ?? PERSONA_KEY, JSON.stringify(key ? next : botAppearance(next))))
     throw new Error("Your assistant preferences could not be saved.");
   // The assistant's colour is editable from two places (Settings -> Appearance
   // and the copilot's own customiser) and drawn in a third, so a change has to

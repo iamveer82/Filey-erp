@@ -44,9 +44,9 @@ export default function CountryTaxFields({
       </Field>
       <div className="flex items-end gap-2">
         <div className="flex-1">
-          <Field label="Default tax rate (%)">
+          <Field label={`Default ${regime.taxLabel} rate (%)`}>
             <input
-              aria-label="Default tax rate (%)"
+              aria-label={`Default ${regime.taxLabel} rate (%)`}
               type="number"
               min="0"
               max="100"

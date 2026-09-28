@@ -8,7 +8,6 @@ import { useEffect, useState, useRef } from "react";
 import {
   Plus,
   Trash2,
-  GripVertical,
   Type,
   Hash,
   Calendar,
@@ -88,11 +87,18 @@ export function CustomFieldsManager({
   const [attempt, setAttempt] = useState(0);
   const scope = useRef<string | null>(null);
   const inFlight = useRef(false);
+  const saved = useRef("[]");
+  const closing = useRef(false);
+  const [optionText, setOptionText] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!open) return;
     let active = true;
     scope.current = agentStorageScope();
     setDefs([]);
+    setNewLabel("");
+    setNewOptions("");
+    setNewType("text");
+    setOptionText({});
     setLoading(true);
     setLoaded(false);
     setError("");
@@ -100,6 +106,7 @@ export function CustomFieldsManager({
       .then((value) => {
         if (active) {
           setDefs(value);
+          saved.current = JSON.stringify(value);
           setLoaded(true);
         }
       })
@@ -127,8 +134,20 @@ export function CustomFieldsManager({
     };
   }, [open, module, attempt]);
 
+  const close = async () => {
+    if (inFlight.current || closing.current) return;
+    closing.current = true;
+    try {
+      if (loaded && (newLabel.trim() || newOptions.trim() || JSON.stringify(defs) !== saved.current) &&
+          !await confirm({ title: "Discard unsaved fields?", message: "Your field changes haven't been saved.",
+            confirmLabel: "Discard changes", cancelLabel: "Keep editing", danger: true })) return;
+      onOpenChange(false);
+    } finally { closing.current = false; }
+  };
+
   const save = async () => {
     if (inFlight.current || loading || !loaded) return;
+    if (newLabel.trim()) { setError("Choose Add field to include your new field before saving."); return; }
     inFlight.current = true;
     setBusy(true);
     setError("");
@@ -150,8 +169,13 @@ export function CustomFieldsManager({
   };
 
   const add = () => {
+    if (busy || loading || !loaded || defs.length >= 100) return;
     if (!newLabel.trim()) {
       toast.error("Label is required.");
+      return;
+    }
+    if (newType === "select" && !newOptions.split(",").some(option => option.trim())) {
+      toast.error("Add at least one choice for this field.");
       return;
     }
     const base = newLabel
@@ -189,12 +213,12 @@ export function CustomFieldsManager({
   const remove = async (def: CustomFieldDef) => {
     const ok = await confirm({
       title: "Remove field",
-      message: `Delete "${def.label}"? Existing values for this field will be hidden (not deleted).`,
-      confirmLabel: "Delete",
+      message: `Remove "${def.label}" from this section? Existing values are kept in your records. Save fields to apply this change.`,
+      confirmLabel: "Remove field",
       danger: true,
     });
     if (!ok) return;
-    setDefs((d) => d.filter((f) => f.id !== def.id));
+    setDefs((d) => d.filter((f) => f.id !== def.id).map((field, position) => ({ ...field, position })));
   };
 
   const move = async (id: string, dir: -1 | 1) => {
@@ -216,21 +240,22 @@ export function CustomFieldsManager({
     <Sheet
       open={open}
       onOpenChange={(value) => {
-        if (!inFlight.current) onOpenChange(value);
+        if (!value) void close();
+        else onOpenChange(true);
       }}
     >
       <SheetContent side="right" className="flex flex-col w-full sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>Custom fields</SheetTitle>
           <SheetDescription>
-            Choose the extra information to capture in this section. Changes apply
-            when you save. Removing a field hides its existing values.
+            Add, rename and arrange the information your team needs. Changes apply
+            to this section when you save. Existing record values are kept when you remove a field.
           </SheetDescription>
         </SheetHeader>
 
         {error && <ErrorBanner message={error} />}
         {loading && !error && <p role="status">Loading fields…</p>}
-        {error && (
+        {error && !loaded && (
           <button
             className="btn-ghost"
             disabled={busy}
@@ -258,23 +283,19 @@ export function CustomFieldsManager({
                 return (
                   <div key={def.id} className="rounded-xl border border-brand-200 p-3">
                     <div className="flex items-start gap-2">
-                      <GripVertical
-                        size={14}
-                        className="mt-0.5 text-brand-400 shrink-0"
-                      />
                       <div className="grid h-7 w-7 place-items-center rounded-xl bg-brand-100 text-ink dark:bg-white/12">
                         <Icon size={14} />
                       </div>
                       <div className="flex-1 min-w-0 space-y-2">
                         <input
                           className="input"
+                          aria-label={`Field label: ${def.label}`}
+                          maxLength={100}
                           value={def.label}
                           onChange={(e) => update(def.id, { label: e.target.value })}
                           placeholder="Field label"
                         />
-                        <div className="flex items-center gap-2 text-[11px] text-brand-400 font-mono">
-                          <span>{def.key}</span>
-                          <span>·</span>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span>{TYPE_LABELS[def.type]}</span>
                           {def.required && (
                             <>
@@ -286,15 +307,17 @@ export function CustomFieldsManager({
                         {def.type === "select" && def.options && (
                           <input
                             className="input text-xs"
-                            value={def.options.join(", ")}
-                            onChange={(e) =>
+                            aria-label={`Choices for ${def.label}`}
+                            value={optionText[def.id] ?? def.options.join(", ")}
+                            onChange={(e) => {
+                              setOptionText(text => ({ ...text, [def.id]: e.target.value }));
                               update(def.id, {
                                 options: e.target.value
                                   .split(",")
                                   .map((s) => s.trim())
                                   .filter(Boolean),
-                              })
-                            }
+                              });
+                            }}
                             placeholder="Option 1, Option 2, …"
                           />
                         )}
@@ -316,21 +339,23 @@ export function CustomFieldsManager({
                       <div className="flex flex-col items-center gap-0.5 shrink-0">
                         <button
                           aria-label="Move up"
-                          className="rounded-xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                          className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-30"
+                          disabled={def.position === 0}
                           onClick={() => move(def.id, -1)}
                         >
                           <ChevronUp size={13} />
                         </button>
                         <button
                           aria-label="Move down"
-                          className="rounded-xl p-1 text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10 cursor-pointer"
+                          className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-30"
+                          disabled={def.position === defs.length - 1}
                           onClick={() => move(def.id, 1)}
                         >
                           <ChevronDown size={13} />
                         </button>
                         <button
-                          aria-label="Delete field"
-                          className="rounded-full p-1 text-danger hover:bg-danger/10 cursor-pointer"
+                          aria-label={`Remove ${def.label} field`}
+                          className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:text-danger hover:bg-danger/10"
                           onClick={() => void remove(def)}
                         >
                           <Trash2 size={13} />
@@ -366,6 +391,7 @@ export function CustomFieldsManager({
             <Field label="Label">
               <input
                 className="input"
+                maxLength={100}
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
                 placeholder="Customer rating"
@@ -415,7 +441,7 @@ export function CustomFieldsManager({
           <button
             className="btn-ghost"
             disabled={busy}
-            onClick={() => onOpenChange(false)}
+            onClick={() => void close()}
           >
             Cancel
           </button>

@@ -17,7 +17,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
-import PaperMark from "../../components/PaperMark";
+import CoinMark from "../../components/CoinMark";
 import { SettingsPanel } from "../../components/SettingsLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../../components/Tabs";
 import { cloudConfigured } from "../../lib/supabase";
@@ -42,6 +42,7 @@ type Section =
   | "company"
   | "account"
   | "users"
+  | "teams"
   | "apps"
   | "appearance"
   | "preferences"
@@ -59,8 +60,8 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
-  { id: "credits", label: "Paper wallet", icon: Wallet },
-  { id: "users", label: "Users & Roles", icon: UsersIcon },
+  { id: "credits", label: "Coin wallet", icon: Wallet },
+  { id: "teams", label: "Teams", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
@@ -74,20 +75,20 @@ const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the
 // user never lands on a panel of dead/erroring controls.
-const CLOUD_ONLY = new Set<Section>(["users", "billing", "devices", "security"]);
+const CLOUD_ONLY = new Set<Section>(["teams", "billing", "devices", "security"]);
 const NAV = ALL_NAV.filter((n) => cloudConfigured || !CLOUD_ONLY.has(n.id));
 
 export default function Settings() {
   const [params, setParams] = useSearchParams();
   const requested = (params.get("section") ?? "") as Section;
   const legacyTarget = params.has("checkout") ? "billing" : "devices";
-  const target = requested === "license" ? legacyTarget : requested;
+  const target = requested === "license" ? legacyTarget : requested === "users" ? "teams" : requested;
   const section = NAV.some((n) => n.id === target) ? target : "company";
   useEffect(() => {
-    if (requested !== "license") return;
+    if (requested !== "license" && requested !== "users") return;
     const next = new URLSearchParams(params);
     next.set("section", section);
-    if (next.has("checkout")) next.set("plan", "ultra");
+    if (requested === "license" && next.has("checkout")) next.set("plan", "ultra");
     setParams(next, { replace: true });
   }, [requested, params, setParams, section]);
   const activeTab = useRef<HTMLButtonElement>(null);
@@ -123,7 +124,7 @@ export default function Settings() {
                   )}
                 >
                   {id === "credits" ? (
-                    <PaperMark />
+                    <CoinMark />
                   ) : (
                     <Icon
                       className={cn("h-3.5 w-3.5 shrink-0", isActive && "text-background")}
@@ -149,7 +150,7 @@ export default function Settings() {
               { id: "account", el: <AccountProfile /> },
               { id: "ai", el: <AiSettings /> },
               { id: "credits", el: <AiCreditsPanel /> },
-              { id: "users", el: <UsersRoles /> },
+              { id: "teams", el: <UsersRoles /> },
               { id: "apps", el: <AppsManager /> },
               { id: "appearance", el: <AppearancePanel /> },
               { id: "devices", el: <SettingsPanel><PlanDevices /></SettingsPanel> },

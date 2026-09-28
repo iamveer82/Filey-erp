@@ -60,7 +60,8 @@ export default function SetupNotice() {
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
-                      "The whole ERP and CRM, 5 invoices a month",
+                      "Free local ERP and CRM",
+                      "Unlimited local invoices and edits",
                       "Works offline — your data stays here",
                       "Upgrade to Pro or Ultra any time",
                     ].map((line) => (

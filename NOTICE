@@ -27,3 +27,9 @@ Comp AI CRM adaptations
   Adapted record drawer composition and URL record-stack navigation in
   src/components/crm/RecordSheet.tsx and src/components/crm/recordStack.ts.
   Full original notice and terms: licenses/comp-ai-crm.txt.
+
+Material Design icons
+  Source: https://github.com/google/material-design-icons
+  Google — Apache License, Version 2.0.
+  Selected SVGs adapted into React in src/components/SidebarIcon.tsx.
+  Full original terms: licenses/material-icons.txt.

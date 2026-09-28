@@ -1,0 +1,27 @@
+import { expect, it, vi } from "vitest";
+import { listOrgDevices, releaseOrgDevice, checkCloudDeviceLogout } from "../license";
+const mocks = vi.hoisted(() => ({ query: vi.fn(), signOut: vi.fn(),session:vi.fn() }));
+vi.mock("../supabase", () => ({ supabase: { from: () => ({ select: () => ({ is: () => ({order: mocks.query}) }) }),rpc:mocks.query,auth:{signOut:mocks.signOut,getSession:mocks.session} } }));
+it("reports device errors and signs out only the session explicitly revoked by the server", async () => {
+  mocks.query.mockResolvedValue({ data: null, error: { message: "Denied" } });
+  await expect(listOrgDevices()).rejects.toThrow("Could not load your devices");
+  await expect(releaseOrgDevice("device")).rejects.toThrow("Denied");
+  mocks.query.mockResolvedValue({ data: null, error: null });
+  await expect(releaseOrgDevice("device")).resolves.toBeUndefined();
+  mocks.query.mockResolvedValue({ data: [], error: null });
+  await expect(listOrgDevices()).resolves.toEqual([]);
+  mocks.query.mockResolvedValue({ data: { id: "device" }, error: null });
+  await expect(releaseOrgDevice("device")).resolves.toBeUndefined();
+  expect(mocks.query).toHaveBeenLastCalledWith('filey_logout_device',{p_id:'device'});
+  mocks.session.mockResolvedValue({data:{session:{access_token:'session-a'}}});
+  mocks.query.mockResolvedValue({data:false,error:null});
+  await checkCloudDeviceLogout();
+  expect(mocks.signOut).not.toHaveBeenCalled();
+  mocks.query.mockResolvedValue({data:true,error:null});
+  await checkCloudDeviceLogout();
+  expect(mocks.signOut).toHaveBeenCalledExactlyOnceWith({scope:'local'});
+  mocks.signOut.mockClear();
+  mocks.session.mockResolvedValueOnce({data:{session:{access_token:'session-a'}}}).mockResolvedValueOnce({data:{session:{access_token:'session-b'}}});
+  await checkCloudDeviceLogout();
+  expect(mocks.signOut).not.toHaveBeenCalled();
+});

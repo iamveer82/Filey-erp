@@ -75,10 +75,11 @@ it("makes local setup testable without a key and clears the hosted key when choo
   expect(JSON.parse(String(init.body)).messages).toEqual([{ role: "user", content: "Reply with the single word: ok" }]);
 });
 
-it("offers a free hosted preset while still requiring the user's own key", () => {
+it("offers OpenRouter with the user's own key and hides its free-model preset", () => {
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenRouter · free models" } });
-  expect(screen.getByLabelText("Model")).toHaveValue("openrouter/free");
+  expect(screen.queryByRole("option", { name: "OpenRouter · free models" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenRouter (any model)" } });
+  expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-4o-mini");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
   expect(screen.queryByText(/AI Briefing/)).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Get your API key" })).toHaveAttribute("href", "https://openrouter.ai/settings/keys");

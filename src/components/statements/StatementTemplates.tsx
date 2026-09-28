@@ -1,6 +1,7 @@
 import CjSummary from "./StatementSummary";
 import type { ComponentType, ReactNode } from "react";
 import { money } from "../../lib/format";
+import { taxRegimeFor } from "../../lib/taxRegimes";
 
 /* ------------------------------------------------------------------ */
 /*  Statement of Account templates — TSX port of the six DEMO          */
@@ -35,6 +36,7 @@ export interface StatementLine {
 
 export interface StatementData {
   company: {
+    country_code?: string;
     name: string;
     address?: string;
     trn?: string;
@@ -42,6 +44,7 @@ export interface StatementData {
     phone?: string;
   };
   party: {
+    country_code?: string;
     kind: StatementPartyKind;
     name: string;
     contact?: string;
@@ -83,8 +86,11 @@ export interface StatementTemplateProps {
 
 /** Per-kind wording so one layout reads correctly for a receivable
  *  (customer) or a payable (supplier) ledger. */
-function kindLabels(kind: StatementPartyKind) {
-  return kind === "customer"
+function kindLabels(data: StatementData) {
+  const regime = taxRegimeFor(data.currency, data.company.country_code);
+  return {taxLabel: regime.taxLabel, companyTaxId: regime.trnLabel,
+    partyTaxId: taxRegimeFor(data.currency, data.party.country_code || data.company.country_code).trnLabel,
+    ...(data.party.kind === "customer"
     ? {
         partyNoun: "Customer",
         journalTitle: "Sales & Collections Journal Statement",
@@ -97,7 +103,7 @@ function kindLabels(kind: StatementPartyKind) {
         refCol: "Invoice",
         docsNoun: "Invoices",
         paymentsNoun: "Payments received",
-        vatLabel: "Total VAT",
+        vatLabel: `Total ${regime.taxLabel}`,
         netLabel: "Net sales",
         terms:
           "Kindly settle any outstanding amounts within 30 days of the statement date.",
@@ -116,12 +122,12 @@ function kindLabels(kind: StatementPartyKind) {
         refCol: "PO #",
         docsNoun: "Purchase orders",
         paymentsNoun: "Payments made",
-        vatLabel: "Total VAT",
+        vatLabel: `Total ${regime.taxLabel}`,
         netLabel: "Net order value",
         terms: "Purchase orders and their payments only. For posted supplier bills and accounts payable, use Reports → Suppliers.",
         gratitude:
           "With gratitude for your continued partnership — settlement follows the agreed terms",
-      };
+      })};
 }
 
 type Tone = "red" | "green" | undefined;
@@ -135,7 +141,7 @@ const two = (v: number) => v.toFixed(2);
 
 /** Compact Journal — dense, black & white, the whole ledger in one table. */
 export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
@@ -158,7 +164,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
               </div>
             )}
             {data.company.trn && (
-              <div className="text-neutral-600 text-[9px]">TRN: {data.company.trn}</div>
+              <div className="text-neutral-600 text-[9px]">{L.companyTaxId}: {data.company.trn}</div>
             )}
           </div>
 
@@ -204,7 +210,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
               {vat ? "Net" : L.debitCol}
             </th>
             {vat && (
-              <th className="px-1.5 py-1 text-right w-16">VAT</th>
+              <th className="px-1.5 py-1 text-right w-16">{L.taxLabel}</th>
             )}
             {vat && (
               <th className="px-1.5 py-1 text-right w-16">Total</th>
@@ -286,7 +292,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
 
 /** Executive Summary — KPI-first with condensed activity (one page by design). */
 export function ExecutiveSummaryTemplate({ data }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const docs = data.lines.filter((t) => !t.opening && t.debit > 0);
   const pays = data.lines.filter((t) => !t.opening && t.credit > 0);
@@ -315,7 +321,7 @@ export function ExecutiveSummaryTemplate({ data }: StatementTemplateProps) {
             </div>
           )}
           {data.company.trn && (
-            <div className="text-neutral-600 text-[10px]">TRN: {data.company.trn}</div>
+            <div className="text-neutral-600 text-[10px]">{L.companyTaxId}: {data.company.trn}</div>
           )}
         </div>
       </div>
@@ -330,7 +336,7 @@ export function ExecutiveSummaryTemplate({ data }: StatementTemplateProps) {
             <div className="text-neutral-700 text-[10.5px]">{data.party.contact}</div>
           )}
           <div className="text-neutral-700 text-[10.5px]">
-            TRN: {data.party.trn || "—"}
+            {L.partyTaxId}: {data.party.trn || "—"}
           </div>
         </div>
         <div className="text-right">
@@ -452,7 +458,7 @@ function ExKpi({
 
 /** Detailed Ledger — accounting-style with running debit/credit balance. */
 export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
@@ -490,7 +496,7 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
               </div>
               <div className="font-semibold">{data.party.name}</div>
               <div className="text-neutral-700 text-[9.5px]">
-                TRN: {data.party.trn || "—"}
+                {L.partyTaxId}: {data.party.trn || "—"}
                 {data.party.email ? ` • ${data.party.email}` : ""}
               </div>
             </div>
@@ -531,7 +537,7 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
               {vat ? "Net" : "Debit"}
             </th>
             {vat && (
-              <th className="py-1.5 font-semibold text-right w-20">VAT</th>
+              <th className="py-1.5 font-semibold text-right w-20">{L.taxLabel}</th>
             )}
             {vat && (
               <th className="py-1.5 font-semibold text-right w-20">Total</th>
@@ -618,7 +624,7 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
 
 /** Modern Statement — blue accent, card-based summary, monospace numbers. */
 export function ModernStatementTemplate({ data, page }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
@@ -651,7 +657,7 @@ export function ModernStatementTemplate({ data, page }: StatementTemplateProps) 
             )}
             {data.company.trn && (
               <div className="text-neutral-500 text-[10px]">
-                TRN: {data.company.trn}
+                {L.companyTaxId}: {data.company.trn}
               </div>
             )}
           </div>
@@ -756,7 +762,7 @@ function MdCard({
 
 /** Elegant Statement — serif, gold accents, formal. */
 export function ElegantStatementTemplate({ data, page }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
@@ -792,7 +798,7 @@ export function ElegantStatementTemplate({ data, page }: StatementTemplateProps)
             <div>
               <div className="italic text-amber-800">Presented to</div>
               <div className="font-semibold text-[13px]">{data.party.name}</div>
-              <div className="text-neutral-700">TRN: {data.party.trn || "—"}</div>
+              <div className="text-neutral-700">{L.partyTaxId}: {data.party.trn || "—"}</div>
             </div>
             <div className="text-right">
               <div className="italic text-amber-800">Statement Date</div>
@@ -903,7 +909,7 @@ function ElKpi({
 
 /** Corporate Statement — bold dark header + footer, formal business style. */
 export function CorporateStatementTemplate({ data, page }: StatementTemplateProps) {
-  const L = kindLabels(data.party.kind);
+  const L = kindLabels(data);
   const m = (v: number) => money(v, data.currency);
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
@@ -955,7 +961,7 @@ export function CorporateStatementTemplate({ data, page }: StatementTemplateProp
             {data.party.contact && (
               <div className="text-neutral-700">{data.party.contact}</div>
             )}
-            <div className="text-neutral-700">TRN: {data.party.trn || "—"}</div>
+            <div className="text-neutral-700">{L.partyTaxId}: {data.party.trn || "—"}</div>
           </div>
           <div className="text-right">
             <div className="text-[9.5px] uppercase text-neutral-500 tracking-wider font-semibold">

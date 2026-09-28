@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Basic's five-creation limit applies locally as well as on the web.
+// Hosted quotas must never gate an offline, local save.
 vi.mock("../dataMode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../dataMode")>()),
   isLocalMode: () => true,
@@ -20,28 +20,16 @@ describe("the free invoice cap on a local workspace", () => {
     localStorage.clear();
   });
 
-  it("refuses the sixth invoice this month", async () => {
-    const { checkFreeInvoiceCap, FREE_LIMITS, clearEntitlementCache } = await import("../license");
-    clearEntitlementCache();
-    await expect(
-      checkFreeInvoiceCap(async () => FREE_LIMITS.invoicesPerMonth)
-    ).rejects.toThrow(/Basic plan limit reached/);
-  });
-
-  it("names both ways out in the message", async () => {
+  it("allows local saves without counting usage or offering an upgrade", async () => {
     const { checkFreeInvoiceCap, clearEntitlementCache } = await import("../license");
     clearEntitlementCache();
-    // Someone who has hit the wall needs to know the two prices, not just that
-    // they are blocked.
-    await expect(checkFreeInvoiceCap(async () => 99)).rejects.toThrow(/\$5\/month/);
-    await expect(checkFreeInvoiceCap(async () => 99)).rejects.toThrow(/Ultra/);
-  });
-
-  it("lets the fifth through", async () => {
-    const { checkFreeInvoiceCap, FREE_LIMITS, clearEntitlementCache } = await import("../license");
-    clearEntitlementCache();
-    await expect(
-      checkFreeInvoiceCap(async () => FREE_LIMITS.invoicesPerMonth - 1)
-    ).resolves.toBeUndefined();
+    const count = vi.fn(async () => { throw new Error("No connection"); });
+    const upgrade = vi.fn();
+    window.addEventListener("filey:upgrade", upgrade);
+    try {
+      await expect(checkFreeInvoiceCap(count)).resolves.toBeUndefined();
+      expect(count).not.toHaveBeenCalled();
+      expect(upgrade).not.toHaveBeenCalled();
+    } finally { window.removeEventListener("filey:upgrade", upgrade); }
   });
 });

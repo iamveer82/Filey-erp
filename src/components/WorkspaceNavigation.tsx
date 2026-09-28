@@ -1,9 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { ChevronDown, Search, X } from "lucide-react";
 import { prefetchModule, type AppModule } from "../modules/registry";
 import { useLang } from "../lib/i18n";
-import AppIcon from "./AppIcon";
+import SidebarIcon from "./SidebarIcon";
 import BloubBot from "./BloubBot";
 
 const GROUPS = [
@@ -53,7 +52,7 @@ export default function WorkspaceNavigation({
   return (
     <div className="workspace-navigation">
       <div className="workspace-nav-search">
-        <Search size={18} strokeWidth={1.75} aria-hidden="true" />
+        <SidebarIcon name="search" />
         <input
           ref={filter}
           aria-label={t("Find a page")}
@@ -64,7 +63,7 @@ export default function WorkspaceNavigation({
         />
         {query && <button type="button" aria-label={t("Clear page search")}
           onClick={() => { setQuery(""); filter.current?.focus(); }}>
-          <X size={16} aria-hidden="true" />
+          <SidebarIcon name="close" size={16} />
         </button>}
       </div>
       <div ref={scroller} className="workspace-nav-scroll">
@@ -84,7 +83,7 @@ export default function WorkspaceNavigation({
                 onClick={() => setExpanded(previous => ({ ...previous, [group.title]: !open }))}
               >
                 <span>{t(group.title)}</span>
-                <ChevronDown size={14} aria-hidden="true" data-expanded={open} />
+                <span data-expanded={open} className="workspace-nav-chevron"><SidebarIcon name="expand" size={16} /></span>
               </button>}
               <nav id={sectionId} aria-label={t(group.title)} hidden={!open}>
                 {group.items.map(({ id, to, label, icon }) => (
@@ -100,7 +99,7 @@ export default function WorkspaceNavigation({
                     <span className="workspace-nav-icon" aria-hidden="true">
                       {id === "agent"
                         ? <BloubBot size={48} state="idle" animate={isDesktop || mobileOpen} ambient trackCursor />
-                        : <AppIcon name={icon} className="h-[18px] w-[18px]" />}
+                        : <SidebarIcon name={icon} />}
                     </span>
                     <span className="min-w-0 truncate">{t(label)}</span>
                   </NavLink>

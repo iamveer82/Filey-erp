@@ -66,7 +66,9 @@ export default function BillingPanel() {
   const [ownsUltra, setOwnsUltra] = useState(false);
   const [ownershipLoading, setOwnershipLoading] = useState(true);
   const [invoicesUsed, setInvoicesUsed] = useState<number | null>(null);
-  const [capped, setCapped] = useState(true);
+  const local = isLocalMode();
+  const [cloudCapped, setCloudCapped] = useState(true);
+  const capped = !local && cloudCapped;
   const [contactOpen, setContactOpen] = useState<PlanCard | null>(null);
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
@@ -99,13 +101,14 @@ export default function BillingPanel() {
         .finally(() => {
           if (active) setSubLoading(false);
         });
-      void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
-        if (active)
-          setCapped(tier === "free" && (isLocalMode() || access.reason !== "paid"));
-      });
+      if (!local) {
+        void Promise.all([entitlement(true), cloudAccess(true)]).then(([tier, access]) => {
+          if (active) setCloudCapped(tier === "free" && access.reason !== "paid");
+        }).catch(() => { if (active) setCloudCapped(true); });
+      }
     };
     refreshOwned();
-    void invoicesThisMonth()
+    if (!local) void invoicesThisMonth()
       .then(setInvoicesUsed)
       .catch(() => {});
     // A purchase collected in the background (auth.tsx) updates this page too.
@@ -114,7 +117,7 @@ export default function BillingPanel() {
       active = false;
       window.removeEventListener("filey:entitlement", refreshOwned);
     };
-  }, [toast]);
+  }, [toast, local]);
 
   useEffect(() => {
     let failed = false;
@@ -291,11 +294,11 @@ export default function BillingPanel() {
         </SettingsSection>
 
         <SettingsSection
-          title="Paper wallet"
-          description="Optional Paper for Filey AI on every plan, separate from your subscription."
+          title="Coin wallet"
+          description="Optional Coin for Filey AI on every plan, separate from your subscription."
         >
           <Link className="btn-ghost" to="/settings?section=credits">
-            Open Paper wallet
+            Open Coin wallet
           </Link>
         </SettingsSection>
 
@@ -312,13 +315,13 @@ export default function BillingPanel() {
 
         <SettingsSection
           title="Usage"
-          description="What this workspace holds, and your invoice allowance this month."
+          description={local ? "Your records on this device. Local invoicing is free and unlimited." : "What this workspace holds, and your cloud invoice allowance this month."}
         >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-medium tabular-nums text-foreground">
               {capped
                 ? `${invoicesUsed ?? "–"} / ${cap} invoices this month`
-                : "Unlimited invoices"}
+                : local ? "Unlimited local invoices" : "Unlimited invoices"}
             </span>
           </div>
           {capped && (
@@ -342,11 +345,12 @@ export default function BillingPanel() {
             </div>
           )}
           <p className="text-xs text-muted-foreground">
-            {!capped
-              ? "This workspace has unlimited invoices."
+            {local
+              ? "Create and edit as many local invoices as you need. No subscription or monthly invoice limit."
+              : !capped ? "This workspace has unlimited invoices."
               : pctUsed >= 100
-                ? "You've used this month's 5 new invoices. You can keep editing existing invoices without a limit."
-                : "Basic includes 5 new invoices a month and unlimited edits. Cloud usage resets on the 1st at 00:00 UTC."}
+                ? `You've used this month's ${cap} new cloud invoices. You can keep editing existing invoices without a limit.`
+                : `Basic includes ${cap} new cloud invoices a month and unlimited edits. Cloud usage resets on the 1st at 00:00 UTC.`}
           </p>
           {statsError ? (
             <p role="alert" className="text-sm text-danger">

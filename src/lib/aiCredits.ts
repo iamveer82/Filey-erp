@@ -16,6 +16,8 @@ export interface CreditModel {
   vision: boolean;
   free?: boolean;
 }
+export const isPaidCreditModel = (model: CreditModel) =>
+  !model.free && model.id !== "filey-ai" && model.id !== "openrouter/free" && !model.id.endsWith(":free");
 export interface CreditAccount {
   balance_micros: number;
   reserved_micros: number;
@@ -52,11 +54,11 @@ export const creditMoney = (micros: number, detailed = false) =>
     minimumFractionDigits: 2,
     maximumFractionDigits: detailed ? 6 : 2,
   }).format(micros / 1_000_000);
-// Paper is a display unit only: 1 Paper = $1. The ledger stays in USD micros.
-export const creditPaper = (micros: number, detailed = false) =>
+// Coin is a display unit only: 1 Coin = $1. The ledger stays in USD micros.
+export const creditCoin = (micros: number, detailed = false) =>
   `${new Intl.NumberFormat(undefined, {
     maximumFractionDigits: detailed ? 6 : 2,
-  }).format(micros / 1_000_000)} Paper`;
+  }).format(micros / 1_000_000)} Coin`;
 export function creditChoice(): { funding: AiFunding; model: string } {
   try {
     const value = JSON.parse(readAgentStorage("filey.ai.funding") ?? "{}");
@@ -76,11 +78,11 @@ export function setCreditChoice(funding: AiFunding, model = creditChoice().model
 }
 
 export async function aiAccountSession() {
-  if (!supabase) throw new Error("Connect your Filey account to use Paper.");
+  if (!supabase) throw new Error("Connect your Filey account to use Coin.");
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session)
     throw new Error(
-      "Sign in to your cloud account to use Paper. Your device records stay on this device."
+      "Sign in to your cloud account to use Coin. Your device records stay on this device."
     );
   return data.session;
 }
@@ -108,7 +110,7 @@ export async function callAiService<T>(
     );
   const current = await accountSession();
   if (current.user.id !== session.user.id)
-    throw new Error("Your account changed. Refresh your Paper wallet.");
+    throw new Error("Your account changed. Refresh your Coin wallet.");
   return data as T;
 }
 const call = callAiService;

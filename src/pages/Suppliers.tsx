@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { companyCountry } from "../lib/companyCountry";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Building2,
@@ -13,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   erp,
+  billing,
   pos,
   suppliers as suppliersApi,
   Product,
@@ -46,6 +49,7 @@ type SortKey = "name" | "category" | "contact" | "balance";
 const contactOf = (s: Supplier) => s.contact_person || s.email || "";
 
 export default function Suppliers() {
+  const [taxIdLabel, setTaxIdLabel] = useState("Tax ID");
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<PoSummary[]>([]);
@@ -79,6 +83,7 @@ export default function Suppliers() {
       suppliersApi.list().then(setSuppliers),
       pos.list().then(setOrders),
       pos.allPayments().then(setPoPayments),
+      billing.getCompany().then(c => setTaxIdLabel(taxRegimeFor(undefined, companyCountry(c)).trnLabel)),
     ])
       .catch((e) =>
         setError(`Could not load suppliers: ${e instanceof Error ? e.message : e}`)
@@ -88,7 +93,7 @@ export default function Suppliers() {
   useEffect(() => {
     load();
   }, []);
-  useLiveSync(load, ["products", "suppliers", "purchase_orders", "purchase_order_items"]);
+  useLiveSync(load, ["products", "suppliers", "purchase_orders", "purchase_order_items", "company_profile"]);
 
   const groups = useMemo<CategoryGroup[]>(() => {
     const m = new Map<string, CategoryGroup>();
@@ -217,7 +222,7 @@ export default function Suppliers() {
                     { key: "email", label: "Email" },
                     { key: "phone", label: "Phone" },
                     { key: "address", label: "Address" },
-                    { key: "tax_id", label: "Tax ID / TRN" },
+    { key: "tax_id", label: taxIdLabel },
                   ]
                 ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."))
               }
@@ -467,6 +472,7 @@ export default function Suppliers() {
       </div>
 
       <SupplierModal
+        taxIdLabel={taxIdLabel}
         open={open}
         initial={edit}
         onClose={() => setOpen(false)}
@@ -481,7 +487,7 @@ export default function Suppliers() {
         onClose={() => setQuickView(null)}
         data={
           quickView
-            ? supplierQuickView(quickView, () => {
+            ? supplierQuickView(quickView, taxIdLabel, () => {
                 nav(`/suppliers/${quickView.id}`);
                 setQuickView(null);
               })
@@ -536,17 +542,17 @@ function TH({
 }
 
 /** DEMO parity: map a supplier record onto the shared QuickViewModal shape. */
-function supplierQuickView(s: Supplier, onFullPage: () => void): QuickViewData {
+function supplierQuickView(s: Supplier, taxIdLabel: string, onFullPage: () => void): QuickViewData {
   const bank = s.bank_details ?? {};
   const meta = [
     { label: "Contact person", value: s.contact_person },
     { label: "Email", value: s.email },
     { label: "Phone", value: s.phone },
-    { label: "Tax ID / TRN", value: s.tax_id },
+    { label: taxIdLabel, value: s.tax_id },
     { label: "Address", value: s.address },
     { label: "Bank", value: bank.bank_name },
     {
-      label: "IBAN / Account",
+      label: bank.iban ? "IBAN" : "Account number",
       value: bank.iban || bank.account_number,
     },
     {
@@ -580,11 +586,13 @@ function supplierQuickView(s: Supplier, onFullPage: () => void): QuickViewData {
 }
 
 function SupplierModal({
+  taxIdLabel,
   open,
   initial,
   onClose,
   onSaved,
 }: {
+  taxIdLabel: string;
   open: boolean;
   initial: Supplier | null;
   onClose: () => void;
@@ -702,7 +710,7 @@ function SupplierModal({
             onChange={(e) => setF({ ...f, address: e.target.value })}
           />
         </Field>
-        <Field label="Tax ID / TRN">
+        <Field label={taxIdLabel}>
           <input
             className="input"
             value={f.tax_id}

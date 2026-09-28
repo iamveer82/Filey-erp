@@ -1,6 +1,17 @@
 import { expect, it } from "vitest";
 import { bankFieldError, bankFieldsFor } from "../bankFields";
 import { EMPTY_BANK, hasBankInfo } from "../../components/BankDetails";
+import { customerPhoneE164 } from "../companyCountry";
+
+it("preserves international phone numbers and normalizes Indian and UAE local numbers without guessing other countries", () => {
+  expect(customerPhoneE164("98765 43210", "IN")).toBe("+919876543210");
+  expect(customerPhoneE164("050 123 4567", "AE")).toBe("+971501234567");
+  expect(customerPhoneE164("+44 7700 900123", "IN")).toBe("+447700900123");
+  expect(customerPhoneE164("0091 9876543210", "AE")).toBe("+919876543210");
+  expect(customerPhoneE164("0501234567", "IN")).toBeNull();
+  expect(customerPhoneE164("0201234567", "GB")).toBeNull();
+  expect(customerPhoneE164("invalid +91 9876543210", "IN")).toBeNull();
+});
 
 /* An IFSC is meaningless to Emirates NBD and an IBAN is meaningless to HDFC, so
  * asking a business for the wrong one is the confusion this exists to remove —

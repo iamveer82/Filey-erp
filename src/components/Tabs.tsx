@@ -17,7 +17,7 @@ export const TabsList = forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex items-center gap-1 border-b border-brand-200",
+      "inline-flex items-stretch gap-1 border-b border-brand-200",
       className
     )}
     {...props}
@@ -32,7 +32,7 @@ export const TabsTrigger = forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "relative inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-brand-500 cursor-pointer transition-colors",
+      "relative inline-flex min-h-10 items-center justify-center gap-1.5 px-3 py-2 text-center text-sm font-semibold text-brand-500 cursor-pointer transition-colors",
       "hover:text-ink",
       // underline indicator via data-state
       "data-[state=active]:text-ink data-[state=active]:after:absolute data-[state=active]:after:left-0 data-[state=active]:after:right-0 data-[state=active]:after:bottom-[-1px] data-[state=active]:after:h-0.5 data-[state=active]:after:bg-primary-500",

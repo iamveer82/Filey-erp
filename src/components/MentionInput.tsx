@@ -1,30 +1,14 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 
 import { MenuPopover } from "./ui-menu";
+import { UserAvatar } from "./AvatarPicker";
 
 export interface MentionMember {
   id: string;
   name: string;
+  avatar?: string | null;
 }
 
-const AVATAR_TONES = [
-  "bg-primary-100 text-primary-700",
-  "bg-secondary-400/20 text-secondary-600",
-  "bg-info/15 text-info",
-  "bg-success/15 text-success",
-];
-const tone = (id: string) => {
-  let h = 0;
-  for (const c of id) h = (h + c.charCodeAt(0)) % AVATAR_TONES.length;
-  return AVATAR_TONES[h];
-};
-const initials = (name: string) =>
-  name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("") || "?";
 const handle = (name: string) =>
   name
     .trim()
@@ -119,7 +103,7 @@ export default function MentionInput({
   };
 
   return (
-    <div className="relative flex-1">
+    <div className="relative min-w-0 flex-1">
       <input
         ref={ref}
         className={small ? "input !py-1.5 text-sm" : "input"}
@@ -160,13 +144,7 @@ export default function MentionInput({
                   : "hover:bg-muted"
               }`}
             >
-              <span
-                className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[11px] font-medium ${tone(
-                  m.id
-                )}`}
-              >
-                {initials(m.name)}
-              </span>
+              <UserAvatar src={m.avatar} name={m.name} className="h-7 w-7 text-[11px]" />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-medium text-ink">
                   {m.name}

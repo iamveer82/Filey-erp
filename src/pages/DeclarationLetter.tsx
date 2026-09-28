@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { companyCountry } from "../lib/companyCountry";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   Download,
   Save,
@@ -84,6 +86,8 @@ We also confirm that we shall be responsible to the Federal Tax Authority of Uni
 A copy of the Certificate of Registration for Value Added Tax in the United Arab Emirates is enclosed herewith for your perusal.`;
 
 type DeclForm = {
+  country_code?: string;
+  currency?: string;
   title?: string;
   ref: string;
   show_stamp?: boolean;
@@ -117,7 +121,10 @@ const letterName = (letter: Pick<DeclForm, "title">) =>
   letter.title?.trim() || "DECLARATION LETTER";
 
 function blankDecl(company?: CompanyProfile | null): DeclForm {
+  const country = company ? companyCountry(company) : "";
   return {
+    country_code: country || undefined,
+    currency: company?.currency || "AED",
     title: "DECLARATION LETTER",
     header_space: DECLARATION_HEADER_SPACE,
     ref: "",
@@ -131,7 +138,7 @@ function blankDecl(company?: CompanyProfile | null): DeclForm {
     qty: "",
     unit: "MT",
     amount: "",
-    body: DEFAULT_BODY,
+    body: country && country !== "AE" ? "We, {company}, confirm the following details for {recipient}.\n\nReference: {lpo}\nQuantity: {qty} {unit}\nAmount: {currency} {amount}\n\n[Enter the purpose of this declaration and the statements you wish to confirm.]" : DEFAULT_BODY,
   };
 }
 
@@ -212,6 +219,7 @@ function resolveBody(form: DeclForm): string {
     amount: fmtAmount(form.amount),
     recipient: form.recipient_name || "—",
     recipientTrn: form.recipient_trn || "—",
+    currency: form.currency || "AED",
   };
   return form.body.replace(/\{(\w+)\}/g, (_, k: string) =>
     k in map ? map[k] : `{${k}}`
@@ -289,7 +297,7 @@ export default function DeclarationLetter() {
       `${letterName(d)} ${d.ref || d.lpo_ref || ""}`.trim(),
       `Recipient: ${d.recipient_name || "—"}`,
       `LPO: ${d.lpo_ref || "—"}`,
-      `Amount: AED ${fmtAmount(d.amount)}`,
+      `Amount: ${d.currency || "AED"} ${fmtAmount(d.amount)}`,
       d.date ? `Date: ${fmtLongDate(d.date)}` : "",
     ]
       .filter(Boolean)
@@ -328,7 +336,7 @@ export default function DeclarationLetter() {
     <div className="">
       <PageHeader
         title="Declaration Letters"
-        subtitle="VAT supply declaration letters in the standard UAE format"
+        subtitle="Create and save business declarations using your company details"
         action={
           <button
             className="btn-primary"
@@ -420,7 +428,7 @@ export default function DeclarationLetter() {
             label: "Amount",
             sortValue: (d) => Number(String(d.amount).replace(/,/g, "")) || 0,
             render: (d) => (
-              <span className="tabular-nums">AED {fmtAmount(d.amount)}</span>
+              <span className="tabular-nums">{d.currency || "AED"} {fmtAmount(d.amount)}</span>
             ),
           },
           {
@@ -473,11 +481,11 @@ export default function DeclarationLetter() {
                 title: letterName(quickView),
                 subtitle: quickView.recipient_name
                   ? `For ${quickView.recipient_name}`
-                  : "VAT supply declaration in the standard UAE format",
+                  : "Business declaration",
                 meta: [
                   { label: "Reference", value: quickView.ref },
                   { label: "Recipient", value: quickView.recipient_name },
-                  { label: "Recipient TRN", value: quickView.recipient_trn },
+                  { label: `Recipient ${taxRegimeFor(quickView.currency || "AED", quickView.country_code).trnLabel}`, value: quickView.recipient_trn },
                   { label: "LPO #", value: quickView.lpo_ref },
                   {
                     label: "Quantity",
@@ -496,7 +504,7 @@ export default function DeclarationLetter() {
                 total:
                   Number(String(quickView.amount).replace(/,/g, "")) ||
                   undefined,
-                currency: "AED",
+                currency: quickView.currency || "AED",
                 footer: (
                   <div className="mt-4 rounded-lg border border-border p-3 bg-hover/20">
                     <div className="text-[11.5px] font-medium text-muted-foreground mb-1">
@@ -565,6 +573,10 @@ function DeclarationEditor({
         setCompany(c);
         setForm((f) => ({
           ...f,
+          ...(!doc.updated_at && !f.country_code ? {
+            country_code: companyCountry(c), currency: c.currency,
+            body: f.body === DEFAULT_BODY ? blankDecl(c).body : f.body,
+          } : {}),
           company_name: f.company_name === "Your Company" ? c.name : f.company_name,
           company_trn: f.company_trn || c.trn || "",
         }));
@@ -579,7 +591,7 @@ function DeclarationEditor({
     loadCompanyStampSig().then(setCompanyStampSig).catch(() => {});
     suppliersApi.list().then(setSupplierList).catch(() => {});
     crm.customers().then(setCustomerList).catch(() => {});
-  }, [doc.use_letterhead]);
+  }, [doc.use_letterhead, doc.updated_at]);
 
   /** Fill recipient fields from a saved supplier ("s:<id>") or customer ("c:<id>"). */
   const fillRecipient = (key: string) => {
@@ -733,7 +745,7 @@ function DeclarationEditor({
                       <Field label="Company name">
                         <input className="input" value={form.company_name} onChange={(e) => set("company_name", e.target.value)} />
                       </Field>
-                      <Field label="Company TRN">
+                      <Field label={`Company ${taxRegimeFor(form.currency || "AED", form.country_code).trnLabel}`}>
                         <input className="input" placeholder="Tax registration number" value={form.company_trn} onChange={(e) => set("company_trn", e.target.value)} />
                       </Field>
                     </div>
@@ -750,7 +762,7 @@ function DeclarationEditor({
                       <Field label="Recipient name">
                         <input className="input" placeholder="Supplier or customer name" value={form.recipient_name} onChange={(e) => set("recipient_name", e.target.value)} />
                       </Field>
-                      <Field label="Recipient TRN">
+                      <Field label={`Recipient ${taxRegimeFor(form.currency || "AED", form.country_code).trnLabel}`}>
                         <input className="input" placeholder="Tax registration number" value={form.recipient_trn} onChange={(e) => set("recipient_trn", e.target.value)} />
                       </Field>
                       <div className="sm:col-span-2">
@@ -767,7 +779,7 @@ function DeclarationEditor({
                       <Field label="LPO number">
                         <input className="input" placeholder="Purchase order reference" value={form.lpo_ref} onChange={(e) => set("lpo_ref", e.target.value)} />
                       </Field>
-                      <Field label="Amount (AED)">
+                      <Field label={`Amount (${form.currency || "AED"})`}>
                         <input className="input tabular-nums" inputMode="decimal" placeholder="0.00" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
                       </Field>
                       <Field label="Quantity">
@@ -799,7 +811,7 @@ function DeclarationEditor({
                   <details className="text-xs text-muted-foreground">
                     <summary className="cursor-pointer py-2 font-medium text-foreground">Available automatic fields</summary>
                     <div className="flex flex-wrap gap-2 pt-2">
-                      {["company", "trn", "recipient", "recipientTrn", "lpo", "qty", "unit", "amount"].map((token) => (
+                      {["company", "trn", "recipient", "recipientTrn", "lpo", "qty", "unit", "amount", "currency"].map((token) => (
                         <code key={token} className="rounded-md bg-muted px-2 py-1">{"{" + token + "}"}</code>
                       ))}
                     </div>
@@ -940,7 +952,7 @@ function DeclarationEditor({
                     <div className="text-sm font-bold mb-6 space-y-0.5">
                       <p>{form.recipient_name || "[Recipient Name]"}</p>
                       {form.recipient_location && <p>{form.recipient_location}</p>}
-                      {form.recipient_trn && <p>TRN:- {form.recipient_trn}</p>}
+                      {form.recipient_trn && <p>{taxRegimeFor(form.currency || "AED", form.country_code).trnLabel}: {form.recipient_trn}</p>}
                     </div>
 
                     <p className="text-center text-sm font-bold underline mb-4">

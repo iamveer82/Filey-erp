@@ -11,11 +11,14 @@ import {
 import { aed, chartAmount, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useFinancials } from "./useReportsData";
+import { isUaeRegime, taxRegimeFor } from "../../lib/taxRegimes";
 
 export default function FinancialTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
   const fin = useFinancials(data.accounts, data.txns, data.invoices);
+  const uae = data.company ? isUaeRegime(data.company.currency, data.company.country_code) : true;
+  const taxLabel = taxRegimeFor(data.company?.currency || "AED", data.company?.country_code).taxLabel;
 
   const tooltipStyle = cs.tooltipStyle;
 
@@ -290,33 +293,32 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
         {/* VAT return */}
         <div className="p-5">
           <div className="text-[14px] font-semibold text-foreground">
-            VAT Return (UAE FTA 201)
+            {uae ? "UAE VAT working summary" : `${taxLabel} account summary`}
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Standard rate: {fin.vatReturn.rate.toFixed(0)}% · Ledger postings +
-            issued invoices
+            {uae ? `Standard rate: ${fin.vatReturn.rate.toFixed(0)}% · Ledger postings and issued invoices` : "Recorded tax account movements. This is not a statutory tax return."}
           </div>
           <div className="mt-4 space-y-2">
-            <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
+            {uae && <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
               <span className="text-muted-foreground">Standard-rated supplies (net)</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.standardSupplyNet)}
               </span>
-            </div>
+            </div>}
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
-              <span className="text-muted-foreground">Output VAT (Box 1)</span>
+              <span className="text-muted-foreground">{uae ? "Output VAT (Box 1)" : `Output ${taxLabel}`}</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.outputVat)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
-              <span className="text-muted-foreground">Zero-rated supplies (Box 4)</span>
+              <span className="text-muted-foreground">{uae ? "Zero-rated supplies (Box 4)" : "Zero-rated supplies"}</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.zeroRatedNet)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
-              <span className="text-muted-foreground">Exempt supplies (Box 5)</span>
+              <span className="text-muted-foreground">{uae ? "Exempt supplies (Box 5)" : "Exempt supplies"}</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.exemptNet)}
               </span>
@@ -324,27 +326,27 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
             {fin.vatReturn.reverseChargeNet !== 0 && (
               <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
                 <span className="text-muted-foreground">
-                  Reverse-charge supplies (Box 3)
+                  {uae ? "Reverse-charge supplies (Box 3)" : "Reverse-charge supplies"}
                 </span>
                 <span className="text-foreground tabular-nums font-medium">
                   {aed(fin.vatReturn.reverseChargeNet)}
                 </span>
               </div>
             )}
-            <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
+            {uae && <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
               <span className="text-muted-foreground">Standard-rated expenses (net)</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.standardExpenseNet)}
               </span>
-            </div>
+            </div>}
             <div className="flex items-center justify-between text-[13px] py-2 border-b border-border">
-              <span className="text-muted-foreground">Input VAT (Box 9)</span>
+              <span className="text-muted-foreground">{uae ? "Input VAT (Box 9)" : `Input ${taxLabel}`}</span>
               <span className="text-foreground tabular-nums font-medium">
                 {aed(fin.vatReturn.inputVat)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[14px] py-3 border-t-2 border-border font-bold mt-2">
-              <span className="text-foreground">Net VAT Due</span>
+              <span className="text-foreground">{uae ? "Net VAT Due" : `Net ${taxLabel} balance`}</span>
               <span
                 className={cn(
                   "tabular-nums",

@@ -24,8 +24,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-it("moves a stale board card without replacing concurrent edits, and reopens tasks correctly", async () => {
+it("rejects stale board moves and edits, and reopens tasks correctly after refresh", async () => {
+  const company = await persistCrmRecord("crm_customers", { company: "Example" });
   const id = await persistCrmRecord("crm_opportunities", {
+    customer_id: company,
     title: "Original",
     value: 200,
     stage: "qualification",
@@ -37,7 +39,11 @@ it("moves a stale board card without replacing concurrent edits, and reopens tas
     { title: "Edited elsewhere", value: 900, owner: "Sam" },
     id
   );
-  await saveCrmStatus("deals", stale, "won");
+  await localClient.from("crm_opportunities").update({ updated_at: "2099-01-01T00:00:00.000Z" }).eq("id", id);
+  await expect(saveCrmStatus("deals", stale, "won")).rejects.toThrow("Record changed");
+  await expect(saveCrmRecord("deals", { ...recordDraft("deals", stale), title: "Stale edit" }, await loadCrmData(), stale)).rejects.toThrow("Record changed");
+  expect((await loadCrmData()).deals[0]).toMatchObject({ title: "Edited elsewhere", stage: "qualification" });
+  await saveCrmStatus("deals", (await loadCrmData()).deals[0], "won");
   let latest = (await loadCrmData()).deals[0];
   expect(latest).toMatchObject({
     title: "Edited elsewhere",
@@ -56,7 +62,9 @@ it("moves a stale board card without replacing concurrent edits, and reopens tas
   });
   const task = (await loadCrmData()).tasks[0];
   await persistCrmRecord("crm_tasks", { title: "Revised task" }, taskId);
-  await saveCrmStatus("tasks", task, "done");
+  await localClient.from("crm_tasks").update({ updated_at: "2099-01-01T00:00:00.000Z" }).eq("id", taskId);
+  await expect(saveCrmStatus("tasks", task, "done")).rejects.toThrow("Record changed");
+  await saveCrmStatus("tasks", (await loadCrmData()).tasks[0], "done");
   const done = (await loadCrmData()).tasks[0];
   expect(done).toMatchObject({ title: "Revised task", status: "done" });
   expect(done.completed_at).toBeTruthy();

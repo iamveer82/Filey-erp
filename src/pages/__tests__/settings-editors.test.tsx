@@ -17,12 +17,13 @@ vi.mock("../../lib/supabase", () => ({ supabase: null }));
 vi.mock("../../lib/api", () => ({
   org: {
     get: async () => ({ id: "org-1", name: "Example team" }),
+    connections: async () => ({code:'A1B2C3',workspace_id:'org-1',workspace_name:'Example team',requests:[]}),
     members: async () => [{ id: "member-1", user_id: "owner-1", org_id: "org-1", role: "owner", name: "Owner" }],
     invites: async () => [], myInvites: async () => [], workspaces: async () => [{id:"org-1",name:"Example team",role:"owner"}], invite,
   },
   fin: { createExpense: vi.fn() },
 }));
-vi.mock("../../lib/ai", () => ({ aiReady: () => true, extractExpenseFromImage: async () => ({ vendor: "Office shop", amount: 20, date: "2026-09-08", category: "Office", description: "Paper" }) }));
+vi.mock("../../lib/ai", () => ({ aiReady: () => true, extractExpenseFromImage: async () => ({ vendor: "Office shop", amount: 20, date: "2026-09-08", category: "Office", description: "Coin" }) }));
 vi.mock("../../lib/docScan", () => ({ fileToImages: async () => [] }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -49,5 +50,5 @@ it("provides a keyboard-reachable receipt upload and names every extracted expen
   expect(screen.getByLabelText("Amount")).toHaveValue("20");
   expect(screen.getByLabelText("Date")).toBeInTheDocument();
   expect(screen.getByLabelText("Category")).toBeInTheDocument();
-  expect(screen.getByLabelText("Note")).toHaveValue("Paper");
+  expect(screen.getByLabelText("Note")).toHaveValue("Coin");
 });

@@ -1,18 +1,42 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import { money, setDisplayCurrency } from "../../lib/format";
 import BankAccounts from "../BankAccounts";
 
 const settings = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/api", () => ({ tools: { settings }, fin: {}, getCacheScope: () => "test-org:user:test-user" }));
+const setSetting = vi.hoisted(() => vi.fn<(key: string, value: string) => Promise<void>>().mockResolvedValue(undefined));
+vi.mock("../../lib/api", () => ({ tools: { settings, setSetting }, billing: { getCompany: async () => ({ name: "India company", country_code: "IN", currency: "INR" }) }, fin: {}, getCacheScope: () => "test-org:user:test-user" }));
 const formatted = (amount: number, currency: string) => money(amount, currency).replace(/\s/g, " ");
 
 afterEach(() => {
   cleanup();
   localStorage.removeItem(`filey_bank_accounts:${encodeURIComponent("cloud:test-org:user:test-user")}`);
   setDisplayCurrency("AED");
+  vi.clearAllMocks();
+});
+
+it("creates an Indian bank account with an IFSC and keeps its currency after reopening", async () => {
+  settings.mockResolvedValue([]);
+  const view = render(<MemoryRouter><UIProvider><BankAccounts /></UIProvider></MemoryRouter>);
+  fireEvent.click(await view.findByRole("button", { name: "Add account" }));
+  const ifsc = await view.findByLabelText("IFSC Code");
+  expect(view.queryByLabelText("IBAN")).toBeNull();
+  fireEvent.change(view.getByLabelText("Bank Name *"), { target: { value: "Fixture bank" } });
+  fireEvent.change(view.getByLabelText("Account Name *"), { target: { value: "Operating" } });
+  fireEvent.change(ifsc, { target: { value: "bad" } });
+  expect(view.getByRole("button", { name: "Create account" })).toBeDisabled();
+  fireEvent.change(ifsc, { target: { value: "HDFC0001234" } });
+  fireEvent.click(view.getByRole("button", { name: "Create account" }));
+  await waitFor(() => expect(setSetting).toHaveBeenCalledOnce());
+  const saved = JSON.parse(setSetting.mock.calls[0][1]);
+  expect(saved[0]).toMatchObject({ country_code: "IN", currency: "INR", ifsc: "HDFC0001234", iban: "" });
+  view.unmount();
+  settings.mockResolvedValue([{ key: "bank_accounts", value: JSON.stringify(saved) }]);
+  const reopened = render(<MemoryRouter><UIProvider><BankAccounts /></UIProvider></MemoryRouter>);
+  expect(await reopened.findByText("IFSC HDFC0001234")).toBeVisible();
+  expect(reopened.getByText("Total balance (INR)")).toBeVisible();
 });
 
 it("groups native AED/USD balances without conversion and preserves account currencies in rows and quick view", async () => {

@@ -37,6 +37,12 @@ describe("toCsv formula injection", () => {
 });
 
 describe("parseCsvObjects", () => {
+  it("rejects ambiguous or truncated CSV before values can be lost", () => {
+    for (const csv of ['name,name\na,b', 'name,Name\na,b', 'name,\na,b', 'name\na,b', 'name\n"unfinished', 'name\n"closed"extra'])
+      expect(() => parseCsvObjects(csv)).toThrow();
+    expect(parseCsvObjects('name,note\nSam,"He said ""hello"""').rows[0]).toEqual({ name: "Sam", note: 'He said "hello"' });
+    expect(parseCsvObjects('__proto__,name\nliteral,Sam').rows[0].__proto__).toBe("literal");
+  });
   it("reads back a file this app exported, byte-order mark and all", () => {
     const csv = "﻿" + toCsv([{ name: "Acme", total: -500 }]);
     const { headers, rows } = parseCsvObjects(csv);

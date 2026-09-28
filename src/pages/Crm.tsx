@@ -21,9 +21,11 @@ import {
   HardDrive,
   ChevronRight,
   CalendarDays,
+  MoreHorizontal,
 } from "lucide-react";
 import {
   CRM_OBJECTS,
+  crmCustomModule,
   OBJECT_KEYS,
   STAGES,
   TASK_STATUSES,
@@ -55,7 +57,8 @@ import { aed, cn, fmtDate, todayYmd, errMsg } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { effectiveDataMode, isLocalMode } from "../lib/dataMode";
 import { downloadText } from "../lib/localPaths";
-import { PageHeader, DataTable, ErrorBanner, Badge, Spinner } from "../components/ui";
+import { PageHeader, DataTable, ErrorBanner, Badge, Spinner, EmptyState } from "../components/ui";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/Popover";
 import ImportCsvModal from "../components/ImportCsvModal";
 import RecordEditor from "../components/crm/RecordEditor";
 import CrmOverview from "../components/crm/CrmOverview";
@@ -184,6 +187,7 @@ function CrmWorkspace({
   const previousRow =
     previousRef && data[previousRef.kind].find((row) => row.id === previousRef.id);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [bulkEdit, setBulkEdit] = useState<{ kind: CrmObject; rows: CrmRow[] } | null>(
     null
   );
@@ -225,6 +229,7 @@ function CrmWorkspace({
     setParams({ view: next });
     setDraftEditor(null);
     setOptionsOpen(false);
+    setActionsOpen(false);
   };
   const filter = (key: string, value: string) =>
     setParams(
@@ -589,6 +594,9 @@ function CrmWorkspace({
                       ))}
                     </select>
                   )}
+                  {kind === "tasks" && <select className="select w-auto max-w-48" aria-label="Task due date" value={due} onChange={event => filter("due", event.target.value)}>
+                    {DUE_FILTERS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>}
                   {(kind === "deals" || kind === "tasks") && (
                     <div className="inline-flex items-center gap-2">
                       <button
@@ -615,15 +623,6 @@ function CrmWorkspace({
                       </button>
                     </div>
                   )}
-                  <button
-                    className="btn-ghost"
-                    title="Save these filters and columns on this device"
-                    disabled={!viewStorageKey}
-                    onClick={() => void saveView()}
-                  >
-                    <Bookmark size={14} />
-                    Save view
-                  </button>
                   {!!duplicateIds.size && (
                     <button
                       className={cn(
@@ -638,15 +637,6 @@ function CrmWorkspace({
                       Possible duplicates · {duplicateIds.size}
                     </button>
                   )}
-                  {(kind === "companies" || kind === "contacts") && (
-                    <button
-                      className="btn-ghost"
-                      disabled={loading || !!error}
-                      onClick={() => setFieldsOpen(true)}
-                    >
-                      Custom fields
-                    </button>
-                  )}
                   <button
                     className="btn-ghost"
                     aria-expanded={optionsOpen}
@@ -655,6 +645,30 @@ function CrmWorkspace({
                   >
                     <SlidersHorizontal size={14} /> View options
                   </button>
+                  <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+                    <PopoverTrigger asChild><button type="button" className="btn-ghost"><MoreHorizontal size={16} /> More actions</button></PopoverTrigger>
+                    <PopoverContent align="end" className="w-60 p-2" aria-label="CRM actions">
+                      <div className="grid gap-1 [&>button]:justify-start" onClick={(event) => {
+                        if ((event.target as Element).closest("button:not(:disabled)")) setActionsOpen(false);
+                      }}>
+                  <button
+                    className="btn-ghost"
+                    title="Save these filters and columns on this device"
+                    disabled={!viewStorageKey}
+                    onClick={() => void saveView()}
+                  >
+                    <Bookmark size={14} />
+                    Save view
+                  </button>
+                  {kind && (
+                    <button
+                      className="btn-ghost"
+                      disabled={loading || !!error}
+                      onClick={() => setFieldsOpen(true)}
+                    >
+                      Custom fields
+                    </button>
+                  )}
                   <button
                     className="btn-ghost"
                     onClick={() => void exportRows()}
@@ -695,6 +709,9 @@ function CrmWorkspace({
                       Export calendar
                     </button>
                   )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 {optionsOpen && (
                   <section
@@ -747,22 +764,7 @@ function CrmWorkspace({
                           <option value="desc">Descending</option>
                         </select>
                       </label>
-                      {kind === "tasks" && (
-                        <label className="text-sm flex-1 min-w-48">
-                          <span className="label">Task due date</span>
-                          <select
-                            className="select"
-                            value={due}
-                            onChange={(e) => filter("due", e.target.value)}
-                          >
-                            {DUE_FILTERS.map((item) => (
-                              <option key={item.value} value={item.value}>
-                                {item.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
+
                     </div>
                     <fieldset>
                       <legend className="text-sm font-medium mb-1">Table columns</legend>
@@ -1043,6 +1045,15 @@ function CrmWorkspace({
                         );
                       })}
                   </div>
+                ) : !rows.length && !loading && !error ? (
+                  <div className="rounded-2xl border border-border bg-card">
+                    <EmptyState icon={icons[kind]} title={`Add your first ${spec.singular}`}
+                      description={DESCRIPTIONS[kind]}
+                      action={<div className="flex flex-wrap justify-center gap-2">
+                        <button className="btn-primary" onClick={() => add(kind)}><Plus size={15} /> New {spec.singular}</button>
+                        <button className="btn-ghost" onClick={() => setImporting(true)}><Upload size={15} /> Import CSV</button>
+                      </div>} />
+                  </div>
                 ) : (
                   <DataTable<CrmRow>
                     key={kind}
@@ -1236,8 +1247,8 @@ function CrmWorkspace({
           onOpen={open}
           onAdd={add}
           mutationDisabled={loading || !!error}
-          onSave={async (draft) => {
-            await saveCrmRecord(editor.kind, draft, data, editor.row);
+          onSave={async (draft, original) => {
+            await saveCrmRecord(editor.kind, draft, data, original);
             returnToRecord();
             toast.success("Record saved");
             await load();
@@ -1280,11 +1291,11 @@ function CrmWorkspace({
           onSaved={load}
         />
       )}
-      {(kind === "companies" || kind === "contacts") && (
+      {kind && (
         <CustomFieldsManager
           open={fieldsOpen}
           onOpenChange={setFieldsOpen}
-          module={kind === "companies" ? "customers" : "contacts"}
+          module={crmCustomModule(kind)}
         />
       )}
       {kind && (

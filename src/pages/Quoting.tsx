@@ -1214,7 +1214,7 @@ export default function Quoting() {
                     </button>
                   }
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
                     <div className="space-y-3">
                       <Field label="Customer">
                         <div className="flex gap-2">
@@ -1265,7 +1265,7 @@ export default function Quoting() {
                           onChange={(e) => set("customer_address", e.target.value)}
                         />
                       </Field>
-                      <Field label="Customer Email / TRN">
+                      <Field label={`Customer Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
                         <div className="grid grid-cols-2 gap-2">
                           <input aria-label="Customer email"
                             className="input"
@@ -1416,7 +1416,7 @@ export default function Quoting() {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[960px] text-sm [&_th]:whitespace-nowrap">
                       <thead>
                         <tr className="text-left text-xs font-semibold text-brand-500">
                           <th className="py-2 pr-2 w-6">#</th>
@@ -1739,7 +1739,7 @@ export default function Quoting() {
                       is a yes/no first and a rate second, because "do I charge
                       VAT on this" is the question a user actually has. */}
                   <div className="mt-4 max-w-xs">
-                    <p className="text-xs font-semibold text-brand-500 mb-1.5">Apply VAT</p>
+                    <p className="text-xs font-semibold text-brand-500 mb-1.5">Apply {taxRegimeFor(form.currency, form.tax_country_code).taxLabel}</p>
                     <div className="flex rounded-xl bg-brand-50 p-0.5">
                       {(
                         [

@@ -85,6 +85,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); setCacheOrg(null); setDisplayCurrency("AED"); vi.restoreAllMocks(); });
 
 describe("purchase invoice parties", () => {
+  it("keeps draft edits across editor sections and saves the edited line items", async () => {
+    const view = await openPurchase();
+    fireEvent.change(view.getByLabelText("Supplier name"), { target: { value: "Draft supplier" } });
+    fireEvent.click(view.getByRole("button", { name: "Continue to items →" }));
+    expect(view.getByRole("tabpanel")).toHaveAccessibleName("Items 1");
+    fireEvent.change(view.getByLabelText("Quantity for line 1"), { target: { value: "3" } });
+    fireEvent.click(view.getByRole("button", { name: "Finishing touches →" }));
+    expect(view.getByRole("tabpanel")).toHaveAccessibleName("Finishing touches");
+    fireEvent.mouseDown(view.getByRole("tab", { name: "Details" }), { button: 0, ctrlKey: false });
+    expect(view.getByLabelText("Supplier name")).toHaveValue("Draft supplier");
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(billing.saveDoc).toHaveBeenCalledWith(expect.objectContaining({
+      customer_name: "Draft supplier",
+      items: [expect.objectContaining({ description: "Office supplies", qty: 3, unit_price: 100 })],
+    })));
+  });
+
   it("uses company currency for new invoices without relabelling saved invoices", async () => {
     setDisplayCurrency("USD");
     vi.mocked(billing.getCompany).mockResolvedValue({ name: "Indian company", currency: "INR", country_code: "IN", default_template: "classic" } as CompanyProfile);
@@ -92,9 +109,13 @@ describe("purchase invoice parties", () => {
     await view.findByText("PINV-PARTY");
     fireEvent.click(view.getByRole("button", {name: "New purchase invoice"}));
     expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
+    expect(view.getByText("Supplier Email / GSTIN", {selector: "label"})).toBeVisible();
+    expect(view.getByLabelText("Supplier State / Union territory").tagName).toBe("INPUT");
+    expect(view.queryByLabelText("Supplier Emirate")).toBeNull();
     view.unmount();
     const existing = await openPurchase();
     expect(existing.getByLabelText("Currency")).toHaveTextContent("AED");
+    expect(existing.getByText("Supplier Email / TRN", {selector: "label"})).toBeVisible();
     expect(billing.saveDoc).not.toHaveBeenCalled();
   });
 

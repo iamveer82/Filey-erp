@@ -46,6 +46,7 @@ export interface BuildStatementInput {
   kind: StatementPartyKind;
   company: StatementData["company"];
   party: {
+    country_code?: string;
     name: string;
     contact?: string;
     trn?: string;
@@ -202,6 +203,7 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
     data: {
       company: input.company,
       party: {
+        country_code: input.party.country_code,
         kind,
         name: input.party.name,
         contact: input.party.contact,

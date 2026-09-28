@@ -21,7 +21,7 @@
 
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { rateLimit, logAction, extractUserId } from "../_shared/rateLimit.ts";
+import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",

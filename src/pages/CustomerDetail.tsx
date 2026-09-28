@@ -1,4 +1,6 @@
 import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
+import { taxRegimeFor } from "../lib/taxRegimes";
+import { companyCountry, companyPhoneHint, customerPhoneE164 } from "../lib/companyCountry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -86,16 +88,6 @@ import {
   type SalesJournal,
 } from "../components/statements/buildSalesJournal";
 import { SalesJournalTemplate } from "../components/statements/SalesJournalTemplate";
-
-// Local re-export so the edit form doesn't need a separate import (same
-// helper as the Customers page — keeps phone_e164 in sync for OTP/SMS).
-const toE164Local = (raw: string): string | null => {
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return null;
-  if (digits.startsWith("971")) return "+" + digits;
-  if (digits.startsWith("0") && digits.length === 10) return "+971" + digits.slice(1);
-  return null;
-};
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -382,6 +374,7 @@ export default function CustomerDetail() {
     return buildStatement({
       kind: "customer",
       company: {
+        country_code: company?.country_code,
         name: company?.name || "Company",
         address:
           [company?.address, company?.city].filter(Boolean).join("\n") ||
@@ -391,6 +384,7 @@ export default function CustomerDetail() {
         phone: company?.phone || undefined,
       },
       party: {
+        country_code: customer?.country_code,
         name: display || "Customer",
         contact:
           customer && customer.company && customer.company !== customer.name
@@ -771,7 +765,7 @@ export default function CustomerDetail() {
                 {display || "—"}
               </div>
               <div className="text-[11.5px] text-muted-foreground truncate">
-                TRN {customer?.trn || "—"}
+                {taxRegimeFor(company?.currency, customer?.country_code || company?.country_code).trnLabel} {customer?.trn || "—"}
               </div>
             </div>
           </div>
@@ -847,7 +841,7 @@ export default function CustomerDetail() {
           </div>
           <Info icon={Mail} label="Email" value={customer?.email || "—"} />
           <Info icon={Phone} label="Phone" value={customer?.phone || "—"} />
-          <Info icon={ShieldCheck} label="TRN" value={customer?.trn || "—"} />
+          <Info icon={ShieldCheck} label={taxRegimeFor(company?.currency, customer?.country_code || company?.country_code).trnLabel} value={customer?.trn || "—"} />
           <Info icon={MapPin} label="Address" value={customer?.address || "—"} />
           <div className="mt-4">
             <div className="text-[12px] text-muted-foreground mb-1">
@@ -1034,7 +1028,7 @@ export default function CustomerDetail() {
                 <div className="h-10 w-10 rounded-lg bg-neutral-900 grid place-items-center text-white text-[11px] font-bold">J</div>
                 <div>
                   <div className="text-[13px] font-medium text-foreground">Sales & Collections Journal</div>
-                  <div className="text-[11.5px] text-muted-foreground">Itemised invoice lines with VAT, qty, rate & payments, DUNE-style.</div>
+                  <div className="text-[11.5px] text-muted-foreground">Itemised invoice lines with tax, quantity, rate and payments.</div>
                 </div>
               </div>
             )}
@@ -1052,7 +1046,7 @@ export default function CustomerDetail() {
                   Sales & Collections Journal
                 </div>
                 <div className="text-[12.5px] text-muted-foreground mt-1 px-3">
-                  Itemised invoice lines with VAT, qty, rate & payments
+                  Itemised invoice lines with tax, quantity, rate and payments
                 </div>
                 <div className="mt-3 text-[11.5px] text-muted-foreground">
                   Includes: {journalData?.transactions.length ?? 0} entries ·
@@ -1462,6 +1456,8 @@ export default function CustomerDetail() {
       )}
 
       <EditCustomerModal
+        country={customer?.country_code || (company ? companyCountry(company) : "")}
+        taxIdLabel={taxRegimeFor(company?.currency, customer?.country_code || company?.country_code).trnLabel}
         customer={customer ?? null}
         open={editOpen}
         onClose={() => setEditOpen(false)}
@@ -1477,11 +1473,15 @@ export default function CustomerDetail() {
 /** Compact edit form for the header "Edit" action — same save path
  *  (crm.updateCustomer) and payload idioms as the Customers page modal. */
 function EditCustomerModal({
+  country,
+  taxIdLabel,
   customer,
   open,
   onClose,
   onSaved,
 }: {
+  country: string;
+  taxIdLabel: string;
   customer: CrmCustomer | null;
   open: boolean;
   onClose: () => void;
@@ -1547,7 +1547,7 @@ function EditCustomerModal({
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
         opening_balance:
           f.opening_balance.trim() === "" ? undefined : Number(f.opening_balance),
-        phone_e164: toE164Local(f.phone) ?? undefined,
+        phone_e164: customerPhoneE164(f.phone, country) ?? undefined,
       });
       toast.success("Customer updated.");
       onSaved();
@@ -1591,10 +1591,12 @@ function EditCustomerModal({
           <input
             className="input"
             value={f.phone}
+            type="tel"
+            placeholder={companyPhoneHint(country)}
             onChange={(e) => setF({ ...f, phone: e.target.value })}
           />
         </Field>
-        <Field label="TRN">
+        <Field label={taxIdLabel}>
           <input
             className="input"
             value={f.trn}

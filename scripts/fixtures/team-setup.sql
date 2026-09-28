@@ -9,6 +9,7 @@ insert into auth.users values
  ('00000000-0000-0000-0000-000000000004','unverified@example.invalid',null);
 create table public.profiles(id uuid primary key,org_id text,email text,name text,updated_at timestamptz default now());
 insert into profiles select id,case when email like 'owner%' then '10000000-0000-0000-0000-000000000001' else '10000000-0000-0000-0000-000000000002' end,email,split_part(email,'@',1),now() from auth.users;
+alter table public.profiles add column avatar text;
 create table public.organizations(id uuid primary key default gen_random_uuid(),name text,owner_id uuid default auth.uid(),created_at timestamptz default now());
 insert into organizations values
  ('10000000-0000-0000-0000-000000000001','Team','00000000-0000-0000-0000-000000000001',now()),

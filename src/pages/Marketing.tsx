@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { Link, useNavigate } from "react-router-dom";
 import { Copy, Download, Globe, Sparkles, UserSearch } from "lucide-react";
 
@@ -425,7 +426,7 @@ function EnrichModal({
           <Row label="Found on" value={details.source} />
           <Row label="Emails" value={details.emails.join(", ") || "—"} />
           <Row label="Phones" value={details.phones.join(", ") || "—"} />
-          <Row label="TRN" value={details.trn || "—"} />
+          <Row label={taxRegimeFor(undefined, c.country_code).trnLabel} value={details.trn || "—"} />
           <Row label="Address" value={details.address || "—"} />
           {fields.length === 0 && (
             <p className="pt-2 text-[12.5px] text-brand-500">

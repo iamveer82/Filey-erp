@@ -21,8 +21,8 @@ it("reviews configured credits and fee before making exactly one checkout reques
   vi.mocked(getCreditStatus).mockResolvedValue(status);
   vi.mocked(buyAiCredits).mockResolvedValue("browser");
   render(<HashRouter><AiCreditsPanel /></HashRouter>);
-  fireEvent.click(await screen.findByRole("button", { name: /Paper · Pay/ }));
-  await screen.findByRole("heading", { name: "Add Paper" });
+  fireEvent.click(await screen.findByRole("button", { name: /Coin · Pay/ }));
+  await screen.findByRole("heading", { name: "Add Coin" });
   expect(screen.getByText("$5.50 USD")).toBeTruthy();
   expect(screen.getByText("$0.50")).toBeTruthy();
   expect(buyAiCredits).not.toHaveBeenCalled();
@@ -37,21 +37,21 @@ it("reviews configured credits and fee before making exactly one checkout reques
   fireEvent.focus(window);
   await screen.findByText(/Payment confirmed\./);
   fireEvent.click(screen.getByRole("button", { name: "Back to Filey" }));
-  await screen.findByRole("heading", { name: "Paper wallet" });
-  expect(screen.getAllByText("5 Paper").length).toBeGreaterThan(0);
-  expect(screen.getByText(/\$5\.00 USD · 1 Paper = \$1/)).toBeTruthy();
+  await screen.findByRole("heading", { name: "Coin wallet" });
+  expect(screen.getAllByText("5 Coin").length).toBeGreaterThan(0);
+  expect(screen.getByText(/\$5\.00 USD · 1 Coin = \$1/)).toBeTruthy();
   expect(buyAiCredits).toHaveBeenCalledOnce();
 });
 it("explains unavailable top-ups and never enables checkout through a crafted URL", async () => {
   window.history.replaceState(null, "", "/#/settings?section=credits&pack=pdt_test");
   vi.mocked(getCreditStatus).mockResolvedValue({ ...status, topups_enabled: false });
   render(<HashRouter><AiCreditsPanel /></HashRouter>);
-  await screen.findByText(/Paper purchases are not available yet/);
+  await screen.findByText(/Coin purchases are not available yet/);
   expect(screen.queryByRole("button", { name: "Continue to payment" })).toBeNull();
   expect(buyAiCredits).not.toHaveBeenCalled();
 });
 
-it("searches named paid and free model rates while preserving usage history", async () => {
+it("searches paid model rates while hiding free models and preserving usage history", async () => {
   vi.mocked(getCreditStatus).mockResolvedValue({ ...status,
     history: [{ id: 1, kind: "usage", amount_micros: -1, description: "Private paid model", created_at: "2026-09-24T00:00:00Z" }],
     models: [
@@ -61,21 +61,22 @@ it("searches named paid and free model rates while preserving usage history", as
   render(<HashRouter><AiCreditsPanel /></HashRouter>);
   const table = await screen.findByRole("table", { name: "AI model rates" });
   expect(within(table).getByText("Private paid model")).toBeInTheDocument();
-  expect(within(table).getByText("Up to 1 Paper")).toBeInTheDocument();
-  expect(within(table).getByText("Up to 2 Paper")).toBeInTheDocument();
-  expect(within(table).getByText("Up to 0.0125 Paper / input image")).toBeInTheDocument();
+  expect(within(table).getByText("Up to 1 Coin")).toBeInTheDocument();
+  expect(within(table).getByText("Up to 2 Coin")).toBeInTheDocument();
+  expect(within(table).getByText("Up to 0.0125 Coin / input image")).toBeInTheDocument();
   expect(screen.getByText(/You pay actual usage; these rates are spending estimates/)).toBeInTheDocument();
-  expect(within(table).getByText("Free model")).toBeInTheDocument();
-  expect(within(table).getAllByText("Free")).toHaveLength(2);
+  expect(within(table).queryByText("Free model")).toBeNull();
+  expect(within(table).queryByText("Free")).toBeNull();
   expect(screen.getByTitle("Private paid model")).toBeInTheDocument();
-  expect(screen.getByText("-0.000001 Paper")).toBeInTheDocument();
+  expect(screen.getByText("-0.000001 Coin")).toBeInTheDocument();
   const search = screen.getByRole("searchbox", { name: "Search model rates" });
   fireEvent.change(search, { target: { value: "provider/paid" } });
   expect(within(table).queryByText("Free model")).toBeNull();
-  expect(screen.getByText(/1 of 2 models/)).toBeInTheDocument();
+  expect(screen.getByText(/1 of 1 models/)).toBeInTheDocument();
   fireEvent.change(search, { target: { value: "free" } });
-  expect(within(table).queryByText("Private paid model")).toBeNull();
-  expect(within(table).getByText("Free model")).toBeInTheDocument();
+  expect(screen.queryByRole("table", { name: "AI model rates" })).toBeNull();
+  expect(screen.queryByText("Free model")).toBeNull();
+  expect(screen.getByText(/No matching models/)).toBeInTheDocument();
   fireEvent.change(search, { target: { value: "missing" } });
   expect(screen.queryByRole("table", { name: "AI model rates" })).toBeNull();
   expect(screen.getByText(/No matching models/)).toBeInTheDocument();
@@ -89,9 +90,9 @@ it("reviews an exact custom amount and fee before opening checkout once", async 
   const input = await screen.findByRole("textbox", { name: "Custom amount · USD" });
   fireEvent.change(input, { target: { value: "12,51" } });
   fireEvent.click(screen.getByRole("button", { name: "Review top-up" }));
-  await screen.findByRole("heading", { name: "Add Paper" });
+  await screen.findByRole("heading", { name: "Add Coin" });
   expect(screen.getByText("$12.51")).toBeTruthy();
-  expect(screen.getByText("12.51 Paper")).toBeTruthy();
+  expect(screen.getByText("12.51 Coin")).toBeTruthy();
   expect(screen.getByText("$0.50")).toBeTruthy();
   expect(screen.getByText("$13.01 USD")).toBeTruthy();
   expect(buyAiCredits).not.toHaveBeenCalled();
@@ -130,7 +131,7 @@ it.each([
   window.history.replaceState(null, "", `/#/settings?section=credits&amount_cents=${amount}`);
   vi.mocked(getCreditStatus).mockResolvedValue(configured);
   render(<HashRouter><AiCreditsPanel /></HashRouter>);
-  await screen.findByRole("heading", { name: "Add Paper" });
+  await screen.findByRole("heading", { name: "Add Coin" });
   expect(screen.queryByRole("button", { name: "Continue to payment" })).toBeNull();
   expect(buyAiCredits).not.toHaveBeenCalled();
 });

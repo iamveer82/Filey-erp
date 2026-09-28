@@ -5,6 +5,7 @@ import Settings from "../settings";
 afterEach(cleanup);
 vi.mock("../settings/BillingPanel", () => ({ default: () => <h2>Plan and device management</h2> }));
 vi.mock("../settings/PlanDevices", () => ({ default: () => <h2>Signed-in devices</h2> }));
+vi.mock("../settings/UsersRoles", () => ({ default: () => <h2>Team workspace</h2> }));
 
 vi.mock("../settings/CompanyDetails", () => ({
   default: () => <input aria-label="Unsaved company name" defaultValue="" />,
@@ -25,6 +26,13 @@ function LocationControls() {
     <button onClick={() => navigate("/settings")}>Settings home</button>
   </>;
 }
+
+it("opens Teams from old invitation links without losing the invitation", async () => {
+  render(<MemoryRouter initialEntries={["/settings?section=users&invite=invite-1"]}><Settings /><LocationControls /></MemoryRouter>);
+  await screen.findByText("Team workspace");
+  expect(screen.getByRole("tab", {name:"Teams"})).toHaveAttribute("aria-selected","true");
+  expect(screen.getByTestId("location")).toHaveTextContent("section=teams&invite=invite-1");
+});
 
 it("keeps drafts across horizontal tabs and follows keyboard and URL navigation", async () => {
   render(<MemoryRouter initialEntries={["/settings?section=company"]}>
@@ -51,7 +59,7 @@ it("routes old desktop license links into billing and makes the wallet discovera
   render(<MemoryRouter initialEntries={["/settings?section=license&checkout=success"]}><Settings /><LocationControls /></MemoryRouter>);
   await screen.findByText("Plan and device management");
   expect(screen.queryByRole("tab", { name: "Desktop License" })).toBeNull();
-  expect(screen.getByRole("tab", { name: "Paper wallet" })).toBeVisible();
+  expect(screen.getByRole("tab", { name: "Coin wallet" })).toBeVisible();
   expect(screen.getByTestId("location")).toHaveTextContent("section=billing&checkout=success&plan=ultra");
 });
 

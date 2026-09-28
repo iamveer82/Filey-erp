@@ -555,6 +555,7 @@ export function DataTable<T>({
                   <input
                     type="checkbox"
                     aria-label="Select all"
+                    ref={(input) => { if (input) input.indeterminate = selectedRows.length > 0 && !allChecked; }}
                     disabled={running}
                     checked={allChecked}
                     onChange={toggleAll}
@@ -603,29 +604,6 @@ export function DataTable<T>({
                   ))}
                 </tr>
               ))
-            ) : rows.length === 0 ? (
-              <tr>
-                <td className="td py-14" colSpan={colCount}>
-                  <div className="flex flex-col items-center gap-3 text-center px-4">
-                    <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
-                      <Inbox size={24} className="text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {empty ?? "Nothing here yet"}
-                      </p>
-                      {/* A custom message means the list was filtered, not
-                          empty — the fixed "they'll show up here" copy would
-                          contradict it. */}
-                      {!empty && (
-                        <p className="text-[12.5px] text-muted-foreground mt-1 max-w-xs">
-                          When you have records, they'll show up right here.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </td>
-              </tr>
             ) : (
               paged.map((row, i) => {
                 const k = rowKey ? keyOf(row) : i;
@@ -730,6 +708,21 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
+      {!showSkeleton && rows.length === 0 && (
+        <div className="flex flex-col items-center gap-3 px-4 py-14 text-center" role="status">
+          <div className="grid h-12 w-12 place-items-center rounded-xl bg-muted">
+            <Inbox size={24} className="text-muted-foreground" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">{empty ?? "Nothing here yet"}</p>
+            {!empty && (
+              <p className="mt-1 max-w-xs text-[12.5px] text-muted-foreground">
+                When you have records, they'll show up right here.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
       {pageSize && sorted.length > pageSize && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-2.5">
           <span className="text-[12.5px] text-muted-foreground tabular-nums">
@@ -844,7 +837,7 @@ export function FormField({
     labelRef.current.htmlFor = control.id;
   });
   return (
-    <div ref={fieldRef} className={cn("flex flex-col", className)}>
+    <div ref={fieldRef} className={cn("flex min-w-0 flex-col", className)}>
       <label ref={labelRef} className="label" htmlFor={htmlFor}>
         {label}
         {required && <span className="text-danger ml-0.5">*</span>}

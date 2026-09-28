@@ -1,5 +1,6 @@
 import { computeBalanceSheet, computeVatReturn, isPostedStatus, type InvoiceDocSummary, type Product } from "../../lib/api";
 import { supplierBillBalances, type ReportsData } from "./useReportsData";
+import { isUaeRegime, taxRegimeFor } from "../../lib/taxRegimes";
 
 export const lowStockRows = (products:Product[]) => products.filter(p => Number(p.quantity || 0) <= Number(p.reorder_level || 0)).sort((a,b)=>Number(a.quantity||0)-Number(b.quantity||0));
 export const customerBalanceRows = (invoices:InvoiceDocSummary[]) => supplierBillBalances(invoices).map(row=>({name:row.name,outstanding:row.open,invoiceCount:row.billCount})).slice(0,10);
@@ -34,7 +35,10 @@ export function reportExportRows(tab:ExportReport,data:ReportsData,today:string)
       list.forEach(row=>add(`Balance Sheet · ${section}`,row.name||"—",row.amount));add("Balance Sheet",`Total ${section}`,total);
     }
     const vat=computeVatReturn(data.txns,5,undefined,undefined,data.invoices);
-    for(const [label,key] of [["Standard-rated supplies","standardSupplyNet"],["Output VAT","outputVat"],["Zero-rated supplies","zeroRatedNet"],["Exempt supplies","exemptNet"],["Input VAT","inputVat"],["Net VAT due","netVatDue"]] as const) add("VAT working summary",label,vat[key]);
+    const uae = data.company ? isUaeRegime(data.company.currency, data.company.country_code) : true;
+    const tax = taxRegimeFor(data.company?.currency || "AED", data.company?.country_code).taxLabel;
+    if(uae) add("VAT working summary","Standard-rated supplies",vat.standardSupplyNet);
+    for(const [label,key] of [[`Output ${tax}`,"outputVat"],["Zero-rated supplies","zeroRatedNet"],["Exempt supplies","exemptNet"],[`Input ${tax}`,"inputVat"],[uae ? "Net VAT due" : `Net ${tax} balance`,"netVatDue"]] as const) add(uae ? "VAT working summary" : `${tax} account summary`,label,vat[key]);
     return rows;
   }
   return [

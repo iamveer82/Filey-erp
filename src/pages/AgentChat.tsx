@@ -27,7 +27,7 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
-import PaperMark from "../components/PaperMark";
+import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
 import { VideoJobCard } from "../components/AgentVideoPanel";
@@ -733,8 +733,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               </h1>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-              <Link to="/settings?section=credits" className="btn-ghost !border-transparent !bg-transparent !px-3 hover:!bg-hover" aria-label="Add Paper to AI wallet" title="Paper wallet and top-ups">
-                <PaperMark /><span className="filey-chat-credit-label">Add Paper</span>
+              <Link to="/settings?section=credits" className="btn-ghost !border-transparent !bg-transparent !px-3 hover:!bg-hover" aria-label="Add Coin to AI wallet" title="Coin wallet and top-ups">
+                <CoinMark /><span className="filey-chat-credit-label">Add Coin</span>
               </Link>
               <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
                 className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">

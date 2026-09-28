@@ -61,7 +61,7 @@ describe.each(ledgers)("live $name", ({ Page, key, setting, row, text, add, fiel
     const view = wrap(<Page />);
     await waitFor(() => expect(mock.settings).toHaveBeenCalledOnce());
     fireEvent.click(view.getByRole("button", { name: add }));
-    fireEvent.change(view.getByRole("textbox", { name: field }), { target: { value: "Unsaved draft" } });
+    fireEvent.change(await view.findByRole("textbox", { name: field }), { target: { value: "Unsaved draft" } });
     mock.settings.mockResolvedValue([{ key: setting, value: JSON.stringify([row]) }]);
     act(() => notifyDataChanged());
     expect(await view.findByText(text)).toBeTruthy();
@@ -75,7 +75,7 @@ describe.each(ledgers)("live $name", ({ Page, key, setting, row, text, add, fiel
     const view=wrap(<Page />);
     await waitFor(()=>expect(mock.settings).toHaveBeenCalledOnce());
     fireEvent.click(view.getByRole("button",{name:add}));
-    fireEvent.change(view.getByRole("textbox",{name:field}),{target:{value:"Unsaved fixture"}});
+    fireEvent.change(await view.findByRole("textbox",{name:field}),{target:{value:"Unsaved fixture"}});
     if (setting==="bank_accounts") fireEvent.change(view.getByRole("textbox",{name:"Account Name *"}),{target:{value:"Operating"}});
     else {
       fireEvent.change(view.getByRole("textbox",{name:"Cheque Number *"}),{target:{value:"FIXTURE-1"}});

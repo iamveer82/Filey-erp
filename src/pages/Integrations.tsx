@@ -338,7 +338,7 @@ export default function Integrations() {
       {
         key: "leads",
         name: "Lead enrichment",
-        desc: "Fill in a company's contact details and TRN from their own website, and rank leads from your trading history.",
+        desc: "Fill in a company's contact details and tax ID from their own website, and rank leads from your trading history.",
         category: "CRM",
         icon: <UserSearch className="h-5 w-5" />,
         to: "/integrations/lead-enrichment",
@@ -485,7 +485,7 @@ export default function Integrations() {
             <div className="flex-1 min-w-48">
               <h2 className="font-semibold text-sm">AI models</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Set up local Ollama or LM Studio, OpenRouter free models, or another
+                Set up local Ollama or LM Studio, OpenRouter, or another
                 compatible provider.
               </p>
             </div>

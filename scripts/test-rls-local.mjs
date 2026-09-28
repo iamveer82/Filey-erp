@@ -37,6 +37,13 @@ try {
   const output = run('psql', ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'],
     sql('scripts/fixtures/rls-setup.sql') + '\n' + migration + '\n' + migration + '\n' + syncMigration + '\n' + syncMigration + '\n' + sql('scripts/fixtures/rls-checks.sql') + '\n' + sql('scripts/fixtures/sync-checks.sql') + '\n' + sql('scripts/fixtures/module-checks.sql') + '\n' + moduleMigration + '\n' + moduleMigration + '\n' + sql('scripts/fixtures/module-assertions.sql'));
   console.log(output.trim());
+  const customFieldsMigration = sql('supabase/2026-09-28-crm-custom-fields.sql');
+  const crmArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+  run('psql', crmArgs, customFieldsMigration + '\n' + customFieldsMigration);
+  assert.equal(run('psql', [...crmArgs, '-tAc', "select count(*) from information_schema.columns where table_schema='public' and table_name in ('crm_leads','crm_opportunities','crm_tasks','crm_notes','crm_activities') and column_name='custom_fields' and data_type='jsonb'"]).trim(), '5');
+  run('psql', crmArgs, "update crm_tasks set custom_fields='{\"region\":\"North\"}' where id=1;\n" + customFieldsMigration);
+  assert.equal(run('psql', [...crmArgs, '-tAc', "select custom_fields->>'region' from crm_tasks where id=1"]).trim(), 'North');
+  console.log('PASS: CRM custom-field migration is additive, repeatable and preserves saved values.');
   console.log(run('psql', ['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-X','-q','-v','ON_ERROR_STOP=1'],
     sql('supabase/2026-09-22-batched-sync.sql')+'\n'+sql('supabase/2026-09-22-batched-sync.sql')+'\n'+sql('scripts/fixtures/sync-batch-checks.sql')).trim());
   const manifestMigration = sql('supabase/2026-09-20-sync-manifest.sql');
@@ -60,6 +67,17 @@ try {
   assert.equal(run('psql', [...basicArgs, '-tAc', "select used from invoice_monthly_usage where org_id='10000000-0000-0000-0000-000000000006'"]).trim(), '5');
   console.log('PASS: eight concurrent creations compete for one slot; exactly one succeeds.');
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
+  run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','device_limits']);
+  const deviceArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','device_limits','-X','-q','-v','ON_ERROR_STOP=1'];
+  const deviceMigration=sql('supabase/2026-09-28-cloud-device-limit.sql');
+  console.log(run('psql',deviceArgs,sql('scripts/fixtures/team-setup.sql')+'\n'+sql('supabase/2026-07-08-org-devices.sql')+'\n'
+    +"create function auth.jwt() returns jsonb language sql stable as $$ select jsonb_build_object('session_id',coalesce(nullif(current_setting('test.session',true),''),'session-a')) $$;\n"
+    +"create table auth.sessions(id text primary key,user_id uuid,created_at timestamptz);\n"
+    +deviceMigration+'\n'+deviceMigration+'\n'+sql('scripts/fixtures/device-limit-assertions.sql')).trim());
+  const deviceRaces=await Promise.all(Array.from({length:5},(_,i)=>promisify(execFile)(exe('psql'),[...deviceArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000001'; select public.register_device('race-${i}')->>'ok';`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(deviceRaces.filter(result=>result.stdout.trim()==='true').length,1);
+  console.log('PASS: concurrent device registrations cannot exceed 20 slots.');
   console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql')+'\n'
     +sql('supabase/2026-09-19-billing-integrity.sql')+'\n'+sql('scripts/fixtures/billing-lifecycle-assertions.sql')).trim());
   const refundMigration=sql('supabase/2026-09-20-subscription-refunds.sql');
@@ -75,10 +93,32 @@ try {
   const teamMigration = sql('supabase/2026-09-20-team-workspaces.sql');
   console.log(run('psql', teamArgs, sql('scripts/fixtures/team-setup.sql') + '\n' + migration + '\n' + moduleMigration + '\n'
     + teamMigration + '\n' + teamMigration + '\n' + sql('scripts/fixtures/team-assertions.sql')).trim());
+  const avatarMigration = sql('supabase/2026-09-28-member-avatars.sql');
+  console.log(run('psql', teamArgs, avatarMigration + '\n' + avatarMigration + '\n' + sql('scripts/fixtures/member-avatar-assertions.sql')).trim());
   console.log(run('psql',teamArgs,sql('supabase/2026-09-20-profile-insert-scope.sql')+'\n'
     +sql('scripts/fixtures/profile-scope-assertions.sql')).trim());
   const rateMigration = sql('supabase/2026-09-20-edge-rate-limits.sql');
   console.log(run('psql',teamArgs,rateMigration+'\n'+rateMigration+'\n'+sql('scripts/fixtures/rate-limit-assertions.sql')).trim());
+  const teamCodesMigration = sql('supabase/2026-09-28-team-codes.sql');
+  console.log(run('psql',teamArgs,teamCodesMigration+'\n'+teamCodesMigration+'\n'+sql('scripts/fixtures/team-code-assertions.sql')).trim());
+  run('psql',teamArgs,"insert into auth.users values('00000000-0000-0000-0000-000000000006','race@example.invalid',now()); insert into profiles(id,org_id,name) values('00000000-0000-0000-0000-000000000006','default','Race');");
+  const joinCode = run('psql',[...teamArgs,'-tAc',"select code from team_invite_codes where user_id='00000000-0000-0000-0000-000000000001'"]).trim();
+  assert.match(joinCode,/^[A-Z0-9]{6}$/);
+  const joinRaces = await Promise.all(Array.from({length:5},()=>promisify(execFile)(exe('psql'),[...teamArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000006'; select filey_request_team_join('${joinCode}')->>'id';`],{encoding:'utf8',windowsHide:true})));
+  const requestId=joinRaces[0].stdout.trim();
+  assert.match(requestId,/^[0-9a-f-]{36}$/);
+  assert(joinRaces.every(result=>result.stdout.trim()===requestId),'Concurrent requests must reuse one pending request');
+  const approvalRaces = await Promise.allSettled(Array.from({length:5},()=>promisify(execFile)(exe('psql'),[...teamArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000001'; select filey_review_team_join('${requestId}','10000000-0000-0000-0000-000000000001',true);`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(approvalRaces.filter(result=>result.status==='fulfilled').length,1);
+  for(const result of approvalRaces) if(result.status==='rejected') assert.match(result.reason.stderr,/no longer waiting for approval/);
+  console.log('PASS: concurrent code requests reuse one request and concurrent approvals grant membership exactly once.');
+  run('createdb',['-h','127.0.0.1','-p',String(port),'-U','postgres','team_media']);
+  const mediaArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','team_media','-X','-q','-v','ON_ERROR_STOP=1'];
+  const mediaMigration=sql('supabase/2026-09-28-team-attachments.sql');
+  console.log(run('psql',mediaArgs,sql('scripts/fixtures/team-setup.sql')+'\n'+migration+'\n'+moduleMigration+'\n'+teamMigration+'\n'
+    +sql('scripts/fixtures/team-media-setup.sql')+'\n'+mediaMigration+'\n'+mediaMigration+'\n'+sql('scripts/fixtures/team-media-assertions.sql')).trim());
   const limitRace = await Promise.all(Array.from({length:12}, () =>
     promisify(execFile)(exe('psql'), [...teamArgs,'-tAc',
       "set role service_role; select public.filey_take_rate_limit('concurrent-account','race',3,3600);"],

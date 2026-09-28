@@ -1438,7 +1438,7 @@ function Editor({
 
             {/* 2 · PO Details */}
             <Step n={2} title="Purchase Order Details">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
                 <div className="space-y-3">
                   <Field label="Supplier">
                     <div className="flex gap-2">
@@ -1472,7 +1472,7 @@ function Editor({
                   <Field label="Supplier Name">
                     <input
                       className="input"
-                      placeholder="Emirates Steel Supplies LLC"
+                      placeholder="Supplier company name"
                       value={form.supplier_name}
                       onChange={(e) => set("supplier_name", e.target.value)}
                     />
@@ -1486,7 +1486,7 @@ function Editor({
                       onChange={(e) => set("supplier_address", e.target.value)}
                     />
                   </Field>
-                  <Field label="Supplier Email / TRN">
+                  <Field label={`Supplier Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
                     <div className="grid grid-cols-2 gap-2">
                       <input
                         className="input"
@@ -1605,7 +1605,7 @@ function Editor({
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[800px] text-sm [&_th]:whitespace-nowrap">
                   <thead>
                     <tr className="text-left text-xs font-semibold text-brand-500">
                       <th className="py-2 pr-2 w-6">#</th>
@@ -2371,7 +2371,7 @@ function SupplierQuickAdd({
             rows={2}
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="Dubai, UAE"
+            placeholder="City, country"
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">

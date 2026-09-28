@@ -354,7 +354,7 @@ export function folderOf(f: SavedFile): string {
 }
 
 /** Upload a user-selected file directly to My Files. */
-export async function uploadUserFile(file: File, tool?: string): Promise<string> {
+export async function uploadUserFile(file: File, tool?: string, folderId?: string | null): Promise<string> {
   const documentType = COMPANY_DOCUMENT_TYPES.find(t => t.key === tool);
   const documentMime = documentType ? validateDocumentUpload(file) : undefined;
   const uid = await userId();
@@ -371,6 +371,7 @@ export async function uploadUserFile(file: File, tool?: string): Promise<string>
     id,
     owner: uid,
     name: file.name,
+    folder_id: folderId ?? null,
     mime,
     size: bytes.length,
     storage_path: path,
@@ -472,15 +473,7 @@ export function useFiles() {
     error,
     refresh,
     upload: async (file: File, tool?: string, folderId?: string | null) => {
-      await uploadUserFile(file, tool);
-      // uploadUserFile lands the file at root; move it into the open folder.
-      if (folderId) {
-        const fresh = await listFiles();
-        const justAdded = fresh.find(
-          (x) => x.name === file.name && x.folderId === null
-        );
-        if (justAdded) await moveFile(justAdded.id, folderId);
-      }
+      await uploadUserFile(file, tool, folderId);
       await refresh();
     },
     remove: async (f: SavedFile) => {

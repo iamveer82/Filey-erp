@@ -2,7 +2,7 @@ import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout"
 import CountryTaxFields from "../../components/CountryTaxFields";
 import CompanyDocuments from "../../components/CompanyDocuments";
 import IndiaRegistrationFields, { loadIndiaRegistration, saveIndiaRegistration, registrationError, type IndiaRegistration } from "../../components/IndiaRegistrationFields";
-import { companyCountry, companyPhoneHint } from "../../lib/companyCountry";
+import { companyCountry, companyPhoneHint, subdivisionLabel } from "../../lib/companyCountry";
 import { taxRegimeFor, taxIdError, isUaeRegime } from "../../lib/taxRegimes";
 import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
@@ -350,6 +350,7 @@ export default function CompanyDetails() {
               }}
             />
             <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
+              <FormField label="City">
               <input
                 className="input"
                 aria-label="City"
@@ -357,15 +358,17 @@ export default function CompanyDetails() {
                 value={c.city ?? ""}
                 onChange={(e) => set("city", e.target.value)}
               />
+              </FormField>
+              <FormField label={india ? "PIN code" : country === "US" ? "ZIP code" : "Postal code"}>
               <input
                 className="input"
-                aria-label={india ? "PIN code" : "Zip / Postal Code"}
                 placeholder={india ? "6-digit PIN code" : "Zip / Postal Code"}
                 inputMode={india ? "numeric" : "text"}
                 autoComplete="postal-code"
                 value={c.zip ?? ""}
                 onChange={(e) => set("zip", e.target.value)}
               />
+              </FormField>
             </div>
           </>
         </FormField>
@@ -421,7 +424,7 @@ export default function CompanyDetails() {
         </FormField>
       </SettingsSection>
       <SettingsSection
-        title="Tax Information"
+        title={`${regime.taxLabel} settings`}
         description="Choose your business country and defaults for new documents."
       >
         <CountryTaxFields
@@ -435,7 +438,7 @@ export default function CompanyDetails() {
         />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {" "}
-          <FormField label="Tax collection">
+          <FormField label={`${regime.taxLabel} collection`}>
             <SelectMenu
               value={c.tax_type === "None" ? "none" : "rates"}
               onChange={(v) => {
@@ -488,7 +491,7 @@ export default function CompanyDetails() {
             </FormField>
           )}
           </>}
-          <FormField label={uae ? "Emirate" : india ? "State / Union territory" : "State / Province"}>
+          <FormField label={subdivisionLabel(country)}>
             {uae ? (
               <SelectMenu
                 value={c.country_subdivision ?? ""}

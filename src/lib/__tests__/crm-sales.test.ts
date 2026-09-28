@@ -4,6 +4,13 @@ import { localClient } from "../localdb";
 import { dealQuoteContext, linkDealQuotation } from "../crmSales";
 beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); setCacheOrg("test", "owner"); });
 const draft = { number: "QT-001", status: "draft", template: "minimal", accent: "#111111", seller_name: "Seller", customer_name: "Customer", currency: "USD", fx_rate: 3.6725, notes: "Agreed scope", terms: "Net 30", tax_rate: 0, discount: 0, items: [{ product: "Consulting", qty: 1, rate: 120, tax: 0, discount: 0 }] } as never;
+it("keeps local quotation-to-invoice conversion free beyond five invoices", async () => {
+  for (let i = 1; i <= 6; i++) {
+    const quote = await quotes.saveDoc({ ...draft as object, number: `QT-FREE-${i}` } as never);
+    await quotes.convertToInvoice(quote);
+  }
+  expect(await billing.listDocs()).toHaveLength(6);
+});
 it("converts once under simultaneous requests, preserves currency and terms and produces no payment", async () => {
   const quote = await quotes.saveDoc(draft);
   await quotes.saveDoc({ ...draft as object, id: quote, fx_rate: null } as never);

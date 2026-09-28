@@ -13,7 +13,7 @@ import { supabase, isConfigured, createSignupClient } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { setCacheOrg } from "./api";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
-import { registerCloudDevice, entitlement, collectPurchases, clearEntitlementCache } from "./license";
+import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache } from "./license";
 import { mfaRequired } from "./mfa";
 import { pendingProfile, queueProfile } from "./profileSync";
 import {
@@ -426,12 +426,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, local]);
 
-  // Cloud device registry (5 per org): claim/refresh this device's slot on
+  // Cloud device registry (20 per workspace): claim/refresh this device's slot on
   // session start. Best-effort — a network blip must not lock the app.
   const [deviceLimitBlocked, setDeviceLimitBlocked] = useState(false);
   const retryDeviceRegistration = async () => {
     try {
       const r = await registerCloudDevice();
+      if (!r.ok && r.reason === "logged_out") await checkCloudDeviceLogout();
       setDeviceLimitBlocked(!r.ok && r.reason === "limit");
     } catch {
       /* keep previous state */
@@ -442,6 +443,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void retryDeviceRegistration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, profile?.org_id]);
+
+  useEffect(()=>{
+    if(!session?.user || local)return;
+    const check=()=>{void checkCloudDeviceLogout().catch(()=>{});};
+    const changed=(event:Event)=>{
+      const tables=(event as CustomEvent<{tables?:string[]}>).detail?.tables;
+      if(!tables || tables.includes('org_devices'))check();
+    };
+    window.addEventListener('focus',check);
+    window.addEventListener('online',check);
+    window.addEventListener('filey:cloud-change',changed);
+    return()=>{
+      window.removeEventListener('focus',check); window.removeEventListener('online',check);
+      window.removeEventListener('filey:cloud-change',changed);
+    };
+  },[session?.user?.id,profile?.org_id,local]);
 
   // Warm the tier cache (free/lite/pro) so render paths can read it
   // synchronously via currentTier(). Local mode resolves immediately.

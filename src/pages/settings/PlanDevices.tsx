@@ -13,6 +13,7 @@ import {
   listOrgDevices,
   releaseOrgDevice,
   verifyStoredLicense,
+  CLOUD_DEVICE_LIMIT,
   LITE_DEVICE_LIMIT,
   type OrgDevice,
 } from "../../lib/license";
@@ -89,14 +90,14 @@ export default function PlanDevices() {
   useEffect(() => {
     void load();
   }, [load, accountVersion]);
-  async function remove(name: string, work: () => Promise<void>) {
+  async function remove(name: string, work: () => Promise<void>, cloud = false) {
     const version = revision.current;
     if (
       !(await confirm({
-        title: `Remove ${name}?`,
+        title: `${cloud ? 'Log out' : 'Remove'} ${name}?`,
         message:
-          "This frees its plan slot. It does not delete the device’s records. Offline access already saved on another device may remain until it reconnects.",
-        confirmLabel: "Remove device",
+          cloud ? "This device will sign out when connected to Filey. Its saved records will stay on the device." : "This frees its plan slot. It does not delete the device’s records. Offline access already saved on another device may remain until it reconnects.",
+        confirmLabel: cloud ? "Log out device" : "Remove device",
         danger: true,
       }))
     )
@@ -199,7 +200,7 @@ export default function PlanDevices() {
             )}
             {devices.length > 0 && (
               <div>
-                <p className="text-sm font-medium">Workspace devices</p>
+                <p className="text-sm font-medium">Workspace devices · {devices.length} / {CLOUD_DEVICE_LIMIT}</p>
                 <ul className="divide-y divide-border">
                   {devices.map((d) => (
                     <li
@@ -218,11 +219,11 @@ export default function PlanDevices() {
                         disabled={busy}
                         onClick={() =>
                           void remove(d.device_name || "device", () =>
-                            releaseOrgDevice(d.id)
+                            releaseOrgDevice(d.id), true
                           )
                         }
                       >
-                        Remove
+                        Log out
                       </button>
                     </li>
                   ))}

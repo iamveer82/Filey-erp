@@ -27,12 +27,14 @@ it("recovers channel context after restart, resets it on /new, and preserves sea
 it("keeps personal settings per account while preserving them between local and cloud", () => {
   localStorage.setItem("filey.ai.persona", JSON.stringify({ userName: "Unknown previous user", role: "private role", orbColor: "#FFD600" }));
   expect(getPersona().userName).toBe("");
-  setPersona({ userName: "Alice", assistantName: "Atlas", role: "Accountant" });
+  setPersona({ userName: "Alice", assistantName: "Atlas", role: "Accountant", botShape: "nuage", botMotion: "orbit" });
   localStorage.setItem("filey_data_mode", "cloud");
   expect(getPersona().assistantName).toBe("Atlas");
+  expect(getPersona()).toMatchObject({ botShape: "nuage", botMotion: "orbit" });
   setCacheOrg("session-fixture", "bob");
   expect(getPersona().userName).toBe("");
   expect(getPersona().role).toBe("");
+  expect(getPersona()).toMatchObject({ botShape: "cercle", botMotion: "playful" });
   setCacheOrg(null);
   expect(() => setPersona({ userName: "Anonymous" })).toThrow("Sign in");
 });

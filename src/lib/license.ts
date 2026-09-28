@@ -193,9 +193,9 @@ export async function deactivateThisDevice(): Promise<void> {
   await deactivateDevice(await deviceId());
 }
 
-/* ---------------- cloud (Pro) device registry: 5 per org ---------------- */
+/* ---------------- cloud device registry: 20 per workspace ---------------- */
 
-export const CLOUD_DEVICE_LIMIT = 5;
+export const CLOUD_DEVICE_LIMIT = 20;
 
 export interface OrgDevice {
   id: string;
@@ -211,7 +211,7 @@ export type RegisterResult =
   | { ok: false; reason: "limit" | "unauthenticated" | "missing_fingerprint" | string };
 
 /** Register this device against the org (called on cloud session start).
- *  Refused with reason "limit" when the org already has 5 other devices. */
+ *  Refused with reason "limit" when the workspace is at CLOUD_DEVICE_LIMIT. */
 export async function registerCloudDevice(): Promise<RegisterResult> {
   if (!supabase) return { ok: false, reason: "not_configured" };
   const name =
@@ -228,18 +228,32 @@ export async function registerCloudDevice(): Promise<RegisterResult> {
 /** The org's registered devices (RLS-scoped to the member's org). */
 export async function listOrgDevices(): Promise<OrgDevice[]> {
   if (!supabase) return [];
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("org_devices")
     .select("*")
+    .is("revoked_at", null)
     .order("last_seen", { ascending: false });
+  if (error) throw new Error("Could not load your devices. Please try again.");
   return (data ?? []) as OrgDevice[];
 }
 
-/** Release an org device slot (own device, or any if org admin — RLS). */
+/** Log out an org device (own device, or any if org admin). */
 export async function releaseOrgDevice(id: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { error } = await supabase.from("org_devices").delete().eq("id", id);
+  const { error } = await supabase.rpc("filey_logout_device",{p_id:id});
   if (error) throw new Error(error.message);
+}
+
+export async function checkCloudDeviceLogout(): Promise<void> {
+  if (!supabase) return;
+  const {data:{session}}=await supabase.auth.getSession();
+  if(!session)return;
+  const {data,error}=await supabase.rpc("filey_device_logged_out",{p_fingerprint:await deviceId()});
+  if (!error && data===true) {
+    const {data:{session:current}}=await supabase.auth.getSession();
+    // A late check for a previous login must not sign out a newer account/session.
+    if(current?.access_token===session.access_token) await supabase.auth.signOut({scope:"local"});
+  }
 }
 
 /** Buy the one-time Freedom licence (Dodo Payments hosted checkout — Dodo is
@@ -291,10 +305,8 @@ export async function claimPurchasedLicense(
 
 export type Tier = "free" | "lite" | "pro";
 
-/** Free tier caps. Volume + branding only — never compliance/correctness.
- *  Cloud is included on Free; the paid tier is about volume and owning it
- *  outright, not about where the data lives. Mirror any change in
- *  supabase/2026-09-19-basic-web-access.sql or the server cap disagrees. */
+/** Hosted Basic quota only. Local invoices and edits have no monthly cap.
+ *  Keep the cloud quota aligned with 2026-09-19-basic-web-access.sql. */
 export const FREE_LIMITS = { invoicesPerMonth: 5 };
 
 /** Desktop (Lite) license device slots. */
@@ -481,26 +493,23 @@ export function offerUpgrade(reason: "invoices" | "emails" = "invoices"): void {
 export const isPlanLimitError = (e: unknown) =>
   /plan limit reached/i.test(e instanceof Error ? e.message : String(e));
 
-/** Basic-tier invoice cap: throws a friendly error when a NEW invoice would
- *  exceed this month's allowance. No-op unless licensing is enforced. */
+/** Hosted Basic creation quota. Local saves never count invoices, check a
+ *  paid entitlement or need a network connection. Edits do not call this. */
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
-  if (!ENFORCE_LICENSING) return;
-  // Basic has the same creation cap locally and on the web. Edits never call this.
+  if (isLocalMode() || !ENFORCE_LICENSING) return;
   if ((await entitlement()) !== "free") return;
   // Pro and Ultra-owner workspaces are uncapped. Historic free-cloud access
   // does not lift Basic's creation limit now that every plan includes the web.
   // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
-  if (!isLocalMode()) {
-    const { reason } = await cloudAccess();
-    if (reason === "paid") return;
-  }
+  const { reason } = await cloudAccess();
+  if (reason === "paid") return;
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth) {
     offerUpgrade("invoices");
     throw new Error(
-      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
+      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} cloud invoices this month). ` +
         `Editing existing invoices is unlimited. Pro is $5/month, or buy Ultra once for unlimited invoicing — Settings → Billing.`
     );
   }

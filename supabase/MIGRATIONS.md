@@ -178,3 +178,12 @@ Applied to `voyrjqgaypiylwskkwpr` on 25 September 2026. Read-back verified
 the recovery RPC, authenticated-only execution, private eligibility helper,
 and both owner-only unlinked-row policies. The recovery RPC was **not called**
 against customer data; the 12 legacy workspace settings remained in place.
+
+## CRM custom fields — 28 September 2026 (not deployed)
+
+Apply `2026-09-28-crm-custom-fields.sql` before releasing the expanded CRM field
+editor. Adds `custom_fields` JSONB to leads, opportunities, tasks, notes and
+activities; company/contact columns already exist. Definitions remain in scoped
+app settings. No permissions or record values are removed. The schema snapshot
+includes the same migration; disposable PostgreSQL tests apply it twice and
+verify stored values survive another application. Production remains on hold.

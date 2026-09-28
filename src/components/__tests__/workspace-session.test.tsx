@@ -45,6 +45,7 @@ vi.mock("../../lib/api", () => ({ setCacheOrg: vi.fn((org?: string | null, user?
 vi.mock("../../lib/realtime", () => ({ watchRealtimeSession: vi.fn(), stopRealtime: vi.fn() }));
 vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
+  checkCloudDeviceLogout: async () => {},
   entitlement: async () => ({}),
   collectPurchases: async () => false,
   clearEntitlementCache: vi.fn(),

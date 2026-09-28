@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { taxRegimeFor } from "../lib/taxRegimes";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Save, Check } from "lucide-react";
 import {
@@ -258,7 +259,7 @@ export default function PayslipPage() {
                   {company?.address && (
                     <p className="text-xs text-gray-500">{company.address}</p>
                   )}
-                  {company?.trn && <p className="text-xs text-gray-500">TRN: {company.trn}</p>}
+                  {company?.trn && <p className="text-xs text-gray-500">{taxRegimeFor(company.currency, company.country_code).trnLabel}: {company.trn}</p>}
                 </div>
                 <div className="text-right">
                   <p className="font-semibold tracking-wide">PAYSLIP</p>

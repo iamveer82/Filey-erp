@@ -195,6 +195,7 @@ export const CRM_OBJECTS: Record<
   },
 };
 export const OBJECT_KEYS = Object.keys(CRM_OBJECTS) as CrmObject[];
+export const crmCustomModule = (kind: CrmObject) => kind === "companies" ? "customers" : kind;
 export const emptyCrmData = (): CrmData => ({
   companies: [],
   contacts: [],
@@ -343,7 +344,7 @@ export async function saveCrmStatus(
           closed_at: ["won", "lost"].includes(value) ? row.closed_at || now : null,
           ...(!["won", "lost"].includes(value) ? { close_reason: null } : {}),
         };
-  await persistCrmRecord(CRM_OBJECTS[kind].table, patch, row.id);
+  await persistCrmRecord(CRM_OBJECTS[kind].table, patch, row.id, text(row.updated_at) || null);
 }
 
 export function recordDraft(kind: CrmObject, row?: CrmRow): Record<string, string> {
@@ -486,10 +487,7 @@ export async function saveCrmRecord(
 ): Promise<number> {
   const patch = validateCrmDraft(kind, draft, data, previous);
   if (draft.custom_fields !== undefined) {
-    const module =
-      kind === "companies" ? "customers" : kind === "contacts" ? "contacts" : null;
-    if (!module)
-      throw new Error("Custom fields are supported for companies and contacts.");
+    const module = crmCustomModule(kind);
     const scope = requireAgentStorageScope();
     const values = JSON.parse(draft.custom_fields);
     if (!values || typeof values !== "object" || Array.isArray(values))
@@ -520,7 +518,8 @@ export async function saveCrmRecord(
       );
     requireAgentStorageScope(scope);
   }
-  return persistCrmRecord(CRM_OBJECTS[kind].table, patch, previous?.id);
+  return persistCrmRecord(CRM_OBJECTS[kind].table, patch, previous?.id,
+    previous ? text(previous.updated_at) || null : undefined);
 }
 
 export async function deleteCrmRecord(kind: CrmObject, row: CrmRow, data: CrmData) {

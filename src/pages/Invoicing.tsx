@@ -5,6 +5,8 @@ import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/do
 import { isLocalMode } from "../lib/dataMode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
+import Step from "../components/DocumentStep";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
 import { useSearchParams } from "react-router-dom";
 import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
@@ -76,6 +78,7 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
+import { subdivisionLabel } from "../lib/companyCountry";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { startingTemplate } from "../components/DocPresetBar";
@@ -539,7 +542,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
-        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
+        buyer_country_code: d.buyer_country_code || d.tax_country_code || UAE_COUNTRY_CODE,
         stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
         signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
@@ -627,7 +630,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
         buyer_city: d.buyer_city,
         buyer_country_subdivision: d.buyer_country_subdivision,
-        buyer_country_code: d.buyer_country_code || UAE_COUNTRY_CODE,
+        buyer_country_code: d.buyer_country_code || d.tax_country_code || UAE_COUNTRY_CODE,
         stamp: normStampSig(durableStampSig(d.stamp), STAMP_DEFAULT),
         signature: normStampSig(durableStampSig(d.signature), SIGN_DEFAULT),
         show_stamp: d.show_stamp ?? false,
@@ -1879,7 +1882,7 @@ function Editor({
   form,
   setForm,
   onBack,
-  onSave,
+  onSave: saveDocument,
   onMessage,
   onFinalize,
   onRevertDraft,
@@ -1909,6 +1912,16 @@ function Editor({
   // on screen) and honors manual page breaks + last-page totals.
   const exportRef = useRef<HTMLDivElement>(null);
   const [previewPage, setPreviewPage] = useState(1);
+  const [editorTab, setEditorTab] = useState("details");
+  const onSave = async () => {
+    const id = await saveDocument();
+    if (id == null) {
+      if (!form.number.trim()) setEditorTab("details");
+      else if (!form.items.some(item => item.description.trim())) setEditorTab("items");
+      else if (!form.customer_name.trim() && !form.customer_email?.trim()) setEditorTab("details");
+    }
+    return id;
+  };
   // Group items into A4 pages, honoring per-item manual page breaks.
   const pages = paginateItems(form.items);
   useEffect(() => {
@@ -2444,7 +2457,8 @@ function Editor({
       />
 
       <ResizablePanels
-        defaultCollapsed
+        defaultCollapsed={!window.matchMedia?.("(min-width: 1280px)").matches}
+        defaultRightWidth={400}
         left={
           <div className="no-print space-y-4">
             
@@ -2453,7 +2467,7 @@ function Editor({
             title="Template"
             subtitle="Choose a document layout"
             action={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   className="btn-ghost text-xs"
                   onClick={() => setViewAll((v) => !v)}
@@ -2481,9 +2495,16 @@ function Editor({
             />
           </Step>
 
+          <Tabs value={editorTab} onValueChange={setEditorTab}>
+            <TabsList aria-label="Invoice editor sections" className="grid w-full grid-cols-3">
+              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="items">Items <span className="text-xs tabular-nums text-muted-foreground">{form.items.length}</span></TabsTrigger>
+              <TabsTrigger value="finishing">Finishing touches</TabsTrigger>
+            </TabsList>
+          <TabsContent value="details" forceMount hidden={editorTab !== "details"}>
           {/* Invoice details */}
           <Step title="Invoice details" action={<Badge tone={statusTone(form.status)}>{form.status}</Badge>}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
               <div className="space-y-3">
                 <Field label={partyLabel}>
                   <div className="flex gap-2">
@@ -2561,7 +2582,7 @@ function Editor({
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
-                <Field label={`${partyLabel} Email / TRN`}>
+                <Field label={`${partyLabel} Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
                   <div className="grid grid-cols-2 gap-2">
                     <input aria-label={`${partyLabel} email`}
                       className="input"
@@ -2577,25 +2598,32 @@ function Editor({
                     />
                   </div>
                 </Field>
-                <Field label={`${partyLabel} City / Emirate / Country`}>
-                  <div className="grid grid-cols-3 gap-2">
+                <Field label={`${partyLabel} City / ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)} / Country`}>
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_4rem] gap-2">
                     <input aria-label={`${partyLabel} city`}
                       className="input"
                       placeholder="City"
                       value={form.buyer_city ?? ""}
                       onChange={(e) => set("buyer_city", e.target.value)}
                     />
-                    <SelectMenu
+                    {(form.buyer_country_code || form.tax_country_code) === "AE" ? <SelectMenu
+                      ariaLabel={`${partyLabel} Emirate`}
                       value={form.buyer_country_subdivision ?? ""}
                       onChange={(v) => set("buyer_country_subdivision", v)}
                       options={[
                         { value: "", label: "Emirate…" },
                         ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
                       ]}
-                    />
+                    /> : <input
+                      aria-label={`${partyLabel} ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)}`}
+                      className="input"
+                      placeholder={subdivisionLabel(form.buyer_country_code || form.tax_country_code)}
+                      value={form.buyer_country_subdivision ?? ""}
+                      onChange={e => set("buyer_country_subdivision", e.target.value)}
+                    />}
                     <input aria-label={`${partyLabel} country code`}
                       className="input"
-                      placeholder="AE"
+                      placeholder="Country code"
                       value={form.buyer_country_code ?? ""}
                       onChange={(e) =>
                         set("buyer_country_code", e.target.value.toUpperCase())
@@ -2648,7 +2676,7 @@ function Editor({
                     </Field>
                   )}
               </div>
-              <div className="grid grid-cols-2 gap-3 content-start">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,144px),1fr))] gap-3 content-start">
                 <Field label="Invoice Number">
                   <div className="flex gap-2">
                     <input aria-label="Invoice number"
@@ -2708,7 +2736,7 @@ function Editor({
                   />
                 </Field>
                 {(form.currency || "AED") !== "AED" && (
-                  <Field label="Exchange Rate to AED (e-invoice)">
+                  <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Exchange Rate to AED (e-invoice)" : "Exchange Rate to AED (accounting)"}>
                     <input aria-label="Exchange rate to AED"
                       type="number"
                       step="0.0001"
@@ -2728,7 +2756,7 @@ function Editor({
               </div>
             </div>
             <details className="group mt-3 border-t border-border pt-2">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">E-invoice details<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">{isUaeRegime(form.currency, form.tax_country_code) ? "E-invoice details" : "Additional details"}<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
                 <Field label="Document Title">
                   <input aria-label="Document title"
@@ -2772,7 +2800,7 @@ function Editor({
                     onChange={(v) => set("po_date", v)}
                   />
                 </Field>
-                <Field label="Invoice Type Code (e-invoice)">
+                <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Invoice Type Code (e-invoice)" : "Document type"}>
                   <SelectMenu
                     value={form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE}
                     onChange={(v) => set("invoice_type_code", v)}
@@ -2804,7 +2832,7 @@ function Editor({
                     </Field>
                   </>
                 )}
-                <Field label="Payment Means (e-invoice)">
+                <Field label={isUaeRegime(form.currency, form.tax_country_code) ? "Payment Means (e-invoice)" : "Payment method"}>
                   <SelectMenu
                     value={form.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE}
                     onChange={(v) => set("payment_means_code", v)}
@@ -2814,7 +2842,7 @@ function Editor({
                     }))}
                   />
                 </Field>
-                <Field label="Transaction Type (e-invoice)">
+                {isUaeRegime(form.currency, form.tax_country_code) && <Field label="Transaction Type (e-invoice)">
                   <div className="grid grid-cols-2 gap-1.5">
                     {TRANSACTION_TYPE_FLAGS.map((f) => (
                       <label
@@ -2834,7 +2862,7 @@ function Editor({
                       </label>
                     ))}
                   </div>
-                </Field>
+                </Field>}
                 <Field label="Tax category, applied to all lines">
                   {/* Bulk-set every line's category (the common single-rate case).
                       Mixed-rate invoices override per line in the items table. */}
@@ -2864,7 +2892,9 @@ function Editor({
               </div>
             </details>
           </Step>
-
+          <div className="mt-4 flex justify-end"><button type="button" className="btn-ghost" onClick={() => setEditorTab("items")}>Continue to items →</button></div>
+          </TabsContent>
+          <TabsContent value="items" forceMount hidden={editorTab !== "items"}>
           {/* Items */}
           <Step title="Items" action={
             <div className="flex flex-wrap items-center gap-3">
@@ -3331,21 +3361,12 @@ function Editor({
               </div>
             )}
           </Step>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
-            <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
-              <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
-              {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
-              <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>
-              {!!invoiceTotals.round_off && <span className="text-muted-foreground">Rounding <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.round_off)}</strong></span>}
-              <span>Total <strong className="ml-1 text-base">{m(invoiceTotals.total)}</strong></span>
-              {(Number(form.advance_applied) || 0) > 0 && <span>After advance <strong className="ml-1 text-base">{m(Math.max(0, invoiceTotals.total - Number(form.advance_applied)))}</strong></span>}
-            </div>
-          </div>
+          <div className="mt-4 flex justify-between gap-2"><button type="button" className="btn-ghost" onClick={() => setEditorTab("details")}>Back to details</button><button type="button" className="btn-ghost" onClick={() => setEditorTab("finishing")}>Finishing touches →</button></div>
+          </TabsContent>
+          <TabsContent value="finishing" forceMount hidden={editorTab !== "finishing"} className="space-y-4">
+          <p className="text-xs text-muted-foreground">Optional details for the finished document. Your company defaults are already included.</p>
           {/* Branding */}
           <Step
-            collapsed
             title="Branding"
             subtitle="Logo, bank details, stamp and signature on the printed invoice"
           >
@@ -3543,6 +3564,20 @@ function Editor({
 
             </div>
           </Step>
+          </TabsContent>
+          </Tabs>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
+            <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
+            <div className="grid w-full gap-x-6 gap-y-2 text-sm tabular-nums sm:flex sm:w-auto sm:flex-wrap [&>span]:flex [&>span]:items-baseline [&>span]:justify-between [&>span]:gap-2">
+              <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
+              {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
+              <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>
+              {!!invoiceTotals.round_off && <span className="text-muted-foreground">Rounding <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.round_off)}</strong></span>}
+              <span>Total <strong className="ml-1 text-base">{m(invoiceTotals.total)}</strong></span>
+              {(Number(form.advance_applied) || 0) > 0 && <span>After advance <strong className="ml-1 text-base">{m(Math.max(0, invoiceTotals.total - Number(form.advance_applied)))}</strong></span>}
+            </div>
+          </div>
+
           </div>
         }
         right={
@@ -3766,23 +3801,6 @@ function Editor({
       </Modal>
     </div>
   );
-}
-
-function Step({ title, subtitle, action, children, collapsed = false }: {
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-  collapsed?: boolean;
-}) {
-  const heading = <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-foreground">{title}</h2>{subtitle && <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>}</div>;
-  if (collapsed) return (
-    <details className="group rounded-xl border border-border bg-card">
-      <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 px-5 py-3 [&::-webkit-details-marker]:hidden">{heading}<ChevronDown size={16} className="shrink-0 text-muted-foreground group-open:rotate-180" /></summary>
-      <div className="border-t border-border p-5">{action && <div className="mb-4 flex justify-end">{action}</div>}{children}</div>
-    </details>
-  );
-  return <section className="rounded-xl border border-border bg-card"><div className="flex flex-col items-start gap-3 px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center">{heading}{action}</div><div className="px-5 pb-5">{children}</div></section>;
 }
 
 /* ---------------- Customer modal (UAE FTA) ---------------- */

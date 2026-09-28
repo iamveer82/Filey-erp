@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { billingRequest, paymentUrl, openBilling } from "./billingService";
-import { clearEntitlementCache, resolveTier } from "./license";
+import { clearEntitlementCache, resolveTier, CLOUD_DEVICE_LIMIT } from "./license";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
  * own org) and invokes the `dodo` edge function for checkout and the customer
@@ -33,11 +33,11 @@ export const PLANS: PlanCard[] = [
     kind: "subscription",
     name: "Basic",
     price: "$0",
-    blurb: "On the web or your device, with 5 new invoices a month.",
+    blurb: "Free ERP and CRM on your device, with unlimited local invoices.",
     features: [
       "Core ERP & CRM, all modules",
-      "5 new invoices per month, unlimited edits",
-      "Filey on the web with cloud sync",
+      "Unlimited local invoices and edits",
+      "Optional cloud sync: 5 new cloud invoices per month",
       "Local storage and backups on this device",
       "“Made with Filey” on documents",
       "Bring-your-own AI key",
@@ -51,7 +51,7 @@ export const PLANS: PlanCard[] = [
     period: " / month",
     blurb: "Your workspace everywhere, on every device you use.",
     features: [
-      "Cloud sync on up to 5 registered devices",
+      `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} registered devices`,
       "Filey on the web at app.gofiley.com",
       "Unlimited invoices — no monthly cap",
       "Team members share one workspace",

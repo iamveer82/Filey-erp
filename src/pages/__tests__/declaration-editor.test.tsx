@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import DeclarationLetter from "../DeclarationLetter";
-import { tools } from "../../lib/api";
+import { billing, tools } from "../../lib/api";
 import { downloadElementAsPdf } from "../../lib/pdfTools";
 import { autoSaveDocument } from "../../lib/files";
 
@@ -22,6 +22,29 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const open = () => render(<MemoryRouter><UIProvider><DeclarationLetter /></UIProvider></MemoryRouter>);
+
+it("uses Indian labels and a generic letter for new documents, preserving the saved country when company settings change", async () => {
+  vi.mocked(billing.getCompany).mockResolvedValue({ name: "India company", country_code: "IN", currency: "INR" } as Awaited<ReturnType<typeof billing.getCompany>>);
+  const page = open();
+  await waitFor(() => expect(page.getByRole("button", { name: "New letter" })).toBeEnabled());
+  fireEvent.click(page.getByRole("button", { name: "New letter" }));
+  await page.findByDisplayValue("India company");
+  expect(page.getByLabelText("Company GSTIN")).toBeVisible();
+  expect(page.getByLabelText("Amount (INR)")).toBeVisible();
+  fireEvent.keyDown(page.getByRole("tab", { name: "Letter text" }), { key: "Enter" });
+  expect(page.getByRole("textbox", { name: "Letter text" })).not.toHaveValue(expect.stringContaining("hydrocarbon"));
+  fireEvent.click(page.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(tools.setSetting).toHaveBeenCalledOnce());
+  const saved = vi.mocked(tools.setSetting).mock.calls[0][1];
+  expect(JSON.parse(saved)[0]).toMatchObject({ country_code: "IN", currency: "INR" });
+  page.unmount();
+  vi.mocked(tools.settings).mockResolvedValue([{ key: "declaration_letters", value: saved }] as Awaited<ReturnType<typeof tools.settings>>);
+  vi.mocked(billing.getCompany).mockResolvedValue({ name: "UAE company", country_code: "AE", currency: "AED" } as Awaited<ReturnType<typeof billing.getCompany>>);
+  const reopened = open();
+  fireEvent.click(await reopened.findByText(JSON.parse(saved)[0].ref));
+  expect(await reopened.findByLabelText("Amount (INR)")).toBeVisible();
+  expect(reopened.getByLabelText("Company GSTIN")).toBeVisible();
+});
 
 it("keeps creation blocked after a failed read until retry succeeds", async () => {
   vi.mocked(tools.settings).mockRejectedValueOnce(new Error("Device storage is unavailable"));

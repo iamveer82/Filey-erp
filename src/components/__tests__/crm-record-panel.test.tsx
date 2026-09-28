@@ -130,7 +130,8 @@ it("treats cancelled tasks as closed and offers an explicit reopen action", asyn
     expect(mocks.save).toHaveBeenCalledWith(
       "crm_tasks",
       { status: "open", completed_at: null },
-      1
+      1,
+      null
     )
   );
 });

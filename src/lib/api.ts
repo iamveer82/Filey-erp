@@ -30,6 +30,7 @@ import { withLocalTransaction } from "./localdb";
 import { loadModuleAccess } from "./moduleAccess";
 import { validateExpense, type ExpenseDetails } from "./expenseDetails";
 import { localWorkspaceOwner } from "./localAuth";
+import { withTeamAttachments, validateTeamAttachments, type TeamAttachment } from "./teamAttachments";
 
 // ===== Types =====
 export interface Product {
@@ -321,6 +322,7 @@ export interface CrmTask {
   assignee?: string;
   completed_at?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 export interface Opportunity {
   id: number;
@@ -945,11 +947,20 @@ async function sChildren<T>(
   order?: { col: string; asc: boolean }[],
   client: any = null
 ): Promise<T[]> {
-  let q: any = (client ?? sb()).from(table).select("*").eq(fk, id);
-  for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data ?? []) as T[];
+  const rows: T[] = [];
+  const remote = !isLocalMode();
+  for (let offset = 0; ; offset += 500) {
+    let q: any = (client ?? sb()).from(table).select("*").eq(fk, id);
+    for (const o of order ?? []) q = q.order(o.col, { ascending: o.asc });
+    if (remote) {
+      if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
+      q = q.range(offset, offset + 499);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!remote || (data ?? []).length < 500) return rows;
+  }
 }
 
 async function sInsert(
@@ -5768,6 +5779,8 @@ export interface OrgMember {
   name: string;
   email: string;
   modules?: string[] | null;
+  avatar?: string | null;
+  avatar_override?: string | null;
 }
 export interface Invitation {
   id: string;
@@ -5784,13 +5797,24 @@ export interface Invitation {
   workspace_name?: string;
 }
 export interface TeamWorkspace { id: string; name: string; role: string }
+export interface TeamJoinRequest {
+  id: string; org_id: string; workspace_name: string; incoming: boolean;
+  name: string | null; email: string; status: 'pending' | 'approved' | 'declined' | 'canceled' | 'expired';
+  created_at: string; expires_at: string;
+}
+export interface TeamConnections {
+  code: string; workspace_id: string | null; workspace_name: string | null; requests: TeamJoinRequest[];
+}
 
 // ===== Company message board =====
 export interface OrgMessage {
   id: number;
   user_id: string;
   body: string;
+  attachments?: TeamAttachment[];
+  recipient_id?: string | null;
   author: string;
+  author_avatar?: string | null;
   parent_id?: number | null;
   /** Which channel it was posted in. Rows predating channels read "general". */
   channel: string;
@@ -5799,10 +5823,10 @@ export interface OrgMessage {
 
 export const messages = {
   /** Page conversations rather than truncating replies away from their parent. */
-  page: async (channel: string, before?: number): Promise<{ rows: OrgMessage[]; next: number | null }> => {
+  page: async (channel: string, before?: number, recipient?: string): Promise<{ rows: OrgMessage[]; next: number | null }> => {
     if (isLocalMode()) {
       const rows = (await sList<OrgMessage>("org_messages", [{ col: "id", asc: false }]))
-        .filter(m => (m.channel ?? "general") === channel);
+        .filter(m => !m.recipient_id && (m.channel ?? "general") === channel);
       const activity = new Map<number,number>();
       rows.forEach(m => activity.set(m.parent_id || m.id, Math.max(activity.get(m.parent_id || m.id) || 0,m.id)));
       const roots = rows.filter(m => !m.parent_id && (before == null || activity.get(m.id)! < before)).sort((a,b) => activity.get(b.id)!-activity.get(a.id)!).slice(0,30);
@@ -5810,21 +5834,21 @@ export const messages = {
       return {rows:rows.filter(m => ids.has(m.id) || ids.has(m.parent_id ?? -1)).map(localMessage),next:roots.length === 30 ? activity.get(roots[roots.length-1].id)! : null};
     }
     const [{data,error},members] = await Promise.all([
-      cdb().rpc("filey_message_page",{p_channel:channel,p_before:before ?? null,p_limit:30}), org.members(),
+      recipient ? cdb().rpc("filey_direct_message_page",{p_person:recipient,p_before:before??null,p_limit:30}) : cdb().rpc("filey_message_page",{p_channel:channel,p_before:before ?? null,p_limit:30}), org.members(),
     ]);
     if (error) throw error;
-    const names = new Map(members.map(m => [m.user_id,m.name]));
-    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"})),next:data.next};
+    const people = new Map(members.map(m => [m.user_id,m]));
+    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar})),next:data.next};
   },
-  thread: async (channel: string, id: number): Promise<OrgMessage[]> => {
+  thread: async (channel: string, id: number, recipient?: string): Promise<OrgMessage[]> => {
     if (!Number.isSafeInteger(id) || id <= 0) return [];
-    if (isLocalMode()) return (await sList<OrgMessage>("org_messages")).filter(m => (m.channel ?? "general") === channel && (m.id === id || m.parent_id === id)).map(localMessage);
+    if (isLocalMode()) return (await sList<OrgMessage>("org_messages")).filter(m => !m.recipient_id && (m.channel ?? "general") === channel && (m.id === id || m.parent_id === id)).map(localMessage);
     const [{data,error},members] = await Promise.all([
       cdb().from("org_messages").select("*").eq("channel",channel).or(`id.eq.${id},parent_id.eq.${id}`).order("id"),org.members(),
     ]);
     if (error) throw error;
-    const names = new Map(members.map(m => [m.user_id,m.name]));
-    return ((data ?? []) as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"}));
+    const people = new Map(members.map(m => [m.user_id,m]));
+    return ((data ?? []) as OrgMessage[]).filter(m=>recipient ? !!m.recipient_id && (m.user_id===recipient || m.recipient_id===recipient) : !m.recipient_id).map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar}));
   },
   unread: async (): Promise<Record<string,number>> => {
     if (isLocalMode()) return {};
@@ -5832,9 +5856,15 @@ export const messages = {
     if (error) throw error;
     return Object.fromEntries((data ?? []).map((r: {channel:string;unread:number}) => [r.channel,Number(r.unread)]));
   },
-  markRead: async (channel: string, last: number) => {
+  unreadDirect: async (): Promise<Record<string,number>> => {
+    if (isLocalMode()) return {};
+    const {data,error}=await cdb().rpc('filey_unread_direct_messages');
+    if(error)throw error;
+    return Object.fromEntries((data??[]).map((r:{person:string;unread:number})=>[r.person,Number(r.unread)]));
+  },
+  markRead: async (channel: string, last: number, recipient?: string) => {
     if (isLocalMode()) return;
-    const {error} = await cdb().rpc("filey_mark_channel_read",{p_channel:channel,p_last:last});
+    const {error} = recipient ? await cdb().rpc('filey_mark_direct_read',{p_person:recipient,p_last:last}) : await cdb().rpc("filey_mark_channel_read",{p_channel:channel,p_last:last});
     if (error) throw error;
   },
   /** Messages in one channel, or every channel when omitted. */
@@ -5850,12 +5880,14 @@ export const messages = {
         // Filter before the 200 cap, not after — otherwise a busy channel
         // pushes a quiet one off the end and it looks empty.
         const mine = channel
-          ? rows.filter((r) => (r.channel ?? "general") === channel)
+          ? rows.filter((r) => !r.recipient_id && (r.channel ?? "general") === channel)
           : rows;
         return mine.slice(0, 200).map((r) => ({
           id: r.id,
           user_id: r.user_id ?? (isLocalMode() ? localWorkspaceOwner() || "local-user" : ""),
           body: r.body,
+          attachments: r.attachments ?? [],
+          recipient_id: r.recipient_id ?? null,
           author: byId.get(r.user_id)?.name ?? "Team member",
           parent_id: r.parent_id ?? null,
           channel: r.channel ?? "general",
@@ -5864,15 +5896,25 @@ export const messages = {
       },
       []
     ),
-  post: async (body: string, parentId?: number | null, channel = "general") => {
-    if (!body.trim() || body.trim().length > 10000) throw new Error("Messages must contain 1 to 10,000 characters.");
+  post: async (body: string, parentId?: number | null, channel = "general", files: File[] = [], recipient?: string) => {
+    if ((!body.trim() && !files.length) || body.trim().length > 10000) throw new Error("Messages must contain 1 to 10,000 characters or an attachment.");
+    validateTeamAttachments(files);
+    if (recipient && (isLocalMode() || !/^[a-f0-9-]{36}$/i.test(recipient))) throw new Error('Open a cloud workspace and choose a teammate.');
     if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(channel)) throw new Error("Invalid channel name.");
     if (parentId && isLocalMode()) {
       const parents = await sList<OrgMessage>("org_messages");
       if (!parents.some(m => m.id === parentId && !m.parent_id && (m.channel ?? "general") === channel)) throw new Error("Reply must belong to this channel.");
     }
     const row: Record<string, unknown> = { body:body.trim(), channel };
+    if(recipient)row.recipient_id=recipient;
     if (parentId) row.parent_id = parentId;
+    if (files.length) {
+      const check=workspaceGuard();
+      return withTeamAttachments(files, async attachments => {
+        row.attachments=attachments;
+        await write({k:"insert",t:"org_messages",row},()=>sInsert("org_messages",row).then(()=>undefined),undefined);
+      },check);
+    }
     return write({ k: "insert", t: "org_messages", row }, () =>
       sInsert("org_messages", row).then(() => undefined), undefined
     );
@@ -5928,6 +5970,29 @@ export const notifs = {
 };
 
 export const org = {
+  connections: () => online(async () => {
+    const {data,error} = await cdb().rpc('filey_team_connections');
+    if (error) throw new Error('Could not load team connections. Please try again.');
+    return data as TeamConnections;
+  }, false),
+  linkCode: (orgId: string) => online(async () => {
+    const {error} = await cdb().rpc('filey_link_team_code', {p_org_id:orgId});
+    if (error) throw new Error('Could not link your code. Check your workspace access and try again.');
+  }),
+  requestJoin: (code: string) => online(async () => {
+    const {data,error} = await cdb().rpc('filey_request_team_join', {p_code:code.trim().toUpperCase()});
+    if (error) throw new Error('Could not request access. Check your connection and verify your email, then try again.');
+    if (data?.error) throw new Error(data.error);
+    if (!data?.id) throw new Error('Your request could not be confirmed. Please try again.');
+  }),
+  reviewJoin: (id: string, orgId: string, approve: boolean, role = 'staff', modules: string[] | null = ['team']) => online(async () => {
+    const {error} = await cdb().rpc('filey_review_team_join', {p_id:id,p_org_id:orgId,p_approve:approve,p_role:role,p_modules:modules});
+    if (error) throw new Error('Could not update this request. Refresh your team and try again.');
+  }),
+  cancelJoin: (id: string) => online(async () => {
+    const {error} = await cdb().rpc('filey_cancel_team_join', {p_id:id});
+    if (error) throw new Error('Could not cancel this request. Please try again.');
+  }),
   get: () =>
     readCached<Organization | null>(
       "organization",
@@ -5983,6 +6048,11 @@ export const org = {
       () => sUpdate("org_members", memberId, { modules }, cdb()),
       undefined
     ),
+  setMemberAvatar: (memberId: number, orgId: string, avatar: string | null) =>
+    online(async () => {
+      const { error } = await cdb().rpc("filey_set_member_avatar", { p_member_id: memberId, p_org_id: orgId, p_avatar: avatar });
+      if (error) throw new Error("Could not save the team avatar. Please try again.");
+    }),
   remove: (memberId: number) =>
     write({ k: "delete", t: "org_members", id: memberId }, () =>
       sDelete("org_members", memberId, cdb()), undefined

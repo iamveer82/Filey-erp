@@ -9,6 +9,7 @@ import { Badge, FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
 import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
 import { checkPassword, strengthLabel } from "../../lib/password";
+import AvatarPicker from "../../components/AvatarPicker";
 
 /* ---------------- Account & Profile ---------------- */
 
@@ -281,12 +282,12 @@ export default function AccountProfile() {
 
   return (
     <SettingsPanel>
-      <SettingsSection title="Your Filey account" description="Your plan, Paper wallet and payment history in one place.">
+      <SettingsSection title="Your Filey account" description="Your plan, Coin wallet and payment history in one place.">
         <div className="flex flex-wrap gap-2">
-          <Link className="btn-primary" to="/settings?section=credits">Open Paper wallet</Link>
+          <Link className="btn-primary" to="/settings?section=credits">Open Coin wallet</Link>
           <Link className="btn-ghost" to="/settings?section=billing">Manage plan & billing</Link>
         </div>
-        <p className="text-sm text-muted-foreground">Paper is optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
+        <p className="text-sm text-muted-foreground">Coin is optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
       </SettingsSection>
       <SettingsSection
         title="Profile Information"
@@ -372,6 +373,11 @@ export default function AccountProfile() {
               />
             </FormField>
           </div>
+        </div>
+        <div className="mt-5 border-t border-border pt-5">
+          <p className="mb-1 text-sm font-medium">Choose an avatar</p>
+          <p className="mb-3 text-[13px] text-muted-foreground">Pick a Filey face, or use the pencil to upload your own photo. Save changes when you’re ready.</p>
+          <AvatarPicker value={p.avatar} onChange={value => set("avatar", value)} />
         </div>
       </SettingsSection>
       <SettingsSection

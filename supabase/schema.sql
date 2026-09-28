@@ -1665,7 +1665,7 @@ create policy license_devices_read on license_devices for select
   ));
 
 
--- ---------- cloud device registry: 5 devices per org ----------
+-- ---------- cloud device registry: 20 devices per org ----------
 
 create table if not exists org_devices (
   id uuid primary key default gen_random_uuid(),
@@ -1685,7 +1685,7 @@ alter table org_devices enable row level security;
 
 -- Members see their org's devices; a member may release their own device,
 -- an org admin may release any. Inserts/updates happen only through the
--- register_device() RPC (security definer) so the 5-slot limit can't be
+-- register_device() RPC (security definer) so the 20-slot limit can't be
 -- bypassed with a direct insert.
 drop policy if exists org_devices_select on org_devices;
 create policy org_devices_select on org_devices for select
@@ -1732,8 +1732,8 @@ begin
   end if;
 
   select count(*) into v_active from org_devices where org_id = v_org;
-  if v_active >= 5 then
-    return jsonb_build_object('ok', false, 'reason', 'limit', 'limit', 5);
+  if v_active >= 20 then
+    return jsonb_build_object('ok', false, 'reason', 'limit', 'limit', 20);
   end if;
 
   insert into org_devices (org_id, user_id, fingerprint, device_name)
@@ -2232,5 +2232,490 @@ do $$ declare t text; begin
       with check (invoice_id is null and user_id=(select auth.uid()) and org_id=(select public.current_org()))',t||'_unlinked_owner',t);
   end loop;
 end $$;
+notify pgrst,'reload schema';
+commit;
+-- Additive only. Definitions use existing workspace-scoped app_settings;
+-- values keep the records' existing permissions and sync revision tracking.
+begin;
+alter table public.crm_leads add column if not exists custom_fields jsonb default '{}';
+alter table public.crm_opportunities add column if not exists custom_fields jsonb default '{}';
+alter table public.crm_tasks add column if not exists custom_fields jsonb default '{}';
+alter table public.crm_notes add column if not exists custom_fields jsonb default '{}';
+alter table public.crm_activities add column if not exists custom_fields jsonb default '{}';
+notify pgrst, 'reload schema';
+commit;
+
+-- Workspace avatars do not change a colleague's personal profile photo.
+begin;
+alter table public.org_members add column if not exists avatar text;
+alter table public.org_members drop constraint if exists org_members_avatar_preset;
+alter table public.org_members add constraint org_members_avatar_preset check (
+  avatar is null or avatar in (
+    '/avatars/sun.svg','/avatars/mint.svg','/avatars/coral.svg','/avatars/sky.svg',
+    '/avatars/lilac.svg','/avatars/peach.svg','/avatars/slate.svg','/avatars/sage.svg'
+  )
+);
+
+-- A changed return type needs a transactional replacement.
+drop function if exists public.filey_team_members();
+create function public.filey_team_members()
+returns table(id bigint,org_id text,user_id uuid,role text,modules text[],name text,email text,avatar text,avatar_override text)
+language sql stable security definer set search_path=public,pg_temp as $$
+  select m.id,m.org_id,m.user_id,m.role,m.modules,p.name,u.email::text,
+    coalesce(m.avatar,nullif(p.avatar,'')),m.avatar
+  from public.org_members m join public.profiles p on p.id=m.user_id join auth.users u on u.id=m.user_id
+  where m.org_id=public.current_org() and exists (
+    select 1 from public.org_members me where me.org_id=m.org_id and me.user_id=auth.uid()
+  ) order by m.id
+$$;
+
+create or replace function public.filey_set_member_avatar(p_member_id bigint,p_org_id text,p_avatar text)
+returns void language plpgsql security definer set search_path=public,pg_temp as $$
+declare member_user uuid;
+begin
+  if auth.uid() is null or p_org_id is distinct from public.current_org() then
+    raise exception 'Reopen your workspace and try again' using errcode='42501';
+  end if;
+  select user_id into member_user from public.org_members
+    where id=p_member_id and org_id=p_org_id for update;
+  if member_user is null or not (member_user=auth.uid() or public.is_org_admin()) then
+    raise exception 'Only this member or a workspace admin can change their avatar' using errcode='42501';
+  end if;
+  update public.org_members set avatar=nullif(p_avatar,'') where id=p_member_id and org_id=p_org_id;
+end $$;
+revoke all on function public.filey_team_members() from public,anon;
+revoke all on function public.filey_set_member_avatar(bigint,text,text) from public,anon;
+grant execute on function public.filey_team_members(),public.filey_set_member_avatar(bigint,text,text) to authenticated;
+notify pgrst,'reload schema';
+commit;
+
+-- Account codes identify a workspace; only an admin can approve membership.
+-- Requires 2026-09-20-team-workspaces.sql and 2026-09-20-edge-rate-limits.sql.
+begin;
+
+create table if not exists public.team_invite_codes (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  code text not null unique check (code ~ '^[A-Z0-9]{6}$'),
+  org_id uuid references public.organizations(id) on delete set null
+);
+create table if not exists public.team_join_requests (
+  id uuid primary key default gen_random_uuid(),
+  org_id uuid not null references public.organizations(id) on delete cascade,
+  inviter_id uuid not null references auth.users(id) on delete cascade,
+  applicant_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending','approved','declined','canceled')),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '7 days',
+  unique (org_id, applicant_id)
+);
+create index if not exists team_join_requests_applicant on public.team_join_requests(applicant_id);
+alter table public.team_invite_codes enable row level security;
+alter table public.team_join_requests enable row level security;
+revoke all on public.team_invite_codes, public.team_join_requests from public, anon, authenticated;
+grant select on public.team_invite_codes, public.team_join_requests to authenticated;
+drop policy if exists team_code_self on public.team_invite_codes;
+create policy team_code_self on public.team_invite_codes for select to authenticated using(user_id=auth.uid());
+drop policy if exists team_request_read on public.team_join_requests;
+create policy team_request_read on public.team_join_requests for select to authenticated
+  using(applicant_id=auth.uid() or (org_id::text=public.current_org() and public.is_org_admin()));
+
+create or replace function public.filey_ensure_team_code(p_user uuid) returns text
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_code text;
+begin
+  -- Serialize generation for the same account, including signup/backfill races.
+  perform pg_advisory_xact_lock(hashtextextended('team-code:'||p_user::text,0));
+  select code into v_code from team_invite_codes where user_id=p_user;
+  if found then return v_code; end if;
+  for attempt in 1..100 loop
+    select string_agg(substr('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',1+get_byte(uuid_send(gen_random_uuid()),n)%36,1),'')
+      into v_code from generate_series(0,5) n;
+    begin
+      insert into team_invite_codes(user_id,code) values(p_user,v_code);
+      return v_code;
+    exception when unique_violation then null;
+    end;
+  end loop;
+  raise exception 'Could not create an invitation code. Please try again.';
+end $$;
+revoke all on function public.filey_ensure_team_code(uuid) from public,anon,authenticated;
+
+create or replace function public.filey_assign_team_code() returns trigger
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  perform filey_ensure_team_code(new.id);
+  return new;
+end $$;
+revoke all on function public.filey_assign_team_code() from public,anon,authenticated;
+drop trigger if exists filey_profile_team_code on public.profiles;
+create trigger filey_profile_team_code after insert on public.profiles
+  for each row execute function public.filey_assign_team_code();
+do $$ begin perform public.filey_ensure_team_code(id) from auth.users; end $$;
+
+create or replace function public.filey_team_connections() returns jsonb
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_code text; v_org text := current_org();
+begin
+  if auth.uid() is null then raise exception 'Sign in to view your team.'; end if;
+  v_code := filey_ensure_team_code(auth.uid());
+  return jsonb_build_object(
+    'code',v_code,
+    'workspace_id',(select org_id from team_invite_codes where user_id=auth.uid()),
+    'workspace_name',(select o.name from organizations o join team_invite_codes c on c.org_id=o.id where c.user_id=auth.uid()),
+    'requests',coalesce((select jsonb_agg(jsonb_build_object(
+      'id',r.id,'org_id',r.org_id,'workspace_name',o.name,'incoming',r.applicant_id<>auth.uid(),
+      'name',p.name,'email',u.email,'status',case when r.status='pending' and r.expires_at<=now() then 'expired' else r.status end,
+      'created_at',r.created_at,'expires_at',r.expires_at
+    ) order by r.created_at desc)
+    from team_join_requests r join organizations o on o.id=r.org_id
+      join auth.users u on u.id=r.applicant_id left join profiles p on p.id=u.id
+    where r.applicant_id=auth.uid() or (r.org_id::text=v_org and is_org_admin() and r.status='pending' and r.expires_at>now())), '[]'::jsonb)
+  );
+end $$;
+
+create or replace function public.filey_link_team_code(p_org_id uuid) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  if auth.uid() is null or my_email() is null then raise exception 'Verify your email before inviting teammates.'; end if;
+  perform 1 from org_members where user_id=auth.uid() and org_id=p_org_id::text
+    and org_id=current_org() and role in ('owner','admin') for share;
+  if not found then raise exception 'Only a workspace owner or admin can invite teammates.'; end if;
+  perform filey_ensure_team_code(auth.uid());
+  update team_invite_codes set org_id=p_org_id where user_id=auth.uid();
+end $$;
+
+create or replace function public.filey_request_team_join(p_code text) returns jsonb
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_code team_invite_codes; v_request team_join_requests;
+begin
+  if auth.uid() is null or my_email() is null then raise exception 'Verify your email before joining a team.'; end if;
+  -- Return validation errors (rather than raising) so failed guesses consume quota.
+  if not filey_take_rate_limit('team-join:'||auth.uid()::text,'team-code',5,3600) then
+    return jsonb_build_object('error','Too many attempts. Please try again in an hour.');
+  end if;
+  if p_code is null or upper(trim(p_code)) !~ '^[A-Z0-9]{6}$' then
+    return jsonb_build_object('error','Enter a six-character code using letters and numbers.');
+  end if;
+  select * into v_code from team_invite_codes where code=upper(trim(p_code)) for share;
+  if not found or v_code.org_id is null then
+    return jsonb_build_object('error','This code is unavailable. Ask the workspace owner for an invitation.');
+  end if;
+  perform 1 from org_members where user_id=v_code.user_id and org_id=v_code.org_id::text and role in ('owner','admin') for share;
+  if not found then return jsonb_build_object('error','This code is unavailable. Ask the workspace owner for an invitation.'); end if;
+  if exists(select 1 from org_members where user_id=auth.uid() and org_id=v_code.org_id::text) then
+    return jsonb_build_object('error','You already belong to this workspace. Choose it from your workspace list.');
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('team-join:'||auth.uid()::text,0));
+  select * into v_request from team_join_requests where org_id=v_code.org_id and applicant_id=auth.uid() for update;
+  if found and v_request.status='pending' and v_request.expires_at>now() then
+    return jsonb_build_object('id',v_request.id);
+  end if;
+  if found and v_request.created_at>now()-interval '1 day' then
+    return jsonb_build_object('error','Please wait a day before requesting to join this workspace again.');
+  end if;
+  insert into team_join_requests(org_id,inviter_id,applicant_id) values(v_code.org_id,v_code.user_id,auth.uid())
+    on conflict(org_id,applicant_id) do update set id=gen_random_uuid(),inviter_id=excluded.inviter_id,
+      status='pending',created_at=now(),expires_at=now()+interval '7 days'
+    returning * into v_request;
+  return jsonb_build_object('id',v_request.id);
+end $$;
+
+create or replace function public.filey_review_team_join(p_id uuid,p_org_id uuid,p_approve boolean,p_role text default 'staff',p_modules text[] default array['team']) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_request team_join_requests;
+begin
+  if auth.uid() is null or my_email() is null then raise exception 'Verify your email before managing your team.'; end if;
+  perform 1 from org_members where user_id=auth.uid() and org_id=p_org_id::text
+    and org_id=current_org() and role in ('owner','admin') for share;
+  if not found then raise exception 'Only a workspace owner or admin can review requests.'; end if;
+  select * into v_request from team_join_requests where id=p_id and org_id=p_org_id for update;
+  if not found or v_request.status<>'pending' or v_request.expires_at<=now() then
+    raise exception 'This request is no longer waiting for approval. Refresh your team.';
+  end if;
+  if p_approve is null then raise exception 'Choose whether to approve this request.'; end if;
+  if p_approve then
+    if p_role is null or p_role not in ('admin','manager','accountant','staff') then raise exception 'Choose a valid member role.'; end if;
+    if cardinality(p_modules)>100 then raise exception 'Too many app permissions.'; end if;
+    if not exists(select 1 from auth.users where id=v_request.applicant_id and email_confirmed_at is not null) then
+      raise exception 'This member must verify their email first.';
+    end if;
+    -- An email invitation may have joined this member while the request was pending.
+    insert into org_members(org_id,user_id,role,modules) values(p_org_id::text,v_request.applicant_id,p_role,p_modules)
+      on conflict(org_id,user_id) do nothing;
+  end if;
+  update team_join_requests set status=case when p_approve then 'approved' else 'declined' end where id=p_id;
+  -- Approval never changes the applicant's active workspace or personal records.
+end $$;
+
+create or replace function public.filey_cancel_team_join(p_id uuid) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  update team_join_requests set status='canceled' where id=p_id and applicant_id=auth.uid() and status='pending';
+end $$;
+
+revoke all on function public.filey_team_connections(),public.filey_link_team_code(uuid),public.filey_request_team_join(text),
+  public.filey_review_team_join(uuid,uuid,boolean,text,text[]),public.filey_cancel_team_join(uuid) from public,anon,authenticated;
+grant execute on function public.filey_team_connections(),public.filey_link_team_code(uuid),public.filey_request_team_join(text),
+  public.filey_review_team_join(uuid,uuid,boolean,text,text[]),public.filey_cancel_team_join(uuid) to authenticated;
+
+do $$ declare t text; begin
+  if exists(select 1 from pg_publication where pubname='supabase_realtime') then
+    foreach t in array array['team_invite_codes','team_join_requests'] loop
+      if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename=t) then
+        execute format('alter publication supabase_realtime add table public.%I',t);
+      end if;
+    end loop;
+  end if;
+end $$;
+notify pgrst,'reload schema';
+commit;
+
+-- September 28: workspace device sessions and private team conversations.
+-- Raise cloud workspace login slots from 5 to 20; preserve registrations and permissions.
+BEGIN;
+alter table public.org_devices add column if not exists session_id text;
+alter table public.org_devices add column if not exists revoked_at timestamptz;
+
+create or replace function public.register_device(p_fingerprint text, p_name text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare
+  v_org text := public.current_org();
+  v_id uuid;
+  v_active int;
+  v_device public.org_devices;
+  v_session text:=auth.jwt()->>'session_id';
+begin
+  if auth.uid() is null then
+    return jsonb_build_object('ok', false, 'reason', 'unauthenticated');
+  end if;
+  if p_fingerprint is null or length(trim(p_fingerprint)) = 0 then
+    return jsonb_build_object('ok', false, 'reason', 'missing_fingerprint');
+  end if;
+
+  -- SECURITY: serialize per-org registrations — two devices racing the
+  -- count check below could both pass and exceed the slot limit (TOCTOU).
+  perform pg_advisory_xact_lock(hashtext('org_devices:' || v_org));
+
+  select * into v_device
+    from org_devices
+   where org_id = v_org and fingerprint = p_fingerprint;
+
+  v_id:=v_device.id;
+  if v_id is not null and v_device.revoked_at is not null
+     and (v_session is null or v_device.session_id is not distinct from v_session
+       or (v_device.session_id is null and coalesce((select created_at<=v_device.revoked_at
+         from auth.sessions where id::text=v_session and user_id=auth.uid()),true))) then
+    return jsonb_build_object('ok',false,'reason','logged_out');
+  end if;
+  if v_id is not null and v_device.revoked_at is null then
+    update org_devices
+       set last_seen = now(),
+           user_id = auth.uid(),
+           session_id = v_session,
+           device_name = coalesce(nullif(p_name, ''), device_name)
+     where id = v_id;
+    return jsonb_build_object('ok', true, 'existing', true);
+  end if;
+
+  select count(*) into v_active from org_devices where org_id = v_org and revoked_at is null;
+  if v_active >= 20 then
+    return jsonb_build_object('ok', false, 'reason', 'limit', 'limit', 20);
+  end if;
+
+  insert into org_devices (org_id, user_id, fingerprint, device_name,session_id)
+  values (v_org, auth.uid(), p_fingerprint, nullif(p_name, ''),v_session)
+  on conflict(org_id,fingerprint) do update set user_id=excluded.user_id,device_name=excluded.device_name,
+    session_id=excluded.session_id,revoked_at=null,last_seen=now();
+  return jsonb_build_object('ok', true);
+end $fn$;
+
+revoke all on function public.register_device(text, text) from public, anon;
+grant execute on function public.register_device(text, text) to authenticated;
+
+create or replace function public.filey_logout_device(p_id uuid) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  update public.org_devices set revoked_at=now() where id=p_id and org_id=public.current_org()
+    and (user_id=auth.uid() or public.is_org_admin());
+  if not found then raise exception 'This device could not be logged out. Refresh and try again'; end if;
+end $$;
+create or replace function public.filey_device_logged_out(p_fingerprint text) returns boolean
+language sql stable security definer set search_path=public,pg_temp as $$
+  select exists(select 1 from public.org_devices where org_id=public.current_org() and fingerprint=p_fingerprint
+    and user_id=auth.uid() and revoked_at is not null
+    and (session_id is not distinct from (auth.jwt()->>'session_id') or (auth.jwt()->>'session_id') is null
+      or (session_id is null and coalesce((select created_at<=org_devices.revoked_at
+        from auth.sessions where id::text=(auth.jwt()->>'session_id') and user_id=auth.uid()),true))))
+$$;
+revoke all on function public.filey_logout_device(uuid),public.filey_device_logged_out(text) from public,anon;
+grant execute on function public.filey_logout_device(uuid),public.filey_device_logged_out(text) to authenticated;
+do $$ begin
+  if exists(select 1 from pg_publication where pubname='supabase_realtime') and not exists(
+    select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='org_devices') then
+    alter publication supabase_realtime add table public.org_devices;
+  end if;
+end $$;
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+
+-- Private images/documents shared only through readable team messages.
+begin;
+alter table public.org_messages add column if not exists attachments jsonb not null default '[]'::jsonb;
+alter table public.org_messages add column if not exists recipient_id uuid references auth.users(id) on delete cascade;
+create index if not exists idx_org_messages_recipient on public.org_messages(org_id,recipient_id,id);
+-- Even workspace administrators cannot read somebody else's direct conversation.
+drop policy if exists team_message_participants on public.org_messages;
+create policy team_message_participants on public.org_messages as restrictive for all to authenticated
+  using(recipient_id is null or user_id=auth.uid() or recipient_id=auth.uid())
+  with check(recipient_id is null or user_id=auth.uid());
+
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+values('team-attachments','team-attachments',false,10485760,array[
+  'image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain','text/csv',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+]) on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
+
+drop policy if exists team_attachments_read on storage.objects;
+create policy team_attachments_read on storage.objects for select to authenticated using (
+  bucket_id='team-attachments' and (storage.foldername(name))[1]=public.current_org()
+  and public.filey_can_use('team') and (
+    (storage.foldername(name))[2]=auth.uid()::text or exists (
+      select 1 from public.org_messages m where m.org_id=public.current_org()
+      and m.attachments @> jsonb_build_array(jsonb_build_object('path',storage.objects.name))
+    )
+  )
+);
+drop policy if exists team_attachments_upload on storage.objects;
+create policy team_attachments_upload on storage.objects for insert to authenticated with check (
+  bucket_id='team-attachments' and (storage.foldername(name))[1]=public.current_org()
+  and (storage.foldername(name))[2]=auth.uid()::text and public.filey_can_use('team')
+);
+-- Uploads are immutable once sent. Failed sends can remove their own unreferenced
+-- uploads; an uncertain network response must never delete a committed attachment.
+drop policy if exists team_attachments_remove on storage.objects;
+create policy team_attachments_remove on storage.objects for delete to authenticated using (
+  bucket_id='team-attachments' and (storage.foldername(name))[1]=public.current_org()
+  and (storage.foldername(name))[2]=auth.uid()::text and public.filey_can_use('team')
+  and not exists(select 1 from public.org_messages m where m.org_id=public.current_org()
+    and m.attachments @> jsonb_build_array(jsonb_build_object('path',storage.objects.name)))
+);
+
+create or replace function public.filey_validate_message() returns trigger
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare a jsonb; v_metadata jsonb; v_paths text[]:='{}';
+begin
+  if auth.uid() is not null then new.org_id:=public.current_org(); new.user_id:=auth.uid(); end if;
+  if new.body is null or length(trim(new.body))>10000 then raise exception 'Messages must contain at most 10,000 characters'; end if;
+  if new.attachments is null or jsonb_typeof(new.attachments)<>'array' then raise exception 'Invalid attachments'; end if;
+  if jsonb_array_length(new.attachments)>5 then raise exception 'Choose up to 5 attachments'; end if;
+  if length(trim(new.body))=0 and jsonb_array_length(new.attachments)=0 then raise exception 'Add a message or attachment'; end if;
+  if new.channel is null or new.channel !~ '^[a-z0-9][a-z0-9_-]{0,79}$' then raise exception 'Invalid channel name'; end if;
+  if new.recipient_id is not null and (new.recipient_id=new.user_id or not exists(
+    select 1 from public.org_members where org_id=new.org_id and user_id=new.recipient_id
+      and (role in ('owner','admin') or modules is null or 'team'=any(modules)))) then
+    raise exception 'Choose a teammate with chat access in this workspace';
+  end if;
+  if new.parent_id is not null and not exists(select 1 from public.org_messages p
+    where p.id=new.parent_id and p.org_id=new.org_id and p.channel=new.channel and p.parent_id is null
+      and ((new.recipient_id is null and p.recipient_id is null) or
+        (p.user_id=new.user_id and p.recipient_id=new.recipient_id) or (p.user_id=new.recipient_id and p.recipient_id=new.user_id))) then
+    raise exception 'Reply must belong to a conversation in this channel';
+  end if;
+  for a in select value from jsonb_array_elements(new.attachments) loop
+    if jsonb_typeof(a)<>'object' or jsonb_typeof(a->'name') is distinct from 'string'
+      or length(a->>'name') not between 1 and 240 or jsonb_typeof(a->'size') is distinct from 'number'
+      or jsonb_typeof(a->'mime') is distinct from 'string' or jsonb_typeof(a->'path') is distinct from 'string'
+      or split_part(a->>'path','/',1)<>new.org_id or split_part(a->>'path','/',2)<>new.user_id::text
+      or split_part(a->>'path','/',3) !~ '^[a-f0-9-]{36}\.(png|jpg|jpeg|webp|gif|pdf|txt|csv|docx|xlsx|pptx)$'
+      or array_length(string_to_array(a->>'path','/'),1)<>3 or (a->>'path')=any(v_paths)
+    then raise exception 'Invalid attachment'; end if;
+    select metadata into v_metadata from storage.objects where bucket_id='team-attachments' and name=a->>'path';
+    if not found or (a->>'size')::numeric not between 1 and 10485760
+      or (a->>'size')::numeric is distinct from (v_metadata->>'size')::numeric
+      or (a->>'mime') is distinct from (v_metadata->>'mimetype')
+      or not ((a->>'mime')=any(array['image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain','text/csv',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation']))
+    then raise exception 'Upload this attachment again'; end if;
+    v_paths:=array_append(v_paths,a->>'path');
+  end loop;
+  return new;
+end $$;
+drop trigger if exists trg_validate_message on public.org_messages;
+create trigger trg_validate_message before insert or update of body,attachments,parent_id,channel,recipient_id on public.org_messages
+  for each row execute function public.filey_validate_message();
+
+create or replace function public.filey_message_page(p_channel text,p_before bigint default null,p_limit integer default 30)
+returns jsonb language sql stable security invoker set search_path=public,pg_temp as $$
+  with activity as (select coalesce(parent_id,id) as root,max(id) as latest from public.org_messages where channel=p_channel and recipient_id is null group by coalesce(parent_id,id)),
+  page as (select * from activity where p_before is null or latest<p_before order by latest desc limit greatest(1,least(p_limit,50))),
+  roots as (select m.* from public.org_messages m join page p on p.root=m.id where m.channel=p_channel and m.parent_id is null and m.recipient_id is null),
+  messages as (select * from roots union all select m.* from public.org_messages m join roots r on m.parent_id=r.id where m.channel=p_channel and m.recipient_id is null)
+  select jsonb_build_object('rows',coalesce((select jsonb_agg(to_jsonb(m) order by m.id desc) from messages m),'[]'::jsonb),
+    'next',case when (select count(*) from page)=greatest(1,least(p_limit,50)) then (select min(latest) from page) else null end)
+$$;
+create or replace function public.filey_direct_message_page(p_person uuid,p_before bigint default null,p_limit integer default 30)
+returns jsonb language sql stable security invoker set search_path=public,pg_temp as $$
+  with visible as (select * from public.org_messages where (user_id=auth.uid() and recipient_id=p_person) or (user_id=p_person and recipient_id=auth.uid())),
+  activity as (select coalesce(parent_id,id) as root,max(id) as latest from visible group by coalesce(parent_id,id)),
+  page as (select * from activity where p_before is null or latest<p_before order by latest desc limit greatest(1,least(p_limit,50))),
+  messages as (select m.* from visible m join page p on coalesce(m.parent_id,m.id)=p.root)
+  select jsonb_build_object('rows',coalesce((select jsonb_agg(to_jsonb(m) order by m.id desc) from messages m),'[]'::jsonb),
+    'next',case when (select count(*) from page)=greatest(1,least(p_limit,50)) then (select min(latest) from page) else null end)
+$$;
+create or replace function public.filey_unread_channels() returns table(channel text,unread bigint)
+language sql stable security definer set search_path=public,pg_temp as $$
+  select m.channel,count(*) from public.org_messages m left join public.org_channel_reads r
+    on r.org_id=m.org_id and r.user_id=auth.uid() and r.channel=m.channel
+    where public.filey_can_use('team') and m.org_id=public.current_org() and m.user_id<>auth.uid() and m.recipient_id is null
+      and m.id>coalesce(r.last_message_id,0) group by m.channel
+$$;
+create or replace function public.filey_unread_direct_messages() returns table(person uuid,unread bigint)
+language sql stable security invoker set search_path=public,pg_temp as $$
+  select m.user_id,count(*) from public.org_messages m left join public.org_channel_reads r
+    on r.org_id=m.org_id and r.user_id=auth.uid() and r.channel='dm:'||m.user_id::text
+    where m.recipient_id=auth.uid() and m.id>coalesce(r.last_message_id,0) group by m.user_id
+$$;
+-- Only the caller's read positions, needed by the invoker-scoped unread query.
+drop policy if exists org_channel_reads_own on public.org_channel_reads;
+create policy org_channel_reads_own on public.org_channel_reads for select to authenticated
+  using(org_id=public.current_org() and user_id=auth.uid() and public.filey_can_use('team'));
+grant select on public.org_channel_reads to authenticated;
+create or replace function public.filey_mark_direct_read(p_person uuid,p_last bigint) returns void
+language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  if not public.filey_can_use('team') then raise exception 'Team access is required'; end if;
+  if p_last<0 or p_last>(select coalesce(max(id),0) from public.org_messages where org_id=public.current_org()
+    and ((user_id=auth.uid() and recipient_id=p_person) or (user_id=p_person and recipient_id=auth.uid()))) then raise exception 'Invalid message position'; end if;
+  insert into public.org_channel_reads(org_id,user_id,channel,last_message_id) values(public.current_org(),auth.uid(),'dm:'||p_person::text,p_last)
+    on conflict(org_id,user_id,channel) do update set last_message_id=greatest(org_channel_reads.last_message_id,excluded.last_message_id);
+end $$;
+
+create or replace function public.notify_mentions() returns trigger
+language plpgsql security definer set search_path=public,pg_temp as $$
+declare actor_name text;
+begin
+  select coalesce(nullif(name,''),'Team member') into actor_name from public.profiles where id=new.user_id;
+  insert into public.notifications(org_id,user_id,actor,kind,body,link)
+  select new.org_id,m.user_id,actor_name,case when new.recipient_id is null then 'mention' else 'message' end,
+    case when new.recipient_id is null then left(new.body,140) else 'Sent you a private message' end,
+    case when new.recipient_id is null then '/team?channel='||new.channel else '/team?person='||new.user_id::text end
+      ||'&message='||coalesce(new.parent_id,new.id)::text
+    from public.org_members m join public.profiles p on p.id=m.user_id
+    where m.org_id=new.org_id and m.user_id<>new.user_id and (m.role in ('owner','admin') or m.modules is null or 'team'=any(m.modules))
+      and ((new.recipient_id=m.user_id) or (new.recipient_id is null
+        and lower(split_part(p.name,' ',1)) in (select lower(t[1]) from regexp_matches(new.body,'@([[:alnum:]_.\-]+)','g') t)));
+  return new;
+end $$;
+revoke all on function public.filey_direct_message_page(uuid,bigint,integer),public.filey_unread_direct_messages(),public.filey_mark_direct_read(uuid,bigint) from public,anon;
+grant execute on function public.filey_direct_message_page(uuid,bigint,integer),public.filey_unread_direct_messages(),public.filey_mark_direct_read(uuid,bigint) to authenticated;
 notify pgrst,'reload schema';
 commit;

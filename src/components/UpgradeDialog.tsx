@@ -58,7 +58,7 @@ export default function UpgradeDialog() {
   const headline =
     reason === "emails"
       ? "You've sent today's Basic emails"
-      : `You've used all ${FREE_LIMITS.invoicesPerMonth} Basic invoices this month`;
+      : `You've used all ${FREE_LIMITS.invoicesPerMonth} Basic cloud invoices this month`;
 
   return (
     <Modal

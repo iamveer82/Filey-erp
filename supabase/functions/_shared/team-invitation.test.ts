@@ -11,7 +11,7 @@ const invite = {
 Deno.test("invitation escapes names and uses a fixed app link", () => {
   const email = invitationEmail(invite, "https://app.gofiley.com");
   assert(email.html.includes("&lt;Acme &amp; Co&gt;"));
-  assert(email.html.includes("/#/settings?section=users&amp;invite=invite-1"));
+  assert(email.html.includes("/#/settings?section=teams&amp;invite=invite-1"));
 });
 Deno.test(
   "retries use the same provider key; accepted is distinct from delivered",
