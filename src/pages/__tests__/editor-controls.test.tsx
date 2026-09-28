@@ -10,11 +10,14 @@ const api = vi.hoisted(() => ({ addCall: vi.fn(), createChannel: vi.fn() }));
 vi.mock("../../lib/api", () => ({
   emailLog: { list: async () => [] },
   callLog: { list: async () => [], add: api.addCall },
+  messages: { unread: async () => ({}) },
   channels: {
     list: async () => [{ id: 1, name: "general", purpose: "" }],
     create: api.createChannel,
   },
 }));
+vi.mock("../../lib/auth", () => ({ useAuth: () => ({user:{id:'fixture'}}) }));
+vi.mock("../../lib/dataMode", () => ({ isLocalMode: () => true }));
 vi.mock("../../lib/realtime", () => ({ useLiveSync: () => {} }));
 vi.mock("../../components/CompanyMessages", () => ({ default: () => <div>Messages</div> }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

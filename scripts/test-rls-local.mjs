@@ -67,6 +67,17 @@ try {
   assert.equal(run('psql', [...basicArgs, '-tAc', "select used from invoice_monthly_usage where org_id='10000000-0000-0000-0000-000000000006'"]).trim(), '5');
   console.log('PASS: eight concurrent creations compete for one slot; exactly one succeeds.');
   console.log('PASS: shared/targeted/private permissions, child rows, cross-tenant RPC and idempotent migration.');
+  run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','device_limits']);
+  const deviceArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','device_limits','-X','-q','-v','ON_ERROR_STOP=1'];
+  const deviceMigration=sql('supabase/2026-09-28-cloud-device-limit.sql');
+  console.log(run('psql',deviceArgs,sql('scripts/fixtures/team-setup.sql')+'\n'+sql('supabase/2026-07-08-org-devices.sql')+'\n'
+    +"create function auth.jwt() returns jsonb language sql stable as $$ select jsonb_build_object('session_id',coalesce(nullif(current_setting('test.session',true),''),'session-a')) $$;\n"
+    +"create table auth.sessions(id text primary key,user_id uuid,created_at timestamptz);\n"
+    +deviceMigration+'\n'+deviceMigration+'\n'+sql('scripts/fixtures/device-limit-assertions.sql')).trim());
+  const deviceRaces=await Promise.all(Array.from({length:5},(_,i)=>promisify(execFile)(exe('psql'),[...deviceArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000001'; select public.register_device('race-${i}')->>'ok';`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(deviceRaces.filter(result=>result.stdout.trim()==='true').length,1);
+  console.log('PASS: concurrent device registrations cannot exceed 20 slots.');
   console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql')+'\n'
     +sql('supabase/2026-09-19-billing-integrity.sql')+'\n'+sql('scripts/fixtures/billing-lifecycle-assertions.sql')).trim());
   const refundMigration=sql('supabase/2026-09-20-subscription-refunds.sql');
@@ -103,6 +114,11 @@ try {
   assert.equal(approvalRaces.filter(result=>result.status==='fulfilled').length,1);
   for(const result of approvalRaces) if(result.status==='rejected') assert.match(result.reason.stderr,/no longer waiting for approval/);
   console.log('PASS: concurrent code requests reuse one request and concurrent approvals grant membership exactly once.');
+  run('createdb',['-h','127.0.0.1','-p',String(port),'-U','postgres','team_media']);
+  const mediaArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','team_media','-X','-q','-v','ON_ERROR_STOP=1'];
+  const mediaMigration=sql('supabase/2026-09-28-team-attachments.sql');
+  console.log(run('psql',mediaArgs,sql('scripts/fixtures/team-setup.sql')+'\n'+migration+'\n'+moduleMigration+'\n'+teamMigration+'\n'
+    +sql('scripts/fixtures/team-media-setup.sql')+'\n'+mediaMigration+'\n'+mediaMigration+'\n'+sql('scripts/fixtures/team-media-assertions.sql')).trim());
   const limitRace = await Promise.all(Array.from({length:12}, () =>
     promisify(execFile)(exe('psql'), [...teamArgs,'-tAc',
       "set role service_role; select public.filey_take_rate_limit('concurrent-account','race',3,3600);"],

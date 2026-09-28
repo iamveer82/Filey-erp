@@ -193,9 +193,9 @@ export async function deactivateThisDevice(): Promise<void> {
   await deactivateDevice(await deviceId());
 }
 
-/* ---------------- cloud (Pro) device registry: 5 per org ---------------- */
+/* ---------------- cloud device registry: 20 per workspace ---------------- */
 
-export const CLOUD_DEVICE_LIMIT = 5;
+export const CLOUD_DEVICE_LIMIT = 20;
 
 export interface OrgDevice {
   id: string;
@@ -211,7 +211,7 @@ export type RegisterResult =
   | { ok: false; reason: "limit" | "unauthenticated" | "missing_fingerprint" | string };
 
 /** Register this device against the org (called on cloud session start).
- *  Refused with reason "limit" when the org already has 5 other devices. */
+ *  Refused with reason "limit" when the workspace is at CLOUD_DEVICE_LIMIT. */
 export async function registerCloudDevice(): Promise<RegisterResult> {
   if (!supabase) return { ok: false, reason: "not_configured" };
   const name =
@@ -231,17 +231,29 @@ export async function listOrgDevices(): Promise<OrgDevice[]> {
   const { data, error } = await supabase
     .from("org_devices")
     .select("*")
+    .is("revoked_at", null)
     .order("last_seen", { ascending: false });
   if (error) throw new Error("Could not load your devices. Please try again.");
   return (data ?? []) as OrgDevice[];
 }
 
-/** Release an org device slot (own device, or any if org admin — RLS). */
+/** Log out an org device (own device, or any if org admin). */
 export async function releaseOrgDevice(id: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { data, error } = await supabase.from("org_devices").delete().eq("id", id).select("id").single();
+  const { error } = await supabase.rpc("filey_logout_device",{p_id:id});
   if (error) throw new Error(error.message);
-  if (!data) throw new Error("This device could not be released. Refresh the list and try again.");
+}
+
+export async function checkCloudDeviceLogout(): Promise<void> {
+  if (!supabase) return;
+  const {data:{session}}=await supabase.auth.getSession();
+  if(!session)return;
+  const {data,error}=await supabase.rpc("filey_device_logged_out",{p_fingerprint:await deviceId()});
+  if (!error && data===true) {
+    const {data:{session:current}}=await supabase.auth.getSession();
+    // A late check for a previous login must not sign out a newer account/session.
+    if(current?.access_token===session.access_token) await supabase.auth.signOut({scope:"local"});
+  }
 }
 
 /** Buy the one-time Freedom licence (Dodo Payments hosted checkout — Dodo is

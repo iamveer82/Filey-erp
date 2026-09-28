@@ -18,6 +18,9 @@ import TwoFactorGate from "./components/TwoFactorGate";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
+import { Monitor, Smartphone, LogOut } from "lucide-react";
+import { fmtDate } from "./lib/format";
+import Logo from "./components/Logo";
 import { maybePromptDesktopShortcut } from "./lib/shortcut";
 
 const Workspace = lazy(() => import("./components/Workspace"));
@@ -56,21 +59,23 @@ function DeviceLimitScreen() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="card max-w-md w-full space-y-4">
-        <h1 className="text-lg font-medium text-ink">Device limit reached</h1>
-        <p className="text-sm text-brand-500">
+    <div className="min-h-dvh grid place-items-center bg-page p-4 sm:p-8">
+      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 sm:p-8 space-y-5">
+        <Logo size={40}/>
+        <div className="space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">Make room for this device</h1>
+        <p className="text-sm leading-relaxed text-muted-foreground">
           Your workspace already has {CLOUD_DEVICE_LIMIT} devices connected.
-          Release one below to use Filey on this device.
-        </p>
+          Log out a device below to continue here. Your saved records stay safe.
+        </p></div>
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         {busy && <p role="status" className="text-sm text-muted-foreground">Updating devices…</p>}
-        <ul className="space-y-1.5">
+        <ul className="max-h-[45dvh] divide-y divide-border overflow-y-auto">
           {devices.map((d) => (
-            <li key={d.id} className="text-sm flex items-center justify-between gap-2">
-              <span className="text-ink min-w-0 truncate">{d.device_name || "Device"}</span>
+            <li key={d.id} className="text-sm flex items-center justify-between gap-3 py-3">
+              {/iphone|android|mobile/i.test(d.device_name||'')?<Smartphone size={20} className="shrink-0 text-muted-foreground"/>:<Monitor size={20} className="shrink-0 text-muted-foreground"/>}
+              <div className="min-w-0 flex-1"><p className="truncate font-medium text-foreground">{d.device_name || "Device"}</p>{d.last_seen && <p className="mt-1 text-xs text-muted-foreground">Last active {fmtDate(d.last_seen)}</p>}</div>
               <button
-                className="text-xs text-danger hover:underline cursor-pointer shrink-0"
+                className="btn-ghost shrink-0 text-danger"
                 disabled={busy}
                 onClick={async () => {
                   if (pending.current) return;
@@ -82,21 +87,22 @@ function DeviceLimitScreen() {
                     await retryDeviceRegistration();
                     setDevices(await listOrgDevices());
                   } catch {
-                    setError("Couldn't release this device. Refresh the list and try again.");
+                    setError("Couldn't log out this device. Refresh the list and try again.");
                   } finally {
                     pending.current = false;
                     setBusy(false);
                   }
                 }}
               >
-                Release
+                <LogOut size={14}/> Log out
               </button>
             </li>
           ))}
         </ul>
+        <p className="text-xs text-muted-foreground">The device signs out when connected to Filey. Offline records remain on that device.</p>
         <button className="btn-ghost w-full" disabled={busy} onClick={() => void load()}>Refresh devices</button>
         <button className="btn-ghost w-full" disabled={busy} onClick={() => void signOut()}>
-          Sign out
+          Use another account
         </button>
       </div>
     </div>

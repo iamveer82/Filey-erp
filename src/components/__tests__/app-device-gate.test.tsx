@@ -11,7 +11,7 @@ vi.mock("../../lib/auth", () => ({
     deviceLimitBlocked: true, retryDeviceRegistration: mocks.retry, signOut: vi.fn(),
     profileError: mocks.profileError, reloadProfile: mocks.retry }),
 }));
-vi.mock("../../lib/license", () => ({ ENFORCE_LICENSING: true, CLOUD_DEVICE_LIMIT: 5,
+vi.mock("../../lib/license", () => ({ ENFORCE_LICENSING: true, CLOUD_DEVICE_LIMIT: 20,
   listOrgDevices: mocks.list, releaseOrgDevice: mocks.release }));
 vi.mock("../../lib/ui", () => ({ UIProvider: ({ children }: PropsWithChildren) => children }));
 vi.mock("../../lib/i18n", () => ({ LanguageProvider: ({ children }: PropsWithChildren) => children }));
@@ -28,13 +28,14 @@ it("recovers a failed device list and reports a rejected release without an unha
   mocks.list.mockRejectedValueOnce(new Error("Database unavailable")).mockResolvedValue([{ id: "device", device_name: "Laptop" }]);
   mocks.release.mockRejectedValue(new Error("Denied"));
   render(<App />);
+  expect(screen.getByText(/Your workspace already has 20 devices connected/)).toBeInTheDocument();
   expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load your devices");
   fireEvent.click(screen.getByRole("button", { name: "Refresh devices" }));
   await screen.findByText("Laptop");
-  fireEvent.click(screen.getByRole("button", { name: "Release" }));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Couldn't release this device"));
+  fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Couldn't log out this device"));
   expect(mocks.retry).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Release" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled();
 });
 
 it("keeps internal profile errors out of the account screen and offers retry", async () => {

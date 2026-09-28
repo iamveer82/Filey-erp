@@ -10,7 +10,7 @@ Two things are for sale:
 | Plan | Price | What it is | How it is enforced |
 |------|-------|-----------|--------------------|
 | **Basic** | $0 | Free local ERP and CRM with unlimited local invoices and edits; optional cloud access with 5 new cloud invoices a month | No local invoice cap; atomic monthly workspace counter in the cloud |
-| **Pro** | $5 / month | Full cloud: sync up to five registered devices, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
+| **Pro** | $5 / month | Full cloud: sync up to 20 registered devices, no invoice cap | `organizations.plan = 'cloud'`, set by subscription webhooks |
 | **Ultra** | $100 once | Full local: unlimited, offline, two devices | A signed ECDSA token the desktop verifies with no network |
 
 Every plan includes web access and cloud sync. Basic is a real tier — every module,

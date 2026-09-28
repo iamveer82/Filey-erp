@@ -103,7 +103,7 @@ export default function MentionInput({
   };
 
   return (
-    <div className="relative flex-1">
+    <div className="relative min-w-0 flex-1">
       <input
         ref={ref}
         className={small ? "input !py-1.5 text-sm" : "input"}

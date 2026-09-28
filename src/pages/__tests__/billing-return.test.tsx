@@ -14,6 +14,7 @@ vi.mock("../../lib/subscription", async (original) => ({
   getSubscription: vi.fn(), awaitCloudPlan: vi.fn(), openBillingPortal: vi.fn(), startCheckout: vi.fn(),
 }));
 vi.mock("../../lib/license", () => ({
+  CLOUD_DEVICE_LIMIT: 20,
   verifyStoredLicense: async () => ({ valid: false }), entitlement: async () => "free",
   cloudAccess: async () => ({ reason: "free" }), FREE_LIMITS: { invoicesPerMonth: 5 },
   licensePurchased: vi.fn(async () => false), claimPurchasedLicense: vi.fn(),

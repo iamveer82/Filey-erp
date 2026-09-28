@@ -27,11 +27,11 @@ Credentials belong in Supabase secrets or the local CLI session, never source co
 - Resend documents a 24-hour idempotency window. Automatic retries reuse an attempt for less than 23 hours; explicit resends start a new attempt. See [Resend idempotency](https://resend.com/docs/dashboard/emails/idempotency-keys).
 - A workspace switch refreshes the profile, permissions, data providers, device registration, and billing caches. Other tabs pause before further actions until reloaded. Device-local records remain associated with their original workspace.
 - Reconnecting a dropped realtime connection or returning after a background pause refreshes missed changes and checks the active workspace again. An unchanged workspace keeps its current screen mounted during that check. Late profile responses, including expired-token errors, cannot replace a newer workspace.
-- Team channels are workspace-wide, not private direct messages or SMS. Replies remain with their root conversation. A new reply brings that conversation into the latest page. Mention links open the correct channel/thread.
+- Team channels are workspace-wide. Chats are private conversations between two workspace members; other members and administrators cannot read them. Replies remain with their root conversation. Unread counts and notification links address the correct channel or person.
 - Ordinary members can read shared invoices; authors and admins can edit. Private records remain private under the existing database policies.
 - Basic local invoices and edits are unlimited. The hosted Basic allowance is five new cloud invoices per month per workspace, with unlimited edits. Paid subscription states affect the workspace's shared allowance.
 
-## Account invitation codes — prepared, not deployed
+## Account invitation codes — deployed September 28
 
 Apply `supabase/2026-09-28-team-codes.sql` after the team-workspaces and edge-rate-limits migrations, before releasing the updated Teams UI. It gives existing accounts and new profiles one stable, unique six-character uppercase alphanumeric code. No additional provider or API key is needed. Email invites continue through the existing Resend-backed `team-invite` function; deploy its updated Teams link with the release.
 
@@ -40,6 +40,16 @@ An owner/admin explicitly links their account code to a workspace they manage. A
 Email invitations and code approvals default to **Staff / Team chat**. Sales, Finance, Operations and All apps presets use the existing server-enforced module permissions. Managers, accountants and staff receive only the selected sections; those role names do not silently confer additional permissions. Owners/admins can customize individual modules afterward using **Members & Roles → Access**. Admins have all app access and can manage the team. Existing shared-record rules remain: ordinary members can read shared invoices, while authors/admins can edit; unshared records are not exposed merely by joining. Account passwords, API credentials and personal wallets are not shared by a code.
 
 Codes cannot be edited by clients, and there is no account-code directory. Request submission requires a verified email and allows five attempts per account per hour, including failed guesses. Requests and approvals are serialized/idempotent; stale approvals cannot change an existing membership. Changing the workspace linked to a code affects only new requests. Membership approval and status refresh use the existing shared realtime connection, not polling.
+
+## Chats, attachments and device login limits
+
+Apply `supabase/2026-09-28-cloud-device-limit.sql` and `supabase/2026-09-28-team-attachments.sql` before deploying the corresponding frontend. Both migrations are additive and repeatable. Existing channels and messages stay intact.
+
+Cloud workspaces allow 20 registered devices. **Log out** revokes that device's registration, frees its slot and signs the updated client out on its next realtime/focus/reconnect check. Its existing authentication cannot reclaim the slot. A fresh sign-in may register again if space is available. Offline data remains on the device. Old desktop clients need the next desktop update for remote logout handling; the separate Ultra offline activation allowance is unchanged.
+
+Chats and channels accept up to five images, PDFs, Office documents, CSV or text files per message, 10 MB each. The `team-attachments` bucket is private; signed-in access follows workspace membership, Team access and message participation. Uploads complete before a message is published, failed sends keep their draft and attempt cleanup. Images load only when opened, limiting storage downloads. No external messaging provider or API key is needed. Local channels remain device-only; direct chats and sharing files require cloud mode.
+
+`npm run test:rls:local` checks participant isolation (including administrator denial), attachment authorization, revoked access, unread counts, invalid uploads, device logout and concurrent 20-device enforcement. React tests cover attachment validation/cleanup, retrying a draft, switching chats/channels and device-list errors. Use test accounts for a separate real two-device delivery check; do not send test messages into customer conversations.
 
 ## Automated acceptance
 
