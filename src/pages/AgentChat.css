@@ -21,7 +21,7 @@
 .filey-composer-dock { flex-shrink: 0; padding: 12px 24px max(12px, env(safe-area-inset-bottom)); }
 .filey-composer { padding: 10px 8px 8px; border: 1px solid hsl(var(--border) / .65); border-radius: 24px; background: hsl(var(--muted)); transition: border-color 150ms ease-out; }
 .filey-composer:focus-within { border-color: hsl(var(--muted-foreground) / .65); }
-.filey-composer-input { display: block; min-height: 36px; max-height: 160px; padding: 4px 12px 8px; font-size: 16px; line-height: 24px; }
+.filey-composer-input { display: block; min-height: 36px; max-height: min(160px, calc(var(--filey-viewport-height, 100dvh) * .3)); padding: 4px 12px 8px; font-size: 16px; line-height: 24px; }
 @supports (field-sizing: content) {
   .filey-composer-input { field-sizing: content; height: auto !important; }
 }
@@ -64,6 +64,14 @@
 }
 
 @media (max-width: 1023px) {
+  /* Safari pans its visual viewport as the keyboard opens. Follow its origin
+     as well as its height, or the composer is lifted above the visible area. */
+  .filey-workspace.workspace-agent {
+    position: fixed;
+    inset-inline: 0;
+    top: var(--filey-viewport-top, 0px);
+    height: var(--filey-viewport-height, 100dvh);
+  }
   .workspace-agent .workspace-header { height: calc(52px + env(safe-area-inset-top)); }
   .workspace-agent .workspace-header-search,
   .workspace-agent .workspace-storage,

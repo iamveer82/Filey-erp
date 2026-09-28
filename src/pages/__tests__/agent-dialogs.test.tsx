@@ -38,6 +38,8 @@ afterEach(() => {
 });
 
 it("keeps phone Enter for a new line and sends using the arrow, with a compact copy action", async () => {
+  const scroll = vi.spyOn(Element.prototype, "scrollTo");
+  const scrollPage = vi.spyOn(Element.prototype, "scrollIntoView");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query === "(pointer: coarse)", media: query,
     addEventListener: vi.fn(), removeEventListener: vi.fn(),
@@ -47,7 +49,9 @@ it("keeps phone Enter for a new line and sends using the arrow, with a compact c
     yield { type: "text" as const, text: "Your draft is ready." };
     return "Your draft is ready.";
   });
-  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const { container } = render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const conversation = container.querySelector(".filey-conversation-scroll")!;
+  Object.defineProperty(conversation, "scrollHeight", { value: 2400 });
   const input = screen.getByRole("textbox", { name: "Message Filey AI" });
   fireEvent.change(input, { target: { value: "Prepare a draft" } });
   expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(true);
@@ -55,6 +59,9 @@ it("keeps phone Enter for a new line and sends using the arrow, with a compact c
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Your draft is ready.");
   expect(stream).toHaveBeenCalledOnce();
+  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 2400 }));
+  expect(scroll.mock.contexts.every(target => target === conversation)).toBe(true);
+  expect(scrollPage).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Copy reply" })).not.toHaveTextContent("Copy");
   fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
   expect(screen.getByRole("menuitem", { name: "Coin wallet" })).toBeInTheDocument();

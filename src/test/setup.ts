@@ -15,9 +15,12 @@ if (!("ImageData" in g)) g.ImageData = class ImageData {};
 if (typeof HTMLCanvasElement !== "undefined")
   HTMLCanvasElement.prototype.getContext = () => null;
 
-// jsdom doesn't implement scrollIntoView (used by chat auto-scroll).
+// jsdom doesn't implement element scrolling.
 if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
+}
+if (typeof Element !== "undefined" && !Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = () => {};
 }
 
 // No test may reach the network. Saving an invoice or recording a payment calls

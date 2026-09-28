@@ -10,8 +10,13 @@ it("fits the software keyboard, preserves pinch zoom, and removes listeners", ()
   viewport.height = 410; viewport.offsetTop = 18; viewport.dispatchEvent(new Event("resize"));
   expect(style.getPropertyValue("--filey-viewport-height")).toBe("410px");
   expect(style.getPropertyValue("--filey-viewport-top")).toBe("18px");
+  viewport.offsetTop = 300; viewport.dispatchEvent(new Event("scroll"));
+  expect(style.getPropertyValue("--filey-viewport-top")).toBe("300px");
   viewport.scale = 2; viewport.height = 205; viewport.dispatchEvent(new Event("resize"));
   expect(style.getPropertyValue("--filey-viewport-height")).toBe("410px");
+  viewport.scale = 1; viewport.height = 844; viewport.offsetTop = 0; viewport.dispatchEvent(new Event("resize"));
+  expect(style.getPropertyValue("--filey-viewport-height")).toBe("844px");
+  expect(style.getPropertyValue("--filey-viewport-top")).toBe("0px");
   stop(); viewport.scale = 1; viewport.dispatchEvent(new Event("resize"));
   expect(style.getPropertyValue("--filey-viewport-height")).toBe("");
   vi.unstubAllGlobals();

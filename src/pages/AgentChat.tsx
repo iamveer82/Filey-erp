@@ -249,8 +249,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   /** Mirrors the streamed text for the catch block — reading the state there
    *  would get the value from the render that started the run, not the latest. */
   const streamedRef = useRef("");
-  const endRef = useRef<HTMLDivElement>(null);
-  const topRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -364,28 +362,19 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   }, [videosOpen]);
 
   useEffect(() => {
-    if (videosOpen) topRef.current?.scrollIntoView({ block: "start" });
+    if (videosOpen) conversationRef.current?.scrollTo({ top: 0 });
   }, [videosOpen]);
 
-  // Opening a chat must not animate. A smooth scroll on mount — with the
-  // sentinel aligned to the *top* of the viewport, which is scrollIntoView's
-  // default — parks the page mid-scroll, so the chat reads as already scrolled
-  // up. On mount: jump straight to the foot of an existing conversation, and
-  // put a fresh one at the top (the scroll position carries over from whatever
-  // page you came from otherwise). After that, follow new turns smoothly, and
-  // anchor to `end` so the newest message sits at the bottom, not the top.
+  // Scroll only the messages. scrollIntoView also moves hidden ancestors and
+  // the page itself, pulling the composer away while a phone keyboard is open.
   const mounted = useRef(false);
   useEffect(() => {
-    if (videosOpen) return;
-    if (!mounted.current || !chat.turns.length) {
-      mounted.current = true;
-      const atFoot = chat.turns.length > 0;
-      (atFoot ? endRef.current : topRef.current)?.scrollIntoView({
-        block: atFoot ? "end" : "start",
-      });
-      return;
-    }
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const scroller = conversationRef.current;
+    if (!scroller || videosOpen) return;
+    const jump = !mounted.current || !chat.turns.length ||
+      (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+    mounted.current = true;
+    scroller.scrollTo({ top: chat.turns.length ? scroller.scrollHeight : 0, behavior: jump ? "instant" : "smooth" });
     // Only real turns animate. `streaming` used to be in here too, which
     // restarted a *smooth* scroll on every streamed step — a fresh easing
     // animation several times a second, which WebView2 renders as the whole
@@ -398,14 +387,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   useEffect(() => {
     if (!streaming || !mounted.current || videosOpen) return;
     const scroller = conversationRef.current;
-    const nearFoot = scroller
-      ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120
-      : window.innerHeight + window.scrollY >=
-        document.documentElement.scrollHeight - 120;
-    if (!nearFoot) return;
+    if (!scroller || scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 120) return;
     // rAF coalesces bursts into one scroll per frame instead of one per step.
     const id = requestAnimationFrame(() => {
-      endRef.current?.scrollIntoView({ block: "end" });
+      scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
     });
     return () => cancelAnimationFrame(id);
   }, [streaming, videosOpen]);
@@ -713,7 +698,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       </aside>}
       {/* A full-width session header frames the centered conversation. */}
       <div
-        ref={topRef}
         className={cn("filey-chat relative flex min-w-0 flex-1 flex-col", histOpen && "filey-chat-with-history")}
       >
         {dragging && (
@@ -818,7 +802,6 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               timer - this card follows it. */}
           <WhatsAppPairingCard />
 
-          <div ref={endRef} />
         </div>
         </div>
 
