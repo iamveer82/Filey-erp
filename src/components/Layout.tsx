@@ -399,7 +399,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
       )}
-      <div ref={workspaceRef} className="filey-workspace flex h-full w-full overflow-hidden bg-background">
+      <div ref={workspaceRef} data-sidebar-open={mobileOpen} className={cn("filey-workspace relative isolate flex h-full w-full overflow-hidden bg-background", pathname === "/agent" && "workspace-agent")}>
         {/* Offline banner */}
         {!isOnline && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-amber-500 text-black text-center text-xs font-semibold py-1.5">
@@ -480,7 +480,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {/* ───────────── Main column ───────────── */}
         <div
           inert={mobileOpen && !isDesktop}
-          className="flex-1 min-w-0 flex flex-col overflow-hidden"
+          className="workspace-main flex-1 min-w-0 flex flex-col overflow-hidden bg-background"
         >
           <header className="workspace-header shrink-0 z-30 h-16 bg-background border-b border-border flex items-center px-3 sm:px-6 gap-2 sm:gap-3">
             {/* Sidebar toggle - desktop hides/shows, mobile opens the drawer */}
@@ -515,14 +515,14 @@ export default function Layout({ children }: { children: ReactNode }) {
               <button
                 aria-label="Open search"
                 onClick={() => window.dispatchEvent(new Event("toggle-command-palette"))}
-                className="grid h-10 w-10 place-items-center rounded-full hover:bg-hover md:hidden"
+                className="workspace-header-search grid h-10 w-10 place-items-center rounded-full hover:bg-hover md:hidden"
               >
                 <Search size={18} aria-hidden="true" />
               </button>
               <Link
                 to="/settings?section=datamode"
                 aria-label={`Storage: ${local ? "This device" : "Cloud"}. Open storage settings`}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover"
+                className="workspace-storage inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-hover"
               >
                 {local ? <HardDrive size={16} aria-hidden="true" /> : <Cloud size={16} aria-hidden="true" />}
                 <span className="hidden sm:inline">
@@ -629,10 +629,10 @@ export default function Layout({ children }: { children: ReactNode }) {
               <CurrencySwitcher />
 
               {/* Light / dark theme toggle */}
-              <span className="hidden min-[400px]:inline-flex"><AnimatedThemeToggler /></span>
+              <span className="workspace-theme hidden min-[400px]:inline-flex"><AnimatedThemeToggler /></span>
 
               {/* Notifications */}
-              <div ref={notifRef} className="relative">
+              <div ref={notifRef} className="workspace-notifications-trigger relative">
                 <button
                   aria-label="Notifications"
                   onClick={() => setNotifOpen((o) => !o)}

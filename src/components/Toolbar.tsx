@@ -2,8 +2,9 @@
  * Standard list-page toolbar: search, optional filter slot, and primary action.
  * All list pages should use this so the chrome feels identical everywhere. */
 import { ReactNode } from "react";
-import { Search, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { cn } from "../lib/format";
+import { SearchInput } from "./ui";
 
 export interface ToolbarProps {
   searchValue?: string;
@@ -30,24 +31,17 @@ export function Toolbar({
       )}
     >
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        <div className="relative min-w-[160px] flex-1 max-w-md">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-400"
-          />
-          <input
-            type="text"
+          <SearchInput
             value={searchValue || ""}
-            onChange={(e) => onSearch?.(e.target.value)}
+            onChange={(value) => onSearch?.(value)}
             placeholder={searchPlaceholder}
-            aria-label={searchPlaceholder}
-            className="input pl-9"
+            className="min-w-[160px] flex-1 max-w-md"
           />
-        </div>
         {filterSlot}
       </div>
       {primaryAction && (
         <button
+          type="button"
           onClick={primaryAction.onClick}
           className="btn-primary shrink-0"
         >

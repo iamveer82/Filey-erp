@@ -6,6 +6,36 @@ import { Modal } from "../ui";
 
 afterEach(cleanup);
 
+it("filters grouped options, preserves the selection and supports keyboard dismissal", async () => {
+  const change = vi.fn();
+  render(<SelectMenu id="provider" ariaLabel="Provider" value="ollama" onChange={change}
+    searchPlaceholder="Search providers…" options={[
+      { value: "ollama", label: "Ollama", group: "On this device" },
+      { value: "openai", label: "OpenAI", group: "Bring your own key" },
+    ]} />);
+  const trigger = screen.getByRole("button", { name: "Provider" });
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  const search = screen.getByRole("textbox", { name: "Search providers…" });
+  await waitFor(() => expect(search).toHaveFocus());
+  fireEvent.change(search, { target: { value: "missing" } });
+  expect(screen.getByRole("status")).toHaveTextContent("No matching options");
+  expect(trigger).toHaveTextContent("Ollama");
+  expect(change).not.toHaveBeenCalled();
+  fireEvent.change(search, { target: { value: "open" } });
+  expect(screen.queryByRole("menuitem", { name: "Ollama" })).not.toBeInTheDocument();
+  expect(fireEvent.keyDown(search, { key: "Home" })).toBe(true);
+  fireEvent.keyDown(search, { key: "ArrowDown" });
+  const option = screen.getByRole("menuitem", { name: "OpenAI" });
+  expect(option).toHaveFocus();
+  fireEvent.click(option);
+  expect(change).toHaveBeenCalledExactlyOnceWith("openai");
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  fireEvent.click(trigger);
+  expect(screen.getByRole("textbox")).toHaveValue("");
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+  expect(trigger).toHaveFocus();
+});
+
 it("keeps dialog menus interactive and keyboard focus inside the active menu", async () => {
   function Example() {
     const [value,setValue]=useState('chat');

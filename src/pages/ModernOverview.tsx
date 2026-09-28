@@ -1,4 +1,5 @@
 import { toast } from "../components/Toaster";
+import { AnnotatedText } from "../components/AnnotatedText";
 import { reportMoney } from "../lib/reportMoney";
 import { getExchangeRates } from "../lib/exchange-rates";
 import { ChartFrame } from "../components/charts";
@@ -313,7 +314,7 @@ export default function ModernOverview() {
   return (
     <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
-        title={`Welcome back, ${firstName}`}
+        title={<><AnnotatedText variant="highlight">Welcome back</AnnotatedText>, {firstName}</>}
         subtitle="Live view of your business, driven by real data in your workspace."
         action={
           <>

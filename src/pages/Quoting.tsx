@@ -287,7 +287,7 @@ const totals = (f: Form) =>
   );
 
 export default function Quoting() {
-  const { toast, confirm } = useUI();
+  const { toast, confirm, prompt } = useUI();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -798,8 +798,13 @@ export default function Quoting() {
       setForm({ ...form, items });
     };
 
-    const addCustomColumn = () => {
-      const label = window.prompt("Column name:")?.trim();
+    const addCustomColumn = async () => {
+      const label = (await prompt({
+        title: "Add field",
+        label: "Field name",
+        placeholder: "e.g. Size or Reference",
+        confirmLabel: "Add field",
+      }))?.trim();
       if (!label) return;
       const key =
         label

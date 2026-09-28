@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Check, KeyRound } from "lucide-react";
 import { SettingsSection } from "./SettingsLayout";
 import { FileySpinner } from "./FileySpinner";
+import { SelectMenu } from "./ui-menu";
 import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
 import { getCacheScope } from "../lib/api";
 import { getImageConfig, imageCredential, setImageConfig } from "../lib/aiImage";
@@ -119,44 +120,37 @@ function MediaProvider({ kind }: { kind: MediaKind }) {
           <label className="label" htmlFor={`${id}-provider`}>
             Provider
           </label>
-          <select
+          <SelectMenu
             id={`${id}-provider`}
-            className="input"
+            className="max-w-md"
+            disabled={busy}
             value={fal ? "fal" : "openai"}
-            onChange={(e) => {
-              setConfig({ ...config, imageProvider: e.target.value as "fal" | "openai" });
+            options={[...(kind === "image" ? [{ value: "openai", label: "OpenAI-compatible image API" }] : []), { value: "fal", label: "fal · bring your own key" }]}
+            onChange={(value) => {
+              setConfig({ ...config, imageProvider: value as "fal" | "openai" });
               setKey("");
               setNotice("");
             }}
-          >
-            {kind === "image" && (
-              <option value="openai">OpenAI-compatible image API</option>
-            )}
-            <option value="fal">fal · bring your own key</option>
-          </select>
+          />
         </div>
         <div className="space-y-2">
           <label className="label" htmlFor={`${id}-model`}>
             {label} model
           </label>
           {fal ? (
-            <select
+            <SelectMenu
               id={`${id}-model`}
-              className="input"
+              className="max-w-md"
+              disabled={busy}
               value={kind === "image" ? config.imageModel : config.videoModel}
-              onChange={(e) =>
+              options={MEDIA_MODELS.filter(m => m.kind === kind).map(m => ({ value: m.id, label: m.label }))}
+              onChange={(value) =>
                 setConfig({
                   ...config,
-                  [kind === "image" ? "imageModel" : "videoModel"]: e.target.value,
+                  [kind === "image" ? "imageModel" : "videoModel"]: value,
                 })
               }
-            >
-              {MEDIA_MODELS.filter((m) => m.kind === kind).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            />
           ) : (
             <input
               id={`${id}-model`}
@@ -193,16 +187,13 @@ function MediaProvider({ kind }: { kind: MediaKind }) {
               <label className="label" htmlFor={`${id}-size`}>
                 Image size
               </label>
-              <select
+              <SelectMenu
                 id={`${id}-size`}
-                className="input"
+                disabled={busy}
                 value={image.size}
-                onChange={(e) => setImage({ ...image, size: e.target.value })}
-              >
-                <option value="1024x1024">Square · 1024 × 1024</option>
-                <option value="1536x1024">Landscape · 1536 × 1024</option>
-                <option value="1024x1536">Portrait · 1024 × 1536</option>
-              </select>
+                onChange={(size) => setImage({ ...image, size })}
+                options={[{ value: "1024x1024", label: "Square · 1024 × 1024" }, { value: "1536x1024", label: "Landscape · 1536 × 1024" }, { value: "1024x1536", label: "Portrait · 1024 × 1536" }]}
+              />
             </div>
           </div>
         )}

@@ -1905,7 +1905,7 @@ function Editor({
   supplierMode: boolean;
   docs: InvoiceDocSummary[];
 }) {
-  const { toast } = useUI();
+  const { toast, prompt } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
   // Off-screen container that renders EVERY page stacked as real A4 sheets —
   // captured for the PDF so the export contains all items (not just the page
@@ -2050,8 +2050,13 @@ function Editor({
     setForm({ ...form, items });
   };
 
-  const addCustomColumn = () => {
-    const label = window.prompt("Column name:")?.trim();
+  const addCustomColumn = async () => {
+    const label = (await prompt({
+      title: "Add field",
+      label: "Field name",
+      placeholder: "e.g. Size or Reference",
+      confirmLabel: "Add field",
+    }))?.trim();
     if (!label) return;
     const key =
       label

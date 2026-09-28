@@ -15,6 +15,7 @@ import { useUI } from "../lib/ui";
 import { SettingsPanel, SettingsSection } from "./SettingsLayout";
 import AiFundingControl from "./AiFundingControl";
 import MediaSettings from "./MediaSettings";
+import { SelectMenu } from "./ui-menu";
 import { getCacheScope } from "../lib/api";
 import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
 
@@ -307,21 +308,15 @@ export default function AiSettings() {
         </div>
         <div className="space-y-2">
           <label className="label" htmlFor="ai-preset">Provider preset</label>
-          <select id="ai-preset" className="input" disabled={!!busy} value={preset?.label ?? ""} onChange={event => {
-            const selected = PRESETS.find(p => p.label === event.target.value);
+          <SelectMenu id="ai-preset" className="max-w-md" disabled={!!busy} value={preset?.label ?? ""}
+            placeholder="Custom configuration" searchPlaceholder="Search providers…"
+            options={[...PRESETS.filter(p => p.access === "local"), ...PRESETS.filter(p => p.access === "free-tier"), ...PRESETS.filter(p => !p.access)].map(p => ({
+              value: p.label, label: p.label,
+              group: p.access === "local" ? "On this device" : p.access === "free-tier" ? "Hosted · free tiers" : "Bring your own key",
+            }))} onChange={value => {
+            const selected = PRESETS.find(p => p.label === value);
             if (selected) update({ provider: selected.provider, baseUrl: selected.baseUrl, model: selected.model });
-          }}>
-            <option value="" disabled>Custom configuration</option>
-            <optgroup label="Local · no API key required">
-              {PRESETS.filter(p => p.access === "local").map(p => <option key={p.label}>{p.label}</option>)}
-            </optgroup>
-            <optgroup label="Hosted · free tiers">
-              {PRESETS.filter(p => p.access === "free-tier").map(p => <option key={p.label}>{p.label}</option>)}
-            </optgroup>
-            <optgroup label="More providers · bring your own key">
-              {PRESETS.filter(p => !p.access).map(p => <option key={p.label}>{p.label}</option>)}
-            </optgroup>
-          </select>
+          }} />
         </div>
         {preset?.note && <p className="text-[13px] leading-relaxed text-muted-foreground">{preset.note}</p>}
         {(preset?.guide || preset?.keyUrl) && <div className="flex flex-wrap items-center gap-2">
@@ -373,11 +368,10 @@ export default function AiSettings() {
             </button>
           </div>
           {modelMessage && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{modelMessage}</p>}
-          {models.length > 0 && <select className="input" aria-label={local ? "Available local models" : "Available models"} disabled={!!busy} value={models.includes(cfg.model) ? cfg.model : ""}
-            onChange={event => update({ model: event.target.value })}>
-            <option value="" disabled>Choose a model</option>
-            {models.map(model => <option key={model}>{model}</option>)}
-          </select>}
+          {models.length > 0 && <SelectMenu ariaLabel={local ? "Available local models" : "Available models"}
+            disabled={!!busy} value={cfg.model} placeholder="Choose a model" searchPlaceholder="Search models…"
+            options={models.map(model => ({ value: model, label: model }))}
+            onChange={model => update({ model })} />}
           <p className="text-xs leading-relaxed text-muted-foreground">Choose a model with tool calling for business actions and vision for document images.</p>
         </div>
 
@@ -388,11 +382,12 @@ export default function AiSettings() {
           <div className="space-y-4 pt-3">
             <div className="space-y-2">
               <label className="label" htmlFor="ai-protocol">API format</label>
-              <select id="ai-protocol" className="input" disabled={!!busy} value={cfg.provider} onChange={event => {
-                const provider = event.target.value as AiProvider;
+              <SelectMenu id="ai-protocol" className="max-w-md" disabled={!!busy} value={cfg.provider}
+                options={[{ value: "openai", label: "OpenAI-compatible" }, { value: "anthropic", label: "Anthropic (Claude)" }]} onChange={value => {
+                const provider = value as AiProvider;
                 const selected = PRESETS.find(p => p.provider === provider);
                 update({ provider, baseUrl: PROVIDER_DEFAULT_URL[provider], model: selected?.model ?? "" });
-              }}><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic (Claude)</option></select>
+              }} />
             </div>
             <div className="space-y-2">
               <label className="label" htmlFor="ai-base-url">API base URL</label>

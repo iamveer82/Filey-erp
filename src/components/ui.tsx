@@ -137,7 +137,7 @@ export function PageHeader({
   subtitle,
   action,
 }: {
-  title: string;
+  title: ReactNode;
   subtitle?: string;
   action?: ReactNode;
 }) {
@@ -145,7 +145,7 @@ export function PageHeader({
   return (
     <div className="page-heading flex items-start justify-between mb-6 gap-4 flex-wrap">
       <div className="min-w-0 flex-1 basis-[240px]">
-        <h1 className="text-[24px] leading-tight font-semibold text-foreground tracking-tight">{t(title)}</h1>
+        <h1 className="text-[24px] leading-tight font-semibold text-foreground tracking-tight">{typeof title === "string" ? t(title) : title}</h1>
         {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{t(subtitle)}</p>}
       </div>
       {action && <div className="page-heading-actions flex min-w-0 max-w-full flex-wrap items-center gap-2">{action}</div>}
@@ -825,16 +825,30 @@ export function FormField({
   required?: boolean;
 }) {
   const fieldId = useId();
+  const messageId = `${fieldId}-message`;
   const fieldRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLLabelElement>(null);
   // Legacy fields often wrap a control in an icon or date-picker container.
   // Associate the rendered control once instead of changing hundreds of callers.
   useLayoutEffect(() => {
-    if (htmlFor) return;
-    const control = fieldRef.current?.querySelector<HTMLElement>('input:not([type="hidden"]),textarea,select,[role="combobox"],button[aria-haspopup="menu"]');
+    const control = htmlFor ? document.getElementById(htmlFor) : fieldRef.current?.querySelector<HTMLElement>('input:not([type="hidden"]),textarea,select,[role="combobox"],button[aria-haspopup="menu"]');
     if (!control || !labelRef.current) return;
     if (!control.id) control.id = fieldId;
     labelRef.current.htmlFor = control.id;
+    const describedBy = control.getAttribute("aria-describedby");
+    const invalid = control.getAttribute("aria-invalid");
+    if (error || hint) control.setAttribute("aria-describedby", [describedBy, messageId].filter(Boolean).join(" "));
+    if (error) control.setAttribute("aria-invalid", "true");
+    return () => {
+      if (error || hint) {
+        if (describedBy) control.setAttribute("aria-describedby", describedBy);
+        else control.removeAttribute("aria-describedby");
+      }
+      if (error) {
+        if (invalid) control.setAttribute("aria-invalid", invalid);
+        else control.removeAttribute("aria-invalid");
+      }
+    };
   });
   return (
     <div ref={fieldRef} className={cn("flex min-w-0 flex-col", className)}>
@@ -844,12 +858,12 @@ export function FormField({
       </label>
       {children}
       {error ? (
-        <p className="text-xs font-medium text-danger mt-1.5 flex items-center gap-1">
+        <p id={messageId} role="alert" className="text-xs font-medium text-danger mt-1.5 flex items-center gap-1">
           <AlertCircle size={12} className="shrink-0" />
           {error}
         </p>
       ) : hint ? (
-        <p className="text-xs text-muted-foreground mt-1">{hint}</p>
+        <p id={messageId} className="text-xs text-muted-foreground mt-1">{hint}</p>
       ) : null}
     </div>
   );
@@ -1129,6 +1143,7 @@ export function SearchInput({
   placeholder?: string;
   className?: string;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className={cn("relative", className)}>
       <Search
@@ -1136,18 +1151,26 @@ export function SearchInput({
         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
       />
       <input
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="input pl-9 pr-9"
+        className="input pl-9 pr-11"
+        onKeyDown={event => {
+          if (event.key === "Escape" && value) {
+            event.preventDefault();
+            event.stopPropagation();
+            onChange("");
+          }
+        }}
       />
       {value && (
         <button
           type="button"
-          onClick={() => onChange("")}
-          className="absolute right-2 top-1/2 -translate-y-1/2 grid place-items-center h-5 w-5 rounded-full bg-muted text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer"
+          onClick={() => { onChange(""); inputRef.current?.focus(); }}
+          className="absolute right-0 top-1/2 -translate-y-1/2 grid place-items-center h-10 w-10 rounded-full text-muted-foreground hover:bg-hover hover:text-foreground transition-colors cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           aria-label="Clear"
         >
           <X size={11} />

@@ -9,6 +9,10 @@ vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast }) }));
 
 const local: AiConfig = { provider: "openai", baseUrl: "http://localhost:11434/v1", model: "local-model", apiKey: "" };
 const reply = () => new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }), { status: 200 });
+const chooseProvider = (name: string) => {
+  fireEvent.click(screen.getByRole("button", { name: "Provider preset" }));
+  fireEvent.click(screen.getByRole("menuitem", { name }));
+};
 beforeEach(() => { localStorage.clear(); setCacheOrg(null); setCacheOrg("test-org", "test-user"); vi.clearAllMocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -61,7 +65,7 @@ it("makes local setup testable without a key and clears the hosted key when choo
   const fetchMock = vi.fn(async () => reply());
   vi.stubGlobal("fetch", fetchMock);
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Ollama (local)" } });
+  chooseProvider("Ollama (local)");
   expect(screen.getByLabelText("API key (optional)")).toHaveValue("");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Model"), { target: { value: "installed-model" } });
@@ -78,7 +82,7 @@ it("makes local setup testable without a key and clears the hosted key when choo
 it("offers OpenRouter with the user's own key and hides its free-model preset", () => {
   render(<AiSettings />);
   expect(screen.queryByRole("option", { name: "OpenRouter · free models" })).toBeNull();
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenRouter (any model)" } });
+  chooseProvider("OpenRouter (any model)");
   expect(screen.getByLabelText("Model")).toHaveValue("openai/gpt-4o-mini");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
   expect(screen.queryByText(/AI Briefing/)).not.toBeInTheDocument();
@@ -87,7 +91,7 @@ it("offers OpenRouter with the user's own key and hides its free-model preset", 
 
 it("offers Gemini's free-tier model without fabricating a provider key", () => {
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Google Gemini" } });
+  chooseProvider("Google Gemini");
   expect(screen.getByLabelText("Model")).toHaveValue("gemini-2.5-flash");
   expect(screen.getByRole("link", { name: "Get your API key" })).toHaveAttribute("href", "https://aistudio.google.com/apikey");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
@@ -100,8 +104,9 @@ it("lets the user select a discovered local model without starting inference", a
   vi.stubGlobal("fetch", fetchMock);
   render(<AiSettings />);
   fireEvent.click(screen.getByRole("button", { name: "Find local models" }));
-  const models = await screen.findByRole("combobox", { name: "Available local models" });
-  fireEvent.change(models, { target: { value: "installed-qwen" } });
+  const models = await screen.findByRole("button", { name: "Available local models" });
+  fireEvent.click(models);
+  fireEvent.click(screen.getByRole("menuitem", { name: "installed-qwen" }));
   expect(screen.getByLabelText("Model")).toHaveValue("installed-qwen");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeEnabled();
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -112,7 +117,7 @@ it("tests the just-entered hosted key, masks it after saving, and keeps it out o
   const fetchMock = vi.fn(async () => reply());
   vi.stubGlobal("fetch", fetchMock);
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  chooseProvider("OpenAI");
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "  fixture-openai-key  " } });
   fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
   await screen.findByText("Connected to gpt-4o-mini. Your model returned a text response.");
@@ -129,10 +134,10 @@ it("keeps each provider's saved key when switching and does not save a draft key
   setAiConfig({ ...local, baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", apiKey: "fixture-original-key" });
   render(<AiSettings />);
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-unsaved-key" } });
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Groq" } });
+  chooseProvider("Groq");
   expect(screen.getByLabelText("API key")).toHaveValue("");
   expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  chooseProvider("OpenAI");
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await screen.findByText("Settings saved. Test the connection to verify your model.");
   expect(getAiConfig().apiKey).toBe("fixture-original-key");
@@ -143,10 +148,10 @@ it("discovers hosted models with the draft key without overwriting the active co
   vi.stubGlobal("fetch", fetchMock);
   setAiConfig(local);
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "Groq" } });
+  chooseProvider("Groq");
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-groq-key" } });
   fireEvent.click(screen.getByRole("button", { name: "Find models" }));
-  await screen.findByRole("combobox", { name: "Available models" });
+  await screen.findByRole("button", { name: "Available models" });
   const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("https://api.groq.com/openai/v1/models");
   expect(new Headers(init.headers).get("authorization")).toBe("Bearer fixture-groq-key");
@@ -156,7 +161,7 @@ it("discovers hosted models with the draft key without overwriting the active co
 it("shows an actionable inline authentication failure without echoing the key", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: { message: "Invalid key: fixture-invalid-key" } }), { status: 401 })));
   render(<AiSettings />);
-  fireEvent.change(screen.getByLabelText("Provider preset"), { target: { value: "OpenAI" } });
+  chooseProvider("OpenAI");
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "fixture-invalid-key" } });
   fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
   const error = await screen.findByRole("alert");

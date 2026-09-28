@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShieldCheck, Building2, ArrowRight } from "lucide-react";
 import { Button } from "../components/Button";
+import { AnnotatedText } from "../components/AnnotatedText";
 import { useAuth } from "../lib/auth";
 
 // ProfileSetup is the first-run screen users see after sign-up.
@@ -45,7 +46,7 @@ export default function ProfileSetup() {
           <div className="mx-auto w-12 h-12 rounded-full bg-success/10 text-success grid place-items-center">
             <ShieldCheck size={26} />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">You're all set</h1>
+          <h1 className="text-xl font-semibold tracking-tight">You're <AnnotatedText>all set</AnnotatedText></h1>
           <p className="text-sm text-brand-400">{company || "Your workspace"} is ready.</p>
           <Button onClick={() => nav("/overview-modern")}>
             Go to dashboard <ArrowRight size={16} />

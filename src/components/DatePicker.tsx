@@ -4,7 +4,7 @@
  * `value` (Date) + `onChange`. For string (yyyy-mm-dd) forms use the
  * `DateField` wrapper below — a drop-in for <input type="date">. */
 import * as React from "react";
-import { format, parse, isValid } from "date-fns";
+import { format, parse, isValid, startOfDay } from "date-fns";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "./Popover";
 import { Calendar } from "./FancyCalendar";
@@ -22,27 +22,14 @@ const PARSE_FORMATS = [
 ];
 
 function parseDate(text: string): Date | undefined {
-  const s = text.trim();
-  if (!s) return undefined;
+  // Accept compact entry, but only add separators once editing is finished.
+  const s = text.trim().replace(/^(\d{2})(\d{2})(\d{4})$/, "$1/$2/$3");
+  if (!/\b\d{4}\b/.test(s)) return undefined;
   for (const f of PARSE_FORMATS) {
     const d = parse(s, f, new Date());
     if (isValid(d)) return d;
   }
-  const native = new Date(s);
-  return isValid(native) ? native : undefined;
-}
-
-// Light input mask: as the user types digits, auto-insert the dd/MM/yyyy
-// slashes (20062026 → 20/06/2026). If the input contains letters (e.g.
-// "20 Jun 2026"), it's left as free text so those formats stay typeable —
-// parseDate handles both on commit.
-function maskDate(raw: string): string {
-  if (/[^\d/]/.test(raw)) return raw;
-  const digits = raw.replace(/\D/g, "").slice(0, 8);
-  if (digits.length > 4)
-    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
-  if (digits.length > 2) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
-  return digits;
+  return undefined;
 }
 
 export interface DatePickerProps {
@@ -67,12 +54,13 @@ export function DatePicker({
   minDate,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false);
-  const [text, setText] = React.useState(value ? format(value, DISPLAY) : "");
+  const formattedValue = value ? format(value, DISPLAY) : "";
+  const [text, setText] = React.useState(formattedValue);
 
-  // Keep the text field in sync when the value changes from outside.
+  // DateField creates Date objects on every render; only reset for a new day.
   React.useEffect(() => {
-    setText(value ? format(value, DISPLAY) : "");
-  }, [value]);
+    setText(formattedValue);
+  }, [formattedValue]);
 
   // Commit a typed value: parse it, or revert to the last valid date.
   const commit = () => {
@@ -81,11 +69,11 @@ export function DatePicker({
       return;
     }
     const d = parseDate(text);
-    if (d) {
+    if (d && (!minDate || d >= startOfDay(minDate))) {
       onChange(d);
       setText(format(d, DISPLAY));
     } else {
-      setText(value ? format(value, DISPLAY) : "");
+      setText(formattedValue);
     }
   };
 
@@ -96,12 +84,12 @@ export function DatePicker({
         value={text}
         placeholder={placeholder}
         disabled={disabled}
-        onChange={(e) => setText(maskDate(e.target.value))}
+        onChange={(e) => setText(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
-            commit();
-            (e.target as HTMLInputElement).blur();
+            e.preventDefault();
+            e.currentTarget.blur();
           }
         }}
       />
@@ -127,7 +115,7 @@ export function DatePicker({
               onChange(d);
               setOpen(false);
             }}
-            disabled={minDate ? (d) => d < minDate : undefined}
+            disabled={minDate ? (d) => d < startOfDay(minDate) : undefined}
           />
           {clearable && value && (
             <button

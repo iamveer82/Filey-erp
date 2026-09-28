@@ -900,7 +900,7 @@ function Editor({
   /** Saved number formats, so a duplicate numbers itself the user's way. */
   docFmts: DocFormats;
 }) {
-  const { toast, confirm } = useUI();
+  const { toast, confirm, prompt } = useUI();
   const poRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
@@ -989,8 +989,13 @@ function Editor({
     setForm({ ...form, items });
   };
 
-  const addCustomColumn = () => {
-    const label = window.prompt("Column name:")?.trim();
+  const addCustomColumn = async () => {
+    const label = (await prompt({
+      title: "Add field",
+      label: "Field name",
+      placeholder: "e.g. Size or Reference",
+      confirmLabel: "Add field",
+    }))?.trim();
     if (!label) return;
     const key =
       label

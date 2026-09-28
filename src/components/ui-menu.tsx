@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -7,7 +8,7 @@ import {
   type RefObject,
 } from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { Check, ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { cn } from "../lib/format";
 
 /* ── ui-menu — the one dropdown-menu primitive for the whole app ─────
@@ -88,11 +89,13 @@ export function MenuPopover({
       }}
       onKeyDown={event => {
         if (role !== "menu" || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        if ((event.target as HTMLElement).matches('input, textarea, [contenteditable="true"]') && ["Home", "End"].includes(event.key)) return;
         const items = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
         if (!items.length) return;
         event.preventDefault();
         const index = items.indexOf(document.activeElement as HTMLElement);
         const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : index < 0 ? (event.key === "ArrowDown" ? 0 : items.length - 1)
           : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
         items[next].focus();
       }}
@@ -101,7 +104,7 @@ export function MenuPopover({
         // itself: the cap turns a 160-currency list into a scrollable panel,
         // overscroll-contain stops the scroll chaining to the page behind
         // (which used to close closeOnScroll menus at the end of the list).
-        "z-50 max-h-[min(60vh,26rem)] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg outline-none",
+        "z-50 max-h-[min(60vh,26rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg outline-none",
         className
       )}
     >
@@ -135,7 +138,7 @@ export function MenuItemRow({
       role="menuitem"
       onClick={onClick}
       className={cn(
-        "flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-[13px] transition-colors hover:bg-hover",
+        "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-inset [@media(pointer:coarse)]:min-h-11",
         danger ? "text-danger hover:bg-danger/10" : "text-foreground"
       )}
     >
@@ -162,10 +165,10 @@ export const MenuSep = () => <div className="mx-2 my-1 border-t border-border" /
  * Menu-button showing the current option's label + chevron; opens the
  * popover with a checked row per option. State wiring stays identical to
  * a select (value + onChange(value)); only presentation changes. Lists
- * over ~10 options scroll (max-h-72); disabled selects become disabled,
- * non-clickable buttons. size "md" = h-9 form rows, "sm" = h-8 toolbars. */
+ * Long lists scroll within the available viewport; disabled selects become
+ * non-clickable buttons. size "md" = h-10 form rows, "sm" = h-8 toolbars. */
 
-export type SelectOption = { value: string; label: string };
+export type SelectOption = { value: string; label: string; group?: string };
 
 export function SelectMenu({
   value,
@@ -175,44 +178,62 @@ export function SelectMenu({
   disabled,
   ariaLabel,
   className,
+  id,
+  placeholder = "Choose an option",
+  searchPlaceholder,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
-  /** "sm" → h-8 toolbar rows, "md" → h-9 form inputs (matches .input). */
+  /** "sm" → h-8 toolbar rows, "md" → h-10 form inputs (matches .input). */
   size?: "sm" | "md";
   disabled?: boolean;
   ariaLabel?: string;
   className?: string;
+  id?: string;
+  placeholder?: string;
+  /** Enables a filter for longer lists while keeping the selected value. */
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const btnRef = useRef<HTMLButtonElement>(null);
   // The portal panel can't inherit width — pin it to the trigger's width.
   const [minW, setMinW] = useState<number | undefined>(undefined);
   const current = options.find((o) => o.value === value);
+  const filtered = options.filter(o => `${o.label} ${o.group ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const toggle = () => {
+    if (disabled) return;
+    setMinW(btnRef.current?.offsetWidth);
+    setQuery("");
+    setOpen(v => !v);
+  };
   return (
     <>
       <button
         type="button"
+        id={id}
         ref={btnRef}
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={ariaLabel}
-        onClick={() => {
-          if (disabled) return;
-          setMinW(btnRef.current?.offsetWidth);
-          setOpen((v) => !v);
+        onClick={toggle}
+        onKeyDown={event => {
+          if (!open && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+            event.preventDefault();
+            toggle();
+          }
         }}
         className={cn(
           "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-[8px] border border-border bg-card px-3 text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          size === "sm" ? "h-8 px-2 text-xs" : "h-10",
+          size === "sm" ? "h-8 px-2 text-xs" : "h-10 [@media(pointer:coarse)]:min-h-11",
           disabled ? "cursor-not-allowed opacity-40" : "hover:bg-hover",
           className
         )}
       >
         <span className="min-w-0 flex-1 truncate text-left">
-          {current?.label ?? ""}
+          {current?.label ?? placeholder}
         </span>
         <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
       </button>
@@ -224,17 +245,27 @@ export function SelectMenu({
           closeOnScroll
           style={{ minWidth: minW }}
         >
-          {options.map((o) => (
-            <MenuItemRow
-              key={o.value}
-              label={o.label}
-              checked={o.value === value}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
-            />
+          {searchPlaceholder && <div className="sticky -top-1 z-10 border-b border-border bg-card p-1 pb-2">
+            <div className="relative">
+              <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input className="input pl-9" aria-label={searchPlaceholder} placeholder={searchPlaceholder}
+                value={query} onChange={event => setQuery(event.target.value)} />
+            </div>
+          </div>}
+          {filtered.map((o, index) => (
+            <Fragment key={o.value}>
+              {o.group && o.group !== filtered[index - 1]?.group && <p className="px-3 pb-1 pt-3 text-xs font-medium text-muted-foreground">{o.group}</p>}
+              <MenuItemRow
+                label={o.label}
+                checked={o.value === value}
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+              />
+            </Fragment>
           ))}
+          {!filtered.length && <p role="status" className="px-3 py-5 text-center text-sm text-muted-foreground">No matching options</p>}
         </MenuPopover>
       )}
     </>

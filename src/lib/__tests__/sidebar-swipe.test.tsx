@@ -7,7 +7,7 @@ function Drawer({ enabled = true }: { enabled?: boolean }) {
   const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   useSidebarSwipe(root, panel, enabled, open, setOpen);
-  return <div ref={root} data-testid="root"><div className="workspace-drawer-backdrop" /><aside ref={panel} data-testid="drawer" data-open={open}><button>Destination</button><input aria-label="Search pages" /></aside><button onClick={() => setOpen(true)}>Menu</button></div>;
+  return <div ref={root} data-testid="root" data-sidebar-open={open}><div className="workspace-drawer-backdrop" /><aside ref={panel} data-testid="drawer" data-open={open}><button>Destination</button><input aria-label="Search pages" /></aside><div className="workspace-main"><button onClick={() => setOpen(true)}>Menu</button></div></div>;
 }
 const point = (x: number, y = 200) => ({ identifier: 1, clientX: x, clientY: y });
 function start(target: Element, x: number, y = 200) { fireEvent.touchStart(target, { touches: [point(x, y)] }); }
@@ -20,13 +20,17 @@ function setup(enabled = true) {
 it('follows an edge swipe, opens on release, and closes with a left swipe without activating links', () => {
   const {root, panel, getByText} = setup();
   start(root, 20); move(root, 200);
-  expect(panel.style.transform).toBe('translate3d(-156px, 0, 0)');
+  expect(root.style.getPropertyValue('--workspace-reveal')).toBe('180px');
+  expect(root.dataset.sidebarDragging).toBe('true');
   expect(panel.dataset.open).toBe('false');
   fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('true');
-  expect(panel.style.transform).toBe('');
+  expect(root.style.getPropertyValue('--workspace-reveal')).toBe('');
+  expect(root.dataset.sidebarDragging).toBeUndefined();
   const clicked = vi.fn(); getByText('Destination').addEventListener('click', clicked);
-  start(getByText('Destination'), 260); move(panel, 50); fireEvent.touchEnd(panel);
+  start(getByText('Destination'), 260); move(panel, 50);
+  expect(root.style.getPropertyValue('--workspace-reveal')).toBe('126px');
+  fireEvent.touchEnd(panel);
   expect(panel.dataset.open).toBe('false');
   fireEvent.click(getByText('Destination'));
   expect(clicked).not.toHaveBeenCalled();
@@ -43,7 +47,8 @@ it('leaves vertical scrolling, fields and gestures away from the edge alone', ()
 it('cancels interrupted and multi-finger gestures and disables swipes on desktop', () => {
   const {root, panel, rerender} = setup();
   start(root, 20); move(root, 200); fireEvent.touchCancel(root);
-  expect(panel.dataset.open).toBe('false'); expect(panel.style.transform).toBe('');
+  expect(panel.dataset.open).toBe('false'); expect(root.style.getPropertyValue('--workspace-reveal')).toBe('');
+  expect(root.dataset.sidebarDragging).toBeUndefined();
   start(root, 20); move(root, 200); fireEvent.touchStart(root, {touches: [point(200), {...point(250), identifier: 2}]}); fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('false');
   rerender(<Drawer enabled={false} />);

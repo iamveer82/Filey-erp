@@ -11,6 +11,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Logo from "../components/Logo";
+import { AnnotatedText } from "../components/AnnotatedText";
 import PasswordRecovery from "../components/PasswordRecovery";
 import { FormField } from "../components/ui";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../components/InputOTP";
@@ -364,7 +365,7 @@ export default function Login() {
         <div className="flex flex-col items-center text-center mb-6">
           <Logo size={44} />
           <h1 className="mt-4 text-[22px] font-semibold tracking-tight text-foreground">
-            {heading}
+            {screen === "form" ? <AnnotatedText variant="highlight">{heading}</AnnotatedText> : heading}
           </h1>
           <p className="mt-1.5 text-sm text-brand-500">{subheading}</p>
         </div>

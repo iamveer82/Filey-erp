@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, BookOpen, Download, Search } from "lucide-react";
 import { PageHeader } from "../components/ui";
+import { AnnotatedText } from "../components/AnnotatedText";
 import { isLocalMode } from "../lib/dataMode";
 import { getAgentMode } from "../lib/agentMode";
 import { downloadText } from "../lib/localPaths";
@@ -470,8 +471,8 @@ export default function KnowledgeCenter() {
                 <BookOpen size={26} className="mb-5 text-primary-500" />
                 <h2 className="text-2xl font-semibold tracking-tight">
                   {help
-                    ? "What do you need help with?"
-                    : "One workspace, connected workflows."}
+                    ? <>What do you need <AnnotatedText>help with?</AnnotatedText></>
+                    : <>One workspace, <AnnotatedText variant="highlight">connected</AnnotatedText> workflows.</>}
                 </h2>
                 <p className="text-sm text-muted-foreground leading-6 mt-3 max-w-xl">
                   Start with a customer, create a quotation, issue an invoice and record

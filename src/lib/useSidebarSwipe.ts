@@ -16,11 +16,8 @@ export function useSidebarSwipe(
     let gesture: { id: number; x: number; y: number; time: number; width: number; distance: number; dragging: boolean } | null = null;
     const reset = () => {
       gesture = null;
-      panel.style.removeProperty("transform");
-      panel.style.removeProperty("transition");
-      backdrop.style.removeProperty("opacity");
-      backdrop.style.removeProperty("visibility");
-      backdrop.style.removeProperty("transition");
+      host.style.removeProperty("--workspace-reveal");
+      delete host.dataset.sidebarDragging;
     };
     const start = (event: TouchEvent) => {
       reset();
@@ -50,13 +47,10 @@ export function useSidebarSwipe(
       }
       event.preventDefault();
       gesture.distance = Math.max(0, Math.min(gesture.width, open ? -dx : dx));
-      const offset = open ? -gesture.distance : gesture.distance - gesture.width;
-      // Direct transforms avoid re-rendering the whole workspace on every move.
-      panel.style.transition = "none";
-      panel.style.transform = `translate3d(${offset}px, 0, 0)`;
-      backdrop.style.transition = "none";
-      backdrop.style.visibility = "visible";
-      backdrop.style.opacity = String(1 + offset / gesture.width);
+      const reveal = open ? gesture.width - gesture.distance : gesture.distance;
+      // One position drives the page and sidebar; no React render per touch frame.
+      host.dataset.sidebarDragging = "true";
+      host.style.setProperty("--workspace-reveal", `${reveal}px`);
     };
     const end = (event: TouchEvent) => {
       if (!gesture?.dragging) { reset(); return; }

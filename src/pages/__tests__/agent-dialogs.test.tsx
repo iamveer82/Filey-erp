@@ -34,6 +34,30 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+it("keeps phone Enter for a new line and sends using the arrow, with a compact copy action", async () => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(pointer: coarse)", media: query,
+    addEventListener: vi.fn(), removeEventListener: vi.fn(),
+  }));
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "text" as const, text: "Your draft is ready." };
+    return "Your draft is ready.";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const input = screen.getByRole("textbox", { name: "Message Filey AI" });
+  fireEvent.change(input, { target: { value: "Prepare a draft" } });
+  expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(true);
+  expect(stream).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Your draft is ready.");
+  expect(stream).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Copy reply" })).not.toHaveTextContent("Copy");
+  fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
+  expect(screen.getByRole("menuitem", { name: "Coin wallet" })).toBeInTheDocument();
 });
 
 it("prefills an integration handoff as an editable draft without running the agent", () => {

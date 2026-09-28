@@ -18,11 +18,11 @@ export function AgentAccessControl({ mode, disabled, onChange, onCapabilities }:
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} aria-label="Agent access" title={MODE_LABELS[mode]}
-        className={cn("composer-control max-w-[160px]", mode === "auto" && "text-amber-700 dark:text-amber-400")}>
-        <Icon size={14} className="shrink-0" /><span className="truncate">{MODE_LABELS[mode]}</span>
+        className={cn("composer-control composer-access max-w-[160px]", mode === "auto" && "text-amber-700 dark:text-amber-400")}>
+        <Icon size={18} className="shrink-0" /><span className="composer-detail truncate">{MODE_LABELS[mode]}</span>
       </button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="start" className="w-[340px] !rounded-2xl p-2" data-browser-overlay>
+    <PopoverContent side="top" align="start" collisionPadding={12} className="max-h-[var(--radix-popover-content-available-height)] w-[340px] overflow-y-auto p-2" data-browser-overlay>
       <p className="px-2 py-2 text-xs font-medium text-muted-foreground">How should Filey approve actions?</p>
       <div role="radiogroup" aria-label="Approval mode" className="space-y-0.5">
         {(["manual", "accept_edits", "auto", "plan"] as const).map(id => {
@@ -55,14 +55,14 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
   const percent = levels.length > 1 ? index / (levels.length - 1) * 100 : 0;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" disabled={disabled} className="composer-control min-w-0 max-w-full" aria-label={`Reasoning effort: ${EFFORT_LABELS[selected]}`} title={`${model} · ${EFFORT_LABELS[selected]} effort`}>
-        <Zap key={selected} size={14} className="effort-change shrink-0" fill={selected === "auto" ? "none" : "currentColor"} />
-        <span className="max-w-[112px] truncate text-foreground sm:max-w-[160px]">{model}</span>
-        <span className="hidden shrink-0 text-muted-foreground sm:inline">{EFFORT_LABELS[selected]}</span>
-        <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+      <button type="button" disabled={disabled} className="composer-control composer-effort min-w-0 max-w-full" aria-label={`Reasoning effort: ${EFFORT_LABELS[selected]}`} title={`${model} · ${EFFORT_LABELS[selected]} effort`}>
+        <Zap key={selected} size={18} className="effort-change shrink-0" fill={selected === "auto" ? "none" : "currentColor"} />
+        <span className="composer-detail max-w-[160px] truncate text-foreground">{model}</span>
+        <span className="composer-detail shrink-0 text-muted-foreground">{EFFORT_LABELS[selected]}</span>
+        <ChevronDown size={12} className="composer-detail shrink-0 text-muted-foreground" />
       </button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="end" className="w-[280px] !rounded-2xl p-4" data-browser-overlay>
+    <PopoverContent side="top" align="end" collisionPadding={12} className="max-h-[var(--radix-popover-content-available-height)] w-[280px] overflow-y-auto p-4" data-browser-overlay>
       <div className="flex items-start justify-between gap-3">
         <Zap key={selected} size={19} className="effort-change mt-1 text-amber-700 dark:text-primary-400" />
         <div className="min-w-0 flex-1 text-center"><p aria-live="polite" className="text-sm font-semibold">{EFFORT_LABELS[selected]}</p><p className="mt-0.5 truncate text-xs text-muted-foreground" title={model}>{model}</p></div>

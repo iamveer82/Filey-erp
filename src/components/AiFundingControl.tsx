@@ -123,7 +123,7 @@ export default function AiFundingControl({
           {choice.funding === "credits" ? (
             <CoinMark />
           ) : (
-            <KeyRound size={14} />
+            <KeyRound size={compact ? 18 : 14} />
           )}
           <span className={compact ? "sr-only" : "max-w-52 truncate"}>
             {choice.funding === "free"

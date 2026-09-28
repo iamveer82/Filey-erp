@@ -1,19 +1,50 @@
 .filey-agent-workspace {
   container: filey-agent / inline-size;
+  height: 100%;
+  min-height: 0;
+  background: hsl(var(--background));
 }
+
+.workspace-agent main { display: flex; overflow: hidden; background: hsl(var(--background)); }
+.workspace-agent main > div { width: 100%; height: 100%; min-height: 0; }
+.workspace-agent .workspace-content { height: 100%; padding: 0; animation: none; }
+.workspace-agent .workspace-header { border-bottom-color: transparent; }
+.filey-chat { height: 100%; min-height: 0; }
+.filey-chat-header { flex-shrink: 0; padding: 8px 20px; }
+.filey-conversation-scroll { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px; }
+.filey-user-message, .filey-assistant-message { font-size: 15px; overflow-wrap: anywhere; }
+.filey-chat-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 40px; border: 0; border-radius: 999px; color: hsl(var(--foreground)); background: transparent; transition: background-color 150ms ease-out; }
+.filey-chat-icon:hover { background: hsl(var(--hover)); }
+.filey-chat-icon:disabled { opacity: .4; cursor: not-allowed; }
+.filey-chat-icon[aria-expanded="true"] { background: hsl(var(--hover)); }
+.filey-reply-copy { width: 32px; height: 32px; color: hsl(var(--muted-foreground)); margin-left: -8px; }
+.filey-composer-dock { flex-shrink: 0; padding: 12px 24px max(12px, env(safe-area-inset-bottom)); }
+.filey-composer { padding: 10px 8px 8px; border: 1px solid hsl(var(--border) / .65); border-radius: 24px; background: hsl(var(--muted)); transition: border-color 150ms ease-out; }
+.filey-composer:focus-within { border-color: hsl(var(--muted-foreground) / .65); }
+.filey-composer-input { display: block; min-height: 36px; max-height: 160px; padding: 4px 12px 8px; font-size: 16px; line-height: 24px; }
+@supports (field-sizing: content) {
+  .filey-composer-input { field-sizing: content; height: auto !important; }
+}
+.filey-composer-actions, .filey-composer-models { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.filey-composer-models { margin-left: auto; }
+.filey-composer .composer-control { min-height: 40px; flex-shrink: 0; }
+.filey-composer .composer-effort { flex-shrink: 1; }
+.filey-chat-send, .filey-chat-send:hover { background: hsl(var(--foreground)); color: hsl(var(--background)); }
+.filey-chat-send:disabled { background: hsl(var(--foreground) / .08); color: hsl(var(--muted-foreground)); opacity: 1; }
+.filey-touch-hint { display: none; }
 
 .filey-chat-history {
   width: 14rem;
-  max-height: calc(var(--filey-viewport-height, 100dvh) - 10rem);
-  min-height: 20rem;
+  height: 100%;
+  min-height: 0;
+  padding: 8px 12px;
 }
 
 @container filey-agent (max-width: 719px) {
   .filey-chat-history {
     width: 100%;
-    min-height: calc(var(--filey-viewport-height, 100dvh) - 10rem);
     border-right: 0;
-    padding-right: 0;
+    padding: 8px 16px;
   }
 
   .filey-chat-with-history {
@@ -21,8 +52,33 @@
   }
 }
 
-@container filey-agent (max-width: 480px) {
-  .filey-chat-credit-label {
-    display: none;
-  }
+@container filey-agent (max-width: 639px) {
+  .filey-chat-header { padding: 0 8px 8px; }
+  .filey-chat-wallet { display: none; }
+  .filey-conversation-scroll { padding-inline: 20px; }
+  .filey-composer-dock { padding: 8px 12px max(12px, env(safe-area-inset-bottom)); }
+  .filey-composer .composer-detail { display: none; }
+  .filey-composer .composer-control { justify-content: center; width: 44px; height: 44px; padding: 0; }
+  .filey-composer .filey-chat-icon { width: 44px; height: 44px; }
+  .filey-composer-hint { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
+@media (max-width: 1023px) {
+  .workspace-agent .workspace-header { height: calc(52px + env(safe-area-inset-top)); }
+  .workspace-agent .workspace-header-search,
+  .workspace-agent .workspace-storage,
+  .workspace-agent .workspace-theme,
+  .workspace-agent .workspace-notifications-trigger { display: none; }
+  .filey-chat { min-height: 0; }
+  .filey-chat-icon { width: 44px; height: 44px; }
+  .filey-user-message, .filey-assistant-message { font-size: 16px; }
+}
+
+@media (pointer: coarse) {
+  .filey-keyboard-hint { display: none; }
+  .filey-touch-hint { display: inline; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filey-composer, .filey-chat-icon { transition: none; }
 }

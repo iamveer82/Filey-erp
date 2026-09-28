@@ -25,8 +25,10 @@ import {
   Settings2,
   Film,
   MoreHorizontal,
+  SquarePen,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
+import { AnnotatedText } from "../components/AnnotatedText";
 import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
@@ -249,6 +251,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const streamedRef = useRef("");
   const endRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -394,7 +397,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // something isn't yanked back on the next step.
   useEffect(() => {
     if (!streaming || !mounted.current || videosOpen) return;
-    const scroller = topRef.current?.closest("main");
+    const scroller = conversationRef.current;
     const nearFoot = scroller
       ? scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 120
       : window.innerHeight + window.scrollY >=
@@ -711,7 +714,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       {/* A full-width session header frames the centered conversation. */}
       <div
         ref={topRef}
-        className={cn("filey-chat relative flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col", histOpen && "filey-chat-with-history")}
+        className={cn("filey-chat relative flex min-w-0 flex-1 flex-col", histOpen && "filey-chat-with-history")}
       >
         {dragging && (
           <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-xl border-2 border-dashed border-foreground/30 bg-background/85 backdrop-blur-sm">
@@ -724,25 +727,26 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         )}
 
-        <header className="sticky top-0 z-30 mb-5 border-b border-border/60 bg-page pb-3 pt-1">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <header className="filey-chat-header">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 hover:!bg-hover"><History size={17} /></button>
+              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="filey-chat-icon"><History size={20} /></button>
               <h1 className="truncate text-sm font-medium leading-tight text-foreground" title={chat.title || "Filey AI"}>
-                {empty ? "Filey AI" : chat.title || "Conversation"}
+                {empty ? "New chat" : chat.title || "Conversation"}
               </h1>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
-              <Link to="/settings?section=credits" className="btn-ghost !border-transparent !bg-transparent !px-3 hover:!bg-hover" aria-label="Add Coin to AI wallet" title="Coin wallet and top-ups">
-                <CoinMark /><span className="filey-chat-credit-label">Add Coin</span>
+              <Link to="/settings?section=credits" className="filey-chat-wallet composer-control" aria-label="Add Coin to AI wallet" title="Coin wallet and top-ups">
+                <CoinMark /><span>Add Coin</span>
               </Link>
               <button type="button" onClick={() => setBrowserPanelOpen(!browserPanel.open)}
-                className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
-                <Globe size={17} />
+                className="filey-chat-icon" aria-label={browserPanel.open ? "Collapse browser" : "Open browser"} title={browserPanel.open ? "Collapse browser" : "Open browser"} aria-expanded={browserPanel.open} aria-controls="filey-browser-panel">
+                <Globe size={20} />
               </button>
               <div ref={moreRef}>
-                <button type="button" onClick={() => setMoreOpen(v => !v)} className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={18} /></button>
+                <button type="button" onClick={() => setMoreOpen(v => !v)} className="filey-chat-icon" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={20} /></button>
                 <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
+                  <MenuItemRow icon={<CoinMark />} label="Coin wallet" onClick={() => { setMoreOpen(false); navigate("/settings?section=credits"); }} />
                   <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
                   <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
                   <MenuSep />
@@ -755,27 +759,27 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 disabled={busy}
                 aria-label="New chat"
                 title="New chat"
-                className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover"
+                className="filey-chat-icon"
               >
-                <Plus size={15} />
+                <SquarePen size={20} />
               </button>
             </div>
           </div>
         </header>
 
 
+        {/* The conversation and composer share one readable measure. */}
+        <div ref={conversationRef} className="filey-conversation-scroll">
         {videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
           setChat(current => ({ ...current, turns: [...current.turns,
             { role: "assistant", text: job.state === "draft" ? `Review your ${job.kind}, then choose Generate to use your own provider key.` : `Here is your ${job.kind} request.`, files: [{ name: `Generated ${job.kind}`, mediaJobId: job.id }] }], updatedAt: Date.now() }));
           setVideosOpen(false);
         }} />}
-
-        {/* The conversation and composer share one readable measure. */}
         <div
           className={cn(
             COLUMN,
-            "pt-2",
-            empty && !busy ? "flex flex-1 flex-col justify-center space-y-3 py-10 sm:py-16" : "flex-1 space-y-7 pb-8"
+            "filey-conversation",
+            empty && !busy ? "flex flex-1 flex-col justify-center py-10" : "space-y-7 py-5"
           )}
           aria-label="Conversation"
         >
@@ -787,8 +791,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               <div className="mx-auto mb-4 grid h-12 w-12 place-items-center">
                 <BloubBot size={48} state="idle" label="Filey AI" ambient />
               </div>
-              <h2 className="text-2xl font-medium leading-tight text-foreground tracking-tight">
-                What shall we work on?
+              <h2 className="text-xl font-medium leading-tight text-foreground tracking-tight sm:text-2xl">
+                What shall we <AnnotatedText variant="wavy">work on?</AnnotatedText>
               </h2>
             </div>
           ) : (
@@ -816,14 +820,15 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
           <div ref={endRef} />
         </div>
+        </div>
 
-        {/* Keep the composer in flow on a short screen, sticky during a chat. */}
+        {/* Only the conversation scrolls; the composer stays above the keyboard. */}
         <div
-          className={cn("z-20 mt-auto bg-page pb-3 pt-2", !empty && "sticky bottom-0")}
+          className="filey-composer-dock"
         >
           <div className={COLUMN}>
             {/* A stable composer keeps Stop readable while a reply is running. */}
-            <div className="rounded-2xl border border-border bg-card p-2.5 transition-colors duration-150 motion-reduce:transition-none focus-within:border-muted-foreground/60 sm:p-3">
+            <div className="filey-composer">
               {/* Attachment chips — one tile per file, remove always visible
                   (hover-only removal hides the affordance on touch). Several
                   files at once is the merge flow: the order shown is the order
@@ -880,14 +885,14 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 ref={textareaRef}
                 aria-label="Message Filey AI"
                 aria-describedby="filey-message-hint"
-                data-ph={auto ? "Describe a task to delegate…" : "Ask Filey to do something…"}
+                data-ph={auto ? "Describe a task…" : "Ask Filey…"}
                 rows={1}
                 value={input}
                 disabled={busy}
-                placeholder={auto ? "Describe a task to delegate…" : "Ask Filey to do something…"}
+                placeholder={auto ? "Describe a task…" : "Ask Filey…"}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches)) {
                     e.preventDefault();
                     void send(input);
                   }
@@ -910,14 +915,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                  * click - a yellow box around the thing you type in. Focus is
                  * still shown, by the wrapper's border darkening.
                  */
-                className="max-h-[160px] min-h-[48px] w-full resize-none bg-transparent px-2 py-2 text-[15px] leading-relaxed text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
+                className="filey-composer-input w-full resize-none bg-transparent text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
                 autoFocus={!videosOpen && typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
               />
 
-              {/* Action bar — one circular cluster, reference-style: the same
-                  8×8 round slot carries attach, toggles, and send, so the eye
-                  reads one row of controls instead of mixed shapes. */}
-              <div className="mt-2 flex flex-wrap items-center gap-1">
+              {/* One row on every screen; compact controls keep their menus. */}
+              <div className="filey-composer-actions">
                 <div className="relative shrink-0" ref={plusRef}>
                   <button
                     type="button"
@@ -926,9 +929,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     aria-label="Add to message"
                     aria-expanded={plusOpen}
                     title="Add files, repos, skills — Ctrl+U for files"
-                    className="btn-ghost w-10 !border-transparent !bg-transparent !px-0 hover:!bg-hover"
+                    className="filey-chat-icon"
                   >
-                    <Plus size={18} />
+                    <Plus size={22} />
                   </button>
 
                   <MenuPopover
@@ -1023,31 +1026,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   const saved = getAgentMode(); setMode(saved);
                   if (saved !== next) setErr("Could not save the access mode. Your previous selection is unchanged.");
                 }} />
-                {/* Autonomous changes how a task runs, not its access permissions. */}
-                {auto && <button
-                  type="button"
-                  onClick={() => setAuto(false)}
-                  disabled={busy}
-                  aria-label="Autonomous mode"
-                  aria-pressed={auto}
-                  title="Autonomous mode: hand the agent a goal and it plans, acts and verifies on its own."
-                  className={cn(
-                    "btn-ghost shrink-0",
-                    auto
-                      ? "!border-primary-400/50 !bg-primary-400/15 text-foreground"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  <Zap
-                    size={13}
-                    className={cn(
-                      "shrink-0 transition-transform duration-200 motion-reduce:transition-none",
-                      auto && "rotate-12 text-primary-600 dark:text-primary-400"
-                    )}
-                  />
-                  Autonomous
-                </button>}
-                <div className="ml-auto flex max-w-full flex-wrap items-center gap-1">
+                <div className="filey-composer-models">
                 <AiFundingControl disabled={busy} compact />
                 <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />
                 {/* Mic — dictation straight into the composer. Browser engine
@@ -1062,25 +1041,23 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     aria-pressed={listening}
                     title={listening ? "Stop dictation" : "Dictate (speech-to-text)"}
                     className={cn(
-                      "btn-ghost w-10 !border-transparent !px-0 shrink-0",
+                      "filey-chat-icon",
                       listening
-                        ? "bg-danger/15 text-danger animate-pulse"
+                        ? "bg-danger/15 text-danger motion-safe:animate-pulse"
                         : "text-muted-foreground hover:bg-hover hover:text-foreground"
                     )}
                   >
-                    <Mic size={15} />
+                    <Mic size={20} />
                   </button>
                 )}
-                {/* One button, three states — empty ghost, ready amber,
-                    streaming stop — exactly like the reference input. Stop is
-                    ink on purpose: an interrupt is not what amber invites. */}
+                {/* Send and Stop keep the same position and touch target. */}
                 {busy ? (
                   <button
                     type="button"
                     onClick={stop}
                     aria-label="Stop generating"
                     title="Stop"
-                    className="btn-secondary w-10 !px-0 shrink-0"
+                    className="filey-chat-icon filey-chat-send"
                   >
                     <Square size={12} fill="currentColor" />
                   </button>
@@ -1091,21 +1068,17 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     disabled={!input.trim() && !files.length}
                     aria-label="Send message"
                     title="Send (Enter)"
-                    className={cn(
-                      "btn-primary w-10 !px-0 shrink-0",
-                      input.trim() || files.length
-                        ? "bg-primary-400 text-zinc-900 hover:bg-primary-500"
-                        : "bg-transparent text-muted-foreground"
-                    )}
+                    className="filey-chat-icon filey-chat-send"
                   >
-                    <ArrowUp size={16} />
+                    <ArrowUp size={20} />
                   </button>
                 )}
                 </div>
               </div>
             </div>
-            <p id="filey-message-hint" className="mt-2 px-1 text-center text-[11px] text-muted-foreground">
-              Enter to send · Shift+Enter for a new line
+            <p id="filey-message-hint" className="filey-composer-hint mt-2 px-1 text-center text-[11px] text-muted-foreground">
+              <span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
+              <span className="filey-touch-hint">Tap the arrow to send</span>
             </p>
           </div>
         </div>
@@ -1221,11 +1194,12 @@ function CopyButton({ text }: { text: string }) {
           }
         );
       }}
-      aria-label="Copy reply"
-      className="btn-ghost text-muted-foreground"
+      aria-label={done ? "Copied reply" : "Copy reply"}
+      title={done ? "Copied" : "Copy reply"}
+      className="filey-chat-icon filey-reply-copy text-muted-foreground"
     >
-      {done ? <Check size={12} /> : <Copy size={12} />}
-      {done ? "Copied" : "Copy"}
+      {done ? <Check size={16} /> : <Copy size={16} />}
+      <span className="sr-only" role="status">{done ? "Copied" : ""}</span>
     </button>
   );
 }
@@ -1237,33 +1211,28 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
     // dominant voice.
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-xl bg-hover px-3.5 py-2.5 text-[13px] leading-relaxed text-foreground">
+        <div className="filey-user-message max-w-[85%] whitespace-pre-wrap rounded-2xl bg-hover px-4 py-2.5 leading-relaxed text-foreground">
           {turn.text}
         </div>
       </div>
     );
   }
   return (
-    <div className="group/msg flex gap-3">
-      {/* The bot is the assistant's face. Only the turn in flight animates:
-          every earlier reply keeps its avatar as a still frame, so a long chat
-          doesn't run one animation loop per message. */}
-      <div className="grid h-[52px] w-[52px] shrink-0 place-items-center">
+    <div className="group/msg">
+      {/* Keep Filey's animated identity while working, and give replies the full width. */}
+      {pending && <div className="mb-2 grid h-7 w-7 place-items-center">
         <BloubBot
-          size={52}
-          animate={!!pending}
+          size={28}
+          animate
           ambient
           state={botStateFor(pending ? "thinking" : "idle")}
           expression={botExpressionFor(pending ? "thinking" : "idle")}
         />
-      </div>
-      {/* Plain text on the background, full measure: boxing every answer as a
-          card frames two-line confirmations like documents. 14px separates the
-          agent's voice from the 13px working density everywhere else. */}
+      </div>}
       <div className="min-w-0 flex-1">
         <div
           className={cn(
-            "text-[14px] leading-relaxed text-foreground",
+            "filey-assistant-message leading-relaxed text-foreground",
             pending && "text-muted-foreground"
           )}
         >
@@ -1277,12 +1246,12 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             <ThinkingDots className="text-muted-foreground" />
           )}
           {pending && turn.text && (
-            <span className="ml-1 inline-block animate-pulse">▍</span>
+            <span className="ml-1 inline-block motion-safe:animate-pulse">▍</span>
           )}
         </div>
         <AgentRunProgress run={turn.run} pending={pending} />
         {!pending && turn.text.trim() && (
-          <div className="mt-3 flex">
+          <div className="mt-1 flex">
             <CopyButton text={turn.text} />
           </div>
         )}

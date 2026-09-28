@@ -1,0 +1,7 @@
+.filey-annotated-text { position: relative; display: inline-block; max-width: 100%; isolation: isolate; overflow-wrap: anywhere; }
+.filey-annotated-words { position: relative; z-index: 1; }
+.filey-annotated-text > svg { position: absolute; left: -1%; bottom: -.22em; width: 102%; height: .4em; pointer-events: none; color: hsl(var(--primary-400)); }
+.filey-annotated-text[data-mark="wavy"] > svg { bottom: -.3em; height: .45em; }
+.filey-annotated-text[data-mark="highlight"] > svg { left: -3%; bottom: -.02em; width: 106%; height: 1.05em; opacity: .4; }
+.dark .filey-annotated-text[data-mark="highlight"] > svg { opacity: .2; }
+@media print { .filey-annotated-text > svg { display: none; } }

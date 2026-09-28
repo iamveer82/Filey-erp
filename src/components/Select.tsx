@@ -68,7 +68,7 @@ export const SelectContent = forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-lg border border-brand-200 bg-white text-ink data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "relative z-50 max-h-[min(24rem,var(--radix-select-content-available-height))] max-w-[calc(100vw-16px)] min-w-[8rem] overflow-hidden rounded-xl border border-border bg-card text-foreground",
         position === "popper" &&
           "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
         className
@@ -111,7 +111,7 @@ export const SelectItem = forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-2 text-sm font-medium outline-none focus:bg-brand-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 dark:focus:bg-white/10",
+      "relative flex min-h-9 w-full cursor-pointer select-none items-center rounded-lg py-1.5 pl-8 pr-2 text-[13px] outline-none focus:bg-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [@media(pointer:coarse)]:min-h-11",
       className
     )}
     {...props}
