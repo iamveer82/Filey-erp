@@ -32,13 +32,12 @@ const doc = (over: Record<string, unknown> = {}) =>
   }) as never;
 
 describe("invoice line items survive saves", () => {
-  it("allows repeated edits after five creations, but refuses a sixth invoice", async () => {
+  it("creates more than five local invoices and keeps repeated edits unlimited", async () => {
     let id = 0;
-    for (let i = 1; i <= 5; i++) id = await billing.saveDoc(doc({ number: `INV-${i}` }));
-    await expect(billing.saveDoc(doc({ number: "INV-6" }))).rejects.toThrow(/Basic plan limit reached/);
-    for (let i = 0; i < 7; i++) await billing.saveDoc(doc({ id, number: "INV-5", notes: `Edit ${i}` }));
+    for (let i = 1; i <= 12; i++) id = await billing.saveDoc(doc({ number: `INV-${i}` }));
+    for (let i = 0; i < 7; i++) await billing.saveDoc(doc({ id, number: "INV-12", notes: `Edit ${i}` }));
     expect((await billing.getDoc(id)).notes).toBe("Edit 6");
-    expect(await invoicesThisMonth()).toBe(5);
+    expect(await invoicesThisMonth()).toBe(12);
   });
   it("keeps items across a normal edit", async () => {
     const id = (await billing.saveDoc(doc())) as number;

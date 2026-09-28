@@ -17,6 +17,7 @@ vi.mock("../../lib/supabase", () => ({ supabase: null }));
 vi.mock("../../lib/api", () => ({
   org: {
     get: async () => ({ id: "org-1", name: "Example team" }),
+    connections: async () => ({code:'A1B2C3',workspace_id:'org-1',workspace_name:'Example team',requests:[]}),
     members: async () => [{ id: "member-1", user_id: "owner-1", org_id: "org-1", role: "owner", name: "Owner" }],
     invites: async () => [], myInvites: async () => [], workspaces: async () => [{id:"org-1",name:"Example team",role:"owner"}], invite,
   },

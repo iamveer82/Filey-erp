@@ -8,6 +8,7 @@ import { useUI } from "../lib/ui";
 import { useLiveSync } from "../lib/realtime";
 import { InfoCard } from "./ui";
 import MentionInput, { type MentionMember } from "./MentionInput";
+import { UserAvatar } from "./AvatarPicker";
 
 function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -16,26 +17,6 @@ function ago(iso: string): string {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
-
-const initials = (name: string) =>
-  name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("") || "?";
-
-const AVATAR_TONES = [
-  "bg-primary-100 text-primary-700",
-  "bg-secondary-400/20 text-secondary-600",
-  "bg-info/15 text-info",
-  "bg-success/15 text-success",
-];
-const tone = (id: string) => {
-  let h = 0;
-  for (const c of id) h = (h + c.charCodeAt(0)) % AVATAR_TONES.length;
-  return AVATAR_TONES[h];
-};
 
 /** Render message body, highlighting @mentions. */
 function renderBody(body: string): ReactNode {
@@ -67,13 +48,7 @@ function MessageRow({
 }) {
   return (
     <div className="flex gap-3 group">
-      <span
-        className={`grid ${
-          isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"
-        } shrink-0 place-items-center rounded-full font-bold ${tone(m.user_id)}`}
-      >
-        {initials(m.author)}
-      </span>
+      <UserAvatar src={m.author_avatar} name={m.author} className={isReply ? "h-6 w-6 text-[10px]" : "h-8 w-8 text-[11px]"} />
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-snug">
           <span className="font-medium text-ink">{m.author}</span>{" "}
@@ -156,7 +131,7 @@ export default function CompanyMessages({
     } finally { if (id === request.current) setLoading(false); }
   },[channel,pages,focusMessage]);
   useEffect(() => { void load(); return () => { request.current++; }; },[load]);
-  useLiveSync(() => void load(),["org_messages","profiles"]);
+  useLiveSync(() => void load(),["org_messages","profiles","org_members"]);
   useEffect(() => { if (!loading && focusMessage) focusRef.current?.scrollIntoView({block:"nearest"}); },[loading,focusMessage]);
   useEffect(() => {
     const last = Math.max(0,...all.map(m => m.id));
@@ -168,13 +143,15 @@ export default function CompanyMessages({
     read(); document.addEventListener("visibilitychange",read);
     return () => document.removeEventListener("visibilitychange",read);
   },[all,channel,loading,error]);
-  useEffect(() => {
+  const loadMembers = useCallback(() => {
     if (isLocalMode()) { setMembers([]); return; }
     org
       .members()
-      .then((ms) => setMembers(ms.map((m) => ({ id: m.user_id, name: m.name }))))
+      .then((ms) => setMembers(ms.map((m) => ({ id: m.user_id, name: m.name, avatar: m.avatar }))))
       .catch(() => toast.error("Failed to load members"));
   }, [toast]);
+  useEffect(loadMembers, [loadMembers]);
+  useLiveSync(loadMembers, ["org_members", "profiles"]);
 
   const roots = useMemo(
     () => {

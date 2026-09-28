@@ -5778,6 +5778,8 @@ export interface OrgMember {
   name: string;
   email: string;
   modules?: string[] | null;
+  avatar?: string | null;
+  avatar_override?: string | null;
 }
 export interface Invitation {
   id: string;
@@ -5794,6 +5796,14 @@ export interface Invitation {
   workspace_name?: string;
 }
 export interface TeamWorkspace { id: string; name: string; role: string }
+export interface TeamJoinRequest {
+  id: string; org_id: string; workspace_name: string; incoming: boolean;
+  name: string | null; email: string; status: 'pending' | 'approved' | 'declined' | 'canceled' | 'expired';
+  created_at: string; expires_at: string;
+}
+export interface TeamConnections {
+  code: string; workspace_id: string | null; workspace_name: string | null; requests: TeamJoinRequest[];
+}
 
 // ===== Company message board =====
 export interface OrgMessage {
@@ -5801,6 +5811,7 @@ export interface OrgMessage {
   user_id: string;
   body: string;
   author: string;
+  author_avatar?: string | null;
   parent_id?: number | null;
   /** Which channel it was posted in. Rows predating channels read "general". */
   channel: string;
@@ -5823,8 +5834,8 @@ export const messages = {
       cdb().rpc("filey_message_page",{p_channel:channel,p_before:before ?? null,p_limit:30}), org.members(),
     ]);
     if (error) throw error;
-    const names = new Map(members.map(m => [m.user_id,m.name]));
-    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"})),next:data.next};
+    const people = new Map(members.map(m => [m.user_id,m]));
+    return {rows:(data.rows as OrgMessage[]).map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar})),next:data.next};
   },
   thread: async (channel: string, id: number): Promise<OrgMessage[]> => {
     if (!Number.isSafeInteger(id) || id <= 0) return [];
@@ -5833,8 +5844,8 @@ export const messages = {
       cdb().from("org_messages").select("*").eq("channel",channel).or(`id.eq.${id},parent_id.eq.${id}`).order("id"),org.members(),
     ]);
     if (error) throw error;
-    const names = new Map(members.map(m => [m.user_id,m.name]));
-    return ((data ?? []) as OrgMessage[]).map(m => ({...m,author:names.get(m.user_id)||"Team member"}));
+    const people = new Map(members.map(m => [m.user_id,m]));
+    return ((data ?? []) as OrgMessage[]).map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar}));
   },
   unread: async (): Promise<Record<string,number>> => {
     if (isLocalMode()) return {};
@@ -5938,6 +5949,29 @@ export const notifs = {
 };
 
 export const org = {
+  connections: () => online(async () => {
+    const {data,error} = await cdb().rpc('filey_team_connections');
+    if (error) throw new Error('Could not load team connections. Please try again.');
+    return data as TeamConnections;
+  }, false),
+  linkCode: (orgId: string) => online(async () => {
+    const {error} = await cdb().rpc('filey_link_team_code', {p_org_id:orgId});
+    if (error) throw new Error('Could not link your code. Check your workspace access and try again.');
+  }),
+  requestJoin: (code: string) => online(async () => {
+    const {data,error} = await cdb().rpc('filey_request_team_join', {p_code:code.trim().toUpperCase()});
+    if (error) throw new Error('Could not request access. Check your connection and verify your email, then try again.');
+    if (data?.error) throw new Error(data.error);
+    if (!data?.id) throw new Error('Your request could not be confirmed. Please try again.');
+  }),
+  reviewJoin: (id: string, orgId: string, approve: boolean, role = 'staff', modules: string[] | null = ['team']) => online(async () => {
+    const {error} = await cdb().rpc('filey_review_team_join', {p_id:id,p_org_id:orgId,p_approve:approve,p_role:role,p_modules:modules});
+    if (error) throw new Error('Could not update this request. Refresh your team and try again.');
+  }),
+  cancelJoin: (id: string) => online(async () => {
+    const {error} = await cdb().rpc('filey_cancel_team_join', {p_id:id});
+    if (error) throw new Error('Could not cancel this request. Please try again.');
+  }),
   get: () =>
     readCached<Organization | null>(
       "organization",
@@ -5993,6 +6027,11 @@ export const org = {
       () => sUpdate("org_members", memberId, { modules }, cdb()),
       undefined
     ),
+  setMemberAvatar: (memberId: number, orgId: string, avatar: string | null) =>
+    online(async () => {
+      const { error } = await cdb().rpc("filey_set_member_avatar", { p_member_id: memberId, p_org_id: orgId, p_avatar: avatar });
+      if (error) throw new Error("Could not save the team avatar. Please try again.");
+    }),
   remove: (memberId: number) =>
     write({ k: "delete", t: "org_members", id: memberId }, () =>
       sDelete("org_members", memberId, cdb()), undefined

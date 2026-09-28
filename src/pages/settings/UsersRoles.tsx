@@ -11,6 +11,9 @@ import { useEffect, useState } from "react";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { useSearchParams } from "react-router-dom";
 import { clearEntitlementCache } from "../../lib/license";
+import AvatarPicker, { UserAvatar } from "../../components/AvatarPicker";
+import { useLiveSync } from "../../lib/realtime";
+import TeamConnections, { TeamAccessFields, teamModules } from "./TeamConnections";
 
 /* ---------------- Users & Roles (Organization) ---------------- */
 
@@ -40,9 +43,12 @@ export default function UsersRoles() {
   const [name, setName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("staff");
+  const [inviteAccess, setInviteAccess] = useState("chat");
   const [accessFor, setAccessFor] = useState<OrgMember | null>(null);
   const [busy, setBusy] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [avatarFor, setAvatarFor] = useState<OrgMember | null>(null);
+  const [avatar, setAvatar] = useState("");
 
   // Desktop/local mode: team data lives in the cloud, so identity comes from
   // the separately signed-in cloud session (sync card), not the local shim.
@@ -81,7 +87,10 @@ export default function UsersRoles() {
   };
   useEffect(() => {
     if (!local || cloudUser) load();
-  }, [local, cloudUser]);
+  }, [local, cloudUser, profile?.org_id]);
+  useLiveSync(() => {
+    if (!local || cloudUser) void org.members().then(setMembers).catch(() => {});
+  }, ["org_members", "profiles"]);
 
   const uid = local ? cloudUser?.id : user?.id;
   const currentOrg = (local ? cloudOrgId : profile?.org_id) || "default";
@@ -146,7 +155,7 @@ export default function UsersRoles() {
     }
     setBusy(true);
     try {
-      const result = await org.invite(trimmed, inviteRole, null);
+      const result = await org.invite(trimmed, inviteRole, teamModules(inviteRole, inviteAccess));
       setInviteEmail("");
       if (result.status === "accepted") toast.success(`Invitation email queued for ${trimmed}.`);
       else toast.error(result.error || "Invitation created, but email could not be confirmed. Retry below.");
@@ -211,6 +220,9 @@ export default function UsersRoles() {
               : "Invite teammates by email. Members keep their own private workspace and share records only when they choose."}
         </p>
       </SettingsSection>
+
+      {loaded && uid && !loadError && <TeamConnections key={`${uid}:${currentOrg}`} orgId={currentOrg}
+        canInvite={!personal && isAdmin} onInvite={() => setInviteOpen(true)} onSwitch={switchOrg} onChanged={load} />}
 
       {/* Your name + company name — edit inline */}
       <SettingsSection
@@ -394,9 +406,7 @@ export default function UsersRoles() {
                   className="flex flex-wrap items-center justify-between gap-3 border-b border-border py-3 last:border-0"
                 >
                   <div className="flex min-w-0 max-w-full items-center gap-3">
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-muted text-foreground text-sm font-medium">
-                      {(m.name || m.email || "?").charAt(0).toUpperCase()}
-                    </span>
+                    <UserAvatar src={m.avatar} name={m.name || m.email} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-foreground">
                         {m.name}
@@ -412,6 +422,10 @@ export default function UsersRoles() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {(isYou || isAdmin) && (
+                      <button className="btn-ghost" aria-label={`Change avatar for ${m.name || m.email}`} disabled={busy}
+                        onClick={() => { setAvatarFor(m); setAvatar(m.avatar_override || ""); }}>Avatar</button>
+                    )}
                     {editable ? (
                       <SelectMenu
                         ariaLabel={`Role for ${m.name || m.email}`}
@@ -442,7 +456,7 @@ export default function UsersRoles() {
                     )}
                     {editable && (
                       <>
-                        <button className="btn-ghost" onClick={() => setAccessFor(m)}>
+                        <button className="btn-ghost" onClick={() => setAccessFor(m)} disabled={m.role === "admin"} title={m.role === "admin" ? "Admins have access to all apps" : undefined}>
                           Access
                         </button>
                         <button
@@ -486,6 +500,27 @@ export default function UsersRoles() {
         )}
       </SettingsSection>
 
+      <Modal open={!!avatarFor} onClose={() => { if (!busy) setAvatarFor(null); }} title={`Avatar for ${avatarFor?.name || "team member"}`}>
+        <fieldset disabled={busy} className="space-y-5">
+          <p className="text-sm text-muted-foreground">Choose a face for this workspace. Their personal profile photo stays unchanged.</p>
+          <AvatarPicker value={avatar} onChange={setAvatar} resetLabel="Use profile photo or initials" />
+          <div className="flex flex-wrap justify-end gap-2">
+            <button className="btn-ghost" onClick={() => setAvatarFor(null)}>Cancel</button>
+            <button className="btn-primary" onClick={async () => {
+              if (!avatarFor || busy) return;
+              setBusy(true);
+              try {
+                await org.setMemberAvatar(avatarFor.id, avatarFor.org_id, avatar || null);
+                setAvatarFor(null);
+                await load();
+                toast.success("Team avatar saved.");
+              } catch { toast.error("Could not save the team avatar. Please try again."); }
+              finally { setBusy(false); }
+            }}>{busy ? "Saving…" : "Save avatar"}</button>
+          </div>
+        </fieldset>
+      </Modal>
+
       <Modal
         open={inviteOpen}
         onClose={() => {
@@ -504,16 +539,7 @@ export default function UsersRoles() {
               autoFocus
             />
           </Field>
-          <Field label="Role">
-            <SelectMenu
-              value={inviteRole}
-              onChange={(v) => setInviteRole(v)}
-              options={ROLES.filter((r) => r !== "owner").map((r) => ({
-                value: r,
-                label: r,
-              }))}
-            />
-          </Field>
+          <TeamAccessFields role={inviteRole} access={inviteAccess} onRole={setInviteRole} onAccess={setInviteAccess} />
           <p className="text-xs text-muted-foreground">
             We email a link valid for seven days. They sign in or create an account with this address, then accept the invitation. Their existing records stay in their own workspace.
           </p>

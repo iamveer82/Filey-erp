@@ -1,4 +1,6 @@
-/** Coin's approved mascot. Adjacent text supplies the accessible label. */
+import { Wallet } from "lucide-react";
+
+/** Adjacent text supplies the accessible label. */
 export default function CoinMark({
   size = 20,
   className = "",
@@ -7,17 +9,10 @@ export default function CoinMark({
   className?: string;
 }) {
   return (
-    <img
-      src="/icons/filey-paper-256.webp"
-      srcSet="/icons/filey-paper-96.webp 96w, /icons/filey-paper-256.webp 256w"
-      sizes={`${size}px`}
-      width={size}
-      height={size}
-      alt=""
+    <Wallet
+      size={size}
       aria-hidden="true"
-      draggable={false}
-      decoding="async"
-      className={`inline-block shrink-0 select-none object-contain ${className}`}
+      className={`inline-block shrink-0 ${className}`}
     />
   );
 }

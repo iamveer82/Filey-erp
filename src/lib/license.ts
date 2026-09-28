@@ -293,10 +293,8 @@ export async function claimPurchasedLicense(
 
 export type Tier = "free" | "lite" | "pro";
 
-/** Free tier caps. Volume + branding only — never compliance/correctness.
- *  Cloud is included on Free; the paid tier is about volume and owning it
- *  outright, not about where the data lives. Mirror any change in
- *  supabase/2026-09-19-basic-web-access.sql or the server cap disagrees. */
+/** Hosted Basic quota only. Local invoices and edits have no monthly cap.
+ *  Keep the cloud quota aligned with 2026-09-19-basic-web-access.sql. */
 export const FREE_LIMITS = { invoicesPerMonth: 5 };
 
 /** Desktop (Lite) license device slots. */
@@ -483,26 +481,23 @@ export function offerUpgrade(reason: "invoices" | "emails" = "invoices"): void {
 export const isPlanLimitError = (e: unknown) =>
   /plan limit reached/i.test(e instanceof Error ? e.message : String(e));
 
-/** Basic-tier invoice cap: throws a friendly error when a NEW invoice would
- *  exceed this month's allowance. No-op unless licensing is enforced. */
+/** Hosted Basic creation quota. Local saves never count invoices, check a
+ *  paid entitlement or need a network connection. Edits do not call this. */
 export async function checkFreeInvoiceCap(
   countThisMonth: () => Promise<number>
 ): Promise<void> {
-  if (!ENFORCE_LICENSING) return;
-  // Basic has the same creation cap locally and on the web. Edits never call this.
+  if (isLocalMode() || !ENFORCE_LICENSING) return;
   if ((await entitlement()) !== "free") return;
   // Pro and Ultra-owner workspaces are uncapped. Historic free-cloud access
   // does not lift Basic's creation limit now that every plan includes the web.
   // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
-  if (!isLocalMode()) {
-    const { reason } = await cloudAccess();
-    if (reason === "paid") return;
-  }
+  const { reason } = await cloudAccess();
+  if (reason === "paid") return;
   const used = await countThisMonth();
   if (used >= FREE_LIMITS.invoicesPerMonth) {
     offerUpgrade("invoices");
     throw new Error(
-      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} invoices this month). ` +
+      `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} cloud invoices this month). ` +
         `Editing existing invoices is unlimited. Pro is $5/month, or buy Ultra once for unlimited invoicing — Settings → Billing.`
     );
   }

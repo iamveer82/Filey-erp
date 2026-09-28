@@ -20,7 +20,7 @@ describe("resolveTier", () => {
     expect(resolveTier(false, "pro", "canceled")).toBe("free");
   });
 
-  it("free caps are volume/branding, not zero", () => {
+  it("retains a positive hosted Basic quota", () => {
     expect(FREE_LIMITS.invoicesPerMonth).toBeGreaterThan(0);
   });
 });

@@ -1214,7 +1214,7 @@ export default function Quoting() {
                     </button>
                   }
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
                     <div className="space-y-3">
                       <Field label="Customer">
                         <div className="flex gap-2">
@@ -1416,7 +1416,7 @@ export default function Quoting() {
                   </div>
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="w-full min-w-[960px] text-sm [&_th]:whitespace-nowrap">
                       <thead>
                         <tr className="text-left text-xs font-semibold text-brand-500">
                           <th className="py-2 pr-2 w-6">#</th>

@@ -1,12 +1,13 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { act, render, cleanup } from "@testing-library/react";
 import BloubBot from "../BloubBot";
-import { setPersona } from "../../lib/ai";
+import { setPersona, getPersona } from "../../lib/ai";
+import { BOT_LOOKS } from "../../lib/botAppearance";
 import { botExpressionFor, botStateFor } from "../../lib/botMood";
 import { STATES, type StateId } from "../../lib/bloub/states";
 import { EXPRESSION_BY_ID } from "../../lib/bloub/expressions";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 beforeEach(() => localStorage.clear());
 
 /* The engine is vendored (src/lib/bloub) and its states are data, not code we
@@ -44,6 +45,12 @@ describe("BloubBot", () => {
     );
   });
 
+  it("keeps the white look visible on a light surface", () => {
+    const { container } = render(<BloubBot ink="#FFFFFF" animate={false} />);
+    expect(container.querySelector('path[stroke="#d4d4d8"]')).not.toBeNull();
+    expect(container.querySelector('g[opacity] > path')?.getAttribute("fill")).toBe("#0a0a0a");
+  });
+
   it("follows the colour chosen in settings, without a remount", () => {
     const { container } = render(<BloubBot animate={false} />);
     const rect = () => container.querySelector("rect")!.getAttribute("fill");
@@ -63,6 +70,55 @@ describe("BloubBot", () => {
       <BloubBot animate={false} label="Filey AI" />
     );
     expect(svgOf(named)).toHaveAttribute("aria-label", "Filey AI");
+  });
+
+  it("updates every mounted avatar when a new look is selected and preserves explicit previews", () => {
+    const live = render(<BloubBot animate={false} />);
+    const preview = render(<BloubBot shape="cercle" animate={false} />);
+    const orb = bodyPath(live.container);
+    act(() => { setPersona({ botShape: "nuage" }); });
+    expect(bodyPath(live.container)).not.toBe(orb);
+    expect(bodyPath(preview.container)).toBe(orb);
+    for (const look of BOT_LOOKS) {
+      live.rerender(<BloubBot shape={look.id} animate={false} />);
+      expect(bodyPath(live.container), look.name).not.toMatch(/NaN|Infinity/);
+    }
+  });
+
+  it("saves safe appearance preferences and ignores unknown or broken stored choices", () => {
+    setPersona({ botShape: "goutte", botMotion: "still" });
+    expect(getPersona()).toMatchObject({ botShape: "goutte", botMotion: "still" });
+    setPersona({ botShape: "missing", botMotion: "missing", orbColor: "invalid" } as never);
+    expect(getPersona()).toMatchObject({ botShape: "cercle", botMotion: "playful", orbColor: "#FFD600" });
+  });
+
+  it("adds continuous orbit rings without replacing the selected shape or a work state", () => {
+    const { container, rerender } = render(<BloubBot shape="nuage" motion="gentle" animate={false} />);
+    const cloud = bodyPath(container);
+    rerender(<BloubBot shape="nuage" motion="orbit" animate={false} />);
+    expect(bodyPath(container)).toBe(cloud);
+    expect(container.querySelectorAll("linearGradient")).toHaveLength(3);
+    rerender(<BloubBot state="thinking" shape="nuage" motion="orbit" animate={false} />);
+    expect(container.querySelectorAll("linearGradient")).toHaveLength(0);
+  });
+
+  it("starts no animation loops in Still mode or with reduced motion and reacts to preference changes", () => {
+    let reduced = false;
+    const query = new EventTarget();
+    Object.defineProperty(query, "matches", { get: () => reduced });
+    vi.stubGlobal("matchMedia", () => query);
+    vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    const raf = vi.spyOn(window, "requestAnimationFrame");
+    const { rerender } = render(<BloubBot motion="still" ambient />);
+    expect(raf).not.toHaveBeenCalled();
+    reduced = true;
+    rerender(<BloubBot motion="playful" ambient />);
+    expect(raf).not.toHaveBeenCalled();
+    act(() => { reduced = false; query.dispatchEvent(new Event("change")); });
+    expect(raf).toHaveBeenCalled();
+    const cancel = vi.spyOn(window, "cancelAnimationFrame");
+    act(() => { reduced = true; query.dispatchEvent(new Event("change")); });
+    expect(cancel).toHaveBeenCalled();
   });
 });
 

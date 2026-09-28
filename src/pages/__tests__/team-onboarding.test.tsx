@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   invite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  avatar: vi.fn(),
+  role: "owner",
   incoming: [] as unknown[],
 }));
 vi.mock("../../lib/auth", () => ({
@@ -39,8 +41,9 @@ vi.mock("../../lib/api", () => ({
         user_id: "owner",
         name: "Owner",
         email: "owner@example.invalid",
-        role: "owner",
+        role: mocks.role,
       },
+      { id: 2, org_id: "one", user_id: "staff", name: "Teammate", email: "staff@example.invalid", role: "staff", avatar: "/avatars/mint.svg", avatar_override: "/avatars/mint.svg" },
     ],
     invites: async () => [],
     myInvites: async () => mocks.incoming,
@@ -51,6 +54,8 @@ vi.mock("../../lib/api", () => ({
     switchWorkspace: mocks.switch,
     acceptInvite: mocks.accept,
     invite: mocks.invite,
+    setMemberAvatar: mocks.avatar,
+    connections: async () => ({code:'A1B2C3',workspace_id:'one',workspace_name:'Acme',requests:[]}),
   },
 }));
 import UsersRoles from "../settings/UsersRoles";
@@ -58,10 +63,31 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   mocks.incoming = [];
+  mocks.role = "owner";
   mocks.reload.mockResolvedValue(undefined);
   mocks.accept.mockResolvedValue(undefined);
 });
 afterEach(cleanup);
+it("keeps the workspace avatar draft on failure and saves it with the member and workspace IDs", async () => {
+  mocks.avatar.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(undefined);
+  render(<MemoryRouter><UsersRoles /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", { name: "Change avatar for Teammate" }));
+  expect(screen.getByRole("button", { name: "Mint avatar" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Sky avatar" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save avatar" }));
+  await waitFor(() => expect(mocks.error).toHaveBeenCalled());
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sky avatar" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Save avatar" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(mocks.avatar).toHaveBeenLastCalledWith(2, "one", "/avatars/sky.svg");
+});
+it("lets staff choose their own workspace avatar but not a colleague's", async () => {
+  mocks.role = "staff";
+  render(<MemoryRouter><UsersRoles /></MemoryRouter>);
+  expect(await screen.findByRole("button", { name: "Change avatar for Owner" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Change avatar for Teammate" })).not.toBeInTheDocument();
+});
 it("accepts an invitation then refreshes workspace identity and tells other tabs", async () => {
   mocks.incoming = [
     {
@@ -101,4 +127,5 @@ it("never claims an unconfirmed email was sent", async () => {
     expect(mocks.error).toHaveBeenCalledWith("Email could not be confirmed")
   );
   expect(mocks.success).not.toHaveBeenCalled();
+  expect(mocks.invite).toHaveBeenCalledWith('teammate@example.invalid', 'staff', ['team']);
 });

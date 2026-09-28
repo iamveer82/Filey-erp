@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Minus, Plus } from "lucide-react";
 
 /** A4 portrait at 96dpi: 210mm × 297mm = 794 × 1123 px (ratio 1:√2). */
@@ -43,7 +43,7 @@ export default function FitPreview({
   // Start with the complete page width, including totals; readers can zoom in.
   const [readingZoom, setReadingZoom] = useState(100);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const box = boxRef.current;
     if (!box) return;
 
@@ -58,7 +58,8 @@ export default function FitPreview({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(measure);
     };
-    scheduleMeasure();
+    // Fit before the first paint, including when a collapsed preview is opened.
+    measure();
 
     // Panel dragging and sidebar changes resize the paper without resizing the
     // window. Only the available width changes the fit; height-only updates bail out.

@@ -1,13 +1,12 @@
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type ReactNode,
   type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../lib/format";
 
@@ -21,10 +20,9 @@ import { cn } from "../lib/format";
  * p-1; rows h-9 rounded-md hover:bg-hover text-[13px]; muted w-4 icons;
  * check = primary-600 dark:primary-400.
  *
- * Rendered through a portal with fixed coordinates measured off the
- * anchor (same approach RowActions proven out for WebView2, which
- * composites absolute menus into a scrolling ancestor's layer and then
- * partially repaints them). */
+ * Radix owns positioning and focus/layer coordination with parent dialogs.
+ * A bare body portal inherits a modal's pointer-events:none and becomes
+ * unclickable even though its menu is visible. */
 
 /** Anchored menu panel. Give it the open flag, a close callback and a ref to
  *  the trigger element; it handles positioning, dismissal and portal mounting. */
@@ -56,104 +54,60 @@ export function MenuPopover({
   children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<CSSProperties | null>(null);
 
   // Keep handlers stable so listeners subscribe once per open/close.
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
   useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!anchorRef.current?.contains(t) && !panelRef.current?.contains(t)) {
-        closeRef.current();
-      }
-    };
-    const esc = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      e.preventDefault();
-      e.stopPropagation();
-      closeRef.current();
-      anchorRef.current?.focus({ preventScroll: true });
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open, anchorRef]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const place = () => {
-      const el = anchorRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const gap = 6;
-      const w = panelRef.current?.offsetWidth ?? 0;
-      const h = panelRef.current?.offsetHeight ?? 0;
-      // The caller's side is only a preference: flip when the panel would
-      // spill past the viewport edge, so a select at the bottom of a form
-      // (or the top of one, for composer-style menus) stays fully on screen.
-      let effSide = side;
-      const below = window.innerHeight - r.bottom;
-      const above = r.top;
-      if (side === "bottom" && below < h + gap && above > below) effSide = "top";
-      else if (side === "top" && above < h + gap && below > above)
-        effSide = "bottom";
-      const rawLeft = align === "end" ? r.right - w : r.left;
-      setPos({
-        position: "fixed",
-        top: effSide === "top" ? r.top - gap : r.bottom + gap,
-        transform: effSide === "top" ? "translateY(-100%)" : undefined,
-        left: Math.max(8, Math.min(rawLeft, window.innerWidth - w - 8)),
-      });
-    };
-    place();
-    // Height isn't known until after paint (fonts, option count) — re-measure
-    // once so the flip decision uses the real panel size.
-    const raf = requestAnimationFrame(place);
+    if (!open || !closeOnScroll) return;
     const onScroll = (e: Event) => {
-      // Capture phase sees EVERY scroll, including the panel scrolling itself.
-      // Closing on the panel's own scroll made long menus snap shut the
-      // moment their scrollbar moved — only the page behind may close it.
       if (panelRef.current?.contains(e.target as Node)) return;
-      if (closeOnScroll) closeRef.current();
-      else place();
+      closeRef.current();
     };
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", place);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", place);
-    };
-  }, [open, anchorRef, side, align, closeOnScroll]);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [open, closeOnScroll]);
 
-  if (!open) return null;
-  return createPortal(
-    <div
+  return <PopoverPrimitive.Root open={open} onOpenChange={next => { if (!next) closeRef.current(); }}>
+    <PopoverPrimitive.Anchor virtualRef={anchorRef as RefObject<HTMLElement>} />
+    <PopoverPrimitive.Portal><PopoverPrimitive.Content
       ref={panelRef}
       role={role}
-      style={{ ...pos, ...style }}
+      side={side} align={align} sideOffset={6} collisionPadding={8}
+      style={{ ...style, pointerEvents: "auto" }}
+      onOpenAutoFocus={event => { if (role === "presentation") event.preventDefault(); }}
+      onCloseAutoFocus={event => {
+        event.preventDefault();
+        if (role === "menu" && document.activeElement === document.body) anchorRef.current?.focus({ preventScroll: true });
+      }}
+      onInteractOutside={event => { if (anchorRef.current?.contains(event.target as Node)) event.preventDefault(); }}
+      onEscapeKeyDown={event => {
+        event.preventDefault(); event.stopPropagation(); closeRef.current();
+        anchorRef.current?.focus({ preventScroll: true });
+      }}
+      onKeyDown={event => {
+        if (role !== "menu" || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        const items = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
+        if (!items.length) return;
+        event.preventDefault();
+        const index = items.indexOf(document.activeElement as HTMLElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[next].focus();
+      }}
       className={cn(
         // Every menu scrolls within the viewport and keeps its wheel events to
         // itself: the cap turns a 160-currency list into a scrollable panel,
         // overscroll-contain stops the scroll chaining to the page behind
         // (which used to close closeOnScroll menus at the end of the list).
-        "z-50 max-h-[min(60vh,26rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg",
+        "z-50 max-h-[min(60vh,26rem)] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg outline-none",
         className
       )}
     >
       {children}
-    </div>,
-    document.body
-  );
+    </PopoverPrimitive.Content></PopoverPrimitive.Portal>
+  </PopoverPrimitive.Root>;
 }
 
 /** One menu row: icon · label · trailing hint / chevron / check. One shape for

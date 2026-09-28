@@ -690,7 +690,7 @@
   .input,
   .select,
   .textarea {
-    @apply w-full rounded-[8px] border border-border bg-card px-3 text-[13px]
+    @apply w-full min-w-0 rounded-[8px] border border-border bg-card px-3 text-[13px]
            text-foreground placeholder:text-muted-foreground
            transition-[border-color] duration-200
            focus:outline-none focus:border-muted-foreground

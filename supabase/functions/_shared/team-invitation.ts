@@ -19,7 +19,7 @@ export function invitationEmail(invite: TeamInvitation, appUrl: string) {
     !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))
   )
     throw new Error("Invalid Filey app URL");
-  url.hash = `/settings?section=users&invite=${encodeURIComponent(invite.id)}`;
+  url.hash = `/settings?section=teams&invite=${encodeURIComponent(invite.id)}`;
   return {
     to: invite.email,
     subject: `Join ${invite.workspace_name.replace(/[\r\n]/g, " ").slice(0, 120)} on Filey`,

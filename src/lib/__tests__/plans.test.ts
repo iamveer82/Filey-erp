@@ -3,10 +3,10 @@ import { FREE_LIMITS, resolveTier } from "../license";
 import { planCardFor, PLANS } from "../subscription";
 
 describe("FREE_LIMITS", () => {
-  // Must match the server trigger in supabase/2026-07-29-free-invoice-cap-5.sql.
+  // Must match the server trigger in supabase/2026-09-19-basic-web-access.sql.
   // If they drift, the client lets an invoice through and the database rejects
   // it — a save that fails for no reason the user can see.
-  it("caps the free tier at 5 invoices per month", () => {
+  it("retains the hosted Basic quota of 5 cloud invoices per month", () => {
     expect(FREE_LIMITS.invoicesPerMonth).toBe(5);
   });
 });
@@ -36,6 +36,12 @@ describe("resolveTier", () => {
 });
 
 describe("planCardFor", () => {
+  it("describes Basic local invoicing as free and unlimited", () => {
+    const basic = PLANS.find(plan => plan.id === "free")!;
+    expect(basic.price).toBe("$0");
+    expect(basic.blurb).toMatch(/unlimited local invoices/i);
+    expect(basic.features).toContain("Unlimited local invoices and edits");
+  });
   // Pro and Enterprise were withdrawn from sale. Orgs still carry those plan
   // values, so the mapping must keep answering for them — a card lookup that
   // returned undefined would crash the billing panel of the very customers who

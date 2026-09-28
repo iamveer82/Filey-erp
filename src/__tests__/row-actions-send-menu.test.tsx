@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { RowActions } from "../components/RowActions";
 import { storedLineAmount } from "../lib/docItems";
 
 /** The Send dropdown once showed WhatsApp only. Every share channel the caller
  *  supplies must reach the menu, and must still fire once it is clicked — the
  *  menu renders in a portal, so a click on it lands outside the trigger's
- *  subtree and the close-on-outside-mousedown handler could eat it. */
+ *  subtree and the outside-pointer handler must not eat it. */
 describe("RowActions send menu", () => {
   // vitest runs without globals here, so RTL's auto-cleanup never registers.
   afterEach(cleanup);
@@ -33,15 +33,19 @@ describe("RowActions send menu", () => {
   it("still fires a channel that is clicked through the portal", () => {
     const onSend = openMenu();
     const email = screen.getByText("Email");
-    // Real pointer order: the document mousedown lands before the click.
+    // Real pointer order: pointerdown/mousedown land before the click.
+    fireEvent.pointerDown(email);
     fireEvent.mouseDown(email);
     fireEvent.click(email);
     expect(onSend.email).toHaveBeenCalledTimes(1);
   });
 
-  it("closes when the click is genuinely outside", () => {
+  it("closes when the click is genuinely outside", async () => {
     openMenu();
-    fireEvent.mouseDown(document.body);
+    // Radix attaches its outside-pointer listener on the next tick so the
+    // event that opened a menu cannot immediately dismiss it.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByText("Email")).toBeNull();
   });
 });

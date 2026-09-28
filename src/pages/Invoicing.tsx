@@ -2467,7 +2467,7 @@ function Editor({
             title="Template"
             subtitle="Choose a document layout"
             action={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   className="btn-ghost text-xs"
                   onClick={() => setViewAll((v) => !v)}
@@ -2504,7 +2504,7 @@ function Editor({
           <TabsContent value="details" forceMount hidden={editorTab !== "details"}>
           {/* Invoice details */}
           <Step title="Invoice details" action={<Badge tone={statusTone(form.status)}>{form.status}</Badge>}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
               <div className="space-y-3">
                 <Field label={partyLabel}>
                   <div className="flex gap-2">
@@ -2599,7 +2599,7 @@ function Editor({
                   </div>
                 </Field>
                 <Field label={`${partyLabel} City / ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)} / Country`}>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_4rem] gap-2">
                     <input aria-label={`${partyLabel} city`}
                       className="input"
                       placeholder="City"
@@ -2676,7 +2676,7 @@ function Editor({
                     </Field>
                   )}
               </div>
-              <div className="grid grid-cols-2 gap-3 content-start">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,144px),1fr))] gap-3 content-start">
                 <Field label="Invoice Number">
                   <div className="flex gap-2">
                     <input aria-label="Invoice number"
@@ -3568,7 +3568,7 @@ function Editor({
           </Tabs>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4" aria-label="Invoice totals">
             <span className="text-sm text-muted-foreground">{form.items.length} {form.items.length === 1 ? "item" : "items"} · {form.currency || "AED"}</span>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
+            <div className="grid w-full gap-x-6 gap-y-2 text-sm tabular-nums sm:flex sm:w-auto sm:flex-wrap [&>span]:flex [&>span]:items-baseline [&>span]:justify-between [&>span]:gap-2">
               <span className="text-muted-foreground">Subtotal <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.subtotal)}</strong></span>
               {invoiceTotals.discount > 0 && <span className="text-muted-foreground">Discount <strong className="ml-1 font-medium text-foreground">−{m(invoiceTotals.discount)}</strong></span>}
               <span className="text-muted-foreground">{taxRegimeFor(form.currency, form.tax_country_code).taxLabel} <strong className="ml-1 font-medium text-foreground">{m(invoiceTotals.tax)}</strong></span>

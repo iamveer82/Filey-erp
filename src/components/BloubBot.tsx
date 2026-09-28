@@ -7,10 +7,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import { BotEngine, type BotFrame } from "../lib/bloub/engine";
-import { NOTIF_BLUE } from "../lib/bloub/decor";
+import { NOTIF_BLUE, RINGS, arcRender } from "../lib/bloub/decor";
 import { DEFAULT_EXPRESSION, EXPRESSION_BY_ID } from "../lib/bloub/expressions";
 import { DEMI_VIEWBOX, RAYON } from "../lib/bloub/repere";
-import { DEFAULT_SHAPE, SHAPE_BY_ID, mixHex } from "../lib/bloub/skins";
+import { SHAPE_BY_ID, mixHex, type ShapeId } from "../lib/bloub/skins";
+import type { BotMotion } from "../lib/botAppearance";
 import { STATE_BY_ID, type StateId } from "../lib/bloub/states";
 import { getPersona } from "../lib/ai";
 
@@ -46,21 +47,6 @@ const AMBIENT_STATES: StateId[] = [
   "swirl",
 ];
 
-/** States an ambient trick may interrupt — the presence states only. Alarms
- *  and one-shots (`alert` for errors, `sleep`) always play untouched. */
-const AMBIENT_HOSTS = new Set<StateId>([
-  "idle",
-  "thinking",
-  "wide",
-  "wink",
-  "egg",
-  "hexagon",
-  "orbit",
-  "play",
-  "notify",
-  "swirl",
-]);
-
 /** Quiet time between two ambient tricks, in ms. */
 const AMBIENT_EVERY = [3500, 8000] as const;
 
@@ -79,6 +65,7 @@ export interface BloubBotProps {
   expression?: string;
   /** Body silhouette from the upstream shape set. */
   shape?: string;
+  motion?: BotMotion;
   /** Body colour. Defaults to the accent from Settings → Appearance. */
   ink?: string;
   /** What shows through the eyes. Defaults to the current theme's surface. */
@@ -105,38 +92,45 @@ export interface BloubBotProps {
  * what the bot is painted with. */
 function subscribeSkin(cb: () => void): () => void {
   window.addEventListener("filey-ui", cb);
-  return () => window.removeEventListener("filey-ui", cb);
+  window.addEventListener("storage", cb);
+  return () => { window.removeEventListener("filey-ui", cb); window.removeEventListener("storage", cb); };
 }
 
 function skinSnapshot(): string {
   const dark = document.documentElement.classList.contains("dark");
-  return `${dark ? "dark" : "light"}:${getPersona().orbColor}`;
+  const persona = getPersona();
+  return `${dark ? "dark" : "light"}:${persona.orbColor}:${persona.botShape}:${persona.botMotion}`;
 }
 
 /** The assistant's colour and the current theme, kept live. Exported because
  *  the settings preview wants the same value the bots are using. */
-export function useBotSkin(): { dark: boolean; color: string } {
+export function useBotSkin(): { dark: boolean; color: string; shape: ShapeId; motion: BotMotion } {
   const snap = useSyncExternalStore(
     subscribeSkin,
     skinSnapshot,
-    () => "light:#FFD600"
+    () => "light:#FFD600:cercle:playful"
   );
-  const [mode, color] = snap.split(":");
-  return { dark: mode === "dark", color: color || "#FFD600" };
+  const [mode, color, shape, motion] = snap.split(":");
+  return { dark: mode === "dark", color, shape: shape as ShapeId, motion: motion as BotMotion };
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof matchMedia === "function" &&
-    matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+function motionPaused(): boolean {
+  return document.hidden || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+
+function subscribeMotion(cb: () => void) {
+  const query = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+  query?.addEventListener("change", cb);
+  document.addEventListener("visibilitychange", cb);
+  return () => { query?.removeEventListener("change", cb); document.removeEventListener("visibilitychange", cb); };
 }
 
 export default function BloubBot({
   size = 64,
-  state = "idle",
+  state: requestedState = "idle",
   expression = DEFAULT_EXPRESSION,
-  shape = DEFAULT_SHAPE,
+  shape: requestedShape,
+  motion: requestedMotion,
   ink,
   paper,
   animate = true,
@@ -146,8 +140,12 @@ export default function BloubBot({
   label,
 }: BloubBotProps) {
   const skin = useBotSkin();
+  const shape = requestedShape ?? skin.shape;
+  const motion = requestedMotion ?? skin.motion;
+  const state = requestedState;
   const inkColor = ink ?? skin.color;
-  const paperColor = paper ?? (skin.dark ? "#0a0a0a" : "#ffffff");
+  const whiteInk = inkColor.toLowerCase() === "#ffffff";
+  const paperColor = paper ?? (skin.dark || whiteInk ? "#0a0a0a" : "#ffffff");
 
   const shapeRadii = useMemo(
     () => SHAPE_BY_ID.get(shape)?.radii ?? null,
@@ -172,12 +170,20 @@ export default function BloubBot({
     engine.sample(SETTLED_AT)
   );
 
-  const still = !animate || prefersReducedMotion();
+  const paused = useSyncExternalStore(subscribeMotion, motionPaused, () => true);
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    if (!animate || !svgRef.current || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    observer.observe(svgRef.current);
+    return () => observer.disconnect();
+  }, [animate]);
+  const still = !animate || paused || !visible || motion === "still";
 
   useEffect(() => {
     engine.setState(state, clock.current);
     if (still) setFrame(engine.sample(clock.current + SETTLED_AT));
-  }, [engine, state, still]);
+  }, [engine, state, still, motion]);
 
   useEffect(() => {
     engine.setShape(shapeRadii, clock.current);
@@ -201,18 +207,16 @@ export default function BloubBot({
   }, [engine, still]);
 
   /* Ambient life: after a few quiet seconds the bot slips into one of the short
-   * catalogue states, plays it once, and settles back onto whatever it was
-   * doing — including a turn in flight ("thinking"), which is exactly when a
-   * chat should feel alive. The schedule dies whenever the caller pins another
+   * catalogue states, plays it once, and settles back to idle. Working and
+   * error states always take priority. The schedule dies when the caller pins another
    * state and restarts on the next render. The cancelled flag neutralises
    * stale chained timers even where clearTimeout can only reach the latest
    * one. */
   useEffect(() => {
     if (
-      !animate ||
+      still || motion !== "playful" ||
       !ambient ||
-      !AMBIENT_HOSTS.has(state) ||
-      prefersReducedMotion()
+      state !== "idle"
     )
       return;
     let cancelled = false;
@@ -244,7 +248,7 @@ export default function BloubBot({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [animate, ambient, engine, state]);
+  }, [still, motion, ambient, engine, state]);
 
   /* The eyes follow the pointer. The engine owns the blend — setLook repoints
    * from wherever the gaze currently is — so this only turns pixels into head
@@ -253,7 +257,7 @@ export default function BloubBot({
    * spin…) keep most of it; resting states hand the direction over fully.
    * Leaving the window or losing focus gives the gaze back to the state. */
   useEffect(() => {
-    if (!animate || !trackCursor || prefersReducedMotion()) return;
+    if (still || !trackCursor) return;
     const follow = (e: PointerEvent) => {
       const el = svgRef.current;
       if (!el) return;
@@ -283,12 +287,18 @@ export default function BloubBot({
       window.removeEventListener("pointermove", follow);
       document.documentElement.removeEventListener("pointerleave", release);
       window.removeEventListener("blur", release);
+      release();
     };
-  }, [animate, trackCursor, engine]);
+  }, [still, trackCursor, engine]);
 
   const uid = useId().replace(/:/g, "");
   const maskId = `bloub-mask-${uid}`;
   const VB = DEMI_VIEWBOX;
+  // A continuous orbit preserves the selected silhouette. The catalogue's
+  // "orbit" is a one-shot trick that morphs to a triangle and fades away.
+  const arcs = motion === "orbit" && state === "idle"
+    ? RINGS.slice(0, 3).map((seed, i) => arcRender({ ...seed, speed: seed.speed * 0.3 }, clock.current, RAYON, `rest-ring-${i}`, 0.7))
+    : frame.arcs;
 
   /* Fill for one particle. Depth-fogged particles mix toward the paper, which
    * only the renderer knows, so the engine hands over the ratio not the hex. */
@@ -363,7 +373,7 @@ export default function BloubBot({
           )}
         </mask>
 
-        {frame.arcs.map((arc) => (
+        {arcs.map((arc) => (
           <linearGradient
             key={arc.id}
             id={`${uid}-${arc.id}`}
@@ -386,7 +396,7 @@ export default function BloubBot({
 
       {/* Back half of the orbits: drawn before the body, so the body hides it. */}
       <g fill="none" strokeLinecap="round">
-        {frame.arcs.map((arc) => (
+        {arcs.map((arc) => (
           <path
             key={`b${arc.id}`}
             d={arc.back}
@@ -408,6 +418,7 @@ export default function BloubBot({
         <g mask={`url(#${maskId})`}>
           <rect x={-VB} y={-VB} width={VB * 2} height={VB * 2} fill={inkColor} />
         </g>
+        {whiteInk && !skin.dark && <path d={frame.bodyPath} fill="none" stroke="#d4d4d8" strokeWidth={3} />}
       </g>
 
       {!frame.dotsBehind && <g>{dots("pf")}</g>}
@@ -422,7 +433,7 @@ export default function BloubBot({
       )}
 
       <g fill="none" strokeLinecap="round">
-        {frame.arcs.map((arc) => (
+        {arcs.map((arc) => (
           <path
             key={`f${arc.id}`}
             d={arc.front}

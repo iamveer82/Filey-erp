@@ -82,10 +82,27 @@ try {
   const teamMigration = sql('supabase/2026-09-20-team-workspaces.sql');
   console.log(run('psql', teamArgs, sql('scripts/fixtures/team-setup.sql') + '\n' + migration + '\n' + moduleMigration + '\n'
     + teamMigration + '\n' + teamMigration + '\n' + sql('scripts/fixtures/team-assertions.sql')).trim());
+  const avatarMigration = sql('supabase/2026-09-28-member-avatars.sql');
+  console.log(run('psql', teamArgs, avatarMigration + '\n' + avatarMigration + '\n' + sql('scripts/fixtures/member-avatar-assertions.sql')).trim());
   console.log(run('psql',teamArgs,sql('supabase/2026-09-20-profile-insert-scope.sql')+'\n'
     +sql('scripts/fixtures/profile-scope-assertions.sql')).trim());
   const rateMigration = sql('supabase/2026-09-20-edge-rate-limits.sql');
   console.log(run('psql',teamArgs,rateMigration+'\n'+rateMigration+'\n'+sql('scripts/fixtures/rate-limit-assertions.sql')).trim());
+  const teamCodesMigration = sql('supabase/2026-09-28-team-codes.sql');
+  console.log(run('psql',teamArgs,teamCodesMigration+'\n'+teamCodesMigration+'\n'+sql('scripts/fixtures/team-code-assertions.sql')).trim());
+  run('psql',teamArgs,"insert into auth.users values('00000000-0000-0000-0000-000000000006','race@example.invalid',now()); insert into profiles(id,org_id,name) values('00000000-0000-0000-0000-000000000006','default','Race');");
+  const joinCode = run('psql',[...teamArgs,'-tAc',"select code from team_invite_codes where user_id='00000000-0000-0000-0000-000000000001'"]).trim();
+  assert.match(joinCode,/^[A-Z0-9]{6}$/);
+  const joinRaces = await Promise.all(Array.from({length:5},()=>promisify(execFile)(exe('psql'),[...teamArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000006'; select filey_request_team_join('${joinCode}')->>'id';`],{encoding:'utf8',windowsHide:true})));
+  const requestId=joinRaces[0].stdout.trim();
+  assert.match(requestId,/^[0-9a-f-]{36}$/);
+  assert(joinRaces.every(result=>result.stdout.trim()===requestId),'Concurrent requests must reuse one pending request');
+  const approvalRaces = await Promise.allSettled(Array.from({length:5},()=>promisify(execFile)(exe('psql'),[...teamArgs,'-tAc',
+    `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000001'; select filey_review_team_join('${requestId}','10000000-0000-0000-0000-000000000001',true);`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(approvalRaces.filter(result=>result.status==='fulfilled').length,1);
+  for(const result of approvalRaces) if(result.status==='rejected') assert.match(result.reason.stderr,/no longer waiting for approval/);
+  console.log('PASS: concurrent code requests reuse one request and concurrent approvals grant membership exactly once.');
   const limitRace = await Promise.all(Array.from({length:12}, () =>
     promisify(execFile)(exe('psql'), [...teamArgs,'-tAc',
       "set role service_role; select public.filey_take_rate_limit('concurrent-account','race',3,3600);"],
