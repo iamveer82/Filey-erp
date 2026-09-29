@@ -20,28 +20,29 @@ export function useSidebarSwipe(
       delete host.dataset.sidebarDragging;
     };
     const start = (event: TouchEvent) => {
+      if (gesture?.dragging) suppressClickUntil.current = Date.now() + 400;
       reset();
-      suppressClickUntil.current = 0;
       if (event.touches.length !== 1) return;
+      suppressClickUntil.current = 0;
       const target = event.target;
-      if (!(target instanceof Element) || target.closest('input,textarea,select,[contenteditable="true"],[role="slider"]')) return;
+      if (!(target instanceof Element) || target.closest('input,textarea,select,canvas,[contenteditable="true"],[role="slider"],.filey-table-scroll')) return;
       if (document.querySelector('[aria-modal="true"]:not(#workspace-sidebar)')) return;
       const touch = event.touches[0];
-      // Leave the very edge to Safari's back gesture. Start just inside the edge.
-      if (!open && (touch.clientX < 8 || touch.clientX > 32)) return;
+      // Leave Safari's outer edge and ordinary buttons/links to native gestures.
+      if (!open && (touch.clientX < 16 || touch.clientX > 48 || target.closest('button,a,[role="button"]'))) return;
       if (open && !panel.contains(target) && target !== backdrop) return;
       gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY, time: event.timeStamp,
         width: panel.getBoundingClientRect().width, distance: 0, dragging: false };
     };
     const move = (event: TouchEvent) => {
       if (!gesture) return;
-      if (event.touches.length !== 1 || !event.cancelable) { reset(); return; }
+      if (event.touches.length !== 1 || !event.cancelable) { cancel(); return; }
       const touch = event.touches[0];
-      if (touch.identifier !== gesture.id) { reset(); return; }
+      if (touch.identifier !== gesture.id) { cancel(); return; }
       const dx = touch.clientX - gesture.x, dy = touch.clientY - gesture.y;
       if (!gesture.dragging) {
         if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { reset(); return; }
-        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+        if (Math.abs(dx) < 20 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
         if ((open && dx > 0) || (!open && dx < 0)) { reset(); return; }
         gesture.dragging = true;
       }
@@ -54,6 +55,11 @@ export function useSidebarSwipe(
     };
     const end = (event: TouchEvent) => {
       if (!gesture?.dragging) { reset(); return; }
+      const touch = Array.from(event.changedTouches ?? []).find(t => t.identifier === gesture!.id);
+      if (touch) {
+        const dx = touch.clientX - gesture.x;
+        gesture.distance = Math.max(0, Math.min(gesture.width, open ? -dx : dx));
+      }
       const elapsed = Math.max(1, event.timeStamp - gesture.time);
       const commit = gesture.distance > gesture.width * 0.35
         || (gesture.distance > 40 && gesture.distance / elapsed > 0.45);
@@ -73,6 +79,8 @@ export function useSidebarSwipe(
     host.addEventListener("touchend", end);
     host.addEventListener("touchcancel", cancel);
     host.addEventListener("click", click, true);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("resize", cancel);
     return () => {
       reset();
       host.removeEventListener("touchstart", start);
@@ -80,6 +88,8 @@ export function useSidebarSwipe(
       host.removeEventListener("touchend", end);
       host.removeEventListener("touchcancel", cancel);
       host.removeEventListener("click", click, true);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("resize", cancel);
     };
   }, [root, sidebar, enabled, open, setOpen]);
 }

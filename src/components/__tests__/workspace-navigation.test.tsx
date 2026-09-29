@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import WorkspaceNavigation from "../WorkspaceNavigation";
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 vi.mock("../../lib/i18n", () => ({ useLang: () => ({ t: (text: string) => text }) }));
 vi.mock("../../modules/registry", () => ({ prefetchModule: vi.fn() }));
@@ -84,4 +84,19 @@ it("keeps the filtered contents still during mobile closing and resets on reopen
   view.rerender(navigation(true));
   expect(search).toHaveValue("");
   expect(screen.getByRole("link", { name: "Settings" })).toBeVisible();
+});
+
+it("reveals the current page by scrolling only the navigation list", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => { frames.push(callback); return frames.length; });
+  const { container } = render(<MemoryRouter initialEntries={["/settings"]}>
+    <WorkspaceNavigation modules={modules} isDesktop={false} mobileOpen onNavigate={() => {}} />
+  </MemoryRouter>);
+  const list = container.querySelector<HTMLElement>(".workspace-nav-scroll")!;
+  vi.spyOn(list, "getBoundingClientRect").mockReturnValue({ top: 120, bottom: 520 } as DOMRect);
+  vi.spyOn(screen.getByRole("link", { name: "Settings" }), "getBoundingClientRect").mockReturnValue({ top: 700, bottom: 744 } as DOMRect);
+  act(() => frames.forEach(frame => frame(0)));
+  expect(list.scrollTop).toBe(224);
+  expect(container.scrollTop).toBe(0);
+  expect(container.scrollLeft).toBe(0);
 });

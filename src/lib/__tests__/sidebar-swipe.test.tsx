@@ -55,3 +55,36 @@ it('cancels interrupted and multi-finger gestures and disables swipes on desktop
   start(root, 20); move(root, 250); fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('false');
 });
+
+it('keeps menu taps and diagonal page scrolling separate from swipe gestures', () => {
+  const {root, panel, getByText} = setup();
+  const menu = getByText('Menu');
+  start(menu, 24); move(menu, 90); fireEvent.touchEnd(menu);
+  expect(root.dataset.sidebarDragging).toBeUndefined();
+  fireEvent.click(menu);
+  expect(panel.dataset.open).toBe('true');
+  start(panel, 250); move(panel, 235, 209); move(panel, 226, 265); fireEvent.touchEnd(panel);
+  expect(panel.dataset.open).toBe('true');
+  expect(root.dataset.sidebarDragging).toBeUndefined();
+});
+
+it('uses the release position and recovers from browser interruptions without stray clicks', () => {
+  const {root, panel, getByText} = setup();
+  start(root, 20); move(root, 200);
+  fireEvent.touchEnd(root, {changedTouches: [point(28)]});
+  expect(panel.dataset.open).toBe('false');
+  start(root, 20); move(root, 200);
+  fireEvent(window, new Event('resize'));
+  expect(root.dataset.sidebarDragging).toBeUndefined();
+  expect(root.style.getPropertyValue('--workspace-reveal')).toBe('');
+  fireEvent.touchEnd(root);
+  expect(panel.dataset.open).toBe('false');
+  start(root, 20); move(root, 200);
+  fireEvent.touchMove(root, { touches: [point(230)], cancelable: false });
+  const menu = getByText('Menu');
+  fireEvent.click(menu);
+  expect(panel.dataset.open).toBe('false');
+  // A new deliberate tap works immediately, even inside the click guard window.
+  start(menu, 24); fireEvent.touchEnd(menu); fireEvent.click(menu);
+  expect(panel.dataset.open).toBe('true');
+});

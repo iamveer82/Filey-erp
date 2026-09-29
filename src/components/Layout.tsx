@@ -155,13 +155,14 @@ export default function Layout({ children }: { children: ReactNode }) {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const closeMenuRef = useRef<HTMLButtonElement>(null);
+  const openMenuRef = useRef<HTMLButtonElement>(null);
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width:1024px)").matches
   );
   useSidebarSwipe(workspaceRef, sidebarRef, !isDesktop, mobileOpen, setMobileOpen);
   useEffect(() => {
     const m = window.matchMedia("(min-width:1024px)");
-    const h = () => setIsDesktop(m.matches);
+    const h = () => { setIsDesktop(m.matches); setMobileOpen(false); };
     m.addEventListener("change", h);
     return () => m.removeEventListener("change", h);
   }, []);
@@ -170,7 +171,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [pathname]);
   useEffect(() => {
     if (!mobileOpen || isDesktop) return;
-    const previous = document.activeElement as HTMLElement | null;
+    const opener = openMenuRef.current;
     const controls = () => {
       const selector = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex="0"]';
       return [
@@ -203,7 +204,8 @@ export default function Layout({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", trap);
     return () => {
       window.removeEventListener("keydown", trap);
-      previous?.focus({ preventScroll: true });
+      // Restoring a previously focused text field reopens the phone keyboard.
+      opener?.focus({ preventScroll: true });
     };
   }, [mobileOpen, isDesktop]);
   useEffect(() => {
@@ -492,6 +494,8 @@ export default function Layout({ children }: { children: ReactNode }) {
               <PanelLeft size={18} aria-hidden="true" />
             </button>
             <button
+              ref={openMenuRef}
+              type="button"
               onClick={() => setMobileOpen(true)}
               aria-label={t("Open menu")}
               aria-controls="workspace-sidebar"

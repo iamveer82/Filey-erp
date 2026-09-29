@@ -34,19 +34,26 @@ export default function WorkspaceNavigation({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const scroller = useRef<HTMLDivElement>(null);
   const filter = useRef<HTMLInputElement>(null);
+  const currentGroup = GROUPS.find(group => modules.some(module => group.ids.includes(module.id)
+    && (pathname === module.to || pathname.startsWith(module.to + "/"))))?.title;
   useEffect(() => {
     // Keep the outgoing content still while the mobile drawer slides closed.
     if (!isDesktop && !mobileOpen) return;
     setQuery("");
-    const currentGroup = GROUPS.find(group => modules.some(module => group.ids.includes(module.id)
-      && (pathname === module.to || pathname.startsWith(module.to + "/"))));
-    if (currentGroup) setExpanded(previous => previous[currentGroup.title] === false
-      ? { ...previous, [currentGroup.title]: true } : previous);
+    if (currentGroup) setExpanded(previous => previous[currentGroup] === false
+      ? { ...previous, [currentGroup]: true } : previous);
     const frame = requestAnimationFrame(() => {
-      scroller.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: "nearest" });
+      const container = scroller.current;
+      const current = container?.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!container || !current) return;
+      // scrollIntoView also scrolls overflow-hidden ancestors while the drawer
+      // moves. Only the navigation list should move to reveal the current page.
+      const bounds = container.getBoundingClientRect(), item = current.getBoundingClientRect();
+      if (item.top < bounds.top) container.scrollTop += item.top - bounds.top;
+      else if (item.bottom > bounds.bottom) container.scrollTop += item.bottom - bounds.bottom;
     });
     return () => cancelAnimationFrame(frame);
-  }, [pathname, mobileOpen, isDesktop]);
+  }, [pathname, mobileOpen, isDesktop, currentGroup]);
 
   const search = query.trim().toLocaleLowerCase();
   const groups = GROUPS.map(group => ({
