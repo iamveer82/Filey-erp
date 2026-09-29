@@ -222,7 +222,7 @@ export default function Marketing() {
             }
             onRowClick={(l) => nav(`/customers/${l.customer.id}`)}
             columns={[
-              {
+              { summary: true, truncate: true,
                 key: "name",
                 label: "Lead",
                 sortValue: (l) => l.customer.name,
@@ -235,7 +235,7 @@ export default function Marketing() {
                   </div>
                 ),
               },
-              {
+              { summary: true,
                 key: "score",
                 label: "Score",
                 sortValue: (l) => l.score,
@@ -254,7 +254,7 @@ export default function Marketing() {
                   </span>
                 ),
               },
-              {
+              { summary: true,
                 key: "revenue",
                 label: "Invoiced",
                 sortValue: (l) => l.revenue,
@@ -271,7 +271,7 @@ export default function Marketing() {
                       ? "Today"
                       : `${l.daysSinceActivity}d ago`,
               },
-              {
+              { actions: true,
                 key: "act",
                 label: "Actions",
                 render: (l) => (

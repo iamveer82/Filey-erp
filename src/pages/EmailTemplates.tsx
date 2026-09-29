@@ -209,28 +209,28 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
         loading={loading}
         empty="No templates yet"
         columns={[
-          {
+          { summary: true, truncate: true,
             key: "name",
             label: "Template",
             sortValue: (t) => t.name,
             render: (t) => <span className="font-medium text-ink">{t.name}</span>,
           },
-          {
+          { summary: true,
             key: "cat",
             label: "Category",
             sortValue: (t) => t.category,
             render: (t) => <Badge tone="info">{t.category}</Badge>,
           },
-          {
+          { truncate: true,
             key: "subj",
             label: "Subject",
             render: (t) => (
-              <span className="text-brand-500 truncate max-w-[300px] block">
+              <span className="text-brand-500">
                 {t.subject}
               </span>
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (t) => (

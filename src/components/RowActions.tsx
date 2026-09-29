@@ -10,7 +10,6 @@ import {
   Eye,
   Pencil,
   Copy,
-  Send,
   Trash2,
   MessageCircle,
   Mail,
@@ -50,7 +49,7 @@ export function RowActions({
   onEdit?: () => void;
   onCopy?: () => void;
   onDelete?: () => void;
-  /** Team-share this record — renders the members icon button. */
+  /** Team-share this record — appears in the row menu. */
   onShare?: () => void;
   shareLabel?: string;
   onSend?: {
@@ -61,179 +60,37 @@ export function RowActions({
   };
   align?: "right" | "left";
 }) {
-  const [openSend, setOpenSend] = useState(false);
-  const [openMore, setOpenMore] = useState(false);
-  const sendBtn = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
   const moreBtn = useRef<HTMLButtonElement>(null);
+  const btn = "grid h-8 w-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";
+  const actions = [
+    { label: "Edit", icon: <Pencil size={16} />, run: onEdit },
+    { label: "Duplicate", icon: <Copy size={16} />, run: onCopy },
+    { label: shareLabel, icon: <Users size={16} />, run: onShare },
+    { label: "WhatsApp", icon: <MessageCircle size={16} />, run: onSend?.whatsapp },
+    { label: "Email", icon: <Mail size={16} />, run: onSend?.email },
+    { label: "SMS", icon: <Phone size={16} />, run: onSend?.sms },
+    { label: "Copy link", icon: <Link2 size={16} />, run: onSend?.copyLink },
+    { label: "Delete", icon: <Trash2 size={16} />, run: onDelete, danger: true },
+  ].filter(action => action.run);
 
-  const btn =
-    "h-7 w-7 grid place-items-center rounded-full text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors";
-
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-0.5",
-        align === "right" && "justify-end"
-      )}
-    >
-      {onView && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onView();
-          }}
-          title="Quick view"
-          aria-label="Quick view"
-          className={btn}
-        >
-          <Eye className="h-4 w-4" />
-        </button>
-      )}
-      {onEdit && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          title="Edit"
-          aria-label="Edit"
-          className={btn}
-        >
-          <Pencil className="h-4 w-4" />
-        </button>
-      )}
-      {onCopy && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onCopy();
-          }}
-          title="Duplicate"
-          aria-label="Duplicate"
-          className={btn}
-        >
-          <Copy className="h-4 w-4" />
-        </button>
-      )}
-      {onShare && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onShare();
-          }}
-          title={shareLabel}
-          aria-label={shareLabel}
-          className={btn}
-        >
-          <Users className="h-4 w-4" />
-        </button>
-      )}
-      {onSend && (
-        <div className="relative">
-          <button
-            ref={sendBtn}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpenSend((v) => !v);
-            }}
-            title="Send"
-            aria-label="Send"
-            aria-expanded={openSend}
-            className={btn}
-          >
-            <Send className="h-4 w-4" />
-          </button>
-          <MenuPopover
-            open={openSend}
-            onClose={() => setOpenSend(false)}
-            anchorRef={sendBtn}
-            align="end"
-            closeOnScroll
-            className="w-44"
-          >
-            {onSend.whatsapp && (
-              <MenuItemRow
-                icon={<MessageCircle size={16} />}
-                label="WhatsApp"
-                onClick={() => {
-                  setOpenSend(false);
-                  onSend.whatsapp!();
-                }}
-              />
-            )}
-            {onSend.email && (
-              <MenuItemRow
-                icon={<Mail size={16} />}
-                label="Email"
-                onClick={() => {
-                  setOpenSend(false);
-                  onSend.email!();
-                }}
-              />
-            )}
-            {onSend.sms && (
-              <MenuItemRow
-                icon={<Phone size={16} />}
-                label="SMS"
-                onClick={() => {
-                  setOpenSend(false);
-                  onSend.sms!();
-                }}
-              />
-            )}
-            {onSend.copyLink && (
-              <>
-                <MenuSep />
-                <MenuItemRow
-                  icon={<Link2 size={16} />}
-                  label="Copy link"
-                  onClick={() => {
-                    setOpenSend(false);
-                    onSend.copyLink!();
-                  }}
-                />
-              </>
-            )}
-          </MenuPopover>
-        </div>
-      )}
-      {onDelete && (
-        <div className="relative">
-          <button
-            ref={moreBtn}
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpenMore((v) => !v);
-            }}
-            title="More"
-            aria-label="More actions"
-            aria-expanded={openMore}
-            className={btn}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
-          <MenuPopover
-            open={openMore}
-            onClose={() => setOpenMore(false)}
-            anchorRef={moreBtn}
-            align="end"
-            closeOnScroll
-            className="w-40"
-          >
-            <MenuItemRow
-              danger
-              icon={<Trash2 size={16} />}
-              label="Delete"
-              onClick={() => {
-                setOpenMore(false);
-                onDelete();
-              }}
-            />
-          </MenuPopover>
-        </div>
-      )}
-    </div>
-  );
+  return <div onClick={event => event.stopPropagation()} className={cn("flex items-center gap-0.5", align === "right" && "justify-end")}>
+    {onView && <button type="button" onClick={e => { e.stopPropagation(); onView(); }}
+      title="Quick view" aria-label="Quick view" className={btn}><Eye size={16} /></button>}
+    {actions.length > 0 && <>
+      <button type="button" ref={moreBtn} onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
+        title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded={open} className={btn}>
+        <MoreHorizontal size={16} />
+      </button>
+      <MenuPopover open={open} onClose={() => setOpen(false)} anchorRef={moreBtn} align="end" closeOnScroll className="w-44">
+        {actions.map(action => <div key={action.label}>
+          {action.danger && actions.length > 1 && <MenuSep />}
+          <MenuItemRow label={action.label} icon={action.icon} danger={action.danger}
+            onClick={() => { setOpen(false); action.run!(); }} />
+        </div>)}
+      </MenuPopover>
+    </>}
+  </div>;
 }
 
 export type QuickViewData = {

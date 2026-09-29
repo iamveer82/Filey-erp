@@ -275,7 +275,7 @@ export default function ChequeRegister() {
             : "No cheques recorded yet"
         }
         columns={[
-          {
+          { summary: true,
             key: "no",
             label: "Cheque #",
             sortValue: (c) => c.cheque_no,
@@ -291,19 +291,19 @@ export default function ChequeRegister() {
               <Badge tone={c.type === "issued" ? "warn" : "info"}>{c.type}</Badge>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "party",
             label: "Party",
             sortValue: (c) => c.party,
             render: (c) => <span className="font-medium">{c.party}</span>,
           },
-          {
+          { truncate: true,
             key: "bank",
             label: "Bank",
             sortValue: (c) => c.bank,
             render: (c) => <span className="text-brand-500 text-sm">{c.bank}</span>,
           },
-          {
+          { summary: true,
             key: "amt",
             label: "Amount",
             sortValue: (c) => c.amount,
@@ -327,13 +327,13 @@ export default function ChequeRegister() {
               );
             },
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (c) => c.status,
             render: (c) => <Badge tone={statusTone(c.status)}>{c.status}</Badge>,
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (c) => (

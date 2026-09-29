@@ -359,7 +359,7 @@ export default function DeliveryChallan() {
         }
         onRowClick={(r) => setQuickView(r)}
         columns={[
-          {
+          { summary: true,
             key: "delivery",
             label: "Delivery",
             sortValue: (r) => r.number,
@@ -367,7 +367,7 @@ export default function DeliveryChallan() {
               <span className="font-mono text-xs font-medium">{r.number}</span>
             ),
           },
-          {
+          { summary: true,
             key: "order",
             label: "Order",
             sortValue: (r) => dcOrder(r),
@@ -383,7 +383,7 @@ export default function DeliveryChallan() {
               <span className="font-medium text-ink">{dcDriver(r) || "—"}</span>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "destination",
             label: "Destination",
             sortValue: (r) => dcDestination(r),
@@ -394,7 +394,7 @@ export default function DeliveryChallan() {
               </span>
             ),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (r) => dcStatus(r),
@@ -413,7 +413,7 @@ export default function DeliveryChallan() {
               </span>
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (r) => (

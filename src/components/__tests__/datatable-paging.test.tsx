@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { DataTable } from "../ui";
 
@@ -54,7 +54,7 @@ describe("DataTable pageSize", () => {
   });
 });
 
-describe("DataTable pinned last column", () => {
+describe("DataTable responsive quick view", () => {
   /** jsdom has no layout, so fake the one measurement the pin depends on. */
   const fakeWidths = (scrollWidth: number, clientWidth: number) => {
     const props = ["scrollWidth", "clientWidth"] as const;
@@ -66,11 +66,12 @@ describe("DataTable pinned last column", () => {
       });
     }
     class RO {
-      constructor(private cb: () => void) {}
-      observe() {
-        this.cb();
+      constructor(private cb: (entries: { target: Element }[]) => void) {}
+      observe(target: Element) {
+        this.cb([{ target }]);
       }
       disconnect() {}
+      unobserve() {}
     }
     (globalThis as any).ResizeObserver = RO;
     return () => {
@@ -84,31 +85,66 @@ describe("DataTable pinned last column", () => {
       rows={[{ id: 1 }]}
       columns={[
         { key: "id", label: "ID", render: (r) => `row-${r.id}` },
-        { key: "act", label: "Actions", render: () => "menu" },
+        { key: "act", label: "Actions", actions: true, render: () => "menu" },
       ]}
     />
   );
 
-  it("pins Actions once the table is wider than its card", () => {
-    const restore = fakeWidths(900, 400);
+  it("uses quick views when content is wider than even a large container", () => {
+    const restore = fakeWidths(1600, 1200);
     try {
       const view = render(wide);
-      expect(view.getByText("menu").closest("td")).toHaveClass("cell-pinned-end");
-      expect(view.getByText("ID").closest("th")).not.toHaveClass("cell-pinned-end");
+      expect(view.queryByRole("table")).toBeNull();
+      expect(view.getByText("menu")).toBeVisible();
+      expect(view.getByText("row-1")).toBeVisible();
     } finally {
       restore();
     }
   });
 
-  it("leaves the column unpinned when everything fits", () => {
-    const restore = fakeWidths(400, 400);
+  it("keeps the table when everything fits", () => {
+    const restore = fakeWidths(1200, 1200);
     try {
       const view = render(wide);
-      expect(view.getByText("menu").closest("td")).not.toHaveClass(
-        "cell-pinned-end"
-      );
+      expect(view.getByRole("table")).toBeVisible();
     } finally {
       restore();
     }
+  });
+
+  it("shows a compact summary with full details, selection, sorting and actions on narrow screens", async () => {
+    const restore = fakeWidths(390, 390);
+    const save = vi.fn().mockResolvedValue(undefined);
+    try {
+      const view = render(<DataTable rows={[{ id: 1, name: "A very long customer company name", amount: 9876543.21 }]}
+        rowKey={r => r.id} bulkActions={[{ label: "Update", run: () => {} }]}
+        columns={[
+          { key: "id", label: "Invoice", summary: true, render: r => `INV-${r.id}` },
+          { key: "name", label: "Customer", summary: true, truncate: true, sortValue: r => r.name, render: r => r.name,
+            editable: { value: r => r.name, onSave: save } },
+          { key: "amount", label: "Total", summary: true, sortValue: r => r.amount, render: r => `AED ${r.amount}` },
+          { key: "template", label: "Template", render: () => "Corporate" },
+          { key: "actions", label: "Actions", actions: true, render: () => <button>Open invoice</button> },
+        ]} />);
+      expect(view.queryByRole("table")).toBeNull();
+      expect(view.getByText("AED 9876543.21")).toBeVisible();
+      expect(view.getByTitle("A very long customer company name")).toBeVisible();
+      const details = view.getByText("Details").closest("details")!;
+      expect(details).toHaveTextContent("Corporate");
+      fireEvent.click(view.getByText("Details"));
+      expect(details.open).toBe(true);
+      fireEvent.click(view.getByRole("button", { name: "A very long customer company name" }));
+      const input = view.getByRole("textbox", { name: "Edit Customer" });
+      fireEvent.change(input, { target: { value: "Updated customer" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await view.findByRole("button", { name: "A very long customer company name" });
+      expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), "Updated customer");
+      expect(view.getByRole("button", { name: "Open invoice" })).toBeVisible();
+      fireEvent.click(view.getByRole("checkbox", { name: "Select row" }));
+      expect(view.getByText("1 selected")).toBeVisible();
+      fireEvent.click(view.getByRole("button", { name: "Sort records" }));
+      fireEvent.click(view.getByRole("menuitem", { name: "Total ↓" }));
+      expect(view.getByRole("button", { name: "Sort records" })).toHaveTextContent("Total ↓");
+    } finally { restore(); }
   });
 });

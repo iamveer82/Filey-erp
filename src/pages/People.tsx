@@ -239,7 +239,7 @@ export default function People() {
         rowKey={(e) => e.id}
         onRowClick={(e) => nav(`/people/${e.id}`)}
         columns={[
-          {
+          { summary: true, truncate: true,
             key: "name",
             label: "Name",
             sortValue: (e) => e.name,
@@ -261,19 +261,19 @@ export default function People() {
               </div>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "role",
             label: "Role",
             sortValue: (e) => e.position ?? e.department ?? "",
             render: (e) => [e.position, e.department].filter(Boolean).join(" · ") || "—",
           },
-          {
+          { summary: true,
             key: "salary",
             label: "Salary",
             sortValue: (e) => e.salary,
             render: (e) => aed(e.salary),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (e) => e.status ?? "",
@@ -297,7 +297,7 @@ export default function People() {
               </button>
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (e) => (

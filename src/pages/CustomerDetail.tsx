@@ -1314,31 +1314,31 @@ export default function CustomerDetail() {
           loading={loading}
           empty="No quotations for this customer"
           columns={[
-            {
+            { summary: true,
               key: "number",
               label: "Number",
               sortValue: (q) => q.number,
               render: (q) => <span className="font-medium text-ink">{q.number}</span>,
             },
-            {
+            { summary: true,
               key: "valid",
               label: "Valid until",
               sortValue: (q) => q.valid_until ?? "",
               render: (q) => fmtDate(q.valid_until),
             },
-            {
+            { summary: true,
               key: "status",
               label: "Status",
               sortValue: (q) => q.status,
               render: (q) => <Badge tone={statusTone(q.status)}>{q.status}</Badge>,
             },
-            {
+            { summary: true,
               key: "total",
               label: "Total",
               sortValue: (q) => q.total,
               render: (q) => aed(q.total),
             },
-            {
+            { actions: true,
               key: "act",
               label: "",
               render: (q) => (
@@ -1365,7 +1365,7 @@ export default function CustomerDetail() {
           loading={loading}
           empty="No orders for this customer"
           columns={[
-            {
+            { summary: true,
               key: "number",
               label: "Order",
               sortValue: (o) => o.order_number,
@@ -1373,19 +1373,19 @@ export default function CustomerDetail() {
                 <span className="font-medium text-ink">{o.order_number}</span>
               ),
             },
-            {
+            { summary: true,
               key: "date",
               label: "Date",
               sortValue: (o) => o.created_at ?? "",
               render: (o) => fmtDate(o.created_at),
             },
-            {
+            { summary: true,
               key: "status",
               label: "Status",
               sortValue: (o) => o.status,
               render: (o) => <Badge tone={statusTone(o.status)}>{o.status}</Badge>,
             },
-            {
+            { summary: true,
               key: "total",
               label: "Total",
               sortValue: (o) => o.total,
@@ -1402,19 +1402,19 @@ export default function CustomerDetail() {
             rows={myOpps}
             empty="No opportunities for this customer"
             columns={[
-              {
+              { summary: true, truncate: true,
                 key: "title",
                 label: "Title",
                 sortValue: (o) => o.title,
                 render: (o) => <span className="font-medium text-ink">{o.title}</span>,
               },
-              {
+              { summary: true,
                 key: "stage",
                 label: "Stage",
                 sortValue: (o) => o.stage,
                 render: (o) => <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>,
               },
-              {
+              { summary: true,
                 key: "value",
                 label: "Value",
                 sortValue: (o) => o.value,

@@ -19,7 +19,7 @@ describe("RowActions send menu", () => {
       copyLink: vi.fn(),
     };
     render(<RowActions onSend={onSend} />);
-    fireEvent.click(screen.getByLabelText("Send"));
+    fireEvent.click(screen.getByLabelText("More actions"));
     return onSend;
   };
 
@@ -47,6 +47,20 @@ describe("RowActions send menu", () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     fireEvent.pointerDown(document.body);
     expect(screen.queryByText("Email")).toBeNull();
+  });
+
+  it("keeps secondary actions in one menu without submitting a form or opening the row", () => {
+    const rowClick = vi.fn(), submit = vi.fn(), edit = vi.fn(), copy = vi.fn(), share = vi.fn(), remove = vi.fn();
+    render(<form onSubmit={submit}><div onClick={rowClick}><RowActions onView={vi.fn()}
+      onEdit={edit} onCopy={copy} onShare={share} onDelete={remove} /></div></form>);
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    for (const [name, handler] of [["Edit", edit], ["Duplicate", copy], ["Share", share], ["Delete", remove]] as const) {
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      fireEvent.click(screen.getByRole("menuitem", { name }));
+      expect(handler).toHaveBeenCalledOnce();
+    }
+    expect(submit).not.toHaveBeenCalled();
+    expect(rowClick).not.toHaveBeenCalled();
   });
 });
 

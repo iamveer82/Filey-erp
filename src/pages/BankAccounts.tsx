@@ -263,13 +263,13 @@ export default function BankAccounts() {
             : "No bank accounts added yet"
         }
         columns={[
-          {
+          { summary: true, truncate: true,
             key: "bank",
             label: "Bank",
             sortValue: (a) => a.bank_name,
             render: (a) => <span className="font-medium text-ink">{a.bank_name}</span>,
           },
-          {
+          { summary: true, truncate: true,
             key: "acct",
             label: "Account",
             render: (a) => (
@@ -297,7 +297,7 @@ export default function BankAccounts() {
             label: "Currency",
             render: (a) => <Badge tone="info">{a.currency}</Badge>,
           },
-          {
+          { summary: true,
             key: "bal",
             label: "Balance",
             sortValue: (a) => a.current_balance,
@@ -307,7 +307,7 @@ export default function BankAccounts() {
               </span>
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (a) => (

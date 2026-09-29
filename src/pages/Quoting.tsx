@@ -2451,7 +2451,7 @@ export default function Quoting() {
           },
         ]}
         columns={[
-          {
+          { summary: true,
             key: "no",
             label: "Quote",
             sortValue: (d) => d.number,
@@ -2459,7 +2459,7 @@ export default function Quoting() {
               <span className="font-mono text-xs font-medium">{d.number}</span>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "cust",
             label: "Customer",
             sortValue: (d) => d.customer_name,
@@ -2477,7 +2477,7 @@ export default function Quoting() {
             sortValue: (d) => d.valid_until || "",
             render: (d) => fmtDate(d.valid_until),
           },
-          {
+          { summary: true,
             key: "total",
             label: "Amount",
             sortValue: (d) => d.total,
@@ -2485,7 +2485,7 @@ export default function Quoting() {
               <span className="font-medium">{money(d.total, d.currency || statCcy)}</span>
             ),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (d) => d.status,
@@ -2509,7 +2509,7 @@ export default function Quoting() {
               />
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (d) => (

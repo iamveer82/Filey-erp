@@ -307,7 +307,7 @@ export default function Orders() {
         loading={loading}
         empty="No orders yet"
         columns={[
-          {
+          { summary: true,
             key: "no",
             label: "Order #",
             sortValue: (o) => o.order_number,
@@ -315,7 +315,7 @@ export default function Orders() {
               <span className="font-medium text-xs text-brand-500">{o.order_number}</span>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "cust",
             label: "Customer",
             sortValue: (o) => o.customer_name,
@@ -323,13 +323,13 @@ export default function Orders() {
               <span className="font-medium text-ink">{o.customer_name}</span>
             ),
           },
-          {
+          { summary: true,
             key: "total",
             label: "Total",
             sortValue: (o) => o.total,
             render: (o) => aed(o.total),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (o) => o.status,
@@ -359,7 +359,7 @@ export default function Orders() {
               />
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (o) => {

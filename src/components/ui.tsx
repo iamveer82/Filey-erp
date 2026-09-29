@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/format";
 import { Card as CardPrimitive } from "./Card";
+import { SelectMenu } from "./ui-menu";
 
 /** Design-token skeleton placeholder with shimmer animation. */
 export function Skeleton({ className }: { className?: string }) {
@@ -359,7 +360,7 @@ export interface BulkAction<T> {
 
 /** A click landing on one of these is the control's own, not the row's. */
 const ROW_CLICK_IGNORE =
-  "button, a, input, select, label, [role='menu'], [data-no-row-click]";
+  "button, a, input, select, label, summary, details, [role='menu'], [data-no-row-click]";
 
 /**
  * Enter/Space activation for something clickable that can't be a real <button>:
@@ -395,6 +396,12 @@ export function DataTable<T>({
     key: string;
     label: string;
     render: (row: T) => ReactNode;
+    /** Essential fields in the narrow quick-view layout. Defaults to the first three. */
+    summary?: boolean;
+    /** Visually shorten long names; the complete value remains in Details. */
+    truncate?: boolean;
+    /** Keep row controls separate from the record's data. */
+    actions?: boolean;
     /** Provide to make the column header sortable. */
     sortValue?: (row: T) => string | number;
     /** Provide to make cells click-to-edit (inline). */
@@ -455,21 +462,23 @@ export function DataTable<T>({
     onSortChange?.(next);
   };
 
-  // Only pin the last column while the table is genuinely too wide — CSS has no
-  // "if overflowing" selector, so measure. jsdom reports 0 for both, which
-  // reads as not-overflowing and keeps the markup unpinned in tests.
-  const [overflowing, setOverflowing] = useState(false);
+  // Use quick views when either the available space or the actual content
+  // makes the table too wide. Retain its measured width while cards are shown.
+  const tableWidth = useRef(0);
+  const [compact, setCompact] = useState(false);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const check = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    const check = () => {
+      if (el.firstElementChild?.tagName === "TABLE") tableWidth.current = el.scrollWidth;
+      setCompact(el.clientWidth > 0 && el.clientWidth + 1 < Math.max(600, columns.length * 124, tableWidth.current));
+    };
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
     return () => ro.disconnect();
   }, [rows.length, columns.length]);
-  const pinnedIdx = overflowing ? columns.length - 1 : -1;
 
   // Clamped rather than reset in an effect, so filtering down to fewer pages
   // while parked on a late page just lands on the last one.
@@ -509,6 +518,45 @@ export function DataTable<T>({
   };
 
   const colCount = columns.length + (selectable ? 1 : 0);
+  const dataColumns = columns.filter(c => !c.actions);
+  const summaryColumns = dataColumns.some(c => c.summary)
+    ? dataColumns.filter(c => c.summary) : dataColumns.slice(0, 3);
+  const detailColumns = dataColumns.filter(c => !summaryColumns.includes(c) || c.truncate);
+  const actionColumns = columns.filter(c => c.actions);
+  const renderCell = (c: typeof columns[number], row: T, k: string | number, full = false) => {
+    const isEditing = !!c.editable && editing?.row === k && editing?.col === c.key;
+    const commit = async () => {
+      if (!c.editable || savingRef.current) return;
+      savingRef.current = true;
+      setEditSaving(true);
+      setActionError("");
+      try {
+        await c.editable.onSave(row, editVal);
+        setEditing(null);
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "The change could not be saved. Your entry is still here; try again.");
+      } finally {
+        savingRef.current = false;
+        setEditSaving(false);
+      }
+    };
+    const value = c.render(row);
+    const text = c.sortValue?.(row);
+    const content = c.truncate && !full
+      ? <div className="filey-cell-text" title={typeof text === "string" ? text : undefined}>{value}</div>
+      : value;
+    if (compact && c.truncate && !full) return content;
+    if (isEditing) return <input autoFocus aria-label={`Edit ${c.label}`} aria-invalid={!!actionError}
+      type={c.editable?.type ?? "text"} value={editVal} disabled={editSaving}
+      onChange={e => setEditVal(e.target.value)} onClick={e => e.stopPropagation()}
+      onBlur={commit} onKeyDown={e => { if (e.key === "Enter") void commit(); else if (e.key === "Escape") setEditing(null); }}
+      className="input h-8 w-full text-sm" />;
+    if (c.editable) return <button type="button" title="Edit value"
+      className="-mx-1 block w-full cursor-text rounded px-1 text-left hover:bg-hover"
+      onClick={e => { e.stopPropagation(); setEditVal(c.editable!.value(row)); setActionError(""); setEditing({ row: k, col: c.key }); }}
+    >{content}</button>;
+    return content;
+  };
   return (
     <div className="card overflow-hidden p-0">
       {actionError && <div className="p-3"><ErrorBanner message={actionError} /></div>}
@@ -547,7 +595,44 @@ export function DataTable<T>({
           "filey-table-scroll min-w-0 overflow-x-auto overscroll-x-contain"
         )}
       >
-        <table className="w-full">
+        {compact ? <div className="filey-record-list">
+          {(selectable || columns.some(c => c.sortValue)) && <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+            {selectable && <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+              <input type="checkbox" aria-label="Select all" checked={allChecked} disabled={running}
+                ref={input => { if (input) input.indeterminate = selectedRows.length > 0 && !allChecked; }} onChange={toggleAll} /> Select all
+            </label>}
+            {columns.some(c => c.sortValue) && <SelectMenu ariaLabel="Sort records" size="sm" className="ml-auto max-w-52"
+              value={sort ? JSON.stringify(sort) : ""}
+              options={[{ value: "", label: "Default order" }, ...columns.filter(c => c.sortValue).flatMap(c => [
+                { value: JSON.stringify({ key: c.key, dir: 1 }), label: `${c.label} ↑` },
+                { value: JSON.stringify({ key: c.key, dir: -1 }), label: `${c.label} ↓` },
+              ])]}
+              onChange={value => { const next = value ? JSON.parse(value) as { key: string; dir: 1 | -1 } : null; if (controlledSort === undefined) setLocalSort(next); onSortChange?.(next); }} />}
+          </div>}
+          {showSkeleton ? Array.from({ length: 5 }, (_, i) => <div key={i} className="p-4"><Skeleton className="h-14 w-full" /></div>) :
+            paged.map((row, i) => {
+              const k = rowKey ? keyOf(row) : i;
+              return <div key={k} className={cn("filey-record", sel.has(k) && "bg-primary-50/40")}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick ? e => { if (!(e.target as HTMLElement).closest(ROW_CLICK_IGNORE)) onRowClick(row); } : undefined}
+                onKeyDown={onRowClick ? keyActivate(() => onRowClick(row)) : undefined}>
+                {selectable && <input className="filey-record-check" type="checkbox" aria-label="Select row" checked={sel.has(k)} disabled={running} onChange={() => toggle(k)} />}
+                <div className="filey-record-fields">
+                  {summaryColumns.map(c => <div key={c.key} className="min-w-0">
+                    <div className="mb-1 text-[11px] text-muted-foreground">{c.label}</div>
+                    <div className="filey-record-value">{renderCell(c, row, k)}</div>
+                  </div>)}
+                </div>
+                {actionColumns.length > 0 && <div className="filey-record-actions">{actionColumns.map(c => <div key={c.key}>{c.render(row)}</div>)}</div>}
+                {detailColumns.length > 0 && <details className="filey-record-details">
+                  <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Details</summary>
+                  <dl className="mt-3 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
+                    {detailColumns.map(c => <div key={c.key} className="min-w-0"><dt className="mb-1 text-xs text-muted-foreground">{c.label}</dt><dd className="filey-record-value">{renderCell(c, row, k, true)}</dd></div>)}
+                  </dl>
+                </details>}
+              </div>;
+            })}
+        </div> : <table className="filey-data-table w-full">
           <thead className="sticky top-0 z-10 bg-card">
             <tr>
               {selectable && (
@@ -563,12 +648,12 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((c, ci) =>
+              {columns.map(c =>
                 c.sortValue ? (
                   <th
                     key={c.key}
                     aria-sort={sort?.key === c.key ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-                    className={cn("th", ci === pinnedIdx && "cell-pinned-end")}
+                    className="th"
                   >
                     <button
                       onClick={() => toggleSort(c.key)}
@@ -585,7 +670,7 @@ export function DataTable<T>({
                 ) : (
                   <th
                     key={c.key}
-                    className={cn("th", ci === pinnedIdx && "cell-pinned-end")}
+                    className="th"
                   >
                     {c.label}
                   </th>
@@ -639,74 +724,20 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map((c, ci) => {
-                      const isEditing =
-                        !!c.editable && editing?.row === k && editing?.col === c.key;
-                      const startEdit = (e: React.MouseEvent) => {
-                        if (!c.editable) return;
-                        e.stopPropagation();
-                        setEditVal(c.editable.value(row));
-                        setActionError("");
-                        setEditing({ row: k, col: c.key });
-                      };
-                      const commit = async () => {
-                        if (!c.editable || savingRef.current) return;
-                        savingRef.current = true;
-                        setEditSaving(true);
-                        setActionError("");
-                        try {
-                          await c.editable.onSave(row, editVal);
-                          setEditing(null);
-                        } catch (error) {
-                          setActionError(error instanceof Error ? error.message : "The change could not be saved. Your entry is still here; try again.");
-                        } finally {
-                          savingRef.current = false;
-                          setEditSaving(false);
-                        }
-                      };
-                      return (
+                    {columns.map(c => (
                         <td
                           key={c.key}
-                          className={cn("td", ci === pinnedIdx && "cell-pinned-end")}
+                          className="td"
                         >
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              aria-label={`Edit ${typeof c.label === "string" ? c.label : c.key}`}
-                              aria-invalid={!!actionError}
-                              type={c.editable?.type ?? "text"}
-                              value={editVal}
-                              disabled={editSaving}
-                              onChange={(e) => setEditVal(e.target.value)}
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={commit}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") commit();
-                                else if (e.key === "Escape") setEditing(null);
-                              }}
-                              className="input h-8 w-full text-sm"
-                            />
-                          ) : c.editable ? (
-                            <button
-                              type="button"
-                              onClick={startEdit}
-                              title="Edit value"
-                              className="-mx-1 block w-full cursor-text rounded px-1 text-left hover:bg-hover"
-                            >
-                              {c.render(row)}
-                            </button>
-                          ) : (
-                            c.render(row)
-                          )}
+                          {renderCell(c, row, k)}
                         </td>
-                      );
-                    })}
+                    ))}
                   </tr>
                 );
               })
             )}
           </tbody>
-        </table>
+        </table>}
       </div>
       {!showSkeleton && rows.length === 0 && (
         <div className="flex flex-col items-center gap-3 px-4 py-14 text-center" role="status">

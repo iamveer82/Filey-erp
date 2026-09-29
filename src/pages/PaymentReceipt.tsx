@@ -728,16 +728,16 @@ export default function PaymentReceipt() {
               loading={docsLoading}
               pageSize={10}
               columns={[
-                { key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
-                { key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
+                { summary: true, key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
+                { summary: true, truncate: true, key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
                 { key: "payment_date", label: "Date", render: (d) => fmtDate(d.payment_date) },
                 { key: "payment_method", label: "Method", render: (d) => d.payment_method || "—" },
-                {
+                { summary: true,
                   key: "amount",
                   label: "Amount",
                   render: (d) => money(d.amount, d.currency || company?.currency || "AED"),
                 },
-                {
+                { summary: true,
                   key: "status",
                   label: "Status",
                   render: (d) => <Badge tone={statusTone(d.status)}>{d.status}</Badge>,
@@ -748,7 +748,7 @@ export default function PaymentReceipt() {
                   render: (d) =>
                     d.shared ? <Badge tone="success">Shared</Badge> : <Badge tone="neutral">Private</Badge>,
                 },
-                {
+                { actions: true,
                   key: "actions",
                   label: "Actions",
                   render: (d) => (

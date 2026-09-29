@@ -635,7 +635,7 @@ export default function Work() {
         }
         pageSize={15}
         columns={[
-          {
+          { summary: true, truncate: true,
             key: "title",
             label: "Title",
             sortValue: (r) => r.title,
@@ -648,7 +648,7 @@ export default function Work() {
               </button>
             ),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             render: (r) => (
@@ -658,7 +658,7 @@ export default function Work() {
             ),
           },
           { key: "owner", label: "Owner", render: (r) => r.owner || "Unassigned" },
-          {
+          { summary: true,
             key: "priority",
             label: "Priority",
             render: (r) => (
@@ -667,7 +667,7 @@ export default function Work() {
               </Badge>
             ),
           },
-          {
+          { summary: true,
             key: "due",
             label: "Target",
             sortValue: (r) => r.due_date || "",

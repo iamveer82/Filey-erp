@@ -396,13 +396,13 @@ export default function Accounting() {
               : "No journal entries yet"
           }
           columns={[
-            {
+            { summary: true,
               key: "d",
               label: "Date",
               sortValue: (t) => t.txn_date,
               render: (t) => fmtDate(t.txn_date),
             },
-            {
+            { summary: true, truncate: true,
               key: "acct",
               label: "Account",
               sortValue: (t) => t.account_name,
@@ -420,7 +420,7 @@ export default function Accounting() {
                 </Badge>
               ),
             },
-            {
+            { truncate: true,
               key: "desc",
               label: "Description",
               sortValue: (t) => t.description ?? "",
@@ -433,13 +433,13 @@ export default function Accounting() {
               },
               render: (t) => t.description ?? "—",
             },
-            {
+            { summary: true,
               key: "amt",
               label: "Amount",
               sortValue: (t) => t.amount,
               render: (t) => <span className="font-medium">{aed(t.amount)}</span>,
             },
-            {
+            { actions: true,
               key: "actions",
               label: "Actions",
               render: (t) => (
@@ -470,7 +470,7 @@ export default function Accounting() {
               : "No accounts - add your first chart-of-accounts entry"
           }
           columns={[
-            {
+            { summary: true,
               key: "code",
               label: "Code",
               sortValue: (a) => a.code,
@@ -485,7 +485,7 @@ export default function Accounting() {
                 <span className="font-mono text-xs text-brand-500">{a.code}</span>
               ),
             },
-            {
+            { summary: true, truncate: true,
               key: "name",
               label: "Account",
               sortValue: (a) => a.name,
@@ -504,13 +504,13 @@ export default function Accounting() {
               sortValue: (a) => a.account_type,
               render: (a) => <Badge tone="neutral">{a.account_type}</Badge>,
             },
-            {
+            { summary: true,
               key: "bal",
               label: "Balance",
               sortValue: (a) => a.balance,
               render: (a) => <span className="font-medium">{aed(a.balance)}</span>,
             },
-            {
+            { actions: true,
               key: "actions",
               label: "Actions",
               render: (a) => (

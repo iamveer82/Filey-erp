@@ -585,7 +585,7 @@ export default function PurchaseOrders() {
           },
         ]}
         columns={[
-          {
+          { summary: true,
             key: "no",
             label: "PO #",
             sortValue: (r) => r.po_number,
@@ -595,13 +595,13 @@ export default function PurchaseOrders() {
               </span>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "sup",
             label: "Supplier",
             sortValue: (r) => r.supplier_name,
             render: (r) => <span className="font-medium">{r.supplier_name}</span>,
           },
-          {
+          { summary: true,
             key: "total",
             label: "Total",
             sortValue: (r) => r.total,
@@ -610,7 +610,7 @@ export default function PurchaseOrders() {
               <span className="font-medium">{money(r.total, r.currency || statCcy)}</span>
             ),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (r) => r.status,
@@ -640,7 +640,7 @@ export default function PurchaseOrders() {
               />
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (r) => (

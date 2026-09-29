@@ -541,7 +541,7 @@ export default function Inventory() {
             },
           ]}
           columns={[
-            {
+            { summary: true,
               key: "sku",
               label: "SKU",
               sortValue: (p) => p.sku,
@@ -549,7 +549,7 @@ export default function Inventory() {
                 <span className="text-xs text-brand-500 font-medium">{p.sku}</span>
               ),
             },
-            {
+            { summary: true, truncate: true,
               key: "name",
               label: "Item",
               sortValue: (p) => p.name,
@@ -567,7 +567,7 @@ export default function Inventory() {
                 </span>
               ),
             },
-            {
+            { summary: true,
               key: "qty",
               label: "Stock",
               sortValue: (p) => p.quantity,
@@ -592,7 +592,7 @@ export default function Inventory() {
                 <span className="text-muted-foreground">{num(p.reorder_level)}</span>
               ),
             },
-            {
+            { summary: true,
               key: "price",
               label: "Unit price",
               sortValue: (p) => p.unit_price,
@@ -644,7 +644,7 @@ export default function Inventory() {
                 />
               ),
             },
-            {
+            { actions: true,
               key: "act",
               label: "Actions",
               render: (p) => (

@@ -1082,13 +1082,13 @@ function CrmWorkspace({
                         : `No ${spec.label.toLowerCase()} yet. Create your first ${spec.singular} or import a CSV.`
                     }
                     columns={[
-                      {
+                      { truncate: true,
                         key: "record",
                         label: kind === "notes" ? "Note" : "Name",
                         sortValue: (r) => recordName(kind, r).toLowerCase(),
                         render: (r) => (
                           <button
-                            className="text-left min-w-40 max-w-72 hover:underline"
+                            className="text-left min-w-0 max-w-full hover:underline"
                             aria-label={recordName(kind, r)}
                             onClick={() => open(kind, r)}
                           >

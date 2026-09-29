@@ -66,7 +66,6 @@
   .workspace-header :is(button, a) { min-height: 44px; min-width: 44px; justify-content: center; }
   input:is([type="checkbox"], [type="radio"]) { min-width: 24px; min-height: 24px; }
   .filey-table-scroll { scroll-padding-inline: 1rem; }
-  .filey-table-scroll .cell-pinned-end { position: static; box-shadow: none; }
   .workspace-notifications { position: fixed; inset-inline: 1rem; top: calc(4rem + env(safe-area-inset-top)); width: auto; max-height: calc(var(--filey-viewport-height, 100dvh) - 6rem); }
 }
 
@@ -810,17 +809,40 @@
   .row-hover {
     @apply transition-colors duration-150 hover:bg-hover;
   }
-
-  /* Pins the Actions column against the right edge of a table that is wider
-     than its card, so row menus stay reachable without scrolling sideways.
-     DataTable adds it only while the table actually overflows — otherwise the
-     hairline would read as a stray divider. Needs its own background, since a
-     sticky cell would let the scrolled rows show through. */
-  .cell-pinned-end {
-    @apply sticky right-0 z-[1] bg-card border-l border-border;
+  .filey-data-table :is(.th, .td) { padding-inline: 12px; }
+  .filey-data-table .td { padding-block: 10px; white-space: nowrap; }
+  .filey-cell-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 0;
+    max-width: 220px;
   }
-  .row-hover:hover .cell-pinned-end {
-    @apply bg-hover;
+  .filey-record-list { container-type: inline-size; }
+  .filey-record {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid hsl(var(--border));
+    font-size: 13px;
+  }
+  .filey-record:last-child { border-bottom: 0; }
+  .filey-record-check { grid-column: 1; align-self: start; margin-top: 20px; }
+  .filey-record-fields { grid-column: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: center; }
+  .filey-record-actions { grid-column: 3; align-self: center; }
+  .filey-record-value { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .filey-record-details { grid-column: 2 / -1; }
+  .filey-record-details summary { width: fit-content; }
+  .filey-record-details[open] .filey-record-value { white-space: normal; }
+  @container (max-width: 600px) {
+    .filey-record-fields { grid-column: 2 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .filey-record-actions { grid-row: 2; align-self: start; z-index: 1; }
+    .filey-record-details { grid-row: 2; grid-column: 2 / -1; }
+    .filey-record-details summary { min-height: 32px; display: list-item; align-content: center; }
   }
 
   /* Joined KPI strips — cards sit close (gap-3) so a row reads as one
@@ -830,6 +852,10 @@
     @apply gap-3;
   }
 }
+
+/* Quick views must override wide-table nowrap/min-width utilities in cells. */
+.filey-cell-text > * { min-width: 0; max-width: 100%; }
+.filey-record-value > * { min-width: 0; max-width: 100%; white-space: normal; text-align: inherit; }
 
 /* ── Dark-mode text legibility ──────────────────────────────────────────────
    `text-ink` / `text-brand-*` now resolve through hsl tokens and flip with

@@ -400,7 +400,7 @@ export default function DeclarationLetter() {
           },
         ]}
         columns={[
-          {
+          { summary: true, truncate: true,
             key: "ref",
             label: "Letter / reference",
             sortValue: (d) => letterName(d),
@@ -411,7 +411,7 @@ export default function DeclarationLetter() {
               </div>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "recipient",
             label: "Recipient",
             sortValue: (d) => d.recipient_name,
@@ -423,7 +423,7 @@ export default function DeclarationLetter() {
             sortValue: (d) => d.lpo_ref,
             render: (d) => <span className="font-mono text-xs">{d.lpo_ref || "—"}</span>,
           },
-          {
+          { summary: true,
             key: "amount",
             label: "Amount",
             sortValue: (d) => Number(String(d.amount).replace(/,/g, "")) || 0,
@@ -431,7 +431,7 @@ export default function DeclarationLetter() {
               <span className="tabular-nums">{d.currency || "AED"} {fmtAmount(d.amount)}</span>
             ),
           },
-          {
+          { summary: true,
             key: "date",
             label: "Date",
             sortValue: (d) => d.date,
@@ -443,7 +443,7 @@ export default function DeclarationLetter() {
             sortValue: (d) => d.updated_at,
             render: (d) => (d.updated_at ? fmtDate(d.updated_at) : "—"),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (d) => (

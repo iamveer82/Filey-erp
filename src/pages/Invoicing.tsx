@@ -1472,7 +1472,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
           },
         ]}
         columns={[
-          {
+          { summary: true,
             key: "no",
             label: "Invoice #",
             sortValue: (d) => d.number,
@@ -1480,11 +1480,11 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
               <span className="font-mono text-xs font-medium whitespace-nowrap">{d.number}</span>
             ),
           },
-          {
+          { summary: true, truncate: true,
             key: "cust",
             label: partyLabel,
             sortValue: (d) => d.customer_name,
-            render: (d) => <span className="font-medium block min-w-40 max-w-72">{d.customer_name}</span>,
+            render: (d) => <span className="font-medium">{d.customer_name}</span>,
           },
           {
             key: "tpl",
@@ -1492,7 +1492,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             sortValue: (d) => d.template,
             render: (d) => <span className="text-brand-500">{d.template}</span>,
           },
-          {
+          { summary: true,
             key: "total",
             label: "Total",
             sortValue: (d) => d.total,
@@ -1502,7 +1502,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
               </span>
             ),
           },
-          {
+          { summary: true,
             key: "status",
             label: "Status",
             sortValue: (d) => d.status,
@@ -1551,7 +1551,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
               />
             ),
           },
-          {
+          { actions: true,
             key: "act",
             label: "Actions",
             render: (d) => (
