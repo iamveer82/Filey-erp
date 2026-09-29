@@ -2828,11 +2828,9 @@ function Editor({
                       />
                     </Field>
                     <Field label="Original Invoice Date">
-                      <input aria-label="Original invoice date"
-                        type="date"
-                        className="input"
+                      <DateField aria-label="Original invoice date"
                         value={form.original_invoice_date || ""}
-                        onChange={(e) => set("original_invoice_date", e.target.value)}
+                        onChange={(value) => set("original_invoice_date", value)}
                       />
                     </Field>
                   </>

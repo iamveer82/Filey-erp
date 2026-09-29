@@ -1,3 +1,4 @@
+import { DateField } from "./DatePicker";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download } from "lucide-react";
 
@@ -114,19 +115,15 @@ export default function WpsExportModal({
     <Modal open={open} onClose={onClose} title="Export WPS salary file (SIF)" size="lg">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Period start">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={start}
-            onChange={(e) => setStart(e.target.value)}
+            onChange={(value) => setStart(value)}
           />
         </Field>
         <Field label="Period end">
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={end}
-            onChange={(e) => setEnd(e.target.value)}
+            onChange={(value) => setEnd(value)}
           />
         </Field>
       </div>

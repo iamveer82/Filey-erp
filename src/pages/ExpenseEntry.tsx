@@ -1,3 +1,4 @@
+import { DateField } from "../components/DatePicker";
 import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -140,7 +141,7 @@ export default function ExpenseEntry() {
             <h2 className="mb-4 text-sm font-semibold">Purchase details</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Vendor / paid to"><input aria-label="Vendor / paid to" className="input" required={!readonly} maxLength={200} value={details.vendor} onChange={event => set("vendor", event.target.value)} placeholder="Business or person you paid" /></Field>
-              <Field label="Expense date"><input aria-label="Expense date" className="input" type="date" required value={date} onChange={event => { setDate(event.target.value); setDirty(true); }} /></Field>
+              <Field label="Expense date"><DateField aria-label="Expense date" required value={date} onChange={value => { setDate(value); setDirty(true); }} /></Field>
               <Field label="Category"><select aria-label="Expense category" className="select" value={category} onChange={event => { setCategory(event.target.value); setDirty(true); }}>{[...new Set([...EXPENSE_CATEGORIES, category])].map(value => <option key={value}>{value}</option>)}</select></Field>
               <Field label="Receipt / invoice number"><input aria-label="Receipt / invoice number" className="input" maxLength={200} value={details.reference} onChange={event => set("reference", event.target.value)} placeholder="Optional reference" /></Field>
               <Field label="Currency"><select aria-label="Expense currency" className="select" value={details.currency} onChange={event => { set("currency", event.target.value); set("fx_rate", event.target.value === "AED" ? 1 : 0); }}>{CURRENCIES.map(currency => <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>)}</select></Field>

@@ -65,7 +65,6 @@ type CalendarPalette = {
   selectedBackground: string;
   selectedForeground: string;
   todayDot: string;
-  footerBorder: string;
   focusRing: string;
   popoverBackground: string;
   popoverBorder: string;
@@ -80,9 +79,6 @@ type CalendarDimensions = {
   dayCellMinHeight: number;
   dayDotBottom: number;
   dayDotSize: number;
-  footerLabelFontSize: number;
-  footerSpacingTop: number;
-  footerValueFontSize: number;
   headerGap: number;
   monthFontSize: number;
   monthTopMargin: number;
@@ -104,9 +100,6 @@ const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
     dayCellMinHeight: 30,
     dayDotBottom: 3,
     dayDotSize: 3,
-    footerLabelFontSize: 11,
-    footerSpacingTop: 10,
-    footerValueFontSize: 11,
     headerGap: 10,
     maxWidth: 248,
     monthFontSize: 15,
@@ -126,9 +119,6 @@ const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
     dayCellMinHeight: 34,
     dayDotBottom: 4,
     dayDotSize: 4,
-    footerLabelFontSize: 11,
-    footerSpacingTop: 12,
-    footerValueFontSize: 12,
     headerGap: 12,
     maxWidth: 280,
     monthFontSize: 16,
@@ -148,9 +138,6 @@ const CALENDAR_DIMENSIONS: Record<CalendarSize, CalendarDimensions> = {
     dayCellMinHeight: 42,
     dayDotBottom: 5,
     dayDotSize: 5,
-    footerLabelFontSize: 10,
-    footerSpacingTop: 14,
-    footerValueFontSize: 13,
     headerGap: 14,
     maxWidth: 336,
     monthFontSize: 18,
@@ -288,7 +275,6 @@ export const Calendar = ({
 }: CalendarProps) => {
   const calendarMotionId = useId();
   const headingId = `${calendarMotionId}-heading`;
-  const selectedInfoId = `${calendarMotionId}-selected`;
   const initialMonth = startOfMonth(
     month ?? defaultMonth ?? selected ?? defaultSelected ?? new Date()
   );
@@ -337,7 +323,6 @@ export const Calendar = ({
     selectedBackground: "hsl(var(--primary-400))",
     selectedForeground: "#171717",
     todayDot: "hsl(var(--foreground))",
-    footerBorder: "1px solid hsl(var(--border))",
     focusRing: "hsl(var(--ring))",
     popoverBackground: "hsl(var(--popover))",
     popoverBorder: "1px solid hsl(var(--border))",
@@ -347,15 +332,6 @@ export const Calendar = ({
 
   // Focus management
   useEffect(() => {
-    if (
-      selectedDate &&
-      isSameMonth(selectedDate, currentMonth) &&
-      !(disabled?.(selectedDate) ?? false) &&
-      !isSameDay(selectedDate, focusedDate)
-    ) {
-      setFocusedDate(selectedDate);
-      return;
-    }
     const focusOk =
       isSameMonth(focusedDate, currentMonth) &&
       !(disabled?.(focusedDate) ?? false);
@@ -457,6 +433,7 @@ export const Calendar = ({
 
   const moveFocusToDate = (preferredDate: Date, step: 1 | -1) => {
     const next = findInteractiveDate(preferredDate, step, disabled);
+    if (disabled?.(next)) return;
     if (!isSameMonth(next, currentMonth)) {
       setMonthValue(next);
     }
@@ -545,7 +522,6 @@ export const Calendar = ({
   return (
     <motion.div
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      aria-describedby={selectedInfoId}
       aria-labelledby={headingId}
       initial={{ opacity: 0, y: 4, scale: 1 }}
       role="group"
@@ -785,52 +761,6 @@ export const Calendar = ({
         </AnimatePresence>
       </div>
 
-      {/* Selected info */}
-      <motion.div
-        animate={{ opacity: 1 }}
-        id={selectedInfoId}
-        initial={{ opacity: 0 }}
-        style={{
-          marginTop: dimensions.footerSpacingTop,
-          paddingTop: dimensions.footerSpacingTop,
-          borderTop: palette.footerBorder,
-        }}
-        transition={{ duration: 0.15 }}
-      >
-        <p
-          style={{
-            fontSize: dimensions.footerLabelFontSize,
-            color: palette.textMuted,
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            marginBottom: 2,
-            margin: 0,
-          }}
-        >
-          Selected
-        </p>
-        <AnimatePresence mode="wait">
-          <motion.p
-            animate={{ opacity: 1, y: 0 }}
-            aria-live="polite"
-            exit={{ opacity: 0, y: -8 }}
-            initial={{ opacity: 0, y: 8 }}
-            key={selectedDate ? getDateKey(selectedDate) : "no-selection"}
-            style={{
-              fontSize: dimensions.footerValueFontSize,
-              fontWeight: selectedDate ? 600 : 500,
-              color: selectedDate ? palette.textPrimary : palette.textMuted,
-              margin: 0,
-              marginTop: 2,
-            }}
-            transition={{ duration: 0.25 }}
-          >
-            {selectedDate
-              ? format(selectedDate, "dd/MM/yyyy")
-              : "No date selected"}
-          </motion.p>
-        </AnimatePresence>
-      </motion.div>
     </motion.div>
   );
 };

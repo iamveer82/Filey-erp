@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent } from "./ui/chart";
 import { toast } from "./Toaster";
 import { ChartFrame } from "./charts";
 import { useState } from "react";
@@ -9,8 +10,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-} from "recharts";
+  } from "recharts";
 import { recordInsights } from "../lib/recordInsights";
 import { ChartPanel, useChartStyle } from "./charts";
 import { downloadCsv } from "../lib/csv";
@@ -83,7 +83,7 @@ export default function RecordInsights<T>({
                         s.length > 18 ? `${s.slice(0, 16)}…` : s
                       }
                     />
-                    <Tooltip contentStyle={cs.tooltipStyle} cursor={cs.cursor} />
+                    <ChartTooltip content={<ChartTooltipContent />} cursor={cs.cursor} />
                     <Bar
                       dataKey="count"
                       name="Records"
@@ -125,7 +125,7 @@ export default function RecordInsights<T>({
                       <CartesianGrid stroke={cs.c.grid} vertical={false} />
                       <XAxis dataKey="name" {...cs.axisProps} minTickGap={24} />
                       <YAxis allowDecimals={false} {...cs.axisProps} />
-                      <Tooltip contentStyle={cs.tooltipStyle} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
                       <Line
                         dataKey="count"
                         name="Records"

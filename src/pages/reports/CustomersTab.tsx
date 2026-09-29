@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
 import { customerBalanceRows } from "./reportExports";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
@@ -6,7 +7,6 @@ import {
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
   CartesianGrid,
 } from "recharts";
 import { aed, chartAmount, num, cn } from "../../lib/format";
@@ -24,8 +24,6 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
   const c = cs.c;
   const topCustomers = useTopCustomers(data.invoices);
   const aging = useReceivablesAging(data.invoices);
-
-  const tooltipStyle = cs.tooltipStyle;
 
   /* Receivables aging bar chart data */
   const agingData = [
@@ -111,14 +109,8 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                 <BarChart
                   data={topCustomers}
                   layout="vertical"
-                  margin={{ top: 5, right: 10, left: 60, bottom: 0 }}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
                 >
-                  <defs>
-                    <linearGradient id="custG" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                      <stop offset="100%" stopColor={c.accent} stopOpacity={0.4} />
-                    </linearGradient>
-                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
                   <XAxis
                     type="number"
@@ -129,16 +121,14 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                     type="category"
                     dataKey="name"
                     {...cs.axisProps}
-                    width={60}
+                    width={88}
                   />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    formatter={(v) => aed(Number(v) || 0)}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
                   <Bar
+                    isAnimationActive={false}
                     dataKey="total"
                     name="Revenue"
-                    fill="url(#custG)"
+                    fill={c.accent}
                     radius={[0, 4, 4, 0]}
                    maxBarSize={32} />
                 </BarChart>
@@ -165,12 +155,6 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                 data={agingData}
                 margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
               >
-                <defs>
-                  <linearGradient id="ageG" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.4} />
-                  </linearGradient>
-                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis
                   dataKey="name"
@@ -180,14 +164,12 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
                   {...cs.axisProps}
                   tickFormatter={(v) => chartAmount(Number(v))}
                 />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v) => aed(Number(v) || 0)}
-                />
+                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="value"
                   name="Outstanding"
-                  fill="url(#ageG)"
+                  fill={c.accent}
                   radius={[6, 6, 0, 0]}
                  maxBarSize={32} />
               </BarChart>

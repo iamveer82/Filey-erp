@@ -4,11 +4,12 @@
  * `value` (Date) + `onChange`. For string (yyyy-mm-dd) forms use the
  * `DateField` wrapper below — a drop-in for <input type="date">. */
 import * as React from "react";
-import { format, parse, isValid, startOfDay } from "date-fns";
+import { addDays, addMonths, addYears, format, parse, isValid, startOfDay } from "date-fns";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { Popover, PopoverTrigger, PopoverContent } from "./Popover";
 import { Calendar } from "./FancyCalendar";
 import { cn } from "../lib/format";
+import { Button } from "./Button";
 
 const DISPLAY = "dd/MM/yyyy";
 const PARSE_FORMATS = [
@@ -32,7 +33,10 @@ function parseDate(text: string): Date | undefined {
   return undefined;
 }
 
-export interface DatePickerProps {
+type DateInputProps = Pick<React.InputHTMLAttributes<HTMLInputElement>,
+  "id" | "required" | "aria-label" | "aria-labelledby" | "aria-describedby" | "aria-invalid">;
+
+export interface DatePickerProps extends DateInputProps {
   value?: Date;
   onChange: (date: Date | undefined) => void;
   placeholder?: string;
@@ -42,6 +46,7 @@ export interface DatePickerProps {
   clearable?: boolean;
   /** Min date selectable. */
   minDate?: Date;
+  maxDate?: Date;
 }
 
 export function DatePicker({
@@ -52,44 +57,109 @@ export function DatePicker({
   disabled,
   clearable = true,
   minDate,
+  maxDate,
+  required,
+  ...inputProps
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false);
   const formattedValue = value ? format(value, DISPLAY) : "";
   const [text, setText] = React.useState(formattedValue);
+  const [notice, setNotice] = React.useState("");
+  const noticeId = React.useId();
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const calendarRef = React.useRef<HTMLDivElement>(null);
+  const inRange = (date: Date) => (!minDate || date >= startOfDay(minDate)) && (!maxDate || date <= startOfDay(maxDate));
 
   // DateField creates Date objects on every render; only reset for a new day.
   React.useEffect(() => {
     setText(formattedValue);
+    setNotice("");
   }, [formattedValue]);
+
+  React.useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   // Commit a typed value: parse it, or revert to the last valid date.
   const commit = () => {
-    if (text.trim() === "") {
-      onChange(undefined);
+    if (text === formattedValue) return;
+    if (text.trim() === "" && !required) {
+      if (value) onChange(undefined);
+      setText("");
+      setNotice("");
       return;
     }
     const d = parseDate(text);
-    if (d && (!minDate || d >= startOfDay(minDate))) {
-      onChange(d);
+    if (d && inRange(d)) {
+      if (format(d, DISPLAY) !== formattedValue) onChange(d);
       setText(format(d, DISPLAY));
+      setNotice("");
     } else {
       setText(formattedValue);
+      const guidance = !d ? "Enter a valid date as dd/mm/yyyy."
+        : minDate && d < startOfDay(minDate) ? `Choose ${format(minDate, DISPLAY)} or later.`
+        : `Choose ${format(maxDate!, DISPLAY)} or earlier.`;
+      setNotice(`${guidance}${formattedValue ? ` Kept ${formattedValue}.` : ""}`);
     }
   };
 
+  const choose = (date: Date | undefined) => {
+    if (date && !inRange(date)) return;
+    const next = date ? format(date, DISPLAY) : "";
+    if (next !== formattedValue) onChange(date);
+    setText(next);
+    setNotice("");
+    setOpen(false);
+  };
+
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn("min-w-0", className)}>
+      <div className="relative">
       <input
-        className="input pr-9"
+        {...inputProps}
+        ref={inputRef}
+        type="text"
+        className="input pr-12 tabular-nums"
         value={text}
         placeholder={placeholder}
         disabled={disabled}
-        onChange={(e) => setText(e.target.value)}
+        required={required}
+        autoComplete="off"
+        spellCheck={false}
+        aria-keyshortcuts="Alt+ArrowDown"
+        aria-describedby={[inputProps["aria-describedby"], notice ? noticeId : undefined].filter(Boolean).join(" ") || undefined}
+        onChange={(e) => { setText(e.target.value); setNotice(""); }}
         onBlur={commit}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.nativeEvent.isComposing) return;
+          if (e.altKey && e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+          } else if (e.key === "Escape") {
+            if (text !== formattedValue || notice) {
+              e.preventDefault();
+              e.stopPropagation();
+              setText(formattedValue);
+              setNotice("");
+            }
+          } else if (e.key === "Enter") {
             e.preventDefault();
             e.currentTarget.blur();
+          } else if (!e.altKey && !e.ctrlKey && !e.metaKey && ["ArrowUp", "ArrowDown"].includes(e.key) && /^\d{2}\/\d{2}\/\d{4}$/.test(text)) {
+            const date = parseDate(text);
+            if (!date) return;
+            e.preventDefault();
+            const caret = e.currentTarget.selectionStart ?? 0;
+            const start = caret < 3 ? 0 : caret < 6 ? 3 : 6;
+            const step = e.key === "ArrowUp" ? 1 : -1;
+            const next = (start === 0 ? addDays : start === 3 ? addMonths : addYears)(date, step);
+            if (!inRange(next)) return;
+            setText(format(next, DISPLAY));
+            setNotice("");
+            requestAnimationFrame(() => {
+              const input = inputRef.current;
+              if (input && document.activeElement === input) input.setSelectionRange(start, start === 6 ? 10 : start + 2);
+            });
           }
         }}
       />
@@ -99,38 +169,37 @@ export function DatePicker({
             type="button"
             disabled={disabled}
             aria-label="Open calendar"
-            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-brand-400 transition-colors hover:bg-brand-100 hover:text-ink disabled:opacity-50 dark:hover:bg-white/10"
+            title="Choose a date (Alt + ↓)"
+            className="filey-date-trigger absolute right-0.5 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <CalendarIcon size={15} />
+            <CalendarIcon size={16} aria-hidden="true" />
           </button>
         </PopoverTrigger>
         <PopoverContent
+          ref={calendarRef}
           align="end"
-          className="!w-auto !border-0 !bg-transparent !p-0 !shadow-none"
+          collisionPadding={12}
+          className="filey-date-popover w-[21rem] max-w-[calc(100vw-24px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain p-0 shadow-md"
+          aria-label="Choose a date"
+          onOpenAutoFocus={event => {
+            const day = calendarRef.current?.querySelector<HTMLElement>('td button[tabindex="0"]');
+            if (day) { event.preventDefault(); day.focus({ preventScroll: true }); }
+          }}
         >
           <Calendar
-            size="sm"
+            size="lg"
             selected={value}
-            onSelect={(d) => {
-              onChange(d);
-              setOpen(false);
-            }}
-            disabled={minDate ? (d) => d < startOfDay(minDate) : undefined}
+            onSelect={choose}
+            disabled={(date) => !inRange(date)}
           />
-          {clearable && value && (
-            <button
-              type="button"
-              className="mt-1.5 w-full rounded-full py-1.5 text-center text-xs font-medium text-brand-500 hover:bg-brand-100 dark:hover:bg-white/10"
-              onClick={() => {
-                onChange(undefined);
-                setOpen(false);
-              }}
-            >
-              Clear date
-            </button>
-          )}
+          <div className="flex items-center justify-between gap-2 border-t border-border p-2">
+            <Button variant="ghost" size="sm" disabled={!inRange(startOfDay(new Date()))} onClick={() => choose(startOfDay(new Date()))}>Today</Button>
+            {clearable && !required && value && <Button variant="link" size="sm" onClick={() => choose(undefined)}>Clear date</Button>}
+          </div>
         </PopoverContent>
       </Popover>
+      </div>
+      {notice && <p id={noticeId} role="alert" className="mt-1.5 text-xs leading-relaxed text-danger">{notice}</p>}
     </div>
   );
 }
@@ -139,11 +208,11 @@ export function DatePicker({
 const toDate = (s?: string) => {
   if (!s) return undefined;
   const d = new Date(`${s}T00:00:00`);
-  return isValid(d) ? d : undefined;
+  return isValid(d) && format(d, "yyyy-MM-dd") === s ? d : undefined;
 };
 const toStr = (d?: Date) => (d ? format(d, "yyyy-MM-dd") : "");
 
-export interface DateFieldProps {
+export interface DateFieldProps extends DateInputProps {
   value?: string; // yyyy-mm-dd
   onChange: (v: string) => void;
   placeholder?: string;
@@ -152,14 +221,16 @@ export interface DateFieldProps {
   clearable?: boolean;
   /** Min date (yyyy-mm-dd). */
   min?: string;
+  max?: string;
 }
 
-export function DateField({ value, onChange, min, ...rest }: DateFieldProps) {
+export function DateField({ value, onChange, min, max, ...rest }: DateFieldProps) {
   return (
     <DatePicker
       value={toDate(value)}
       onChange={(d) => onChange(toStr(d))}
       minDate={toDate(min)}
+      maxDate={toDate(max)}
       {...rest}
     />
   );

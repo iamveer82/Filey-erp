@@ -1,8 +1,30 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
 /* Keep the existing JS design tokens (colors, shadows, gradients,
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */
 @config "../tailwind.config.js";
+
+/* shadcn uses the existing Filey HSL theme and appearance accent. Keep the
+   numbered palette and legacy secondary surface intact for existing pages. */
+@theme inline {
+  --color-primary: hsl(var(--primary-400));
+  --color-primary-foreground: #171717;
+  --color-secondary-foreground: #171717;
+  --color-chart-1: hsl(var(--chart-primary));
+  --color-chart-2: hsl(var(--chart-secondary));
+  --color-chart-3: hsl(var(--info));
+  --color-chart-4: hsl(var(--success));
+  --color-chart-5: hsl(var(--warning));
+  --color-sidebar-foreground: hsl(var(--foreground));
+  --color-sidebar-primary: hsl(var(--primary-400));
+  --color-sidebar-primary-foreground: #171717;
+  --color-sidebar-accent: hsl(var(--accent));
+  --color-sidebar-accent-foreground: hsl(var(--accent-foreground));
+  --color-sidebar-border: hsl(var(--border));
+  --color-sidebar-ring: hsl(var(--ring));
+}
 
 @keyframes filey-spin { to { transform: rotate(360deg); } }
 .page-heading-actions > .flex { max-width: 100%; flex-wrap: wrap; }
@@ -61,10 +83,10 @@
   border-inline-end: 1px solid hsl(var(--border));
 }
 .workspace-sidebar-header { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 14px 14px 10px; }
-.workspace-brand { display: flex; flex: 1; min-width: 0; align-items: center; min-height: 40px; border-radius: 999px; padding-inline: 4px; }
+.workspace-brand { display: flex; flex: 1; min-width: 0; align-items: center; min-height: 40px; border-radius: 8px; padding-inline: 4px; }
 .workspace-sidebar-close { height: 44px; width: 44px; flex-shrink: 0; border-radius: 50%; place-items: center; color: hsl(var(--muted-foreground)); background: hsl(var(--hover)); }
 .workspace-navigation { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.workspace-nav-search { display: flex; align-items: center; gap: 9px; margin: 0 14px 12px; padding-inline: 12px 4px; min-height: 38px; border: 1px solid hsl(var(--border)); border-radius: 999px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
+.workspace-nav-search { display: flex; align-items: center; gap: 8px; margin: 0 14px 10px; padding-inline: 9px 4px; min-height: 34px; border: 1px solid hsl(var(--border)); border-radius: 8px; color: hsl(var(--muted-foreground)); background: hsl(var(--background)); }
 .workspace-nav-search:focus-within { border-color: hsl(var(--foreground) / .45); box-shadow: 0 0 0 2px hsl(var(--foreground) / .07); }
 .workspace-nav-search > svg { flex-shrink: 0; }
 .workspace-nav-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; padding-block: 8px; font-size: 13px; color: hsl(var(--foreground)); }
@@ -72,24 +94,25 @@
 .workspace-nav-search input::placeholder { color: hsl(var(--muted-foreground)); }
 .workspace-nav-search button { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 50%; }
 .workspace-nav-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 12px; scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
-.workspace-nav-group + .workspace-nav-group { margin-top: 10px; }
-.workspace-nav-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: .045em; color: hsl(var(--muted-foreground)); }
+.workspace-nav-group + .workspace-nav-group { margin-top: 8px; }
+.workspace-nav-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 5px 8px; border-radius: 6px; font-size: 13px; font-weight: 550; color: hsl(var(--foreground)); text-align: start; }
 .workspace-nav-heading svg { flex-shrink: 0; transform: rotate(-90deg); transition: transform 160ms ease-out; }
 .workspace-nav-heading [data-expanded="true"] svg { transform: rotate(0); }
-.workspace-nav-group nav { display: grid; gap: 3px; }
+.workspace-nav-group nav { display: grid; gap: 2px; }
+.workspace-nav-group[data-submenu] nav { margin-inline: 11px 0; padding-inline-start: 10px; border-inline-start: 1px solid hsl(var(--border)); }
 .workspace-nav-group nav[hidden] { display: none; }
-.workspace-nav-link { display: flex; align-items: center; gap: 10px; min-height: 38px; border-radius: 999px; padding: 7px 12px; color: hsl(var(--foreground) / .8); font-size: 13.5px; line-height: 20px; transition: background-color 140ms ease-out, color 140ms ease-out; }
+.workspace-nav-link { display: flex; align-items: center; gap: 8px; min-height: 32px; border-radius: 6px; padding: 5px 8px; color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 20px; transition: background-color 140ms ease-out, color 140ms ease-out; }
 .workspace-nav-icon { display: grid; flex-shrink: 0; width: 20px; place-items: center; color: hsl(var(--muted-foreground)); }
-.workspace-nav-link[data-assistant="true"] { min-height: 56px; padding-block: 3px; padding-inline-start: 5px; gap: 8px; font-weight: 600; background: hsl(var(--primary-400) / .1); }
-.workspace-nav-link[data-assistant="true"] .workspace-nav-icon { width: 48px; }
-.workspace-nav-link[aria-current="page"] { color: hsl(var(--background)); background: hsl(var(--foreground)); font-weight: 550; }
+.workspace-nav-link[data-assistant="true"] { min-height: 42px; padding-block: 3px; padding-inline-start: 2px; gap: 8px; font-weight: 550; color: hsl(var(--foreground)); }
+.workspace-nav-link[data-assistant="true"] .workspace-nav-icon { width: 30px; }
+.workspace-nav-link[aria-current="page"] { color: hsl(var(--foreground)); background: hsl(var(--hover)); font-weight: 550; }
 .workspace-nav-link[aria-current="page"] .workspace-nav-icon { color: inherit; }
 .workspace-sidebar-footer { flex-shrink: 0; padding: 8px 12px 12px; border-top: 1px solid hsl(var(--border) / .7); }
 .workspace-support-links { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 2px; padding-bottom: 6px; }
 .workspace-support-links a { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 4px; border-radius: 999px; font-size: 11.5px; color: hsl(var(--muted-foreground)); }
 .workspace-support-links svg { flex-shrink: 0; }
 .workspace-support-links a[aria-current="page"] { color: hsl(var(--foreground)); background: hsl(var(--hover)); }
-.workspace-account-trigger { display: flex; width: 100%; align-items: center; gap: 10px; min-height: 52px; padding: 7px 9px; border-radius: 999px; background: hsl(var(--background)); border: 1px solid hsl(var(--border) / .7); }
+.workspace-account-trigger { display: flex; width: 100%; align-items: center; gap: 10px; min-height: 52px; padding: 7px 9px; border-radius: 8px; background: transparent; border: 1px solid transparent; }
 .workspace-drawer-backdrop { display: none; }
 @media (hover: hover) {
   .workspace-nav-heading:hover, .workspace-nav-search button:hover, .workspace-support-links a:hover, .workspace-account-trigger:hover { background: hsl(var(--hover)); color: hsl(var(--foreground)); }
@@ -627,7 +650,7 @@
     @apply text-[22px] leading-tight font-semibold text-foreground mt-2 tracking-tight tabular-nums;
   }
 
-  /* ── Buttons — reference scale: 32px height, pill radius, 13px text.
+  /* ── Buttons — 40px height, pill radius, 13px text.
         Primary = amber CTA; ghost = bordered card surface (SectionButton). ── */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-1.5 h-10 rounded-full
@@ -661,7 +684,7 @@
            bg-destructive px-3 text-[13px] font-medium text-white select-none
            transition-colors duration-200 hover:opacity-90 active:scale-[0.97]
            outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none cursor-pointer;
+           disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
 
   .btn-link {
@@ -683,6 +706,18 @@
       transform;
     transition-duration: 140ms;
     white-space: nowrap;
+    touch-action: manipulation;
+    --tw-ring-offset-color: hsl(var(--background));
+  }
+  :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .btn-link):disabled {
+    transform: none;
+    cursor: not-allowed;
+  }
+  :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger)[aria-busy="true"] {
+    cursor: progress;
+  }
+  :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger) > svg {
+    flex-shrink: 0;
   }
   @media (prefers-reduced-motion: reduce) {
     .btn-primary:active,
@@ -711,6 +746,15 @@
   }
   .textarea {
     @apply py-2 min-h-[88px] resize-y leading-relaxed;
+  }
+  :is(.input, .select, .textarea)[aria-invalid="true"] {
+    border-color: hsl(var(--danger));
+  }
+  @media (pointer: coarse) {
+    :is(.btn-primary, .btn-secondary, .btn-ghost, .btn-danger, .btn-link, .input, .select) {
+      min-height: 44px;
+    }
+    .filey-date-trigger { min-width: 44px; min-height: 44px; }
   }
   .select {
     @apply appearance-none bg-no-repeat pr-9 cursor-pointer;
@@ -1117,3 +1161,6 @@
     print-color-adjust: exact !important;
   }
 }
+
+/* Date shortcuts share one contained calendar surface. */
+.filey-date-popover > [role="group"] { max-width: none !important; border: 0 !important; }

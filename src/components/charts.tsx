@@ -1,7 +1,8 @@
-import { ResponsiveContainer } from "recharts";
 import { type ReactNode, type ReactElement } from "react";
 import { cn } from "../lib/format";
 import { useChartColors } from "../lib/accent";
+import { ChartContainer, type ChartConfig } from "./ui/chart";
+import { CardHeader, CardTitle, CardDescription, CardContent } from "./ui/card";
 
 /* ── charts — the one recipe for every chart in the app ─────────────────────
  * Filey's chart language: quiet ink on a flat card, hairline horizontal grid,
@@ -17,25 +18,16 @@ export function useChartStyle() {
   const c = useChartColors();
   return {
     c,
-    tooltipStyle: {
-      borderRadius: 10,
-      fontSize: 12,
-      background: c.tooltipBg,
-      border: `1px solid ${c.tooltipBorder}`,
-      color: c.tooltipFg,
-      boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-      padding: "8px 10px",
-    } as React.CSSProperties,
     /** Muted ticks, no axis lines, no tick marks — the grid does the ruling. */
     tick: { fontSize: 11, fill: c.axis } as React.CSSProperties,
     axisProps: {
       stroke: "transparent",
       tickLine: false,
       axisLine: false,
+      tickMargin: 8,
       tick: { fontSize: 11, fill: c.axis },
     } as const,
     cursor: { fill: "currentColor", fillOpacity: 0.04 },
-    legendStyle: { fontSize: 11, color: c.axis } as React.CSSProperties,
   };
 }
 
@@ -84,12 +76,12 @@ export function ChartPanel({
 }) {
   return (
     <div className={cn("p-5 min-w-0 flex flex-col", className)}>
-      <div className="flex items-start justify-between gap-3">
+      <CardHeader className="flex items-start justify-between gap-3 p-0">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <div className="text-[14px] font-semibold text-foreground truncate">
+            <CardTitle>
               {title}
-            </div>
+            </CardTitle>
             {live && (
               <span className="px-1.5 py-0.5 rounded text-[10.5px] font-medium bg-success/10 text-success ring-1 ring-success/30 inline-flex items-center shrink-0">
                 Live
@@ -97,12 +89,12 @@ export function ChartPanel({
             )}
           </div>
           {subtitle && (
-            <div className="text-[12.5px] text-muted-foreground mt-0.5">{subtitle}</div>
+            <CardDescription className="mt-1">{subtitle}</CardDescription>
           )}
         </div>
         {action}
-      </div>
-      <div className={cn("min-w-0", bodyClassName)}>{children}</div>
+      </CardHeader>
+      <CardContent className={cn("px-0", bodyClassName)}>{children}</CardContent>
     </div>
   );
 }
@@ -111,18 +103,20 @@ export function ChartPanel({
 export function ChartFrame({
   children,
   height = 256,
+  config = {},
 }: {
   children: ReactElement;
   height?: number;
+  config?: ChartConfig;
 }) {
   return (
-    <ResponsiveContainer
-      width="100%"
-      height={height}
-      minWidth={0}
+    <ChartContainer
+      config={config}
+      className="w-full aspect-auto"
+      style={{ height }}
       initialDimension={{ width: 320, height }}
     >
       {children}
-    </ResponsiveContainer>
+    </ChartContainer>
   );
 }

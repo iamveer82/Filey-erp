@@ -61,6 +61,16 @@ it("keeps desktop groups expanded while allowing compact navigation", () => {
   expect(screen.getByRole("link", { name: "Reports" })).toHaveAttribute("aria-current", "page");
 });
 
+it("preserves collapsed sections when navigating to another section", () => {
+  render(<MemoryRouter initialEntries={["/reports"]}>
+    <WorkspaceNavigation modules={modules} isDesktop mobileOpen={false} onNavigate={() => {}} />
+  </MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Sales" }));
+  fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+  expect(screen.getByRole("button", { name: "Sales" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+});
+
 it("keeps the filtered contents still during mobile closing and resets on reopening", () => {
   const navigation = (open: boolean) => <MemoryRouter initialEntries={["/settings"]}>
     <WorkspaceNavigation modules={modules} isDesktop={false} mobileOpen={open} onNavigate={() => {}} />

@@ -3,6 +3,27 @@ import { localYmd } from "../lib/format";
 import { reportMoney } from "../lib/reportMoney";
 import type { Rates } from "../lib/exchange-rates";
 
+/** Issue-month totals split by current status, never added to payment records. */
+export function monthlyInvoiceSales(invoices: InvoiceDocSummary[], today = new Date()) {
+  const end = localYmd(today);
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date(today.getFullYear(), today.getMonth() - 5 + i, 1);
+    return {
+      month: localYmd(date).slice(0, 7),
+      label: date.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+      paid: 0,
+      open: 0,
+    };
+  });
+  for (const invoice of invoices) {
+    const date = invoice.issue_date?.slice(0, 10);
+    if (!date || date > end || !isPostedStatus(invoice.status) || !Number.isFinite(invoice.total)) continue;
+    const month = months.find(row => row.month === date.slice(0, 7));
+    if (month) month[invoice.status === "paid" ? "paid" : "open"] += invoice.total;
+  }
+  return months;
+}
+
 /** Payments use the saved sales invoice currency/rate. Purchase invoices and
  * unavailable/non-posted parents cannot contribute to customer receipts. These
  * records are separate from receipt documents, which have no stable payment ID. */

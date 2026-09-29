@@ -38,8 +38,14 @@ export default function WorkspaceNavigation({
     // Keep the outgoing content still while the mobile drawer slides closed.
     if (!isDesktop && !mobileOpen) return;
     setQuery("");
-    setExpanded({});
-    if (scroller.current) scroller.current.scrollTop = 0;
+    const currentGroup = GROUPS.find(group => modules.some(module => group.ids.includes(module.id)
+      && (pathname === module.to || pathname.startsWith(module.to + "/"))));
+    if (currentGroup) setExpanded(previous => previous[currentGroup.title] === false
+      ? { ...previous, [currentGroup.title]: true } : previous);
+    const frame = requestAnimationFrame(() => {
+      scroller.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [pathname, mobileOpen, isDesktop]);
 
   const search = query.trim().toLocaleLowerCase();
@@ -73,7 +79,7 @@ export default function WorkspaceNavigation({
           const open = direct || !!search || (expanded[group.title] ?? (isDesktop || current));
           const sectionId = `${prefix}-${group.title}`;
           return (
-            <section key={group.title} className="workspace-nav-group">
+            <section key={group.title} className="workspace-nav-group" data-submenu={!direct || undefined}>
               {!direct && <button
                 type="button"
                 className="workspace-nav-heading"
@@ -96,11 +102,11 @@ export default function WorkspaceNavigation({
                     className="workspace-nav-link"
                     data-assistant={id === "agent" || undefined}
                   >
-                    <span className="workspace-nav-icon" aria-hidden="true">
+                    {direct && <span className="workspace-nav-icon" aria-hidden="true">
                       {id === "agent"
-                        ? <BloubBot size={48} state="idle" animate={isDesktop || mobileOpen} ambient trackCursor />
-                        : <SidebarIcon name={icon} />}
-                    </span>
+                        ? <BloubBot size={30} state="idle" animate={isDesktop || mobileOpen} ambient trackCursor />
+                        : <SidebarIcon name={icon} size={16} />}
+                    </span>}
                     <span className="min-w-0 truncate">{t(label)}</span>
                   </NavLink>
                 ))}

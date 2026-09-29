@@ -6,6 +6,20 @@ import { Modal } from "../ui";
 
 afterEach(cleanup);
 
+it("focuses the selected option and closes without rewriting an unchanged value", async () => {
+  const change = vi.fn();
+  const view = render(<SelectMenu value="second" ariaLabel="Template" onChange={change} options={[{value:"first",label:"Corporate"},{value:"second",label:"Minimal"}]} />);
+  fireEvent.click(screen.getByRole("button", {name:"Template"}));
+  const selected = screen.getByRole("menuitem", {name:"Minimal"});
+  await waitFor(() => expect(selected).toHaveFocus());
+  fireEvent.click(selected);
+  expect(change).not.toHaveBeenCalled();
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name:"Template"}));
+  view.rerender(<SelectMenu disabled value="second" ariaLabel="Template" onChange={change} options={[]} />);
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+});
+
 it("filters grouped options, preserves the selection and supports keyboard dismissal", async () => {
   const change = vi.fn();
   render(<SelectMenu id="provider" ariaLabel="Provider" value="ollama" onChange={change}

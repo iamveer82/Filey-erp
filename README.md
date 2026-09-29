@@ -33,6 +33,30 @@ Tauri 2 (Rust shell) · React 19 · TypeScript · Vite · Tailwind CSS ·
 Recharts · React Router · Supabase (auth + Postgres, row-level secured) ·
 pdf-lib (MIT) + pdfjs-dist (Apache-2.0) for local PDF tools.
 
+### UI components
+
+[shadcn/ui](https://ui.shadcn.com/docs) is configured for the shared desktop and
+responsive web frontend, using Tailwind 4, Radix, Lucide, and Filey's existing
+light/dark theme. The utility alias points to Filey's existing `cn` helper in
+`src/lib/format.ts`; newer registry components may install their own `cn` package.
+
+```bash
+npm run ui -- info
+npm run ui -- add <component> --dry-run
+npm run ui -- add <component>
+```
+
+New components go in `src/components/ui/` and use the `@/` source alias.
+Reuse the existing Filey components (`Button.tsx`, `Dialog.tsx`, `Select.tsx`,
+and the `primitives` barrel) before adding an equivalent. Review generated
+styles to retain Filey's pill buttons. Keep the configured theme when adding
+components; do not reinitialize it over the existing CSS.
+
+Charts use the shared `ChartFrame` with shadcn tooltips and legends. Supply
+`ChartConfig` for named series and `valueFormatter` for currency values. Keep
+invoice totals, dated payments and receipt documents separate to avoid double
+counting; the monthly sales stack groups whole invoices by current paid/open status.
+
 ## Quick start
 
 ### Prerequisites

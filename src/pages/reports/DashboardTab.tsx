@@ -1,5 +1,6 @@
+import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../../components/ui/chart";
 import { ChartFrame } from "../../components/charts";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import { aed, chartAmount, num, cn } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
@@ -113,50 +114,35 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
             ) : (
             <ChartFrame height={280}>
               <BarChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="dashInvoiced" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.9} />
-                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.3} />
-                  </linearGradient>
-                  <linearGradient id="dashReceived" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.primary} stopOpacity={0.9} />
-                    <stop offset="100%" stopColor={c.primary} stopOpacity={0.3} />
-                  </linearGradient>
-                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis dataKey="d" {...cs.axisProps} />
                 <YAxis
                   {...cs.axisProps}
                   tickFormatter={(v) => chartAmount(Number(v))}
                 />
-                <Tooltip
-                  contentStyle={cs.tooltipStyle}
-                  cursor={cs.cursor}
-                  formatter={(v) => aed(Number(v) || 0)}
-                />
-                <Legend
-                  wrapperStyle={cs.legendStyle}
-                  iconType="circle"
-                  iconSize={8}
-                />
+                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="invoiced"
                   name="Invoiced"
-                  fill="url(#dashInvoiced)"
+                  fill={c.accent}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="invoicePayments"
                   name="Invoice payments"
-                  fill={c.tertiary}
+                  fill={c.primary}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="received"
                   name="Receipt documents"
-                  fill="url(#dashReceived)"
+                  fill={c.tertiary}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />

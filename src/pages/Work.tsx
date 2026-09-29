@@ -1,3 +1,4 @@
+import { DateField } from "../components/DatePicker";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Plus, RefreshCw, Download, ArrowLeft, Trash2 } from "lucide-react";
@@ -288,13 +289,11 @@ export default function Work() {
                 }}
               >
                 <Field label="Work date">
-                  <input
-                    className="input"
-                    type="date"
+                  <DateField
                     aria-label="Work date"
                     required
                     value={timeDate}
-                    onChange={(e) => setTimeDate(e.target.value)}
+                    onChange={(value) => setTimeDate(value)}
                   />
                 </Field>
                 <Field label="Minutes">
@@ -419,12 +418,10 @@ export default function Work() {
               />
             </Field>
             <Field label={kind === "ticket" ? "Resolution target" : "Due date"}>
-              <input
+              <DateField
                 aria-label="Due date"
-                type="date"
-                className="input"
                 value={draft.due_date || ""}
-                onChange={(e) => patch({ due_date: e.target.value || null })}
+                onChange={(value) => patch({ due_date: value || null })}
               />
             </Field>
             <Field label="Estimated hours">

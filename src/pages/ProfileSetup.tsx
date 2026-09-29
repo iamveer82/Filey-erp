@@ -1,4 +1,3 @@
-import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShieldCheck, Building2, ArrowRight } from "lucide-react";
@@ -102,8 +101,8 @@ export default function ProfileSetup() {
             />
           </div>
           {err && <p className="text-sm text-danger">{err}</p>}
-          <Button type="submit" disabled={busy} className="w-full">
-            {busy ? <Loader2 size={16} className="animate-spin" /> : "Continue"}
+          <Button type="submit" loading={busy} className="w-full">
+            {busy ? "Saving…" : "Continue"}
           </Button>
         </form>
       </div>

@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
@@ -5,7 +6,6 @@ import {
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
   CartesianGrid,
 } from "recharts";
 import { aed, chartAmount, cn } from "../../lib/format";
@@ -19,8 +19,6 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
   const fin = useFinancials(data.accounts, data.txns, data.invoices);
   const uae = data.company ? isUaeRegime(data.company.currency, data.company.country_code) : true;
   const taxLabel = taxRegimeFor(data.company?.currency || "AED", data.company?.country_code).taxLabel;
-
-  const tooltipStyle = cs.tooltipStyle;
 
   /* Expense by category bar chart */
   const expenseByCategory = useMemo(() => {
@@ -174,12 +172,6 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
                   data={expenseByCategory}
                   margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
                 >
-                  <defs>
-                    <linearGradient id="expG" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                      <stop offset="100%" stopColor={c.accent} stopOpacity={0.4} />
-                    </linearGradient>
-                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                   <XAxis
                     dataKey="name"
@@ -189,14 +181,12 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
                     {...cs.axisProps}
                     tickFormatter={(v) => chartAmount(Number(v))}
                   />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    formatter={(v) => aed(Number(v) || 0)}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
                   <Bar
+                    isAnimationActive={false}
                     dataKey="value"
                     name="Expense"
-                    fill="url(#expG)"
+                    fill={c.accent}
                     radius={[6, 6, 0, 0]}
                    maxBarSize={32} />
                 </BarChart>

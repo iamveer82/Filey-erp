@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../components/ui/chart";
 import { toast } from "../components/Toaster";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { reportMoney } from "../lib/reportMoney";
@@ -13,12 +14,10 @@ import {
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
   CartesianGrid,
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts";
 import {
   erp,
@@ -402,11 +401,11 @@ export default function ModernOverview() {
       </div>
 
       {/* ── Charts row: sales bar + segments pie ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 border border-border rounded-xl overflow-hidden bg-card">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartPanel
           title="Invoiced and payment records"
           subtitle={`Last ${RANGE_DAYS[range]} days · invoices by issue date, invoice payments and receipt documents by payment date`}
-          className="lg:col-span-2 border-b lg:border-b-0 lg:border-r border-border"
+          className="lg:col-span-2 rounded-xl border border-border bg-card"
           bodyClassName="h-[280px] mt-4"
         >
           {loading ? (
@@ -418,24 +417,21 @@ export default function ModernOverview() {
           ) : (
             <ChartFrame height={280}>
               <BarChart data={trend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
-                <ChartGradient id="barSold" color={c.accent} from={0.9} to={0.3} />
                 <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                 <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
                 <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
-                <Tooltip
-                  contentStyle={cs.tooltipStyle}
-                  cursor={cs.cursor}
-                  formatter={(v) => aed(Number(v) || 0)}
-                />
-                <Legend wrapperStyle={cs.legendStyle} />
+                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="invoiced"
                   name="Invoiced"
-                  fill="url(#barSold)"
+                  fill={c.accent}
                   radius={[4, 4, 0, 0]}
                   maxBarSize={28}
                 />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="received"
                   name="Receipt documents"
                   fill={c.tertiary}
@@ -443,6 +439,7 @@ export default function ModernOverview() {
                   maxBarSize={28}
                 />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="invoicePayments"
                   name="Invoice payments"
                   fill={c.primary}
@@ -455,6 +452,7 @@ export default function ModernOverview() {
         </ChartPanel>
         <ChartPanel
           title="Customer segments"
+          className="rounded-xl border border-border bg-card"
           subtitle="All customers · from the customer directory"
           bodyClassName="mt-2"
         >
@@ -472,6 +470,7 @@ export default function ModernOverview() {
                 <ChartFrame height={220}>
                   <PieChart>
                     <Pie
+                      isAnimationActive={false}
                       data={segmentPie}
                       innerRadius={58}
                       outerRadius={84}
@@ -483,7 +482,7 @@ export default function ModernOverview() {
                         <Cell key={i} fill={pieColors[i % pieColors.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={cs.tooltipStyle} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
                   </PieChart>
                 </ChartFrame>
                 {/* Donut centre: the whole point of the chart, stated once */}
@@ -632,13 +631,10 @@ export default function ModernOverview() {
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                   <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
                   <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
-                  <Tooltip
-                    contentStyle={cs.tooltipStyle}
-                    cursor={cs.cursor}
-                    formatter={(v) => aed(Number(v) || 0)}
-                  />
-                  <Legend wrapperStyle={cs.legendStyle} />
+                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
+                  <ChartLegend content={<ChartLegendContent />} />
                   <Area
+                    isAnimationActive={false}
                     type="monotone"
                     dataKey="received"
                     name="Receipt documents"
@@ -649,6 +645,7 @@ export default function ModernOverview() {
                     activeDot={{ r: 3, strokeWidth: 0 }}
                   />
                   <Area
+                    isAnimationActive={false}
                     type="monotone"
                     dataKey="invoicePayments"
                     name="Invoice payments"
@@ -660,6 +657,7 @@ export default function ModernOverview() {
                     activeDot={{ r: 3, strokeWidth: 0 }}
                   />
                   <Area
+                    isAnimationActive={false}
                     type="monotone"
                     dataKey="expenses"
                     name="Recorded expenses"

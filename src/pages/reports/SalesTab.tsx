@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../../components/ui/chart";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
 import {
@@ -10,15 +11,17 @@ import {
   Cell,
   XAxis,
   YAxis,
-  Tooltip,
-  Legend,
   CartesianGrid,
 } from "recharts";
-import { aed, chartAmount, num, cn, localYmd } from "../../lib/format";
+import { aed, chartAmount, num, cn } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
+
+import { monthlyInvoiceSales } from "../overviewData";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../../components/ui/card";
+import type { ChartConfig } from "../../components/ui/chart";
 
 const CLOSED = ["paid", "draft", "cancelled"];
 
@@ -58,25 +61,12 @@ export default function SalesTab({ data }: { data: ReportsData }) {
     }).length;
   }, [data.invoices]);
 
-  const monthlySales = useMemo(() => {
-    const byMonth = new Map<string, { m: string; total: number }>();
-    const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = localYmd(d).slice(0, 7);
-      const label = d.toLocaleDateString(undefined, { month: "short" });
-      byMonth.set(key, { m: label, total: 0 });
-    }
-    for (const inv of data.invoices) {
-      if (!isPostedStatus(inv.status) || !inv.issue_date) continue;
-      const key = inv.issue_date.slice(0, 7);
-      const row = byMonth.get(key);
-      if (row) row.total += inv.total || 0;
-    }
-    return Array.from(byMonth.values());
-  }, [data.invoices]);
-
-  const tooltipStyle = cs.tooltipStyle;
+  const monthlySales = useMemo(() => monthlyInvoiceSales(data.invoices), [data.invoices]);
+  const monthlyConfig = {
+    paid: { label: "Paid invoices", color: c.primary },
+    open: { label: "Open invoices", color: c.accent },
+  } satisfies ChartConfig;
+  const periodTotal = monthlySales.reduce((sum, month) => sum + month.paid + month.open, 0);
 
   const kpis = [
     { label: "Total Invoiced", value: aed(totalInvoiced) },
@@ -107,15 +97,14 @@ export default function SalesTab({ data }: { data: ReportsData }) {
       </div>
 
       {/* Revenue trend (line) + monthly sales (bar) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 border border-border rounded-xl overflow-hidden bg-card">
-        <div className="p-5 border-b lg:border-b-0 lg:border-r border-border">
-          <div className="text-[14px] font-semibold text-foreground">
-            Sales and payments
-          </div>
-          <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Last 7 days · invoices by issue date; payments and receipt documents by payment date
-          </div>
-          <div className="h-[280px] mt-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Sales and payments</CardTitle>
+            <CardDescription>Last 7 days · invoices and recorded payments</CardDescription>
+          </CardHeader>
+          <CardContent>
+          <div className="h-[280px]">
             {allZero(trend, "invoiced", "invoicePayments", "received") ? (
               <ChartEmpty hint="Post an invoice, record an invoice payment or confirm a receipt document to see activity here." />
             ) : (
@@ -133,16 +122,10 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                   {...cs.axisProps}
                   tickFormatter={(v) => chartAmount(Number(v))}
                 />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v) => aed(Number(v) || 0)}
-                />
-                <Legend
-                  iconType="circle"
-                  iconSize={8}
-                  wrapperStyle={{ fontSize: 12 }}
-                />
+                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Line
+                  isAnimationActive={false}
                   type="monotone"
                   dataKey="invoiced"
                   name="Invoiced"
@@ -151,19 +134,21 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                   dot={false}
                 />
                 <Line
+                  isAnimationActive={false}
                   type="monotone"
                   dataKey="invoicePayments"
                   name="Invoice payments"
-                  stroke={c.tertiary}
+                  stroke={c.primary}
                   strokeWidth={2.5}
                   strokeDasharray="5 3"
                   dot={false}
                 />
                 <Line
+                  isAnimationActive={false}
                   type="monotone"
                   dataKey="received"
                   name="Receipt documents"
-                  stroke={c.primary}
+                  stroke={c.tertiary}
                   strokeWidth={2.5}
                   dot={false}
                 />
@@ -171,54 +156,41 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             </ChartFrame>
             )}
           </div>
-        </div>
+          </CardContent>
+          <CardFooter className="mt-auto border-t border-border">
+            Payments and receipt documents stay separate; they may describe the same payment.
+          </CardFooter>
+        </Card>
 
-        <div className="p-5">
-          <div className="text-[14px] font-semibold text-foreground">
-            Monthly sales
-          </div>
-          <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Invoiced totals - last 6 months
-          </div>
-          <div className="h-[280px] mt-3">
-            {allZero(monthlySales, "total") ? (
-              <ChartEmpty hint="Monthly totals build up as you invoice through the year." />
-            ) : (
-            <ChartFrame height={280}>
-              <BarChart
-                data={monthlySales}
-                margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="salesG" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                    <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis
-                  dataKey="m"
-                  {...cs.axisProps}
-                />
-                <YAxis
-                  {...cs.axisProps}
-                  tickFormatter={(v) => chartAmount(Number(v))}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v) => aed(Number(v) || 0)}
-                />
-                <Bar
-                  dataKey="total"
-                  name="Invoiced"
-                  fill="url(#salesG)"
-                  radius={[6, 6, 0, 0]}
-                 maxBarSize={32} />
-              </BarChart>
-            </ChartFrame>
-            )}
-          </div>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Monthly sales</CardTitle>
+            <CardDescription>{monthlySales[0].label} – {monthlySales[5].label}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[280px]">
+              {allZero(monthlySales, "paid", "open") ? (
+                <ChartEmpty hint="Monthly totals build up as you invoice through the year." />
+              ) : (
+                <ChartFrame height={280} config={monthlyConfig}>
+                  <BarChart accessibilityLayer data={monthlySales} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
+                    <CartesianGrid stroke={c.grid} vertical={false} />
+                    <XAxis dataKey="label" {...cs.axisProps} tickMargin={10} tickFormatter={(value: string) => value.slice(0, 3)} />
+                    <YAxis {...cs.axisProps} tickFormatter={(v) => chartAmount(Number(v))} />
+                    <ChartTooltip cursor={cs.cursor} content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar dataKey="paid" name="Paid invoices" stackId="sales" fill="var(--color-paid)" radius={[0, 0, 4, 4]} maxBarSize={36} isAnimationActive={false} />
+                    <Bar dataKey="open" name="Open invoices" stackId="sales" fill="var(--color-open)" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false} />
+                  </BarChart>
+                </ChartFrame>
+              )}
+            </div>
+          </CardContent>
+          <CardFooter className="flex-col items-start gap-1 border-t border-border">
+            <span className="font-medium text-foreground tabular-nums">{aed(periodTotal)} invoiced in this period</span>
+            <span>Grouped by issue month, using each invoice’s current payment status.</span>
+          </CardFooter>
+        </Card>
       </div>
 
       {/* Invoice status pie + legend */}
@@ -237,6 +209,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             <ChartFrame height={280}>
               <PieChart>
                 <Pie
+                  isAnimationActive={false}
                   data={pie}
                   dataKey="value"
                   nameKey="name"
@@ -249,10 +222,7 @@ export default function SalesTab({ data }: { data: ReportsData }) {
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  formatter={(v) => num(Number(v) || 0)}
-                />
+                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => num(Number(v) || 0)} />} />
               </PieChart>
             </ChartFrame>
             )}

@@ -2,9 +2,11 @@
  * cva-based variants matching the existing Filey iOS minimal tokens. */
 import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
+import { cn } from "../lib/format";
+import { FileySpinner } from "./FileySpinner";
 
 export const buttonVariants = cva(
-  "disabled:pointer-events-none",
+  "shrink-0 touch-manipulation [&>svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -29,15 +31,23 @@ export const buttonVariants = cva(
 export interface ButtonProps
   extends
     React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    VariantProps<typeof buttonVariants> {
+  loading?: boolean;
+}
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, ...props }, ref) => (
+  ({ className, variant, size, type = "button", disabled, loading, children, ...props }, ref) => (
     <button
       ref={ref}
-      className={buttonVariants({ variant, size, className })}
       {...props}
-    />
+      type={type}
+      disabled={disabled || loading}
+      aria-busy={loading || props["aria-busy"]}
+      className={cn(buttonVariants({ variant, size }), className)}
+    >
+      {loading && <FileySpinner size={16} />}
+      {children}
+    </button>
   )
 );
 Button.displayName = "Button";

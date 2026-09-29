@@ -77,7 +77,12 @@ export function MenuPopover({
       role={role}
       side={side} align={align} sideOffset={6} collisionPadding={8}
       style={{ ...style, pointerEvents: "auto" }}
-      onOpenAutoFocus={event => { if (role === "presentation") event.preventDefault(); }}
+      onOpenAutoFocus={event => {
+        if (role === "presentation") { event.preventDefault(); return; }
+        const target = panelRef.current?.querySelector<HTMLElement>('input:not(:disabled)')
+          ?? panelRef.current?.querySelector<HTMLElement>('[aria-current="true"]:not(:disabled)');
+        if (target) { event.preventDefault(); target.focus({ preventScroll: true }); }
+      }}
       onCloseAutoFocus={event => {
         event.preventDefault();
         if (role === "menu" && document.activeElement === document.body) anchorRef.current?.focus({ preventScroll: true });
@@ -136,6 +141,7 @@ export function MenuItemRow({
     <button
       type="button"
       role="menuitem"
+      aria-current={checked || undefined}
       onClick={onClick}
       className={cn(
         "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:ring-inset [@media(pointer:coarse)]:min-h-11",
@@ -201,6 +207,7 @@ export function SelectMenu({
   // The portal panel can't inherit width — pin it to the trigger's width.
   const [minW, setMinW] = useState<number | undefined>(undefined);
   const current = options.find((o) => o.value === value);
+  useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
   const filtered = options.filter(o => `${o.label} ${o.group ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   const toggle = () => {
     if (disabled) return;
@@ -259,7 +266,7 @@ export function SelectMenu({
                 label={o.label}
                 checked={o.value === value}
                 onClick={() => {
-                  onChange(o.value);
+                  if (o.value !== value) onChange(o.value);
                   setOpen(false);
                 }}
               />

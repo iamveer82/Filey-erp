@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ModernOverview from "../ModernOverview";
-import { invoicePaymentsInAed, overviewDeltas, overviewTrend } from "../overviewData";
+import { invoicePaymentsInAed, monthlyInvoiceSales, overviewDeltas, overviewTrend } from "../overviewData";
 import { useDeltas, useTrend } from "../reports/useReportsData";
 import { billing, crm, erp, fin, receipts, type InvoiceDocSummary, type ReceiptSummary } from "../../lib/api";
 import { aed } from "../../lib/format";
@@ -47,6 +47,26 @@ const invoice = (patch: Partial<InvoiceDocSummary> = {}): InvoiceDocSummary => (
 const receipt = (patch: Partial<ReceiptSummary> = {}): ReceiptSummary => ({
   id: 1, number: "REC-1", customer_name: "Alice", status: "paid", template: "receipt",
   amount: 20, currency: "USD", payment_date: "2026-09-03", updated_at: "2026-09-03", ...patch,
+});
+
+it("stacks mutually exclusive invoice statuses by issue month, across years without future or unposted totals", () => {
+  const rows = [
+    invoice({ status: "paid", total: 400, issue_date: "2025-12-01" }),
+    invoice({ status: "sent", total: 100, paid: 25, issue_date: "2025-12-02" }),
+    invoice({ status: "overdue", total: 80, issue_date: "2026-01-01" }),
+    invoice({ total: 999, issue_date: "2026-01-03" }),
+    invoice({ total: 999, issue_date: "2025-07-31" }),
+    invoice({ status: "draft", total: 999, issue_date: "2025-12-01" }),
+    invoice({ status: "cancelled", total: 999, issue_date: "2025-12-01" }),
+    invoice({ total: NaN, issue_date: "2025-12-01" }),
+  ];
+  const monthly = monthlyInvoiceSales(rows, new Date(2026, 0, 2));
+  expect(monthly.map(row => row.month)).toEqual(["2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01"]);
+  expect(monthly[0]).toMatchObject({ paid: 0, open: 0 });
+  expect(monthly[4]).toMatchObject({ paid: 400, open: 100 });
+  expect(monthly[5]).toMatchObject({ paid: 0, open: 80 });
+  expect(monthly.reduce((sum, row) => sum + row.paid + row.open, 0)).toBe(580);
+  expect(rows[1].paid).toBe(25);
 });
 const series = (chart: string) => JSON.parse(screen.getByTestId(chart).textContent || "[]") as ReturnType<typeof overviewTrend>;
 const mount = () => render(<MemoryRouter><ModernOverview /></MemoryRouter>);

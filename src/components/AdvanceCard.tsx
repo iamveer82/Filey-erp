@@ -1,3 +1,4 @@
+import { DateField } from "./DatePicker";
 import { useEffect, useState } from "react";
 import { Wallet, Plus, Trash2, Pencil } from "lucide-react";
 import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
@@ -207,11 +208,9 @@ export default function AdvanceCard({
             />
           </Field>
           <Field label="Date">
-            <input
-              className="input"
-              type="date"
+            <DateField
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(value) => setDate(value)}
             />
           </Field>
           <Field label="Note (optional)">
@@ -459,11 +458,9 @@ export function CustomerAdvancesPanel() {
             />
           </Field>
           <Field label="Date">
-            <input
-              className="input"
-              type="date"
+            <DateField
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(value) => setDate(value)}
             />
           </Field>
           <Field label="Note (optional)">

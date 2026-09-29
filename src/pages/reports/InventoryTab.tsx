@@ -1,3 +1,4 @@
+import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
 import { lowStockRows } from "./reportExports";
 import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
@@ -6,7 +7,6 @@ import {
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
   CartesianGrid,
 } from "recharts";
 import { aed, chartAmount, num, cn } from "../../lib/format";
@@ -17,8 +17,6 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
   const categoryBars = useCategoryBars(data.products);
-
-  const tooltipStyle = cs.tooltipStyle;
 
   /* KPIs — all derived from products array. */
   const kpis = useMemo(() => {
@@ -105,12 +103,6 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
                   data={categoryBars}
                   margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
                 >
-                  <defs>
-                    <linearGradient id="invG" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={c.accent} stopOpacity={0.95} />
-                      <stop offset="100%" stopColor={c.accent} stopOpacity={0.35} />
-                    </linearGradient>
-                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
                   <XAxis
                     dataKey="name"
@@ -120,14 +112,12 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
                     {...cs.axisProps}
                     tickFormatter={(v) => chartAmount(Number(v))}
                   />
-                  <Tooltip
-                    contentStyle={tooltipStyle}
-                    formatter={(v) => aed(Number(v) || 0)}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
                   <Bar
+                    isAnimationActive={false}
                     dataKey="value"
                     name="Value"
-                    fill="url(#invG)"
+                    fill={c.accent}
                     radius={[6, 6, 0, 0]}
                    maxBarSize={32} />
                 </BarChart>
