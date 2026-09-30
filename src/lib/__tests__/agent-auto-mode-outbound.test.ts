@@ -38,7 +38,10 @@ describe("Auto mode vs a caller-supplied confirm", () => {
     if (change === "capability") setCapabilityEnabled("channels", false);
     else setAgentMode("plan");
     approve(true);
-    expect(await result).toMatchObject({ error: expect.stringContaining("permissions changed"), retry_safe: false });
+    expect(await result).toMatchObject({
+      error: expect.stringContaining(change === "capability" ? "capability was turned off" : "access mode changed"),
+      retry_safe: false,
+    });
     expect(sendWa).not.toHaveBeenCalled();
   });
   it("refuses a sensitive tool when the caller's confirm says no, even in Auto", async () => {
