@@ -89,7 +89,7 @@ it("ignores older file reads and surfaces a failed file read without importing s
       ],
     },
   });
-  await screen.findByText("Could not read CSV: File unavailable");
+  await screen.findByText("Could not read file: File unavailable");
   expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
   expect(onImport).not.toHaveBeenCalled();
 });

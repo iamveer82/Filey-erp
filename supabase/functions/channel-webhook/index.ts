@@ -80,9 +80,9 @@
 //     create drafts and approve pending actions.
 //   * The service-role key never leaves this process; clients can only READ
 //     their own channel_messages rows (RLS).
-//   * Data tools are READ-ONLY and org-scoped (see tools.ts): the agent can look
+//   * Data tools are org-scoped and require active owner/admin membership: the agent can look
 //     up invoices, balances, low stock and customers for OWNER_USER_ID's org, but
-//     cannot mutate anything. The service-role client bypasses RLS, so tools.ts
+//     creates only drafts/additive records directly. The service-role client bypasses RLS, so tools.ts
 //     pins .eq("org_id", ...) on every query — that scope IS the tenant boundary.
 //   * Write tools are DRAFT-ONLY (see tools.ts WRITE POLICY); anything with
 //     external effect goes through agent_pending_actions + "APPROVE <code>".
@@ -90,7 +90,8 @@
 //     (migration 2026-07-26-agent-memories.sql, RLS user_id = auth.uid()).
 //     Both fail soft until the migration is applied.
 //   * ponytail: single-owner — every message maps to OWNER_USER_ID (one bot =
-//     one install, matches the single-tenant desktop). Multi-user needs a
+//     one hosted install). Per-account desktop gateways use the full runtime;
+//     multi-user hosted routing needs a
 //     pairing table (chat_id -> user_id); add when SaaS multi-tenant lands.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
@@ -102,10 +103,10 @@ import {
   parseTelegramUpdate,
   parseWhatsAppWebhook,
 } from "./parse.ts";
-import { ALL_TOOLS, runTool } from "./tools.ts";
+import { ALL_TOOLS, boundedToolResult, runTool } from "./tools.ts";
 import { rankMemories } from "./tools-writes.ts";
 import { sendChannelText } from "./delivery.ts";
-import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import { rateLimit } from "../_shared/rateLimit.ts";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
 import {
   claimSeenMessage,
@@ -206,7 +207,7 @@ async function loadMemories(client: any, ownerId: string, query: string): Promis
 // deno-lint-ignore no-explicit-any
 async function aiReply(userText: string, name: string, client: any, orgId: string | null, ownerId: string, channel: Channel, chatId: string): Promise<string> {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) return "My AI key isn't set up yet — ask the Filey admin to configure ANTHROPIC_API_KEY.";
+  if (!key) return "This assistant isn't configured yet. Open Filey to check the connection.";
   const model = Deno.env.get("AGENT_MODEL") ?? "claude-haiku-4-5-20251001";
   const canQuery = !!(client && orgId);
   const memories = client ? await loadMemories(client, ownerId, userText) : [];
@@ -236,7 +237,7 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
         `never sent automatically), plus new customers, products and logged ` +
         `expenses (log_expense). Look up the customer/supplier first so names ` +
         `match existing records. For payment reminders use ` +
-        `request_payment_reminder; record payments in Filey with their amounts and accounting entries. ` +
+        `request_payment_reminder; record payments in Filey so amounts and accounting entries stay correct. ` +
         `External actions return an approval code; never claim ` +
         `anything happened until the owner replies APPROVE <code>. You cannot ` +
         `finalize, send, delete or edit existing records — if asked, say that ` +
@@ -270,8 +271,11 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
   }
 
   try {
+    const deadline = Date.now() + 90_000;
+    let toolCalls = 0;
     // Tool-use loop: lookup → draft chains need a few rounds.
     for (let round = 0; round < 6; round++) {
+      if (Date.now() >= deadline) return "This task took too long. Check Filey for any saved drafts before trying again.";
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
@@ -286,10 +290,11 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
           messages,
           ...(canQuery ? { tools: ALL_TOOLS } : {}),
         }),
+        signal: AbortSignal.timeout(Math.min(30_000, deadline - Date.now())),
       });
       if (!res.ok) {
-        console.error("anthropic", res.status, await res.text());
-        return "Sorry — I hit an error reaching my brain. Try again in a moment.";
+        console.error("channel model request failed", res.status);
+        return "I couldn't complete that request. Check Filey for any saved drafts before trying again.";
       }
       const data = await res.json();
       const content = Array.isArray(data?.content) ? data.content : [];
@@ -300,16 +305,19 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
         const results: any[] = [];
         for (const block of content) {
           if (block?.type !== "tool_use") continue;
+          if (++toolCalls > 18 || Date.now() >= deadline) return "I reached this task's limit. Check Filey for any saved drafts before continuing.";
           let out: unknown;
           try {
             out = await runTool(client, orgId as string, block.name, block.input, ownerId, { channel, externalId: chatId });
-          } catch (e) {
-            out = { error: String(e) };
+          } catch {
+            console.error("channel tool failed", block.name);
+            out = { error: "That action could not be completed. Do not claim it succeeded." };
           }
           results.push({
             type: "tool_result",
             tool_use_id: block.id,
-            content: JSON.stringify(out).slice(0, 6000),
+            content: boundedToolResult(out),
+            ...(out && typeof out === "object" && "error" in out ? { is_error: true } : {}),
           });
         }
         messages.push({ role: "user", content: results });
@@ -317,13 +325,13 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
       }
 
       // deno-lint-ignore no-explicit-any
-      const text = content.find((b: any) => b?.type === "text")?.text;
+      const text = content.filter((b: any) => b?.type === "text").map((b: any) => b.text).join("\n");
       return typeof text === "string" && text.trim() ? text : "…";
     }
-    return "I looked into that but couldn't wrap it up — try asking a bit more specifically.";
+    return "I couldn't finish that task. Check Filey for any saved drafts before continuing.";
   } catch (e) {
-    console.error("anthropic fetch", e);
-    return "Sorry — I couldn't reach my brain just now. Try again shortly.";
+    console.error("channel model request failed", e instanceof Error ? e.name : "unknown");
+    return "I couldn't finish that request. Check Filey for any saved drafts before trying again.";
   }
 }
 
@@ -443,7 +451,7 @@ const json = (body: unknown, status = 200) =>
 
 /** The same pipeline the hosted channels run, except the reply is RETURNED
  *  rather than sent — the bridge already has the socket to answer on. */
-async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<string> {
+async function handleBridgeMessage(msg: InboundMsg): Promise<string> {
   const ownerId = Deno.env.get("OWNER_USER_ID") ?? "";
   const url = Deno.env.get("SUPABASE_URL");
   const svc = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -469,7 +477,7 @@ async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<strin
       externalId: msg.externalId,
       direction: "in",
       body: msg.body,
-      raw,
+      raw: { message_id: msg.msgId ?? null },
     });
   }
 
@@ -518,6 +526,8 @@ serve(async (req) => {
     return new Response("forbidden", { status: 403 });
   }
   if (req.method !== "POST") return new Response("ok");
+  if (!Deno.env.get("OWNER_USER_ID") || !Deno.env.get("SUPABASE_URL") || !Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))
+    return new Response("connection unavailable", { status: 503 });
 
   // Read the RAW body first — Slack/WhatsApp signature checks need the exact
   // bytes, and JSON.parse(req.json()) would consume them.
@@ -553,7 +563,7 @@ serve(async (req) => {
       body: text,
       fromName: String(b.fromName ?? "") || from,
     };
-    const reply = await handleBridgeMessage(msg, body);
+    const reply = await handleBridgeMessage(msg);
     return json({ reply });
   }
 
@@ -605,21 +615,6 @@ serve(async (req) => {
     }
   }
 
-  // RATE LIMIT: max 30 messages per hour per install (prevents spam flood).
-  // NOTE: this block runs BEFORE parsing the payload into a message, so it
-  // must not reference message fields (an earlier version read msg.externalId
-  // here and crashed with a TDZ error whenever OWNER_USER_ID was set).
-  const OWNER = Deno.env.get("OWNER_USER_ID") ?? "";
-  const supa = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-  );
-  if (OWNER) {
-    const allowed = await rateLimit(supa, OWNER, "channel_webhook", 30, 3600);
-    if (!allowed) return new Response("rate limited", { status: 429 });
-    await logAction(supa, OWNER, "channel_webhook", { channel });
-  }
-
   // ── Normalize the payload into messages ──
   let msgs: InboundMsg[];
   if (channel === "whatsapp") {
@@ -636,6 +631,22 @@ serve(async (req) => {
   const client = ownerId && url && svc ? createClient(url, svc) : null;
 
   for (const msg of msgs) {
+    const paired = client
+      ? await tryPairChannel(client, ownerId, msg, msg.body, () => credsCache.delete(msg.channel))
+      : null;
+    if (paired !== null) {
+      await sendReply(msg, paired);
+      continue;
+    }
+    const refusal = await ownerRefusal(msg);
+    if (refusal !== null) {
+      await sendReply(msg, refusal);
+      continue;
+    }
+    // Receipts, non-text updates and strangers must not consume the owner's
+    // model quota. Limit only authenticated, paired task messages.
+    if (client && !(await rateLimit(client, ownerId, "channel_webhook", 30, 3600)))
+      return new Response("rate limited", { status: 429 });
     // ── Inbound dedup: claim the provider's message id BEFORE any work. ──
     // Providers retry non-2xx deliveries, so once the marker is claimed we
     // must never fail this webhook again (see the try/catch below) — that
@@ -646,30 +657,7 @@ serve(async (req) => {
     }
 
     try {
-      // A channel the agent connected itself arrives here unpaired: the only
-      // message it accepts is the PAIR code, and only until that code is spent.
-      const paired = client
-        ? await tryPairChannel(
-            client,
-            ownerId,
-            msg,
-            msg.body,
-            () => credsCache.delete(msg.channel),
-          )
-        : null;
-      if (paired !== null) {
-        await sendReply(msg, paired);
-        continue;
-      }
-
-      // SECURITY: only the paired owner gets the agent (see ownerRefusal).
-      const refusal = await ownerRefusal(msg);
-      if (refusal !== null) {
-        await sendReply(msg, refusal);
-        continue;
-      }
-
-      if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "in", body: msg.body, raw: body });
+      if (client) await log(client, ownerId, msg.channel, { externalId: msg.externalId, direction: "in", body: msg.body, raw: { message_id: msg.msgId ?? null } });
 
       const io = client ? approvalIOFor(client, ownerId) : null;
       // Approvals bypass the model entirely — a confirm must be deterministic.

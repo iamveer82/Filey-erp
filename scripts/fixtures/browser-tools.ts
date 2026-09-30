@@ -5,7 +5,7 @@ import InvoiceExportSheet from "../../src/components/InvoiceExportSheet";
 import { EMPTY_BANK } from "../../src/components/BankDetails";
 import "../../src/index.css";
 import { PDFDocument, StandardFonts, PDFName } from "pdf-lib";
-import { pdfToImages, pdfToText, sanitizePdf, imagesToPdf, svgToImage, imageToSvg, elementToPdfBytes } from "../../src/lib/pdfTools";
+import { pdfToImages, pdfToText, sanitizePdf, imagesToPdf, svgToImage, imageToSvg, elementToPdfBytes, encryptPdf, decryptPdf, removeRestrictions, heicToPdf } from "../../src/lib/pdfTools";
 
 const artifacts: {name:string;base64:string}[]=[];
 const checks: {name:string;ms:number}[]=[];
@@ -22,6 +22,20 @@ try {
   const source=file("fixture.pdf",await pdf.save());
   await check("PDF text through real web worker",async()=>{
     assert(new TextDecoder().decode((await pdfToText(source)).bytes).includes("Filey fixture 42"),"PDF text missing");
+  });
+  await check("Password removal opens without a password and preserves selectable content",async()=>{
+    const encrypted=await encryptPdf(source,{userPassword:"fixture-password",ownerPassword:"fixture-owner",copying:false});
+    const locked=file(encrypted.name,encrypted.bytes);
+    let refused=false;
+    try {await decryptPdf(locked,"incorrect-fixture-password");} catch(error) {refused=/password/i.test(String(error));}
+    assert(refused,"Incorrect password was accepted");
+    const unlocked=await decryptPdf(locked,"fixture-password");
+    const parsed=await PDFDocument.load(unlocked.bytes);
+    assert(!parsed.isEncrypted && parsed.getPageCount()===1,"Password was not removed or pages changed");
+    assert(new TextDecoder().decode((await pdfToText(file(unlocked.name,unlocked.bytes))).bytes).includes("Filey fixture 42"),"Password removal lost text");
+    const restricted=await encryptPdf(source,{ownerPassword:"fixture-owner",printing:false});
+    const opened=await removeRestrictions(file(restricted.name,restricted.bytes));
+    assert(new TextDecoder().decode((await pdfToText(file(opened.name,opened.bytes))).bytes).includes("Filey fixture 42"),"Permission removal lost text");
   });
   await check("PDF canvas rendering and image-to-PDF round trip",async()=>{
     const images=await pdfToImages(source,1);
@@ -55,6 +69,17 @@ try {
     const vector=await imageToSvg(file("fixture.png",image.bytes,"image/png"));
     const markup=new TextDecoder().decode(vector.bytes);
     assert(markup.includes("<path") && !markup.includes("<image"),"Vector tracing did not produce actual paths");
+  });
+  await check("HEIC decoding under the desktop content security policy",async()=>{
+    // Official 7 KB libheif image, pinned to commit
+    // bc292d97abed6b1ba1fc3d95c4191829ee99b088, tests/data/rainbow-451x461.heic.
+    const response=await fetch(new URL("./rainbow-451x461.heic",import.meta.url));
+    assert(response.ok,"HEIC fixture missing");
+    const source=file("fixture.heic",new Uint8Array(await response.arrayBuffer()),"image/heic");
+    const output=await heicToPdf(source);
+    const pdf=await PDFDocument.load(output.bytes);
+    assert(pdf.getPageCount()===1 && pdf.getPage(0).getWidth()===451 && pdf.getPage(0).getHeight()===461,"HEIC output has wrong image dimensions");
+    assert((await pdfToImages(file(output.name,output.bytes),1))[0].bytes.length>100,"HEIC output cannot be rendered");
   });
   await check("Arabic invoice fields and real PDF raster output",async()=>{
     const holder=document.createElement("div");holder.style.width="794px";document.body.append(holder);

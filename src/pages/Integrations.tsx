@@ -2,6 +2,7 @@ import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import FreeConnections from "../components/FreeConnections";
 import WorkServices from "../components/WorkServices";
 import EmailConnection from "../components/EmailConnection";
+import TelegramAgentConnection from "../components/TelegramAgentConnection";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -474,6 +475,7 @@ export default function Integrations() {
       {tab === "free" && (
         <>
           <WhatsAppBridgeProvider key={agentStorageScope() ?? "signed-out"} />
+          <TelegramAgentConnection key={`telegram:${agentStorageScope() ?? "signed-out"}`} />
           <EmailConnection />
           <FreeConnections />
         </>

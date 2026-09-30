@@ -75,6 +75,8 @@ export default function PortalView() {
     template: String(d.template || "minimal"),
     accent: String(d.accent || "#222222"),
     currency: ccy,
+    tax_country_code: typeof d.tax_country_code === "string" ? d.tax_country_code : null,
+    transaction_type: typeof d.transaction_type === "string" ? d.transaction_type : null,
     doc_title: String(d.doc_title || docTitleFor(shared.doc_type)),
     number: String(d.number || ""),
     logo: d.logo ? String(d.logo) : null,

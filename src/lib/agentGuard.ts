@@ -26,7 +26,6 @@ const READ_PREFIXES = [
   "receivables_",
   "payables_",
   "crm_pipeline",
-  "use_saved_file",
 ];
 
 export const isReadOnly = (name: string): boolean =>
@@ -59,18 +58,34 @@ export interface AgentGuard {
 const keyOf = (name: string, args: Record<string, unknown>) => {
   // Stable across key order: the model does not emit arguments consistently.
   try {
-    const sorted = Object.keys(args ?? {})
-      .sort()
-      .reduce<Record<string, unknown>>((o, k) => ((o[k] = args[k]), o), {});
-    return `${name}:${JSON.stringify(sorted)}`;
+    return `${name}:${JSON.stringify(args, (_key, value) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+        : value)}`;
   } catch {
     return `${name}:?`;
   }
 };
 
+/** Providers sometimes report a failure flag without an error string. */
+export function toolFailure(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (r.error) {
+    if (typeof r.error === "string") return r.error;
+    try { return JSON.stringify(r.error) || "The action returned an error."; }
+    catch { return "The action returned an error."; }
+  }
+  return r.ok === false || r.success === false || r.successful === false || r.isError === true
+    ? typeof r.message === "string" && r.message ? r.message : "The action did not complete successfully."
+    : null;
+}
+
 const shortNote = (name: string, result: unknown): string => {
-  const r = result as { error?: string; message?: string } | null;
-  if (r?.error) return `${name} failed: ${r.error}`;
+  const r = result as { message?: string; pending_action?: string } | null;
+  const error = toolFailure(result);
+  if (error) return `${name} failed: ${error}`;
+  if (r?.pending_action) return `${name}: waiting for ${r.pending_action.replace(/_/g, " ")}`;
   if (r?.message) return `${name}: ${r.message}`;
   return `${name}: done`;
 };
@@ -83,14 +98,15 @@ const shortNote = (name: string, result: unknown): string => {
  *  agent routing around it. */
 export function coachResult(result: unknown, roundsLeft: number): unknown {
   if ((result as { retry_safe?: boolean } | null)?.retry_safe === false) return result;
-  const err = (result as { error?: string } | null)?.error;
+  const err = toolFailure(result);
   if (!err) return result;
   const refused =
-    /not approve|owner-only|capability.*(off|disabled)|Plan mode|permission|access.*(disabled|enable|expired)/i.test(
+    /not approve|owner-only|capability.*(off|disabled)|Plan mode|permission|access.*(disabled|enable|expired|denied|revoked)|requires? (an? )?(owner|admin)|role.*(required|allowed|does not)|only a workspace owner|not allowed|cannot control this computer|personal browser is unavailable/i.test(
       String(err)
     );
   return {
     ...(result as Record<string, unknown>),
+    error: err,
     steps_remaining: roundsLeft,
     what_to_do: refused
       ? "Respect this access or approval boundary. Do not retry through a different tool or channel. Explain what access or decision is needed; continue only with independently authorized work."
@@ -106,7 +122,7 @@ export function createGuard(): AgentGuard {
 
   return {
     before(name, args) {
-      if (["workspace_browser", "get_video_job", "list_video_jobs"].includes(name)) return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "agent_computer" || name === "browser") &&
@@ -128,13 +144,14 @@ export function createGuard(): AgentGuard {
         short: {
           error: `Already ran ${name} with these exact arguments in this task — not repeating it.`,
           previous_result: prior,
-          hint: "If this genuinely needs doing twice, change something (a different recipient, amount or reference) so it isn't an accidental duplicate.",
+          retry_safe: false,
+          hint: "Use the confirmed earlier result. If its outcome is uncertain, verify it before acting again. Never change arguments solely to bypass duplicate protection.",
         },
       };
     },
     after(name, args, result) {
       const k = keyOf(name, args);
-      const failed = !!(result as { error?: string } | null)?.error;
+      const failed = !!toolFailure(result);
       if (!failed && !isReadOnly(name)) {
         // Verify against current records after a write, not the pre-write cache.
         for (const key of seen.keys())

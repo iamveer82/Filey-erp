@@ -4,7 +4,7 @@ import { runTool } from "../aiTools";
 import type { AiConfig } from "../ai";
 import { compressForModel, headroomReset } from "../headroom";
 
-vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn() }));
+vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn(), isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
 vi.mock("../capabilities", () => ({ isToolAllowed: () => true }));
 vi.mock("../agentMode", () => ({ gateFor: () => "run" }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
@@ -112,6 +112,27 @@ describe("advanced agent runtime", () => {
     expect(result.events.find(e => e.type === "tool_result")).toMatchObject({ result: { retry_safe: false } });
     expect(JSON.stringify(result.requests[2])).toContain("not repeating");
   });
+  it("does not report an unfulfilled tool action as completed even if the model says Done", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "The user did not approve sending." });
+    const result = await run([turn([call("send_invoice", { invoice_number: "INV-1" })]), turn([], "Sent!")]);
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+    expect(result.text).toContain("Not completed: send_invoice failed");
+  });
+  it.each(["openai", "anthropic"] as const)("rejects duplicate provider call IDs before any %s batch action runs", async provider => {
+    const reply = provider === "openai" ? turn([call("create_invoice_draft", {}, "same"), call("get_stats", {}, "same")])
+      : { stop_reason: "tool_use", content: [{ type: "tool_use", id: "same", name: "create_invoice_draft", input: {} }, { type: "tool_use", id: "same", name: "get_stats", input: {} }] };
+    const result = await run([reply], {}, { ...config, provider });
+    expect(runTool).not.toHaveBeenCalled();
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "error" });
+    expect(result.text).toContain("Nothing was executed");
+  });
+  it("bounds a single provider batch and does not label an empty response successful", async () => {
+    const excessive = await run([turn(Array.from({ length: 33 }, (_, index) => call("get_stats", {}, String(index))))]);
+    expect(excessive.text).toContain("too many tool calls");
+    expect(runTool).not.toHaveBeenCalled();
+    const empty = await run([turn()]);
+    expect(empty.events[0]).toMatchObject({ type: "done", reason: "error", text: "The model returned no final answer." });
+  });
 
   it("does not execute malformed tool arguments", async () => {
     const result = await run([
@@ -120,6 +141,7 @@ describe("advanced agent runtime", () => {
     ]);
     expect(runTool).not.toHaveBeenCalled();
     expect(JSON.stringify(result.requests[1])).toContain("valid JSON object");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
   });
 
   it("stops a remaining tool batch after cancellation", async () => {

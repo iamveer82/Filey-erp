@@ -1,3 +1,4 @@
+import EInvoicePartyFields from "../../components/EInvoicePartyFields";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import CountryTaxFields from "../../components/CountryTaxFields";
 import CompanyDocuments from "../../components/CompanyDocuments";
@@ -510,6 +511,10 @@ export default function CompanyDetails() {
             )}
           </FormField>
         </div>
+        {uae && <div className="border-t border-border pt-4">
+          <h3 className="font-medium mb-3">Electronic invoicing identity</h3>
+          <EInvoicePartyFields value={c.einvoice} includeLegal={false} onChange={value => set("einvoice", value)} />
+        </div>}
         {/* WPS is specific to UAE payroll. */}
         {uae && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

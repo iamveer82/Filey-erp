@@ -1,4 +1,3 @@
-import { SelectMenu } from "../components/ui-menu";
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, BookOpen, Download, Search } from "lucide-react";
@@ -8,6 +7,7 @@ import { isLocalMode } from "../lib/dataMode";
 import { getAgentMode } from "../lib/agentMode";
 import { downloadText } from "../lib/localPaths";
 import { useUI } from "../lib/ui";
+import { SelectMenu } from "../components/ui-menu";
 
 const COUNTRY_COVERAGE = [
   ["UAE", "Invoices, quotes, POs and receipts; AED and foreign-currency documents", "Editable VAT and TRN fields; PINT-AE export", "AED ledger; WPS export fields", "No verified government-gateway submission or filing"],
@@ -19,6 +19,20 @@ const COUNTRY_COVERAGE = [
 
 export const GUIDES = [
   {
+    id: "remote-agent", category: "Integrations", title: "Your Filey agent on WhatsApp and Telegram", to: "/integrations?tab=free",
+    summary: "Request work from your phone and receive documents through a securely paired desktop agent.",
+    steps: [
+      "First configure your AI model in Settings → AI Assistant. The phone connection uses the same Filey tools, memories, saved procedures and workspace permissions as chat in the app.",
+      "For WhatsApp, open Integrations → Built-in connections in Filey desktop and scan the QR through WhatsApp's Linked devices. Use Message yourself, or set a separate owner number for a spare paired phone. Other senders are ignored.",
+      "For Telegram, create a dedicated bot with @BotFather → /newbot and enter its token in Built-in connections. Open its private chat and send the exact PAIR code shown in Filey within ten minutes. Groups and other accounts are ignored.",
+      "Keep the signed-in desktop app open and online. Switching account or workspace stops remote work; reconnect in the desired workspace. These desktop connections do not run from a closed app or a mobile browser.",
+      "Ask to find records, prepare or revise a draft, export an invoice PDF, or process a document. Generated files are returned to the originating chat when the provider accepts them. Check the actual file; a reply alone is not delivery proof.",
+      "Sensitive actions show the exact tool and arguments. Reply YES within fifteen minutes to authorize that one action once. A different recipient, amount or operation requires a new approval. Capabilities and your workspace role still apply.",
+      "Use /status for readiness, /help for examples, /stop to cancel queued work, or /new to also reset the conversation. Cancellation cannot undo a write or provider request that was already accepted; inspect Filey before repeating it.",
+      "WhatsApp supports text, documents and configured speech providers. Telegram supports text, photos and documents up to 12 MB; voice is not implemented there. Interactive editing and paid media review happen in Filey. Optional agent computers stay separate from personal browser tabs.",
+    ],
+  },
+  {
     id: "international-business", category: "Getting started", title: "Business country, currency and taxes", to: "/settings?section=company",
     summary: "Configure India, UAE or an individual EU country without changing saved documents.",
     steps: [
@@ -29,6 +43,79 @@ export const GUIDES = [
       "India uses GSTIN labels, UAE uses TRN and EU countries use VAT ID. Format checks do not prove that a registration is valid.",
       "This release does not provide automatic national tax filings, Indian split-GST calculations or country-specific payroll. The underlying ledger is still AED; company and display currencies do not migrate it.",
       "Local storage retains country fields. Cloud administrators must apply the international-business migration before country settings or tagged documents can save or synchronize to cloud.",
+    ],
+  },
+  {
+    id: "directories", category: "Sales & CRM", title: "Customers and suppliers", to: "/customers",
+    summary: "Save contact details once and reuse them in business documents.",
+    steps: [
+      "Create a customer in Customers or a supplier in Suppliers. Enter the company, contact details, address and tax identifier that apply to that business.",
+      "Use CSV import for an existing directory. Map the columns, check the preview and correct rejected rows before importing.",
+      "Select the saved party when creating a document. Review its copied address and contact details; changing the directory later does not rewrite previously saved documents.",
+      "Open the party's detail page to review linked documents, payments, notes and follow-ups. Use Statement of Account when you need a summary of its recorded balance.",
+      "A directory entry is a business contact. Creating one does not invite that person into your Filey workspace or send a message.",
+    ],
+  },
+  {
+    id: "orders", category: "Sales & CRM", title: "Record a sales order", to: "/orders",
+    summary: "Keep the order, its products and fulfilment status together.",
+    steps: [
+      "Choose New order, select a customer and add the ordered products, quantities and rates. Review the total before saving.",
+      "Use the order's edit action to update its status and details. Inspect the linked product quantities and movement history when completing or correcting fulfilment.",
+      "Use quick view for a summary and the export action for the current order records. Share actions prepare a message in your chosen channel; verify the recipient before sending.",
+      "An order and an invoice are separate records. Review invoicing and received payments separately; saving an order does not mean the customer has paid.",
+    ],
+  },
+  {
+    id: "receipts", category: "Finance & people", title: "Issue a payment receipt", to: "/payment-receipts",
+    summary: "Record the receipt and produce a PDF for the payer.",
+    steps: [
+      "Create a receipt, choose the payer and enter the payment date, currency, amount, method and reference. Link a saved invoice when it belongs to that collection.",
+      "Review the company details, bank details and document preview, then Save. A failed save keeps the current receipt open for correction or retry.",
+      "Download PDF to produce the receipt, or use the document's sharing action. Review its status and the linked invoice balance before treating the payment as settled.",
+      "A payment receipt records a payment; it does not charge a card or move money. Avoid entering the same collection again as a separate unrelated payment.",
+    ],
+  },
+  {
+    id: "bank-cheques", category: "Finance & people", title: "Bank details, reconciliation and cheques", to: "/bank-accounts",
+    summary: "Keep payment instructions and recorded bank movements clear.",
+    steps: [
+      "Add a bank account with its currency and country-specific account identifiers. Review these details before copying or sharing payment instructions.",
+      "For reconciliation, upload a bank statement CSV with Date, Description and Amount, or Debit and Credit columns. Filey proposes matches by amount and nearby dates.",
+      "Inspect matched and unmatched rows before confirming. Confirmation marks the selected recorded transactions as reconciled; it does not connect or authorize your bank account.",
+      "Open Cheques to record a received or issued cheque with its number, party, amount, issue date and due date. Update its status only when the corresponding real-world event occurs.",
+      "Saving bank details or a cheque is recordkeeping. Filey does not initiate a bank transfer or clear a cheque.",
+    ],
+  },
+  {
+    id: "delivery-declarations", category: "Documents & data", title: "Delivery documents and declarations", to: "/delivery-challans",
+    summary: "Prepare supporting documents without changing their business purpose.",
+    steps: [
+      "In Delivery, create the appropriate delivery, received-goods or return document. Enter the party, products, quantities, date and reference.",
+      "Review its template and saved company details, then Save and download the PDF. Keep its status aligned with the actual delivery or return.",
+      "Use Declaration Letter for a statement your company needs to issue. Review the recipient, reference, quantities, amount and editable body before saving or signing.",
+      "A supporting document is separate from an invoice, stock adjustment or payment. Check the source records rather than assuming a PDF has completed those actions.",
+    ],
+  },
+  {
+    id: "communications", category: "Integrations", title: "Communication history and email templates", to: "/comms",
+    summary: "Check outbound attempts and keep reusable wording safe.",
+    steps: [
+      "Open Comms log to review Email, Calls or WhatsApp invoice jobs. This section is an outbound history, not an incoming email inbox.",
+      "Choose Log a call to record who you contacted, direction, duration, outcome and notes. Logging a call does not dial a number.",
+      "Email Templates stores reusable subjects and bodies. Create your own or explicitly choose Use starter templates; use the listed placeholders when preparing document messages.",
+      "Wait for template saving to finish. If it fails, your entered text stays open so you can retry. A connection failure does not mean the saved templates have been deleted.",
+      "A provider-accepted email or queued WhatsApp PDF is not proof of recipient delivery. Check the channel or provider's delivery result when that confirmation matters.",
+    ],
+  },
+  {
+    id: "follow-ups", category: "Sales & CRM", title: "Reminders, notes and marketing follow-up", to: "/follow-ups",
+    summary: "Keep the next action attached to the right business contact.",
+    steps: [
+      "In Follow-ups, choose the customer or supplier side, add a reminder and set its due date. Mark it complete only after the task has been done.",
+      "Use customer or supplier notes for working context. The dashboard separates overdue, due-today and open reminders.",
+      "In Marketing, review suggested contacts based on recorded trading history. Optional lookup and enrichment services require their own configured providers.",
+      "Review the campaign recipients, exclusions and message before sending. A saved draft does not send a campaign; third-party messaging charges and quotas still apply.",
     ],
   },
   {
@@ -49,7 +136,7 @@ export const GUIDES = [
     summary: "Use core ERP and CRM locally without a paid license.",
     steps: [
       "Core local storage and local invoices are free with no monthly invoice cap. Sign in online once to link the device; later offline password access requires a remembered password sign-in.",
-      "Paid Ultra licenses retain their existing benefits, device activation and offline signature verification. They are not required to access your local records.",
+      "Paid plans and connected devices are managed from Billing & Subscription and Devices. A paid license is not required to access your local records.",
       "Hosted cloud quotas and provider charges are separate. Free local software does not include unlimited hosted email, SMS, or external AI usage.",
       "In the desktop app, open Data & Storage to create a full database-and-files backup. The separate summary export is not a complete restorable backup.",
     ],
@@ -106,9 +193,11 @@ export const GUIDES = [
     steps: [
       "Create an invoice and select the customer. Select saved products when you want document lines linked to inventory.",
       "Enter quantities, prices, tax and discounts. Check currency, issue date, due date and the live document preview.",
+      "Choose Check e-invoice in the main toolbar to review required UAE e-invoice fields locally without saving. Complete the seller, buyer, tax and document details listed in the review before exporting XML.",
       "Save the draft before sending. Use the document's email or sharing action to deliver it; saving a draft does not send it.",
       "Record a payment against the invoice when money is received. Check the remaining balance and Payment Receipts.",
       "Review Accounting and Reports for the resulting entries. A sales value and a cash receipt are different measures.",
+      "Checking and exporting supported UAE PINT-AE XML is free. A validated export is not a submitted or government-approved invoice: network submission requires a configured accredited provider. Unsupported complex transaction types are blocked from export.",
     ],
   },
   {
@@ -204,7 +293,7 @@ export const GUIDES = [
       "Local Ollama needs no API key. LM Studio accepts keyless requests by default; if you enabled authentication, enter your local server token. Downloaded models run on your hardware; model licenses still apply. A cloud-backed model can still send data online through a local server.",
       "For hosted inference, choose a provider and use Get your API key to open its dashboard. Enter a key from your own account. Availability, region eligibility, charges and quotas vary. Check Provider setup & limits before sending business data.",
       "Filey supports OpenAI-compatible Chat Completions and Anthropic Messages endpoints. Choose a model with tool calling for business actions and vision for document images. A successful greeting test does not prove all model capabilities.",
-      "AI keys are saved in this browser or desktop profile, without application-level encryption, and are used with the selected endpoint. Changing the endpoint origin clears the previous key to avoid sending it to another provider. No shared provider key is bundled with these presets.",
+      "Desktop API keys are kept in the operating system's credential store for your signed-in account and workspace. Web and mobile keys stay in memory until the page reloads; enter them again after reloading. Provider and model settings are saved separately from keys. Keys belong to the selected endpoint origin, so changing providers does not send another provider's key to the new endpoint. No shared provider key is bundled with these presets.",
       "Find local models only reads the server catalogue. Test connection sends a short greeting; it does not read or change business records. In a browser, your local server must allow the Filey origin; the installed desktop app uses its native request transport.",
       "Filey's cloud/local record mode and the AI provider are independent choices. Local AI can still invoke enabled online tools. To keep a run offline, use a downloaded local model and disable the online capabilities you do not want.",
     ],
@@ -231,12 +320,29 @@ export const GUIDES = [
     to: "/browser",
     summary: "Open Instagram, WhatsApp and other websites in the Windows app.",
     steps: [
-      "Open Browser in the sidebar and choose a website. Windows opens an isolated Filey browser window; the web version opens a normal browser tab.",
+      "Open Browser under Tools, or use the browser icon in Filey AI. It opens a collapsible browser panel beside the conversation. Use its address bar, website shortcuts and tabs in the Windows desktop app.",
+      "Interactive browsing requires the installed Windows app. The web and mobile versions show the browser panel's availability message; they cannot control another browser tab.",
       "Sign in to the website yourself. Site logins stay on this device with your Filey account and company, including across local/cloud switching. Changing workspace closes the windows without deleting that profile's cookies.",
       "In Filey AI, enable temporary Computer access and describe the task. The model needs vision and tool support. It can open windows, inspect screenshots and interact with the visible page while access is active.",
       "Review the selected account, recipient and content before publishing or sending. Opening a site or a message draft does not complete the action. You handle passwords, CAPTCHA and site permissions.",
       "Some sites restrict embedded browsers or need popup login flows. Filey shows blocked popup and download notices. Use your regular browser when a site requires it; no authentication or platform restrictions are bypassed.",
       "For invoices, paired WhatsApp sends the actual PDF. Prepare WhatsApp + PDF saves the file and opens an unsent draft; attach the saved PDF and verify the result before treating it as sent.",
+    ],
+  },
+  {
+    id: "file-tools",
+    category: "Workflows",
+    title: "Convert, unlock and prepare files",
+    to: "/tools",
+    summary: "Create a new file on your device, download it or continue with another tool.",
+    steps: [
+      "Open Tools and search for the task, such as merge, compress, OCR or Remove PDF Password. Each tool shows its accepted file types and whether it needs one file or several.",
+      "Choose files from your device or drag them into the tool. Review Tool settings before running. Tools with a page editor let you adjust the document first; your original file stays unchanged.",
+      "To remove a PDF password, choose Remove PDF Password, add the protected PDF and enter its current password. Run the tool to create a copy that opens without the password. An incorrect password leaves the original protected.",
+      "When Your files are ready appears, choose Download results for every output or Download beside an individual file. Results remain available while you stay in that tool.",
+      "To continue working, search the Next tool menu and choose Continue. Filey passes the generated files directly into the selected tool. Adjust again returns to the current tool's settings.",
+      "If a conversion fails, correct the settings or replace the input and run it again. Large or unsupported HEIC photos may need exporting as JPEG or PNG first. Cancel stops supported long-running conversions.",
+      "OCR and table extraction need a clear source. Office conversions preserve supported content rather than the complete original layout. Redaction and sanitization create rasterized pages; keep the original if you also need selectable text.",
     ],
   },
   {
@@ -302,7 +408,7 @@ export const GUIDES = [
     to: "/integrations",
     summary: "All connections live in one section.",
     steps: [
-      "Use App directory to find an integration. Provider setup holds connection credentials and the desktop WhatsApp bridge.",
+      "Use App directory to find an integration. Provider setup holds optional provider credentials. Built-in connections contains Connect WhatsApp in the installed desktop app.",
       "Authorize connected apps in the provider's browser window, then refresh connection status. Missing provider setup is different from being signed out of Filey.",
       "Built-in connections include public reference rates, manual WhatsApp and Telegram links, calendar export and Resend email status.",
       "Contact chat links open your own messaging account. Automated bots require their own administrator setup and credentials.",
@@ -330,9 +436,10 @@ export const GUIDES = [
     summary: "Know where the active workspace is stored.",
     steps: [
       "Cloud mode uses your signed-in account and workspace permissions. Local mode stores business records on the device.",
-      "The storage badge in the header identifies the active workspace. In Settings → Data & Storage, review the destination before switching. Existing records stay in their original store unless you explicitly transfer them.",
-      "Cloud saves require connectivity. Local saves work offline. Automatic cloud sync is off by default and must be enabled separately for the same account that owns the device workspace.",
-      "Switching preserves your session after checking the destination. If a cloud session or a local license is unavailable, the current workspace remains open with an explanation. Other open tabs pause until reloaded.",
+      "In Settings → Data & Storage, turn Store in my Filey account on to upload this device's pending changes before continuing in Filey Cloud. If an edited record differs in both places, this switch keeps the device's edited version; cloud-only records remain.",
+      "Turn the switch off to save the latest cloud records and files on this device before working locally. Switching needs a connection to finish the transfer. The destination opens only after the transfer succeeds.",
+      "Cloud saves require connectivity. Local saves work offline. Optional two-way background sync is controlled separately under Advanced sync for the same account and workspace.",
+      "The storage badge identifies the active store. If a transfer cannot finish, Filey keeps the current store open and offers Try again. Your account stays signed in; other open tabs pause until reloaded.",
       "Export a backup before moving devices or making a large import. Keep backup files in a location you control.",
       "When reporting a problem, include the section, action, error message and whether it happened in cloud or local mode. Do not include passwords or API keys.",
     ],
@@ -348,7 +455,7 @@ export default function KnowledgeCenter() {
   const filtered = GUIDES.filter((g) =>
     `${g.title} ${g.category} ${g.summary} ${g.steps.join(" ")}`
       .toLowerCase()
-      .includes(query.toLowerCase())
+      .includes(query.trim().toLowerCase())
   );
   const download = async () => {
     try {
@@ -399,16 +506,13 @@ export default function KnowledgeCenter() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <SelectMenu
-            value={String(article?.id || "")}
-            onChange={(nextValue) => setParams(nextValue ? { article: nextValue } : {})}
-            options={[
-              { value: "", label: "Choose a guide" },
-              ...filtered.map((g) => ({ value: String(g.id), label: String(g.title) })),
-            ]}
-            ariaLabel={"Choose a help article"}
-            className="mt-3 lg:hidden"
-          />
+          <div className="mt-3 lg:hidden"><SelectMenu
+            ariaLabel="Choose a help article"
+            value={article?.id || ""}
+            onChange={id => setParams(id ? { article: id } : {})}
+            options={[{ value: "", label: "Choose a guide" }, ...filtered.map(g => ({ value: g.id, label: g.title }))]}
+            searchPlaceholder="Find a guide"
+          /></div>
           <nav aria-label="Help topics" className="hidden lg:block mt-4 space-y-5">
             {[...new Set(filtered.map((g) => g.category))].map((category) => (
               <div key={category}>
@@ -429,12 +533,8 @@ export default function KnowledgeCenter() {
                   ))}
               </div>
             ))}
-            {!filtered.length && (
-              <p role="status" className="text-sm text-muted-foreground">
-                No matching guides. Try “invoice”, “password” or “stock”.
-              </p>
-            )}
           </nav>
+          {!filtered.length && <p role="status" className="mt-4 text-sm text-muted-foreground">No matching guides. Try “invoice”, “password” or “stock”.</p>}
         </aside>
         <div className="min-w-0">
           {article ? (

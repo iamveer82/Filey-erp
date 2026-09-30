@@ -10,6 +10,7 @@ const base: DocViewForm = {
   seller_name: "Filey Trading LLC",
   seller_address: "Business Bay\nDubai, UAE",
   seller_trn: "100234567890003",
+  einvoice: { seller: { tin: "1001234567" } },
   seller_email: "billing@filey.ae",
   seller_phone: "+971 4 000 0000",
   customer_name: "Acme LLC",
@@ -71,7 +72,7 @@ describe("UAE reference-pack templates", () => {
     expect(html).toContain("فاتورة ضريبية");
     expect(html).toContain("Filey Trading LLC");
     expect(html).toContain("TRN: 100234567890003");
-    expect(html).toContain("TIN: 1002345678");
+    expect(html).toContain("TIN: 1001234567");
     expect(html).toContain("Acme LLC");
     expect(html).toContain("INV-2026-0001");
     expect(html).toContain("VAT @ 5%");
@@ -238,21 +239,20 @@ describe("UAE reference-pack templates — wave 2", () => {
     expect(html).toContain("VAT @ 5%");
   });
 
-  it("uae-margin has no VAT columns and a net-only grand total", () => {
+  it("uae-margin hides VAT columns without removing recorded VAT from the amount due", () => {
     const html = renderToStaticMarkup(<DocView form={{ ...base, template: "uae-margin" }} />);
     expect(html).toContain("نظام هامش الربح");
     expect(html).not.toContain("VAT %");
     expect(html).not.toContain("VAT Breakdown");
     expect(html).not.toContain("VAT @");
     expect(html).toContain("Total (AED)");
-    expect(html).toContain("6,000.00"); // VAT not added on a margin-scheme doc
-    expect(html).not.toContain("6,300.00");
+    expect(html).toContain("6,300.00"); // a layout cannot change booked tax
     expect(html).toContain("Art. 43");
   });
 
   it("uae-commercial has no VAT anywhere in items or totals", () => {
     const html = renderToStaticMarkup(
-      <DocView form={{ ...base, template: "uae-commercial" }} />
+      <DocView form={{ ...base, tax_rate: 0, template: "uae-commercial" }} />
     );
     expect(html).toContain("INVOICE");
     expect(html).toContain("Amount (AED)");

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
@@ -133,7 +133,7 @@ it("does not adopt shared email templates or write starters until explicitly req
   expect(view.queryByText("Alice template")).toBeNull();
   expect(mock.setSetting).not.toHaveBeenCalled();
   fireEvent.click(starters);
-  expect(view.getByText("Invoice Due")).toBeTruthy();
+  expect(await view.findByText("Invoice Due")).toBeTruthy();
   expect(mock.setSetting).toHaveBeenCalledOnce();
   expect(mock.setSetting).toHaveBeenCalledWith("email_templates", expect.any(String));
   expect(localStorage.getItem(emailKey)).toContain("Private body");
@@ -150,6 +150,130 @@ it("refreshes persisted email templates without resetting an unsaved editor", as
   act(() => notifyDataChanged());
   expect(await view.findByText("Updated elsewhere")).toBeTruthy();
   expect(view.getByDisplayValue("Unsaved email template")).toBeTruthy();
+  expect(mock.setSetting).not.toHaveBeenCalled();
+});
+
+it("deletes from the latest template list after a confirmation waits through a refresh", async () => {
+  localStorage.setItem(cacheKey(emailKey), JSON.stringify([emailTemplate]));
+  const view = wrap(<EmailTemplates />);
+  await waitFor(() => expect(view.getByRole("button", { name: "New template" })).toBeEnabled());
+  fireEvent.click(view.getByRole("button", { name: "More actions" }));
+  fireEvent.click(await view.findByRole("menuitem", { name: "Delete" }));
+  const confirmation = within(await view.findByRole("alertdialog"));
+  const added = { ...emailTemplate, id: 2, name: "Added elsewhere" };
+  mock.settings.mockResolvedValue([{ key: "email_templates", value: JSON.stringify([emailTemplate, added]) }]);
+  act(() => notifyDataChanged());
+  expect(await view.findByText("Added elsewhere")).toBeTruthy();
+  fireEvent.click(confirmation.getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(mock.setSetting).toHaveBeenCalledOnce());
+  expect(mock.setSetting).toHaveBeenCalledWith("email_templates", JSON.stringify([added]));
+  await waitFor(() => expect(view.queryByText("Alice template")).toBeNull());
+  expect(view.getByText("Added elsewhere")).toBeTruthy();
+});
+
+it("keeps a template draft and original cache after a failed durable save, then retries", async () => {
+  localStorage.setItem(cacheKey(emailKey), JSON.stringify([emailTemplate]));
+  const view = wrap(<EmailTemplates />);
+  await waitFor(() => expect(view.getByRole("button", { name: "New template" })).toBeEnabled());
+  fireEvent.click(view.getByRole("button", { name: "New template" }));
+  fireEvent.change(view.getByRole("textbox", { name: "Template Name *" }), { target: { value: "Payment reminder" } });
+  fireEvent.change(view.getByRole("textbox", { name: "Subject *" }), { target: { value: "Invoice {{number}}" } });
+  mock.setSetting.mockRejectedValueOnce(new Error("Could not save fixture"));
+  fireEvent.click(view.getByRole("button", { name: "Create template" }));
+  expect(await view.findByText("Could not save fixture")).toBeTruthy();
+  expect(view.getByDisplayValue("Payment reminder")).toBeTruthy();
+  expect(JSON.parse(localStorage.getItem(cacheKey(emailKey))!)).toEqual([emailTemplate]);
+  fireEvent.click(view.getByRole("button", { name: "Create template" }));
+  await waitFor(() => expect(view.queryByRole("dialog")).toBeNull());
+  expect(view.getByText("Payment reminder")).toBeTruthy();
+  expect(mock.setSetting).toHaveBeenCalledTimes(2);
+});
+
+it("does not claim success or duplicate writes while a template save is pending", async () => {
+  let finish!: () => void;
+  mock.setSetting.mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+  const view = wrap(<EmailTemplates />);
+  const starters = await view.findByRole("button", { name: "Use starter templates" });
+  fireEvent.click(starters);
+  fireEvent.click(starters);
+  expect(mock.setSetting).toHaveBeenCalledOnce();
+  expect(view.queryByText("Starter templates added.")).toBeNull();
+  expect(localStorage.getItem(cacheKey(emailKey))).toBeNull();
+  await act(async () => finish());
+  expect(await view.findByText("Invoice Due")).toBeTruthy();
+});
+
+it("does not let a refresh started before a template save overwrite its saved cache", async () => {
+  let resolve!: (rows: { key: string; value: string }[]) => void;
+  const view = wrap(<EmailTemplates />);
+  await view.findByRole("button", { name: "Use starter templates" });
+  mock.settings.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+  act(() => notifyDataChanged());
+  await waitFor(() => expect(mock.settings).toHaveBeenCalledTimes(2));
+  fireEvent.click(view.getByRole("button", { name: "Use starter templates" }));
+  expect(await view.findByText("Invoice Due")).toBeTruthy();
+  const saved = localStorage.getItem(cacheKey(emailKey));
+  await act(async () => resolve([{ key: "email_templates", value: JSON.stringify([emailTemplate]) }]));
+  expect(view.queryByText("Alice template")).toBeNull();
+  expect(localStorage.getItem(cacheKey(emailKey))).toBe(saved);
+});
+
+it.each(["account", "mode"])("does not report or mirror a pending save into the next %s workspace", async change => {
+  let finish!: () => void;
+  mock.setSetting.mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve; }));
+  const view = wrap(<EmailTemplates />);
+  fireEvent.click(await view.findByRole("button", { name: "Use starter templates" }));
+  const originalKey = cacheKey(emailKey);
+  act(() => {
+    if (change === "account") mock.scope = "org:user:bob";
+    else localStorage.setItem("filey_data_mode", "cloud");
+    window.dispatchEvent(new Event("filey:agent-storage"));
+  });
+  await view.findByRole("button", { name: "Use starter templates" });
+  await act(async () => finish());
+  expect(view.queryByText("Starter templates added.")).toBeNull();
+  expect(view.queryByText(/Workspace changed while saving/)).toBeNull();
+  expect(view.queryByText("Invoice Due")).toBeNull();
+  expect(localStorage.getItem(originalKey)).toBeNull();
+  expect(localStorage.getItem(cacheKey(emailKey))).toBeNull();
+});
+
+it("keeps cached templates and prevents overwrites when their authoritative read fails", async () => {
+  localStorage.setItem(cacheKey(emailKey), JSON.stringify([emailTemplate]));
+  mock.settings.mockRejectedValueOnce(new Error("Connection failed"));
+  const view = wrap(<EmailTemplates />);
+  expect(await view.findByText("Couldn't load saved templates. Your current records are preserved.")).toBeTruthy();
+  expect(view.getByText("Alice template")).toBeTruthy();
+  expect(view.getByRole("button", { name: "New template" })).toBeDisabled();
+  fireEvent.click(view.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(view.getByRole("button", { name: "New template" })).toBeEnabled());
+  expect(mock.setSetting).not.toHaveBeenCalled();
+});
+
+it("makes a refresh failure recoverable inside an open template editor without losing its draft", async () => {
+  const view = wrap(<EmailTemplates />);
+  await waitFor(() => expect(view.getByRole("button", { name: "New template" })).toBeEnabled());
+  fireEvent.click(view.getByRole("button", { name: "New template" }));
+  const editor = within(view.getByRole("dialog"));
+  fireEvent.change(editor.getByRole("textbox", { name: "Template Name *" }), { target: { value: "Unsaved reminder" } });
+  fireEvent.change(editor.getByRole("textbox", { name: "Subject *" }), { target: { value: "Payment due" } });
+  mock.settings.mockRejectedValueOnce(new Error("Fixture unavailable"));
+  act(() => notifyDataChanged());
+  expect(await editor.findByText("Couldn't load saved templates. Your current records are preserved.")).toBeTruthy();
+  expect(editor.getByRole("button", { name: "Create template" })).toBeDisabled();
+  fireEvent.click(editor.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(editor.getByRole("button", { name: "Create template" })).toBeEnabled());
+  expect(editor.getByDisplayValue("Unsaved reminder")).toBeTruthy();
+  expect(mock.setSetting).not.toHaveBeenCalled();
+});
+
+it.each(["{}", "[null]"])("preserves cached templates when stored JSON has an invalid shape: %s", async value => {
+  localStorage.setItem(cacheKey(emailKey), JSON.stringify([emailTemplate]));
+  mock.settings.mockResolvedValue([{ key: "email_templates", value }]);
+  const view = wrap(<EmailTemplates />);
+  expect(await view.findByText("Couldn't load saved templates. Your current records are preserved.")).toBeTruthy();
+  expect(view.getByText("Alice template")).toBeTruthy();
+  expect(view.getByRole("button", { name: "New template" })).toBeDisabled();
   expect(mock.setSetting).not.toHaveBeenCalled();
 });
 

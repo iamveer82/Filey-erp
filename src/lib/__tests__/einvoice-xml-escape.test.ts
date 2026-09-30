@@ -7,6 +7,7 @@ import { buildInvoiceXml, type EInvoiceDoc } from "../einvoiceXml";
 
 const doc = (over: Partial<EInvoiceDoc> = {}): EInvoiceDoc => ({
   number: "INV-2026-0001",
+  einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408" },
   issue_date: "2026-09-04",
   currency: "AED",
   tax_rate: 5,

@@ -99,6 +99,7 @@ const sentMessages = new Map();
 // Bounded replay window across reconnects; provider re-delivery must not repeat a tool.
 const receivedIds = new Set();
 const typing = new Map();
+const mediaDownloads = new Set();
 
 // Several pending turns in the same chat share one heartbeat. Presence is
 // best-effort and never blocks receipt, delivery, or the owner security gate.
@@ -177,6 +178,7 @@ function startStdinLoop() {
   rl.on("close", async () => {
     closing = true;
     connected = false;
+    stopMediaDownloads();
     qrGeneration++;
     try { activeSock?.end?.(undefined); } catch { /* already closed */ }
     await credentialWrites;
@@ -253,28 +255,60 @@ function askAgent(jid, event) {
   });
 }
 
-async function downloadLimited(message, limit) {
+async function downloadLimited(message, limit, signal) {
+  signal.throwIfAborted();
   const content = normalizeMessageContent(message.message) ?? {};
   const media = content.documentMessage || content.imageMessage || content.audioMessage || content.videoMessage;
   const options = mediaRequestOptions(media);
-  const controller = new AbortController();
   let stream;
-  const timer = setTimeout(() => {
-    controller.abort();
-    stream?.destroy(new Error("Attachment download timed out"));
-  }, 30_000);
-  timer.unref?.();
+  const abort = () => stream?.destroy(new Error("Attachment download stopped"));
+  signal.addEventListener("abort", abort, { once: true });
   const chunks = [];
   let size = 0;
   try {
-    stream = await downloadMediaMessage(message, "stream", { options: { ...options, signal: controller.signal } });
+    stream = await downloadMediaMessage(message, "stream", { options: { ...options, signal } });
+    if (signal.aborted) abort();
     for await (const chunk of stream) {
       size += chunk.length;
       if (size > limit) throw new Error("Attachment exceeds its size limit");
       chunks.push(chunk);
     }
     return Buffer.concat(chunks, size);
-  } finally { clearTimeout(timer); stream?.destroy?.(); }
+  } finally { signal.removeEventListener("abort", abort); stream?.destroy?.(); }
+}
+
+/** Media must not block the event loop's later /stop or text messages. Bound
+ * concurrent downloads and show presence before the provider finishes them. */
+async function forwardMedia(jid, socket, work) {
+  if (mediaDownloads.size >= 3) {
+    await sendTo(jid, `${HEADER}\n\nI'm receiving your earlier files. Wait for a reply before sending another.`);
+    return;
+  }
+  const controller = new AbortController();
+  mediaDownloads.add(controller);
+  const stopTyping = beginTyping(jid);
+  const ack = setTimeout(() => {
+    if (!controller.signal.aborted && connected && socket === activeSock)
+      void sendTo(jid, `${HEADER}\n\nReceiving your attachment — I'll send the result here. Keep Filey open while I work.`);
+  }, ACK_AFTER_MS);
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  timeout.unref?.();
+  try { await work(controller.signal); }
+  catch {
+    if (!controller.signal.aborted && connected && socket === activeSock)
+      await sendTo(jid, `${HEADER}\n\nI couldn't download that file. Send it again as a document under 12 MB.`);
+    else if (connected && socket === activeSock && !controller.signal.reason?.fileyStop)
+      await sendTo(jid, `${HEADER}\n\nThat attachment took too long to download. Send it again or try a smaller file.`);
+  } finally {
+    clearTimeout(ack);
+    clearTimeout(timeout);
+    mediaDownloads.delete(controller);
+    stopTyping();
+  }
+}
+
+function stopMediaDownloads() {
+  for (const controller of mediaDownloads) controller.abort({ fileyStop: true });
 }
 
 /** Reconnect ONCE per drop, on a fresh socket, with the dead one fully torn
@@ -301,6 +335,7 @@ function startupFailure(error) {
 
 function reconnect(dead) {
   if (closing) return;
+  stopMediaDownloads();
   try {
     // Stop it answering and stop it re-entering here — but NOT `creds.update`.
     // Baileys flushes credential updates (prekey counters, identity state) as
@@ -471,7 +506,9 @@ async function start() {
       const name = m.pushName ?? phone;
 
       const content = normalizeMessageContent(m.message) ?? {};
-      const document = content.documentMessage || content.imageMessage;
+      if (!content.documentMessage && !content.imageMessage && !content.videoMessage && !content.audioMessage && ["/stop", "/new"].includes(text.toLowerCase()))
+        stopMediaDownloads();
+      const document = content.documentMessage || content.imageMessage || content.videoMessage;
       if (document) {
         // Only authenticated owner media is downloaded. Bound the stream even
         // when provider metadata is absent or incorrect.
@@ -479,15 +516,15 @@ async function start() {
           await sendTo(jid, `${HEADER}\n\nSend a PDF or image smaller than 12 MB.`);
           continue;
         }
-        try {
-          const bytes = await downloadLimited(m, 12 * 1024 * 1024);
-          if (closing || !connected || sock !== activeSock) continue;
+        void forwardMedia(jid, sock, async signal => {
+          const bytes = await downloadLimited(m, 12 * 1024 * 1024, signal);
+          if (signal.aborted || closing || !connected || sock !== activeSock) return;
           // eslint-disable-next-line no-control-regex -- Strip control bytes from an untrusted filename.
-          const filename = String(document.fileName || (content.imageMessage ? "photo.jpg" : "document.pdf")).split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, "").slice(0, 160);
+          const filename = String(document.fileName || (content.imageMessage ? "photo.jpg" : content.videoMessage ? "video.mp4" : "document.pdf")).split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, "").slice(0, 160);
           void askAgent(jid, { type: "message", from: phone, text: text || "Tell me what is in this attachment.", fromName: name, attachment: {
             name: filename || "attachment", mimetype: document.mimetype || "application/octet-stream", b64: bytes.toString("base64"),
           } }).then(deliver);
-        } catch { await sendTo(jid, `${HEADER}\n\nI couldn't download that file. Send it again as a document under 12 MB.`); }
+        });
         continue;
       }
       if (!text) {
@@ -499,10 +536,13 @@ async function start() {
         // 40-minute voice memo is not a prompt.
         const audio = normalizeMessageContent(m.message)?.audioMessage;
         if (audio) {
-          if (Number(audio.fileLength) > 8 * 1024 * 1024 || Number(audio.seconds) > 300) continue;
-          try {
-            const buf = await downloadLimited(m, 8 * 1024 * 1024);
-            if (closing || !connected || sock !== activeSock) continue;
+          if (Number(audio.fileLength) > 8 * 1024 * 1024 || Number(audio.seconds) > 300) {
+            void sendTo(jid, `${HEADER}\n\nSend a voice note shorter than five minutes and smaller than 8 MB.`);
+            continue;
+          }
+          void forwardMedia(jid, sock, async signal => {
+            const buf = await downloadLimited(m, 8 * 1024 * 1024, signal);
+            if (signal.aborted || closing || !connected || sock !== activeSock) return;
             if (buf && buf.length <= 8 * 1024 * 1024) {
               void askAgent(jid, {
                   type: "voice_note",
@@ -514,9 +554,7 @@ async function start() {
             } else {
               console.error("voice note too large, skipped");
             }
-          } catch {
-            console.error("WhatsApp voice attachment could not be downloaded.");
-          }
+          });
         }
         continue;
       }

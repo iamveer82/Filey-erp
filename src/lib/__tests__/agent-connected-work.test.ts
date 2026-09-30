@@ -166,9 +166,10 @@ describe("invoice WhatsApp tools", () => {
     expect(desktopBrowserCommand).not.toHaveBeenCalled();
   });
 
-  it("keeps acceptance but avoids another workspace's ledger after the provider responds", async () => {
+  it("cancels the old turn and avoids another workspace's ledger after the provider responds", async () => {
     vi.mocked(sendWaFile).mockImplementationOnce(async () => { setCacheOrg("another-org", "another-user"); return "provider-id"; });
-    expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12" })).toMatchObject({ ok: true, status: "accepted", warning: expect.stringMatching(/account changed/i) });
+    await expect(call("send_invoice_whatsapp", { invoice_number: "INV-12" })).rejects.toMatchObject({ name: "AbortError" });
+    expect(sendWaFile).toHaveBeenCalledTimes(1);
     expect(billing.setStatus).not.toHaveBeenCalled();
     expect(waLogAdd).not.toHaveBeenCalled();
   });
@@ -208,6 +209,28 @@ describe("invoice WhatsApp tools", () => {
 });
 
 describe("connected work discovery and permissions", () => {
+  it.each(["whatsapp:owner", "telegram:owner"])("does not bootstrap the owner's computer or personal browser for %s", async agentId => {
+    const session = vi.fn(async () => 42);
+    expect(await runTool("computer_use", { action: "list_windows" }, () => true, true, "remote-turn", undefined, session, agentId)).toHaveProperty("error");
+    expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toMatchObject({ retry_safe: false });
+    expect(session).not.toHaveBeenCalled();
+    expect(runComputerUse).not.toHaveBeenCalled();
+    expect(desktopBrowserCommand).not.toHaveBeenCalled();
+    expect(offeredTools({ isOwner: true, computerSession: session, agentId }, new Set(["web"])).map(tool => tool.name)).not.toContain("workspace_browser");
+    setCapabilityEnabled("agent_computers", true);
+    expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toHaveProperty("tab");
+    expect(desktopBrowserCommand).toHaveBeenCalledWith(expect.objectContaining({ action: "open" }), undefined, agentId);
+    expect(session).not.toHaveBeenCalled();
+  });
+  it("respects capability and mode revocation while approval is pending", async () => {
+    const args = { action: "list_windows" };
+    const session = vi.fn(async () => 42);
+    expect(await runTool("computer_use", args, () => { setCapabilityEnabled("computer", false); return true; }, true, "revoked-turn", undefined, session)).toMatchObject({ retry_safe: false });
+    expect(session).not.toHaveBeenCalled();
+    setCapabilityEnabled("computer", true);
+    expect(await runTool("computer_use", args, () => { setAgentMode("plan"); return true; }, true, "revoked-turn", undefined, session)).toMatchObject({ retry_safe: false });
+    expect(session).not.toHaveBeenCalled();
+  });
   it("does not reacquire computer access after takeover while approval is open", async () => {
     const session = vi.fn(async () => 42);
     const approve = () => {

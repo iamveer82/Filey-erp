@@ -119,7 +119,7 @@ export function Switch({
       className={cn(
         "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        checked ? "bg-primary-500" : "bg-border",
+        checked ? "bg-foreground" : "bg-border",
         disabled || busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
         className
       )}
@@ -127,7 +127,8 @@ export function Switch({
       <span
         aria-hidden="true"
         className={cn(
-          "pointer-events-none block h-5 w-5 rounded-full bg-white shadow transition-transform",
+          "pointer-events-none block h-5 w-5 rounded-full shadow transition-transform",
+          checked ? "bg-background" : "bg-foreground",
           checked ? "translate-x-5" : "translate-x-0.5"
         )}
       />
@@ -156,7 +157,7 @@ export function PageHeader({
   );
 }
 
-/** Generic white card. Use `tone` for accent / dark variants. */
+/** Shared card surface; `tone` remains accepted for older callers. */
 export function Card({
   children,
   className,
@@ -170,7 +171,7 @@ export function Card({
   onClick?: () => void;
 }) {
   return (
-    <CardPrimitive className={cn("p-5", (hover || onClick) && "cursor-pointer", className)} onClick={onClick}>
+    <CardPrimitive className={cn("min-w-0 p-5", (hover || onClick) && "cursor-pointer", className)} onClick={onClick}>
       {children}
     </CardPrimitive>
   );
@@ -197,13 +198,10 @@ export function Delta({
   );
 }
 
-/** Glanceable KPI card — icon chip, metric, delta.
- *  Pass rawValue + formatValue for a live count-up animation when the card
- *  scrolls into view. */
 /** Shrink an element's font-size until its text fits the available width, down
  *  to a floor — so a big number stays fully visible instead of truncating to an
  *  ellipsis. Re-fits when the value or available card width changes. */
-function useFitText<T extends HTMLElement>(dep: unknown, max = 18, min = 11) {
+function useFitText<T extends HTMLElement>(dep: unknown, max = 26, min = 12) {
   const ref = useRef<T>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -216,7 +214,7 @@ function useFitText<T extends HTMLElement>(dep: unknown, max = 18, min = 11) {
         size -= 1;
         el.style.fontSize = size + "px";
       }
-      // Extremely long totals still remain readable at the minimum font size.
+      // Keep even unusually long totals readable at the minimum font size.
       el.style.whiteSpace = el.scrollWidth > el.clientWidth ? "normal" : "nowrap";
     };
     fit();
@@ -236,7 +234,7 @@ export function MetricCard({
   value,
   delta,
   icon,
-  iconClass = "bg-muted text-foreground",
+  iconClass = "text-muted-foreground",
   rawValue,
   formatValue,
   change,
@@ -267,34 +265,32 @@ export function MetricCard({
   // No border-color transition: the base colour is a theme custom property, and
   // animating it leaves the previous theme's colour painted on a flip.
   return (
-    <CardPrimitive className="p-4 h-full hover:border-border">
-      <div className="flex items-start gap-3 h-full min-h-0">
+    <CardPrimitive className="min-w-0 p-4 sm:p-5 h-full flex flex-col gap-0">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 text-[13px] text-muted-foreground leading-5 break-words">
+          {label}
+        </p>
         {icon && (
           <div
-            className={cn("rounded-lg p-1.5 shrink-0", iconClass)}
-            style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}
+            aria-hidden="true"
+            className={cn("grid h-5 w-5 shrink-0 place-items-center [&>svg]:h-4 [&>svg]:w-4", iconClass)}
           >
             {icon}
           </div>
         )}
-        <div className="min-w-0 flex-1 flex flex-col justify-center h-full overflow-hidden">
-          <p className="text-[12px] text-muted-foreground leading-4 truncate">
-            {label}
-          </p>
-          <p
-            ref={numRef}
-            title={display}
-            className="text-[22px] leading-tight font-semibold text-foreground mt-0.5 tabular-nums tracking-tight whitespace-nowrap [overflow-wrap:anywhere]"
-          >
-            {display}
-          </p>
-          {change && (
-            <p className={cn("text-[11px] font-medium mt-0.5 leading-4", toneClass)}>
-              {change}
-            </p>
-          )}
-        </div>
       </div>
+      <p
+        ref={numRef}
+        title={display}
+        className="text-[26px] leading-tight font-semibold text-foreground mt-2 tabular-nums tracking-tight whitespace-nowrap [overflow-wrap:anywhere]"
+      >
+        {display}
+      </p>
+      {change && (
+        <p className={cn("text-[12px] mt-1.5 leading-4", toneClass)}>
+          {change}
+        </p>
+      )}
       {delta !== undefined && !change && (
         <div className="mt-3">
           <Delta value={delta} />
@@ -319,12 +315,12 @@ export function InfoCard({
   tone?: "default" | "accent" | "dark";
 }) {
   return (
-    <CardPrimitive className={cn("p-4 flex flex-col", className)}>
-      <div className="flex items-center justify-between mb-3">
-        <p className="font-semibold text-ink text-sm">{title}</p>
-        {action}
+    <CardPrimitive className={cn("min-w-0 w-full self-start p-4 sm:p-5 flex flex-col gap-0", className)}>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="min-w-0 text-sm font-semibold leading-5 text-foreground break-words">{title}</h2>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
-      <div className="flex-1 min-h-0">{children}</div>
+      <div className="flex-1 min-h-0 min-w-0">{children}</div>
     </CardPrimitive>
   );
 }
@@ -622,7 +618,7 @@ export function DataTable<T>({
           {showSkeleton ? Array.from({ length: 5 }, (_, i) => <div key={i} className="p-4"><Skeleton className="h-14 w-full" /></div>) :
             paged.map((row, i) => {
               const k = rowKey ? keyOf(row) : i;
-              return <div key={k} className={cn("filey-record", sel.has(k) && "bg-primary-50/40")}
+              return <div key={k} className={cn("filey-record", sel.has(k) && "bg-muted/60")}
                 tabIndex={onRowClick ? 0 : undefined}
                 onClick={onRowClick ? e => { if (!(e.target as HTMLElement).closest(ROW_CLICK_IGNORE)) onRowClick(row); } : undefined}
                 onKeyDown={onRowClick ? keyActivate(() => onRowClick(row)) : undefined}>
@@ -718,7 +714,7 @@ export function DataTable<T>({
                     onKeyDown={onRowClick ? keyActivate(() => onRowClick(row)) : undefined}
                     className={cn(
                       "row-hover",
-                      checked && "bg-primary-50/40",
+                      checked && "bg-muted/60",
                       onRowClick && "cursor-pointer"
                     )}
                   >
@@ -1009,7 +1005,7 @@ export function TimelineItem({
 }) {
   const dotClass: Record<TimelineStatus, string> = {
     done: "bg-success text-white border-success",
-    current: "bg-primary-400 text-neutral-900 border-primary-500 ring-4 ring-primary-500/15",
+    current: "bg-foreground text-background border-foreground ring-4 ring-foreground/10",
     error: "bg-danger text-white border-danger",
     default: "bg-card text-muted-foreground border-border",
   };
@@ -1118,7 +1114,7 @@ export function SectionBox({
   );
 }
 
-/** Amber-accent toggle tile (reference "Branding & finalize" controls):
+/** Neutral toggle tile (reference "Branding & finalize" controls):
  *  icon chip, label/desc, pill switch, optional expanded content. */
 export function ToggleTile({
   icon: Icon,
@@ -1139,14 +1135,14 @@ export function ToggleTile({
     <div
       className={cn(
         "rounded-lg border p-3 transition-colors",
-        active ? "border-primary-400 bg-primary-500/5" : "border-border"
+        active ? "border-foreground/25 bg-muted/60" : "border-border"
       )}
     >
       <div className="flex items-start gap-2">
         <div
           className={cn(
             "h-8 w-8 shrink-0 rounded-md grid place-items-center",
-            active ? "bg-primary-500/15 text-primary-600 dark:text-primary-400" : "bg-hover text-muted-foreground"
+            active ? "bg-muted text-foreground" : "bg-hover text-muted-foreground"
           )}
         >
           <Icon className="h-4 w-4" strokeWidth={1.75} />
@@ -1162,12 +1158,13 @@ export function ToggleTile({
           onClick={onToggle}
           className={cn(
             "h-5 w-9 shrink-0 rounded-full transition-colors cursor-pointer",
-            active ? "bg-primary-400" : "bg-border"
+            active ? "bg-foreground" : "bg-border"
           )}
         >
           <span
             className={cn(
-              "block h-4 w-4 rounded-full bg-white shadow transition-transform",
+              "block h-4 w-4 rounded-full shadow transition-transform",
+              active ? "bg-background" : "bg-foreground",
               active ? "translate-x-4" : "translate-x-0.5"
             )}
           />

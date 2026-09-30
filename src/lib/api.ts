@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured, supabase, invokeFn } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent, setWorkspaceTransition } from "./dataMode";
 import { applyRoundOff, r2 } from "./money";
+import { isCreditNote } from "./einvoice";
 import {
   splitItemMeta,
   mergeItemMeta,
@@ -377,6 +378,7 @@ export interface InvoiceItem {
   tax_category?: string;
 }
 export interface InvoiceDocSummary {
+  invoice_type_code?: string;
   id: number;
   customer_id?: number | null;
   quotation_id?: number | null;
@@ -415,6 +417,10 @@ export interface InvoicePayment {
   paid_at: string;
 }
 export interface InvoiceDoc {
+  einvoice?: import("./einvoice").EInvoiceDetails;
+  original_invoice_number?: string | null;
+  original_invoice_date?: string | null;
+  aed_exchange_rate?: number | null;
   /** Frozen jurisdiction; changing currency never changes tax treatment. */
   tax_country_code?: string;
   id: number;
@@ -453,7 +459,7 @@ export interface InvoiceDoc {
   discount: number;
   quotation_id?: number;
   // --- UAE e-invoice (Peppol PINT-AE) mandatory fields; see lib/einvoice.ts ---
-  invoice_type_code?: string;      // 380 tax invoice, 381 credit note, …
+  invoice_type_code?: string;      // 380 tax invoice, 381 tax credit note, 81 commercial credit note, …
   transaction_type?: string;       // 8-flag bitstring, see TRANSACTION_TYPE_FLAGS
   payment_means_code?: string;     // UN/ECE 4461
   buyer_city?: string;
@@ -482,6 +488,7 @@ export type InvoiceDocInput = Omit<
   "id" | "created_at" | "updated_at"
 > & { id?: number };
 export interface CompanyProfile {
+  einvoice?: import("./einvoice").EInvoiceParty;
   country_code?: string;
   name: string;
   business_type?: string;
@@ -2516,11 +2523,14 @@ export const tools = {
     ),
   setSetting: (key: string, value: string) =>
     online(async () => {
-      const { data } = await sb()
+      const checkWorkspace = workspaceGuard();
+      const { data, error } = await sb()
         .from("app_settings")
         .select("id")
         .eq("key", key)
         .maybeSingle();
+      if (error) throw error;
+      checkWorkspace();
       const row = data as { id?: number } | null;
       if (row?.id) await sUpdate("app_settings", row.id, { value });
       else await sInsert("app_settings", { key, value });
@@ -3190,6 +3200,7 @@ export const followups = {
 // ===== Billing / Invoicing =====
 function docTotal(
   d: {
+    invoice_type_code?: string;
     tax_rate: number;
     discount: number;
     unit_price_formula?: { a: string; b?: string } | null;
@@ -3201,7 +3212,7 @@ function docTotal(
     custom?: Record<string, string> | null;
   }[]
 ) {
-  return applyRoundOff(
+  return (isCreditNote(d.invoice_type_code) ? -1 : 1) * applyRoundOff(
     lineAwareTotals(
       docLineItems(items) as any,
       d.discount,
@@ -3468,7 +3479,7 @@ async function propagateInvoice(
     // 1) Reverse any previous posting for this document. Only touch stock/orders
     //    if a prior posting actually existed (else first finalize would net to 0).
     const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, items, isPurchase, client);
+    if (prior > 0) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client);
 
     const { net: netDoc, tax: taxDoc, total: totalDoc } = docTotals(
       {
@@ -3498,6 +3509,25 @@ async function propagateInvoice(
     const tax = toBase(taxDoc);
     const total = toBase(totalDoc);
     const txnDate = (doc.issue_date as string) || todayYmd();
+
+    if (isCreditNote(String(doc.invoice_type_code ?? ""))) {
+      if (isPurchase) throw new Error("Supplier credit notes need the supplier credit workflow.");
+      // Credit notes reverse the financial amount. Physical returns need an
+      // explicit stock adjustment; a price correction must never add inventory.
+      const postings = [
+        { account: await findOrCreateSalesAccount(client), kind: "revenue", side: "debit", amount: net, label: "Sales credit" },
+        { account: await findOrCreateArAccount(client), kind: "asset", side: "credit", amount: total, label: "Customer credit" },
+      ];
+      if (tax > 0) postings.push({ account: await findOrCreateOutputVatAccount(client), kind: "liability", side: "debit", amount: tax, label: "VAT credit" });
+      for (const posting of postings) {
+        if (posting.amount <= 0) continue;
+        await sInsert("transactions", { account_id: posting.account, txn_type: posting.side,
+          amount: posting.amount, description: `${ref} — ${posting.label}`, ref, source,
+          invoice_id: id || null, txn_date: txnDate }, client);
+        await adjustAccountBalance(posting.account, ledgerDelta(posting.kind, posting.side, posting.amount), client);
+      }
+      return;
+    }
 
     if (isPurchase) {
       // Purchase invoice (supplier bill): stock IN, debit Purchases, credit AP.
@@ -3690,7 +3720,7 @@ async function unpropagateInvoice(
     const isPurchase = doc.doc_type === "purchase";
     const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
     const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
-    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, items, isPurchase, client);
+    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
     throw e;
@@ -3816,7 +3846,7 @@ export const billing = {
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
           "id,user_id,number,customer_id,quotation_id,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
-          "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type";
+          "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type,invoice_type_code";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
           // doc_type is null on legacy rows and those count as sales, which
@@ -3870,6 +3900,7 @@ export const billing = {
           return {
             id: d.id,
             number: d.number,
+            invoice_type_code: d.invoice_type_code,
             customer_id: d.customer_id,
             quotation_id: d.quotation_id,
             customer_name: d.customer_name,
@@ -3888,11 +3919,11 @@ export const billing = {
             shared: d.shared ?? undefined,
             updated_at: d.updated_at,
             tax_rate: d.tax_rate ?? undefined,
-            net_by_tax_category: netByTaxCategory(
+            net_by_tax_category: Object.fromEntries(Object.entries(netByTaxCategory(
               docLineItems(docLines) as never,
               d.discount,
               d.unit_price_formula
-            ),
+            )).map(([category, amount]) => [category, amount * (isCreditNote(d.invoice_type_code) ? -1 : 1)])),
           };
         }) as InvoiceDocSummary[];
       },
@@ -3955,6 +3986,8 @@ export const billing = {
         if (company.country_code) row.tax_country_code = company.country_code;
       }
       validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
+      if (isCreditNote(String(row.invoice_type_code ?? "")) && isPostedStatus(row.status) && row.doc_type === "purchase") throw new Error("Keep supplier credit notes as drafts until the supplier credit workflow is connected.");
+      if (isCreditNote(String(row.invoice_type_code ?? "")) && isPostedStatus(row.status) && (row.einvoice as InvoiceDoc["einvoice"])?.credit_reason !== "VD" && (!row.original_invoice_number || !row.original_invoice_date)) throw new Error("Add the original invoice number and date before posting a credit note.");
       // Freeze the FX rate (AED per unit) the first time a non-AED invoice is
       // saved, so its AED-equivalent doesn't drift with live rates afterward.
       // Best-effort + cached (lib/exchange-rates); never blocks the save.
@@ -3982,6 +4015,10 @@ export const billing = {
           const previous = await client.from("invoice_docs").select("*").eq("id", id).single();
           if (previous.error) throw previous.error;
           previousDoc = previous.data;
+          if (isPostedStatus(previousDoc?.status) && isCreditNote(String(previousDoc?.invoice_type_code ?? "")) !== isCreditNote(String(row.invoice_type_code ?? "")))
+            throw new Error("Create a separate credit note to correct a posted invoice.");
+          if (row.einvoice || (previousDoc?.einvoice as { uuid?: string } | undefined)?.uuid) row.einvoice = { ...((row.einvoice ?? previousDoc?.einvoice) as object),
+            uuid: (previousDoc?.einvoice as { uuid?: string } | undefined)?.uuid || crypto.randomUUID() };
           const { data: existing, error } = await client
             .from("invoice_doc_items")
             .select("*")
@@ -3992,6 +4029,7 @@ export const billing = {
           docId = id;
         } else {
           await checkFreeInvoiceCap(invoicesThisMonth);
+          if (row.einvoice) row.einvoice = { ...(row.einvoice as object), uuid: crypto.randomUUID() };
           docId = await sInsert("invoice_docs", row, client);
         }
         let insertedItemIds: number[] = [];
@@ -4114,6 +4152,10 @@ export const billing = {
             .single();
           if (error) throw error;
           const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId, undefined, client);
+          if (isPostedStatus(status) && isCreditNote(doc.invoice_type_code)) {
+            if (doc.doc_type === "purchase") throw new Error("Supplier credit notes must remain drafts until the supplier credit workflow is connected.");
+            if (doc.einvoice?.credit_reason !== "VD" && (!doc.original_invoice_number || !doc.original_invoice_date)) throw new Error("Add the original invoice number and date before posting a credit note.");
+          }
           await sUpdate("invoice_docs", docId, { status }, client);
           if (isPostedStatus(status) === isPostedStatus(doc.status)) return;
           const docItems = items
@@ -4226,6 +4268,7 @@ export const billing = {
         if (docError) throw docError;
         if (!doc) throw new Error("Invoice not found or access denied.");
         const docRow = doc as InvoiceDoc;
+        if (isCreditNote(docRow.invoice_type_code)) throw new Error("A credit note reduces the customer balance. It cannot receive an invoice payment.");
         if (!isPostedStatus(docRow.status))
           throw new Error(
             "Finalize this invoice before recording a payment. Use an advance for a prepayment.",
@@ -5842,13 +5885,34 @@ export const messages = {
   },
   thread: async (channel: string, id: number, recipient?: string): Promise<OrgMessage[]> => {
     if (!Number.isSafeInteger(id) || id <= 0) return [];
-    if (isLocalMode()) return (await sList<OrgMessage>("org_messages")).filter(m => !m.recipient_id && (m.channel ?? "general") === channel && (m.id === id || m.parent_id === id)).map(localMessage);
+    const checkWorkspace = workspaceGuard();
+    if (isLocalMode()) {
+      const rows = (await sList<OrgMessage>("org_messages")).filter(m => !m.recipient_id && (m.channel ?? "general") === channel);
+      checkWorkspace();
+      const target = rows.find(m => m.id === id);
+      if (!target) return [];
+      const root = target.parent_id || target.id;
+      return rows.filter(m => m.id === root || m.parent_id === root).map(localMessage);
+    }
+    const inConversation = (m: OrgMessage) => recipient ? !!m.recipient_id && (m.user_id === recipient || m.recipient_id === recipient) : !m.recipient_id;
+    const client = cdb();
+    const query = (root: number) => client.from("org_messages").select("*").eq("channel",channel).or(`id.eq.${root},parent_id.eq.${root}`).order("id");
     const [{data,error},members] = await Promise.all([
-      cdb().from("org_messages").select("*").eq("channel",channel).or(`id.eq.${id},parent_id.eq.${id}`).order("id"),org.members(),
+      query(id),org.members(),
     ]);
     if (error) throw error;
+    checkWorkspace();
+    let rows = ((data ?? []) as OrgMessage[]).filter(inConversation);
+    const target = rows.find(m => m.id === id);
+    if (!target) return [];
+    if (target.parent_id) {
+      const parent = await query(target.parent_id);
+      if (parent.error) throw parent.error;
+      checkWorkspace();
+      rows = ((parent.data ?? []) as OrgMessage[]).filter(inConversation);
+    }
     const people = new Map(members.map(m => [m.user_id,m]));
-    return ((data ?? []) as OrgMessage[]).filter(m=>recipient ? !!m.recipient_id && (m.user_id===recipient || m.recipient_id===recipient) : !m.recipient_id).map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar}));
+    return rows.map(m => ({...m,author:people.get(m.user_id)?.name||"Team member",author_avatar:people.get(m.user_id)?.avatar}));
   },
   unread: async (): Promise<Record<string,number>> => {
     if (isLocalMode()) return {};

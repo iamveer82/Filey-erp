@@ -1,3 +1,5 @@
+import EInvoicePartyFields from "../components/EInvoicePartyFields";
+import { readEInvoiceParty } from "../lib/einvoice";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { EMIRATES, normalizeEmirate } from "../lib/einvoice";
@@ -897,6 +899,10 @@ function CustomerModal({
             />
           </Field>
         </div>
+        {f.country_code === "AE" && <details className="border-t border-border pt-3 mt-3">
+          <summary className="cursor-pointer font-medium mb-3">Electronic invoicing identity</summary>
+          <EInvoicePartyFields value={readEInvoiceParty(f.custom_fields?.einvoice_identity)} onChange={identity => setF({ ...f, custom_fields: { ...f.custom_fields, einvoice_identity: JSON.stringify(identity) } })} />
+        </details>}
         {/* Credit & balance (Vyapar parity). Opening balance: + = they owe you. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Credit limit (AED)">

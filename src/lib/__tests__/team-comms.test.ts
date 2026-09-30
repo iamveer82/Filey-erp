@@ -61,6 +61,17 @@ describe("chat channels", () => {
     await expect(messages.post("Wrong channel",root,"sales")).rejects.toThrow("this channel");
     await expect(messages.post(" ")).rejects.toThrow("characters");
   });
+
+  it("opens the complete thread when a notification points to a reply", async () => {
+    await messages.post("Original", null, "general");
+    const root = (await messages.list("general"))[0].id;
+    await messages.post("First reply", root, "general");
+    await messages.post("Second reply", root, "general");
+    const reply = (await messages.list("general")).find(m => m.body === "First reply")!;
+    expect((await messages.thread("general", reply.id)).map(m => m.body).sort()).toEqual(["First reply", "Original", "Second reply"]);
+    expect(await messages.thread("sales", reply.id)).toEqual([]);
+    expect(await messages.thread("general", Number.MAX_SAFE_INTEGER)).toEqual([]);
+  });
 });
 
 describe("email record", () => {

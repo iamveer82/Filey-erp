@@ -167,7 +167,7 @@ export default function MergeStudio({
                 : "border-brand-200"
             }`}
           >
-            <span className="absolute left-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-primary-500 text-[11px] font-medium text-[#0A0A0A]">
+            <span className="absolute left-1.5 top-1.5 z-10 grid h-5 w-5 place-items-center rounded-full bg-neutral-900 text-[11px] font-medium text-white">
               {i + 1}
             </span>
             <button

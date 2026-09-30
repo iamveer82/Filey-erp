@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor, cleanup } from "@testing-library/react";
+import { fireEvent, render, waitFor, cleanup, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
@@ -126,6 +126,46 @@ describe("invoice editor actions", () => {
     vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1 });
   });
 
+  it("makes e-invoice checking and messaging directly accessible beside save and PDF", async () => {
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    const actions = within(await view.findByRole("group", { name: "Invoice actions" }));
+    for (const name of ["Save", "Download PDF", "Company", "WhatsApp", "Messages", "Email", "Mark as done"])
+      expect(actions.getByRole("button", { name })).toBeVisible();
+    expect(actions.queryByRole("button", { name: "More" })).toBeNull();
+    const check = actions.getByRole("button", { name: "Check e-invoice" });
+    expect(check).toHaveClass("btn-primary");
+    fireEvent.click(check);
+    expect(await view.findByRole("dialog", { name: "Check e-invoice" })).toBeVisible();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("keeps reverse-charge details in line metadata through editor save", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, tax_rate: 0,
+      items: [{ ...invoice.items[0], tax_category: "AE", custom: { einvoice_nature: "DL8.48.8.2", einvoice_gtin: "1234567890128" } }] });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.mouseDown(await view.findByRole("tab", { name: /Items/ }), { button: 0, ctrlKey: false });
+    const gtin = await view.findByRole("textbox", { name: "GTIN product identifier for line 1" });
+    expect(gtin).toHaveValue("1234567890128");
+    expect(view.getByRole("combobox", { name: "Tax category for line 1" })).toBeVisible();
+    fireEvent.change(gtin, { target: { value: "012345678905" } });
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      items: expect.arrayContaining([expect.objectContaining({ tax_category: "AE", custom: expect.objectContaining({
+        einvoice_nature: "DL8.48.8.2", einvoice_gtin: "012345678905",
+      }) })]),
+    })));
+  });
+
   it("reports a native PDF failure and releases the export button without saving", async () => {
     const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
     vi.spyOn(pdfTools, "downloadElementAsPdf").mockRejectedValue(new Error("Folder is read-only"));
@@ -167,6 +207,8 @@ describe("invoice editor actions", () => {
   it.each(["canceled", "failed"] as const)("does not report XML export success when native saving is %s", async (outcome) => {
     const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
     vi.spyOn(invoiceXml, "validateEInvoice").mockReturnValue({ errors: [], warnings: [] });
+    vi.spyOn(invoiceXml, "eInvoiceIssues").mockReturnValue([]);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408" } });
     vi.spyOn(invoiceXml, "buildInvoiceXml").mockReturnValue("<Invoice />");
     const write = vi.spyOn(localPaths, "saveBytes");
     if (outcome === "canceled") write.mockResolvedValue(null);
@@ -176,13 +218,13 @@ describe("invoice editor actions", () => {
     setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "More actions" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-    fireEvent.click(await view.findByRole("button", { name: "More" }));
-    fireEvent.click(await view.findByRole("menuitem", { name: "XML" }));
+    fireEvent.click(await view.findByRole("button", { name: "Check e-invoice" }));
+    fireEvent.click(await view.findByRole("button", { name: "Save & export XML" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("INV-AUDIT.xml", new TextEncoder().encode("<Invoice />")));
-    if (outcome === "failed") expect(await view.findByText("XML export failed: Folder is read-only")).toBeTruthy();
+    if (outcome === "failed") expect(await view.findByText("Folder is read-only")).toBeTruthy();
     expect(view.queryByText("e-Invoice XML exported (PINT-AE).")).toBeNull();
     expect(view.queryByText(/XML exported\. Recommended/)).toBeNull();
-    expect(save).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalled();
   });
 });
 

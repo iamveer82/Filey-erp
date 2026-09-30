@@ -9,7 +9,7 @@
 	<cbc:ID>AE-CI-001Test</cbc:ID>
 	<cbc:UUID>19e2c9a3-b000-4fb0-9bd5-a9c4ebda2358</cbc:UUID>
 	<cbc:IssueDate>2025-02-07</cbc:IssueDate>
-	<cbc:IssueTime>17:38:00</cbc:IssueTime>
+	<cbc:IssueTime>17:38:00+04:00</cbc:IssueTime>
 	<cbc:DueDate>2025-02-07</cbc:DueDate>
 	<cbc:InvoiceTypeCode>480</cbc:InvoiceTypeCode>
 	<cbc:DocumentCurrencyCode>AED</cbc:DocumentCurrencyCode>
@@ -30,7 +30,7 @@
 			<cac:PartyTaxScheme>
 				<cbc:CompanyID>198765432112303</cbc:CompanyID>
 				<cac:TaxScheme>
-					<cbc:ID>!VAT</cbc:ID>
+					<cbc:ID>VAT</cbc:ID>
 				</cac:TaxScheme>
 			</cac:PartyTaxScheme>
 			<cac:PartyLegalEntity>

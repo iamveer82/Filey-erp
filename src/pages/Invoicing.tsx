@@ -1,8 +1,10 @@
+import { readEInvoiceParty } from "../lib/einvoice";
+import InvoiceImportModal from "../components/InvoiceImportModal";
 import { invoiceMessageVersion } from "../lib/messageOutbox";
 import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
 import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
 import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/documentMessage";
-import { isLocalMode } from "../lib/dataMode";
+import { assertWorkspaceCurrent, isLocalMode } from "../lib/dataMode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import Step from "../components/DocumentStep";
@@ -40,13 +42,13 @@ import {
   Landmark,
   SeparatorHorizontal,
   FileCode,
-  MoreHorizontal,
   ChevronDown,
 } from "lucide-react";
 import {
   advances,
   suppliers,
   billing,
+  getCacheScope,
   crm,
   erp,
   recurrences,
@@ -85,7 +87,7 @@ import { startingTemplate } from "../components/DocPresetBar";
 import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
-import { SelectMenu, MenuPopover } from "../components/ui-menu";
+import { SelectMenu } from "../components/ui-menu";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -134,9 +136,15 @@ import {
   type CompanyStampSig,
 } from "../components/StampSignatureSettings";
 import { ResizablePanels } from "../components/ResizablePanels";
+import EInvoiceReview from "../components/EInvoiceReview";
 import { validateEInvoice, buildInvoiceXml } from "../lib/einvoiceXml";
 import {
   INVOICE_TYPE_CODES,
+  PINT_AE_INVOICE_TYPE_CODES,
+  TAX_EXEMPTION_CODES,
+  REVERSE_CHARGE_TYPES,
+  isCreditNote,
+  isCommercialInvoice,
   PAYMENT_MEANS_CODES,
   TAX_CATEGORY_CODES,
   TRANSACTION_TYPE_FLAGS,
@@ -356,6 +364,7 @@ function blankForm(
     seller_country_subdivision: c.country_subdivision,
     seller_legal_id: c.legal_id,
     seller_legal_id_type: c.legal_id_type,
+    einvoice: { seller: c.einvoice },
     customer_name: "",
     customer_address: "",
     customer_trn: "",
@@ -419,6 +428,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [messageDialog, setMessageDialog] = useState<DocumentMessageProps | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
@@ -518,6 +528,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         seller_country_subdivision: d.seller_country_subdivision,
         seller_legal_id: d.seller_legal_id,
         seller_legal_id_type: d.seller_legal_id_type,
+        einvoice: d.einvoice,
+        original_invoice_number: d.original_invoice_number,
+        original_invoice_date: d.original_invoice_date,
+        aed_exchange_rate: d.aed_exchange_rate,
         logo: d.logo,
         customer_name: d.customer_name,
         customer_address: d.customer_address,
@@ -589,13 +603,13 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     else toast.error("Choose an existing invoice.");
   }, [params, company, editInvoice, setParams, toast]);
 
-  const duplicateInvoice = async (id: number) => {
+  const duplicateInvoice = async (id: number, credit = false) => {
     try {
       const d = await billing.getDoc(id);
       setForm({
-        number: pickInvoiceNumber(mode, docs.map((x) => x.number), numFmt),
+        number: credit ? `CN-${d.number}-${Date.now().toString().slice(-6)}` : pickInvoiceNumber(mode, docs.map((x) => x.number), numFmt),
         status: "draft",
-        doc_title: d.doc_title || d.doc_type,
+        doc_title: credit ? "Credit Note" : d.doc_title || d.doc_type,
         template: d.template,
         accent: d.accent,
         currency: d.currency,
@@ -609,6 +623,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         seller_country_subdivision: d.seller_country_subdivision,
         seller_legal_id: d.seller_legal_id,
         seller_legal_id_type: d.seller_legal_id_type,
+        einvoice: { ...d.einvoice, uuid: undefined, credit_reason: credit ? undefined : d.einvoice?.credit_reason },
+        original_invoice_number: credit ? d.number : d.original_invoice_number,
+        original_invoice_date: credit ? d.issue_date : d.original_invoice_date,
+        aed_exchange_rate: d.aed_exchange_rate,
         logo: d.logo,
         customer_name: d.customer_name,
         customer_address: d.customer_address,
@@ -623,7 +641,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         terms: d.terms,
         tax_rate: d.tax_rate,
         discount: d.discount,
-        invoice_type_code: d.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE,
+        invoice_type_code: credit ? (isCommercialInvoice(d.invoice_type_code) ? "81" : "381") : d.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE,
         transaction_type: d.transaction_type || DEFAULT_TRANSACTION_TYPE,
         payment_means_code: d.payment_means_code || DEFAULT_PAYMENT_MEANS_CODE,
         buyer_city: d.buyer_city,
@@ -972,6 +990,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
                   seller_trn: c.trn ?? prev.seller_trn,
                   seller_email: c.email ?? prev.seller_email,
                   seller_phone: c.phone ?? prev.seller_phone,
+                  seller_city: c.city, seller_country_subdivision: c.country_subdivision,
+                  seller_legal_id: c.legal_id, seller_legal_id_type: c.legal_id_type,
+                  einvoice: { ...prev.einvoice, seller: c.einvoice },
                   logo: c.logo ?? prev.logo,
                   tax_rate: c.default_tax_rate ?? prev.tax_rate,
                 };
@@ -993,6 +1014,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
           onRevertDraft={() => setDocStatus("draft")}
           saving={saving}
           onEditCompany={() => setCompanyOpen(true)}
+          onCreditNote={form.id && form.status !== "draft" && !isPurchase ? () => void duplicateInvoice(form.id!, true) : undefined}
           partyLabel={partyLabel}
           supplierMode={isPurchase}
           docs={docs}
@@ -1187,6 +1209,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   return (
     <div>
       {messageDialog && <DocumentMessageDialog {...messageDialog} onClose={() => setMessageDialog(null)} />}
+      {importOpen && company && <InvoiceImportModal base={{ ...blankForm(company, [], mode, numFmt), doc_type: isPurchase ? "purchase" : undefined }} onClose={() => setImportOpen(false)} onSaved={() => void loadDocs()} />}
       <PageHeader
         title={isPurchase ? "Purchase Invoices" : "Invoicing"}
         subtitle={
@@ -1195,7 +1218,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             : "Create, send and track invoices"
         }
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-ghost" disabled={!company} onClick={() => setImportOpen(true)}><FileCode size={16} /> {isPurchase ? "Import supplier invoice" : "Import invoices"}</button>
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
               <Sparkles size={16} /> Scan with AI
             </button>
@@ -1554,14 +1578,14 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             label: "Actions",
             render: (d) => (
               <div className="flex items-center justify-end gap-1">
-                <button
+                {!isCreditNote(d.invoice_type_code) && <button
                   aria-label="Payments"
                   title="Record payment"
                   className="rounded-md p-1.5 text-muted-foreground hover:bg-hover hover:text-foreground cursor-pointer transition-colors duration-200"
                   onClick={() => setPayFor(d)}
                 >
                   <CreditCard size={15} />
-                </button>
+                </button>}
                 <RowActions
                   onView={() => openQuickView(d)}
                   onEdit={() => editInvoice(d.id)}
@@ -1616,6 +1640,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
                 seller_trn: c.trn ?? prev.seller_trn,
                 seller_email: c.email ?? prev.seller_email,
                 seller_phone: c.phone ?? prev.seller_phone,
+                  seller_city: c.city, seller_country_subdivision: c.country_subdivision,
+                  seller_legal_id: c.legal_id, seller_legal_id_type: c.legal_id_type,
+                  einvoice: { ...prev.einvoice, seller: c.einvoice },
                 logo: c.logo ?? prev.logo,
                 tax_rate: c.default_tax_rate ?? prev.tax_rate,
               };
@@ -1886,6 +1913,7 @@ function Editor({
   onRevertDraft,
   saving,
   onEditCompany,
+  onCreditNote,
   partyLabel,
   supplierMode,
   docs,
@@ -1899,6 +1927,7 @@ function Editor({
   onRevertDraft: () => void;
   saving: boolean;
   onEditCompany: () => void;
+  onCreditNote?: () => void;
   partyLabel: string;
   supplierMode: boolean;
   docs: InvoiceDocSummary[];
@@ -1933,6 +1962,8 @@ function Editor({
     .reduce((n, g) => n + g.length, 0);
   const isLastPreviewPage = curPageIdx === previewPages - 1;
   const [downloading, setDownloading] = useState(false);
+  const [eInvoiceOpen, setEInvoiceOpen] = useState(false);
+  const [exportingXml, setExportingXml] = useState(false);
   const downloadPdf = async () => {
     if (downloading) return;
     setDownloading(true);
@@ -1949,32 +1980,42 @@ function Editor({
   // Export the UAE e-Invoice (Peppol PINT-AE UBL) XML. Blocks on missing
   // mandatory fields; surfaces recommended-field gaps as a non-blocking note.
   const exportXml = async () => {
-    const v = validateEInvoice(form as never);
-    if (v.errors.length) {
-      toast.error(`Can't export e-Invoice XML - missing: ${v.errors.join(", ")}`);
-      return;
-    }
-    const xml = buildInvoiceXml(form as never);
-    const name = `${form.number || "invoice"}.xml`;
+    if (exportingXml) return;
+    const check = validateEInvoice(form);
+    if (check.errors.length) { setEInvoiceOpen(true); return; }
+    setExportingXml(true);
+    const mode = isLocalMode(), scope = getCacheScope();
+    const checkScope = () => {
+      assertWorkspaceCurrent();
+      if (mode !== isLocalMode() || scope !== getCacheScope()) throw new Error("Your workspace changed. Reopen this invoice before exporting.");
+    };
     try {
+      checkScope();
+      const id = await onSave();
+      if (id == null) return;
+      checkScope();
+      const saved = await billing.getDoc(id);
+      checkScope();
+      if (!saved.einvoice?.uuid) throw new Error("Save the e-invoice details before exporting.");
+      setForm({ ...form, id, einvoice: saved.einvoice });
+      const xml = buildInvoiceXml({ ...form, einvoice: saved.einvoice });
+      const name = `${form.number || "invoice"}.xml`;
       if (hasTauri) {
         if (!(await saveBytes(name, new TextEncoder().encode(xml)))) return;
       } else {
-        const blob = new Blob([xml], { type: "application/xml" });
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
         const a = document.createElement("a");
-        a.href = url;
-        a.download = name;
-        a.click();
+        a.href = url; a.download = name; a.click();
         setTimeout(() => URL.revokeObjectURL(url), 4000);
       }
-    } catch (e) {
-      toast.error(`XML export failed: ${errMsg(e)}`);
-      return;
-    }
-    if (v.warnings.length)
-      toast.info(`XML exported. Recommended fields still empty: ${v.warnings.join(", ")}`);
-    else toast.success("e-Invoice XML exported (PINT-AE).");
+      const bytes = new TextEncoder().encode(xml);
+      const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
+      const archiveName = `${safeName(form.number)}-${saved.einvoice.uuid}-${hash}.xml`;
+      checkScope();
+      await autoSaveDocument(archiveName, "invoice", async () => ({ name: archiveName, bytes }));
+      toast.success("XML exported. Submit it through your accredited provider.");
+    } catch (error) { toast.error(errMsg(error)); }
+    finally { setExportingXml(false); }
   };
   // Finalize, then archive the issued invoice PDF to My Files (best-effort,
   // deduped by name so re-finalizing won't pile up copies).
@@ -2017,13 +2058,13 @@ function Editor({
     const items = form.items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
     setForm({ ...form, items });
   };
-  const addItem = () =>
+  const addItem = (description = "") =>
     setForm({
       ...form,
       items: [
         ...form.items,
         {
-          description: "",
+          description,
           qty: 1,
           unit_price: 0,
           unit: "",
@@ -2183,6 +2224,7 @@ function Editor({
     setForm({
       ...form,
       customer_id: c.id,
+      einvoice: { ...form.einvoice, buyer: readEInvoiceParty(c.custom_fields?.einvoice_identity) },
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
@@ -2197,8 +2239,6 @@ function Editor({
     });
 
   const [viewAll, setViewAll] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLButtonElement>(null);
   const [lineOptions, setLineOptions] = useState(() => !!form.unit_price_formula || form.customColumns.length > 0 || form.items.some((item) => (item.discount || 0) > 0 || (item.calcMode && item.calcMode !== "auto") || (item.tax_category && item.tax_category !== DEFAULT_TAX_CATEGORY)));
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
@@ -2338,10 +2378,15 @@ function Editor({
 
   return (
     <div>
+      <EInvoiceReview open={eInvoiceOpen} doc={form} busy={saving || exportingXml}
+        onClose={() => setEInvoiceOpen(false)} onChange={einvoice => set("einvoice", einvoice)}
+        onFix={issue => { setEInvoiceOpen(false); if (issue.field.startsWith("seller")) onEditCompany(); else setEditorTab(issue.section === "items" ? "items" : "details"); }}
+        onExport={() => void exportXml()} />
       <PageHeader
         title={form.id ? (partyLabel === "Supplier" ? "Edit Purchase Invoice" : "Edit Invoice") : (partyLabel === "Supplier" ? "New Purchase Invoice" : "New Invoice")}
         subtitle={partyLabel === "Supplier" ? "Record a supplier invoice and its line items" : "Prepare an invoice for your customer"}
-        action={<div className="flex flex-wrap items-center gap-2">
+      />
+      <div role="group" aria-label="Invoice actions" className="mb-6 flex flex-wrap items-center gap-2">
           <button className="btn-ghost" onClick={onBack} disabled={saving}><ArrowLeft size={15} /> Back</button>
           <button className="btn-ghost" onClick={() => setViewOpen(true)}>
             <Maximize2 size={15} /> Preview
@@ -2355,47 +2400,42 @@ function Editor({
             <Download size={15} /> {downloading ? "Exporting…" : "Download PDF"}
           </button>
           <button
-            className="btn-primary"
+            className="btn-outline"
             onClick={onSave}
             disabled={saving}
             title="Save without sending (Ctrl+S)"
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
-          <button ref={moreRef} className="btn-ghost" disabled={saving} aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen((open) => !open)}><MoreHorizontal size={15} /> More</button>
-          <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
-            <div className="flex flex-col gap-1"
-              ref={(node) => { node?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus(); }}
-              onClick={(event) => { if ((event.target as HTMLElement).closest('button')) setMoreOpen(false); }}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") { moreRef.current?.focus(); return; }
-                if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-                event.preventDefault();
-                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-                buttons[event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
-              }}>
           {/* Peppol PINT-AE is the UAE e-invoice — only meaningful for
               documents under the UAE VAT regime. */}
           {partyLabel !== "Supplier" && isUaeRegime(form.currency, form.tax_country_code) && (
-            <button role="menuitem"
-              className="btn-ghost justify-start w-full"
-              onClick={exportXml}
-              title="Export UAE e-Invoice XML (Peppol PINT-AE)"
+            <button
+              className="btn-primary"
+              disabled={saving || exportingXml}
+              onClick={() => {
+                set("einvoice", { ...form.einvoice,
+                  payment_account_id: form.einvoice?.payment_account_id || bank.iban || bank.account_number,
+                  payment_account_name: form.einvoice?.payment_account_name || bank.account_name });
+                setEInvoiceOpen(true);
+              }}
+              title="Check required UAE e-invoice details and export XML for free"
             >
-              <FileCode size={15} /> XML
+              <FileCode size={15} /> Check e-invoice
             </button>
           )}
-          <button role="menuitem"
-            className="btn-ghost justify-start w-full"
+          <button
+            className="btn-ghost"
             onClick={onEditCompany}
+            disabled={saving}
             title="Edit company details"
           >
             <Building2 size={15} /> Company
           </button>
+          {onCreditNote && !isCreditNote(form.invoice_type_code) && <button className="btn-ghost" disabled={saving} onClick={onCreditNote}>Create credit note</button>}
           {form.status === "draft" ? (
-            <button role="menuitem"
-              className="btn-ghost justify-start w-full"
+            <button
+              className="btn-ghost"
               onClick={handleFinalize}
               disabled={saving}
               title="Finalize: posts to Orders & Accounting, updates inventory for linked products, and shows in reports & the dashboard"
@@ -2403,8 +2443,8 @@ function Editor({
               <CheckCircle2 size={15} /> Mark as done
             </button>
           ) : (
-            <button role="menuitem"
-              className="btn-ghost justify-start w-full"
+            <button
+              className="btn-ghost"
               onClick={onRevertDraft}
               disabled={saving}
               title="Move this invoice back to draft"
@@ -2412,24 +2452,21 @@ function Editor({
               <Pencil size={15} /> Move to draft
             </button>
           )}
-          <button role="menuitem" className="btn-ghost justify-start w-full" disabled={saving} onClick={() => void onMessage("whatsapp")} title="Save and prepare the invoice for WhatsApp">
+          <button className="btn-ghost" disabled={saving} onClick={() => void onMessage("whatsapp")} title="Save and prepare the invoice for WhatsApp">
             <MessageCircle size={15} /> WhatsApp
           </button>
-          <button role="menuitem" className="btn-ghost justify-start w-full" disabled={saving} onClick={() => void onMessage("sms")} title="Save and prepare an invoice message">
+          <button className="btn-ghost" disabled={saving} onClick={() => void onMessage("sms")} title="Save and prepare an invoice message">
             <Smartphone size={15} /> Messages
           </button>
-          <button role="menuitem"
-            className="btn-ghost justify-start w-full"
+          <button
+            className="btn-ghost"
             onClick={saveAndSend}
             disabled={saving}
             title={`Save and email the invoice to the ${partyLabel.toLowerCase()} (Ctrl+Enter)`}
           >
             <Send size={15} /> Email
           </button>
-            </div>
-          </MenuPopover>
-        </div>}
-      />
+      </div>
 
       <CustomerModal
         open={custModal}
@@ -2735,7 +2772,7 @@ function Editor({
                     ]}
                   />
                 </Field>
-                <Field label="Due Date (optional)">
+                <Field label={isUaeRegime(form.currency, form.tax_country_code) && !isCreditNote(form.invoice_type_code) ? "Due Date" : "Due Date (optional)"}>
                   <DateField
                     value={form.due_date ?? ""}
                     onChange={(v) => set("due_date", v)}
@@ -2810,7 +2847,7 @@ function Editor({
                   <SelectMenu
                     value={form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE}
                     onChange={(v) => set("invoice_type_code", v)}
-                    options={INVOICE_TYPE_CODES.map((t) => ({
+                    options={(isUaeRegime(form.currency, form.tax_country_code) ? PINT_AE_INVOICE_TYPE_CODES : INVOICE_TYPE_CODES).map((t) => ({
                       value: t.code,
                       label: `${t.code} - ${t.label}`,
                     }))}
@@ -2820,6 +2857,7 @@ function Editor({
                   form.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE
                 ) && (
                   <>
+                    {isCreditNote(form.invoice_type_code) && <p className="text-sm text-muted-foreground sm:col-span-2">A credit note reduces the customer balance. Record any physical stock return separately.</p>}
                     <Field label="Original Invoice No. (credit/debit note)">
                       <input aria-label="Original invoice number"
                         className="input"
@@ -2846,7 +2884,7 @@ function Editor({
                     }))}
                   />
                 </Field>
-                {isUaeRegime(form.currency, form.tax_country_code) && <Field label="Transaction Type (e-invoice)">
+                {isUaeRegime(form.currency, form.tax_country_code) && <Field label="Transaction details">
                   <div className="grid grid-cols-2 gap-1.5">
                     {TRANSACTION_TYPE_FLAGS.map((f) => (
                       <label
@@ -2866,6 +2904,10 @@ function Editor({
                       </label>
                     ))}
                   </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Selected details appear on the invoice preview and PDF, and are included in the XML.
+                    These labels do not change tax calculations. Set each line’s tax category separately.
+                  </p>
                 </Field>}
                 <Field label="Tax category, applied to all lines">
                   {/* Bulk-set every line's category (the common single-rate case).
@@ -2887,12 +2929,12 @@ function Editor({
                     }))}
                   />
                 </Field>
-                <p className="col-span-full text-[11px] text-brand-400">
-                  The PDF is the human-readable copy your customer sees. Under the
-                  FTA e-invoicing mandate (MD 243/2025), the legal invoice is the
-                  PINT-AE XML exchanged via your accredited service provider —
-                  export it from More → XML.
-                </p>
+                {isUaeRegime(form.currency, form.tax_country_code) && <p className="col-span-full text-[11px] text-brand-400">
+                  The PDF is your customer’s readable copy. Use Check e-invoice to review and export
+                  the XML, including electronic identifiers used for delivery. Some special transaction
+                  types need additional details before XML export is supported. Exporting does not submit
+                  the invoice to an accredited provider.
+                </p>}
               </div>
             </details>
           </Step>
@@ -2969,9 +3011,9 @@ function Editor({
                     <th className="py-2 px-2 w-24 min-w-24 text-right">Qty</th>
                     <th className="py-2 px-2 w-24 min-w-24 text-right">Unit</th>
                     <th hidden={!lineOptions} className="py-2 px-2 w-28 min-w-28 text-right">Calc</th>
-                    {(form.tax_rate || 0) > 0 && (
-                      <th hidden={!lineOptions} className="py-2 px-2 w-16 min-w-16 text-right" title="Tax category">
-                        Tax
+                    {((form.tax_rate || 0) > 0 || isUaeRegime(form.currency, form.tax_country_code)) && (
+                      <th hidden={!lineOptions} className="py-2 px-2 w-28" title="Tax category">
+                        Tax category
                       </th>
                     )}
                     {form.customColumns.map((col, idx) => (
@@ -3119,10 +3161,10 @@ function Editor({
                           ]}
                         />
                       </td>
-                      {(form.tax_rate || 0) > 0 && (
+                      {((form.tax_rate || 0) > 0 || isUaeRegime(form.currency, form.tax_country_code)) && (
                         <td hidden={!lineOptions} className="py-2 px-2">
                           <SelectMenu
-                            ariaLabel="UAE e-invoice tax category"
+                            ariaLabel={`Tax category for line ${i + 1}`}
                             value={it.tax_category || DEFAULT_TAX_CATEGORY}
                             onChange={(v) => setItem(i, { tax_category: v })}
                             options={TAX_CATEGORY_CODES.map((t) => ({
@@ -3248,6 +3290,33 @@ function Editor({
                 </tbody>
               </table>
             </div>
+            {isUaeRegime(form.currency, form.tax_country_code) && form.items.some(item => ["E", "AE"].includes(item.tax_category || "")) && (
+              <section aria-label="Required line tax details" className="mt-4 space-y-3 border-t border-border pt-4">
+                <h3 className="text-sm font-medium">Required line tax details</h3>
+                {form.items.map((item, index) => ["E", "AE"].includes(item.tax_category || "") && (
+                  <fieldset key={index} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <legend className="mb-2 text-xs text-muted-foreground">Line {index + 1} · {item.description || "Item"}</legend>
+                    {item.tax_category === "E" ? (
+                      <Field label="VAT exemption reason">
+                        <SelectMenu ariaLabel={`VAT exemption reason for line ${index + 1}`} value={item.custom.einvoice_exemption_code || ""}
+                          onChange={value => setItemCustom(index, "einvoice_exemption_code", value)}
+                          options={[{ value: "", label: "Choose the applicable exemption" }, ...TAX_EXEMPTION_CODES.map(code => ({ value: code.code, label: code.label }))]} />
+                      </Field>
+                    ) : <>
+                      <Field label="Reverse-charge supply type">
+                        <SelectMenu ariaLabel={`Reverse-charge supply type for line ${index + 1}`} value={item.custom.einvoice_nature || ""}
+                          onChange={value => setItemCustom(index, "einvoice_nature", value)}
+                          options={[{ value: "", label: "Choose the supply type" }, ...REVERSE_CHARGE_TYPES.map(code => ({ value: code.code, label: code.label }))]} />
+                      </Field>
+                      <Field label="GTIN product identifier">
+                        <input className="input" aria-label={`GTIN product identifier for line ${index + 1}`} value={item.custom.einvoice_gtin || ""}
+                          onChange={event => setItemCustom(index, "einvoice_gtin", event.target.value)} />
+                      </Field>
+                    </>}
+                  </fieldset>
+                ))}
+              </section>
+            )}
             {/* Custom column management */}
             {form.customColumns.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 mt-2 text-xs text-brand-500">
@@ -3298,7 +3367,8 @@ function Editor({
               </div>
             )}
             <div className="flex flex-wrap gap-2 mt-3">
-              <button className="btn-ghost" onClick={addItem}>
+              <button className="btn-ghost" onClick={() => addItem("Delivery or service charge")}><Plus size={14} /> Add charge</button>
+              <button className="btn-ghost" onClick={() => addItem()}>
                 <Plus size={14} /> Add item
               </button>
               <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>

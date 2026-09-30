@@ -10,16 +10,18 @@
 .workspace-agent .workspace-content { height: 100%; padding: 0; animation: none; }
 .workspace-agent .workspace-header { border-bottom-color: transparent; }
 .filey-chat { height: 100%; min-height: 0; }
-.filey-chat-header { flex-shrink: 0; padding: 8px 20px; }
-.filey-conversation-scroll { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px; }
+.filey-chat-header { flex-shrink: 0; padding: 12px 20px; border-bottom: 1px solid hsl(var(--border)); }
+.filey-conversation-viewport { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+.filey-conversation-scroll { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 0 24px; }
 .filey-user-message, .filey-assistant-message { font-size: 15px; overflow-wrap: anywhere; }
 .filey-chat-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 40px; border: 0; border-radius: 999px; color: hsl(var(--foreground)); background: transparent; transition: background-color 150ms ease-out; }
 .filey-chat-icon:hover { background: hsl(var(--hover)); }
 .filey-chat-icon:disabled { opacity: .4; cursor: not-allowed; }
 .filey-chat-icon[aria-expanded="true"] { background: hsl(var(--hover)); }
+.filey-chat-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
 .filey-reply-copy { width: 32px; height: 32px; color: hsl(var(--muted-foreground)); margin-left: -8px; }
 .filey-composer-dock { flex-shrink: 0; padding: 12px 24px max(12px, env(safe-area-inset-bottom)); }
-.filey-composer { padding: 10px 8px 8px; border: 1px solid hsl(var(--border) / .65); border-radius: 24px; background: hsl(var(--muted)); transition: border-color 150ms ease-out; }
+.filey-composer { padding: 8px; border: 1px solid hsl(var(--border) / .65); border-radius: 20px; background: hsl(var(--muted)); transition: border-color 150ms ease-out; }
 .filey-composer:focus-within { border-color: hsl(var(--muted-foreground) / .65); }
 .filey-composer-input { display: block; min-height: 36px; max-height: min(160px, calc(var(--filey-viewport-height, 100dvh) * .3)); padding: 4px 12px 8px; font-size: 16px; line-height: 24px; }
 @supports (field-sizing: content) {
@@ -53,7 +55,7 @@
 }
 
 @container filey-agent (max-width: 639px) {
-  .filey-chat-header { padding: 0 8px 8px; }
+  .filey-chat-header { padding: 8px; }
   .filey-chat-wallet { display: none; }
   .filey-conversation-scroll { padding-inline: 20px; }
   .filey-composer-dock { padding: 8px 12px max(12px, env(safe-area-inset-bottom)); }

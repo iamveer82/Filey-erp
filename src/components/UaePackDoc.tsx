@@ -9,18 +9,19 @@
  */
 import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
-import { docTotals, docLineAmount } from "../lib/docItems";
+import { docTotals, docLineAmount, docTaxBreakdown } from "../lib/docItems";
 import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import { applyRoundOff } from "../lib/money";
 import {
   EMIRATES,
   TAX_CATEGORY_CODES,
   normalizeEmirate,
-  tinFromTrn,
+  partyTin,
   type Code,
 } from "../lib/einvoice";
 import type { DocViewForm, DocViewItem, DocViewLabels } from "./DocView";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
+import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
 import { BankDetailsBlock, type BankInfo } from "./BankDetails";
 
 /** Map a code to its human label (falls back to the raw code) — DocView pattern. */
@@ -539,37 +540,26 @@ export default function UaePackDoc({
     docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula),
     !!form.round_off
   );
-  const lineNets = form.items.map((it) => ({
-    cat: it.tax_category || "S",
-    net: docLineAmount(it, form.unit_price_formula),
-  }));
-  const grossNet = lineNets.reduce((s, l) => s + l.net, 0);
-  const discount = t.discount || 0;
+  const breakdown = docTaxBreakdown(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula)
+      .map(row => ({ ...row, cat: row.category }));
+  const grossNet = t.subtotal;
+  const discount = t.discount;
   const netAfterDisc = grossNet - discount;
-  const byCat: Record<string, number> = {};
-  for (const l of lineNets) byCat[l.cat] = (byCat[l.cat] || 0) + l.net;
-  const breakdown = Object.entries(byCat).map(([cat, net]) => {
-    const taxable = grossNet > 0 ? netAfterDisc * (net / grossNet) : 0;
-    const rate = cat === "S" ? form.tax_rate || 0 : 0;
-    return { cat, taxable, rate, tax: (taxable * rate) / 100 };
-  });
   const vat = breakdown.reduce((s, b) => s + b.tax, 0);
-  // Margin/commercial variants never show or add VAT on the document.
-  const noVat = cfg.columns === "margin" || cfg.columns === "commercial";
-  const vatInTotal = noVat ? 0 : vat;
-  const grandTotal = form.round_off
-    ? Math.round(netAfterDisc + vatInTotal)
-    : netAfterDisc + vatInTotal;
-  const roundOffAmt = grandTotal - (netAfterDisc + vatInTotal);
+  // Layout controls presentation, never the amount charged. A non-VAT
+  // business records zero VAT; selecting a template cannot remove booked tax.
+  const noVat = cfg.columns === "margin" || (cfg.columns === "commercial" && vat === 0);
+  const grandTotal = t.total;
+  const roundOffAmt = t.round_off;
 
   // Per-line VAT: rate applies to standard ('S'/unset) lines only.
   const lineRate = (it: DocViewItem) =>
-    !it.tax_category || it.tax_category === "S" ? form.tax_rate || 0 : 0;
+    !it.tax_category || it.tax_category === "S" ? it.tax || form.tax_rate || 0 : 0;
 
   const sellerEmirate = codeLabel(EMIRATES, normalizeEmirate(form.seller_country_subdivision));
   const buyerEmirate = codeLabel(EMIRATES, normalizeEmirate(form.buyer_country_subdivision));
-  const sellerTin = tinFromTrn(form.seller_trn);
-  const buyerTin = tinFromTrn(form.customer_trn);
+  const sellerTin = partyTin(form.einvoice?.seller);
+  const buyerTin = partyTin(form.einvoice?.buyer);
   const fxRate = form.aed_exchange_rate ?? form.fx_rate ?? 0;
   const advance = Number(form.advance_applied) || 0;
   const partyLabel = labels?.partyLabel || (cfg.table === "credit" ? "Issued To" : "Bill To");
@@ -739,7 +729,7 @@ export default function UaePackDoc({
       case "vat":
         return m(lineVat);
       case "total":
-        return m(noVat ? taxable : taxable + lineVat);
+        return m(taxable + lineVat);
     }
   };
 
@@ -999,6 +989,7 @@ export default function UaePackDoc({
 
       {showFooter && (
         <>
+          <InvoiceTransactionSummary form={form} />
           <div className="invoice-signatures grid grid-cols-2">
             {sigLabels.map((s) => (
               <div

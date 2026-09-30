@@ -154,10 +154,7 @@ describe("purchase invoice parties", () => {
     expect(view.getByLabelText("Supplier email")).toHaveValue(vendor.email);
     expect(view.queryByText("Apply customer advance")).toBeNull();
     if (action === "Save") fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
-    else {
-      fireEvent.click(view.getByRole("button", { name: "More" }));
-      fireEvent.click(view.getByRole("menuitem", { name: action }));
-    }
+    else fireEvent.click(view.getByRole("button", { name: action }));
     await waitFor(() => expect(billing.saveDoc).toHaveBeenCalledWith(expect.objectContaining({
       doc_type: "purchase", customer_id: null, advance_applied: 0,
       customer_name: vendor.name, customer_email: vendor.email, customer_address: vendor.address, customer_trn: vendor.tax_id,

@@ -1,3 +1,4 @@
+import { loadXlsx } from "../lib/spreadsheet";
 import { FileySpinner as Loader2 } from "./FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Upload, CheckCircle2 } from "lucide-react";
@@ -22,12 +23,16 @@ export default function ImportCsvModal({
   fields,
   onClose,
   onImport,
+  reviewBeforeImport = false,
+  spreadsheets = false,
 }: {
   open: boolean;
   title: string;
   fields: ImportField[];
   onClose: () => void;
   onImport: (rows: Record<string, unknown>[]) => Promise<void>;
+  reviewBeforeImport?: boolean;
+  spreadsheets?: boolean;
 }) {
   const { toast } = useUI();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -62,7 +67,16 @@ export default function ImportCsvModal({
     setReading(true);
     setError("");
     try {
-      const { headers: h, rows } = parseCsvObjects(await f.text());
+      if (f.size > 5 * 1024 * 1024) throw new Error("Choose a file smaller than 5 MB.");
+      let text: string;
+      if (spreadsheets && /\.xlsx?$/i.test(f.name)) {
+        const XLSX = await loadXlsx();
+        const workbook = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: "array", dateNF: "yyyy-mm-dd", cellDates: true, sheetRows: 1002 });
+        if (workbook.SheetNames.length !== 1) throw new Error("Use one worksheet per import. Save the required sheet as a separate file.");
+        text = XLSX.utils.sheet_to_csv(workbook.Sheets[workbook.SheetNames[0]], { dateNF: "yyyy-mm-dd" });
+      } else text = await f.text();
+      const { headers: h, rows } = parseCsvObjects(text);
+      if (rows.length > 1000) throw new Error("Import up to 1,000 rows at a time.");
       if (version !== fileRequest.current) return;
       setHeaders(h);
       setRaw(rows);
@@ -82,7 +96,7 @@ export default function ImportCsvModal({
         setHeaders([]);
         setRaw([]);
         setMap({});
-        setError(`Could not read CSV: ${e instanceof Error ? e.message : String(e)}`);
+        setError(`Could not read file: ${e instanceof Error ? e.message : String(e)}`);
       }
     } finally {
       if (version === fileRequest.current) setReading(false);
@@ -112,8 +126,10 @@ export default function ImportCsvModal({
     setBusy(true);
     try {
       await onImport(mapped);
-      toast.success(`Imported ${mapped.length} row(s).`);
-      onClose();
+      if (!reviewBeforeImport) {
+        toast.success(`Imported ${mapped.length} row(s).`);
+        onClose();
+      }
     } catch (e) {
       toast.error(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -138,15 +154,15 @@ export default function ImportCsvModal({
       )}
       {reading && (
         <p role="status" className="text-sm text-muted-foreground mb-4">
-          Reading CSV…
+          Reading file…
         </p>
       )}
       <label className="btn-ghost w-full justify-center mb-4">
-        <Upload size={15} /> {raw.length ? "Choose a different file" : "Select CSV file"}
+        <Upload size={15} /> {raw.length ? "Choose a different file" : spreadsheets ? "Select Excel or CSV file" : "Select CSV file"}
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,text/csv"
+          accept={spreadsheets ? ".csv,.xlsx,.xls,text/csv" : ".csv,text/csv"}
           disabled={busy}
           className="hidden"
           onChange={(e) => {
@@ -201,7 +217,7 @@ export default function ImportCsvModal({
             </>
           ) : (
             <>
-              <CheckCircle2 size={15} /> Import {raw.length || ""}
+              <CheckCircle2 size={15} /> {reviewBeforeImport ? "Review invoices" : `Import ${raw.length || ""}`}
             </>
           )}
         </button>

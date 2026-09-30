@@ -14,7 +14,7 @@ const GROUPS = [
   { title: "Accounting", ids: ["people", "accounting", "bank-accounts", "cheques", "payment-receipts", "declaration"] },
   { title: "Service", ids: ["projects", "helpdesk"] },
   { title: "Team", ids: ["team", "comms"] },
-  { title: "Tools", ids: ["tools", "files", "email-templates", "delivery-challans"] },
+  { title: "Tools", ids: ["tools", "files", "browser", "email-templates", "delivery-challans"] },
   { title: "System", ids: ["settings", "integrations"] },
 ];
 

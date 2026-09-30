@@ -33,7 +33,7 @@ describe("distinct invoice layouts", () => {
     for (const value of [form.seller_name!, form.customer_name!, form.number!, form.items[0].description, form.notes!, form.terms!]) {
       expect(html).toContain(value);
     }
-    expect(html).toContain(id === "uae-margin" || id === "uae-commercial" ? "2,000.00" : "2,100.00");
+    expect(html).toContain("2,100.00");
     expect(html).toContain(form.seller_trn!);
     expect(html).toContain(form.customer_trn!);
   });

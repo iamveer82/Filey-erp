@@ -35,7 +35,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-full min-w-0 items-center justify-between gap-2 rounded-[8px] border border-border bg-card px-3 text-[13px] text-foreground outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40 aria-invalid:border-danger data-[size=default]:h-10 data-[size=sm]:h-8 data-[size=sm]:px-2 data-[size=sm]:text-xs [@media(pointer:coarse)]:min-h-11 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-transparent bg-muted/60 px-3 text-[13px] text-foreground outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:border-muted-foreground disabled:cursor-not-allowed disabled:opacity-40 aria-invalid:border-danger data-[size=default]:h-10 data-[size=sm]:h-8 data-[size=sm]:px-2 data-[size=sm]:text-xs [@media(pointer:coarse)]:min-h-11 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className
       )}
       {...props}
@@ -60,7 +60,7 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          "relative z-50 max-h-[min(60vh,26rem,var(--radix-select-content-available-height))] min-w-[8rem] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-lg",
+          "relative z-50 max-h-[min(60vh,26rem,var(--radix-select-content-available-height))] min-w-[8rem] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-sm",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className
@@ -117,7 +117,7 @@ function SelectItem({
         className="absolute right-2 flex size-3.5 items-center justify-center"
       >
         <SelectPrimitive.ItemIndicator>
-          <CheckIcon className="size-3.5 text-primary-600 dark:text-primary-400" />
+          <CheckIcon className="size-3.5 text-foreground" />
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>

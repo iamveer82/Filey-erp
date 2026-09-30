@@ -212,3 +212,21 @@ functions retain their existing JWT gateway settings and verify users, provider
 signatures or server trigger secrets inside their handlers. Disposable PostgreSQL
 checks reproduce the old billing exploit, test denial and normal workspace
 creation, and deliver eight concurrent Stripe callbacks to prove one settlement.
+
+## E-invoice document identity — 29 September 2026 (not deployed)
+
+Apply `2026-09-29-einvoice-identity.sql` before releasing the expanded e-invoice
+save/export workflow. It adds the document and company e-invoice JSON fields,
+retains the existing UAE invoice columns and preserves an existing document
+UUID during updates from stale clients or sync. It rewrites no customer rows.
+This does not enable automatic provider submission or store provider credentials.
+
+## Hosted agent draft transactions — 30 September 2026 (not deployed)
+
+Apply `2026-09-30-channel-agent-drafts.sql` before deploying the hardened
+`channel-webhook`. The service-only RPC verifies the current owner/admin
+workspace and saves invoice, quotation or purchase-order headers, lines and
+audit entries in one transaction. It changes no existing customer records.
+`schema.sql` includes the same function. Disposable PostgreSQL checks cover
+role/workspace rejection, field allowlists and rollback after a failed line.
+Missing migration fails closed; production application remains pending.

@@ -1,3 +1,5 @@
+import { EMIRATES } from "../lib/einvoice";
+import EInvoicePartyFields from "./EInvoicePartyFields";
 import CountryTaxFields from "./CountryTaxFields";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import { companyCountry, companyPhoneHint } from "../lib/companyCountry";
@@ -190,6 +192,14 @@ export default function CompanyModal({
             />
           </Field>
         )}
+        {companyCountry(c) === "AE" && <details className="border-t border-border pt-3">
+          <summary className="cursor-pointer font-medium mb-3">Electronic invoicing identity</summary>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <Field label="City"><input className="input" value={c.city || ""} onChange={event => setC({ ...c, city: event.target.value })} /></Field>
+            <Field label="Emirate"><SelectMenu value={c.country_subdivision || ""} onChange={country_subdivision => setC({ ...c, country_subdivision })} options={[{ value: "", label: "Choose an emirate" }, ...EMIRATES.map(entry => ({ value: entry.code, label: entry.label }))]} /></Field>
+          </div>
+          <EInvoicePartyFields value={{ ...c.einvoice, legal_id: c.legal_id, legal_id_type: c.legal_id_type }} onChange={value => setC({ ...c, einvoice: value, legal_id: value.legal_id, legal_id_type: value.legal_id_type })} />
+        </details>}
         <Field label="Logo">
           <div className="flex items-center gap-3">
             {c.logo && (

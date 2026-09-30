@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGuard, isReadOnly, coachResult } from "../agentGuard";
+import { createGuard, isReadOnly, coachResult, toolFailure } from "../agentGuard";
 
 // The duplicate-write case is the one that reaches a customer: a model that
 // second-guesses its first result and calls send_invoice again. Everything else
@@ -51,6 +51,20 @@ describe("repeated calls", () => {
     const again = g.before("send_invoice", { b: 2, a: 1 });
     expect(again.short).toBeTruthy();
   });
+  it("protects nested writes regardless of property order without ignoring array order", () => {
+    const g = createGuard();
+    g.after("create_invoice_draft", { items: [{ description: "Service", qty: 1 }], customer: { id: 2, name: "Mark" } }, { id: 9 });
+    expect(g.before("create_invoice_draft", { customer: { name: "Mark", id: 2 }, items: [{ qty: 1, description: "Service" }] }).short).toBeDefined();
+    expect(g.before("create_invoice_draft", { customer: { name: "Mark", id: 2 }, items: [{ qty: 2, description: "Service" }] })).toEqual({});
+  });
+  it("selects a saved file again and invalidates the earlier document observation", () => {
+    const g = createGuard();
+    g.after("use_saved_file", { name: "A.pdf" }, { ok: true });
+    g.after("read_attached_document", {}, { text: "Document A" });
+    g.after("use_saved_file", { name: "B.pdf" }, { ok: true });
+    expect(g.before("read_attached_document", {})).toEqual({});
+    expect(g.before("use_saved_file", { name: "A.pdf" })).toEqual({});
+  });
   it("reads current records after a mutation instead of reusing pre-edit results", () => {
     const g = createGuard();
     g.after("list_invoices", {}, { invoices: [] });
@@ -90,6 +104,13 @@ describe("coaching a failure", () => {
   it("does not coach the model to bypass a denied approval", () => {
     expect(coachResult({ error: "Cancelled — the user did not approve this action." }, 6)).toMatchObject({ what_to_do: expect.stringContaining("Do not retry through a different tool") });
   });
+  it.each(["Your workspace role does not have access to invoicing.", "Only a workspace owner or administrator can use computer, shell or unrestricted network tools."])("respects the verified workspace boundary: %s", error => {
+    expect(coachResult({ error }, 6)).toMatchObject({ what_to_do: expect.stringContaining("Do not retry through a different tool") });
+  });
+  it("contains a malformed cyclic provider error", () => {
+    const error: Record<string, unknown> = {}; error.self = error;
+    expect(toolFailure({ error })).toBe("The action returned an error.");
+  });
 });
 
 describe("run summary", () => {
@@ -105,5 +126,14 @@ describe("run summary", () => {
 
   it("is empty before anything happens, so the caller can fall back", () => {
     expect(createGuard().summary()).toBe("");
+  });
+  it("reports provider failure flags and pending media truthfully", () => {
+    const g = createGuard();
+    g.after("composio_run", {}, { successful: false, message: "Not delivered" });
+    g.after("generate_image", {}, { pending_action: "media_approval", job_id: "draft-1" });
+    expect(g.steps()[0].ok).toBe(false);
+    expect(g.summary()).toContain("Not delivered");
+    expect(g.summary()).toContain("waiting for media approval");
+    expect(coachResult({ ok: false }, 3)).toMatchObject({ error: expect.any(String) });
   });
 });

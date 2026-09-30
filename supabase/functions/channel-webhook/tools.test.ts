@@ -1,6 +1,6 @@
 // Runnable check for the agent data tools:  deno test supabase/functions/channel-webhook/
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { runTool, TOOLS, WRITE_TOOLS } from "./tools.ts";
+import { boundedToolResult, runTool, TOOLS, WRITE_TOOLS } from "./tools.ts";
 
 // Minimal thenable query-builder stub. Records every .eq() so we can assert
 // org scoping; resolves to { data } when awaited.
@@ -57,7 +57,7 @@ Deno.test("list_low_stock returns only items at/below a set reorder level", asyn
 
 Deno.test("find_customer ignores empty queries and sanitizes filter chars", async () => {
   const { client } = fakeClient([]);
-  assertEquals(await runTool(client, "ORG", "find_customer", { query: "   " }), []);
+  assertEquals(typeof (await runTool(client, "ORG", "find_customer", { query: "   " }) as { error?: string }).error, "string");
 });
 
 Deno.test("unknown tool returns an error object, never throws", async () => {
@@ -71,6 +71,7 @@ Deno.test("unknown tool returns an error object, never throws", async () => {
 // Records every insert payload; select/single resolve with a fake id.
 function fakeWriteClient() {
   const inserts: [string, unknown][] = [];
+  const rpcRequests: Record<string, unknown>[] = [];
   const from = (table: string) => {
     // deno-lint-ignore no-explicit-any
     const builder: any = {
@@ -88,7 +89,11 @@ function fakeWriteClient() {
     };
     return builder;
   };
-  return { client: { from }, inserts };
+  return { client: { from, rpc: (name: string, input: Record<string, unknown>): Promise<{ data: { created: string; id: number; number: string } | null; error: { code: string } | null }> => {
+    assertEquals(name, "filey_channel_create_draft");
+    rpcRequests.push(input);
+    return Promise.resolve({ data: { created: "draft", id: 42, number: "DEMO-42" }, error: null });
+  } }, inserts, rpcRequests };
 }
 
 const WRITE_INPUTS: Record<string, unknown> = {
@@ -111,7 +116,7 @@ const WRITE_INPUTS: Record<string, unknown> = {
 
 Deno.test("write tools pin user_id + org_id on every insert", async () => {
   for (const tool of WRITE_TOOLS) {
-    const { client, inserts } = fakeWriteClient();
+    const { client, inserts, rpcRequests } = fakeWriteClient();
     const out = await runTool(client, "ORG-1", tool.name, WRITE_INPUTS[tool.name], "OWNER-1");
     assertEquals((out as { error?: string }).error, undefined, `${tool.name} errored`);
     // Every non-audit insert must carry explicit ownership.
@@ -122,13 +127,20 @@ Deno.test("write tools pin user_id + org_id on every insert", async () => {
       assertEquals(row.user_id, "OWNER-1", `${tool.name}: insert missing user_id`);
       assertEquals(row.org_id, "ORG-1", `${tool.name}: insert missing org_id`);
     }
+    for (const params of rpcRequests) {
+      assertEquals(params.p_owner, "OWNER-1");
+      assertEquals(params.p_org, "ORG-1");
+    }
   }
 });
 
 Deno.test("document write tools only ever create drafts", async () => {
   for (const name of ["create_draft_invoice", "create_draft_quote", "create_draft_po"]) {
-    const { client, inserts } = fakeWriteClient();
-    await runTool(client, "ORG", name, WRITE_INPUTS[name], "OWNER");
+    const { client, inserts, rpcRequests } = fakeWriteClient();
+    const result = await runTool(client, "ORG", name, WRITE_INPUTS[name], "OWNER") as { created: string };
+    assertEquals(result.created, "draft");
+    assertEquals(rpcRequests.length, 1);
+    assertEquals(rpcRequests[0].p_kind, name.replace("create_draft_", ""));
     const heads = inserts
       .filter(([t]) => ["invoice_docs", "quotations", "purchase_orders"].includes(t))
       .flatMap(([, r]) => (Array.isArray(r) ? r : [r])) as { status?: string }[];
@@ -339,10 +351,24 @@ function fakeProposalClient(invoice: unknown, failInserts = 0) {
   return { client, inserts, codes, get attempts() { return attempts; } };
 }
 
+Deno.test("status-only mark-paid is not exposed as a hosted agent tool", async () => {
+  const f = fakeProposalClient({ id: 77, number: "INV-77", status: "sent" });
+  const out = (await runTool(f.client, "ORG-9", "propose_mark_invoice_paid", {
+    invoice_number: "INV-77",
+  }, "OWNER")) as { error?: string };
+  assertEquals(typeof out.error, "string");
+  assertEquals(f.inserts.length, 0);
+});
+
 Deno.test("payment reminder proposal binds trusted source without accepting model-supplied approval metadata", async () => {
   const f = fakeProposalClient({ id: 77, number: "INV-77", status: "sent", customer_email: "customer@example.invalid" });
-  const out = (await runTool(f.client, "ORG-9", "request_payment_reminder", {
+  const injected = (await runTool(f.client, "ORG-9", "request_payment_reminder", {
     invoice_number: "INV-77", approval_channel: "whatsapp", approval_chat_id: "ATTACKER",
+  }, "OWNER", { channel: "telegram", externalId: "42" })) as { error?: string };
+  assertEquals(typeof injected.error, "string");
+  assertEquals(f.inserts.length, 0);
+  const out = (await runTool(f.client, "ORG-9", "request_payment_reminder", {
+    invoice_number: "INV-77",
   }, "OWNER", { channel: "telegram", externalId: "42" })) as { proposed?: string; approval_code?: string };
   assertEquals(out.proposed, "send_payment_reminder");
   assertEquals(/^\d{4}$/.test(out.approval_code ?? ""), true);
@@ -379,4 +405,60 @@ Deno.test("payment reminder validates status before parking anything", async () 
     invoice_number: "NOPE",
   }, "OWNER")) as { error?: string };
   assertEquals(typeof nf.error, "string");
+});
+
+Deno.test("hosted tool inputs reject oversized lines, wrong types and injected fields before any write", async () => {
+  for (const input of [
+    { customer_name: "Demo", items: Array.from({ length: 31 }, () => ({ description: "Item", unit_price: 10 })) },
+    { customer_name: "Demo", items: [{ description: "Item", qty: "2", unit_price: 10 }] },
+    { customer_name: "Demo", items: [{ description: "Item", qty: -1, unit_price: 10 }] },
+    { customer_name: "Demo", status: "paid", items: [{ description: "Item", unit_price: 10 }] },
+  ]) {
+    const f = fakeWriteClient();
+    const result = await runTool(f.client, "ORG", "create_draft_invoice", input, "OWNER") as { error?: string };
+    assertEquals(typeof result.error, "string");
+    assertEquals(f.rpcRequests.length, 0);
+    assertEquals(f.inserts.length, 0);
+  }
+});
+
+Deno.test("pending message proposals record their exact source conversation", async () => {
+  const f = fakeProposalClient(null);
+  await runTool(f.client, "ORG", "send_message", { channel: "telegram", to: "12", text: "Demo" }, "OWNER", { channel: "whatsapp", externalId: "971500000000" });
+  const payload = f.inserts[0][1].payload as Record<string, unknown>;
+  assertEquals(payload.approval_channel, "whatsapp");
+  assertEquals(payload.approval_chat_id, "971500000000");
+});
+
+Deno.test("missing atomic draft RPC returns an honest failure without partial inserts", async () => {
+  const f = fakeWriteClient();
+  f.client.rpc = () => Promise.resolve({ data: null, error: { code: "PGRST202" } });
+  const result = await runTool(f.client, "ORG", "create_draft_quote", WRITE_INPUTS.create_draft_quote, "OWNER") as { error?: string };
+  assertEquals(result.error?.includes("No partial draft was saved"), true);
+  assertEquals(f.inserts.length, 0);
+});
+
+Deno.test("bounded model results stay valid JSON and identify previews", () => {
+  const result = boundedToolResult({ rows: Array.from({ length: 1000 }, () => ({ name: 'Demo "company"' })) });
+  assertEquals(JSON.parse(result).truncated, true);
+  assertEquals(result.length < 6000, true);
+  assertEquals(JSON.parse(boundedToolResult(undefined)).error, "No result was returned.");
+});
+
+Deno.test("report line failures cannot become invented zero totals", async () => {
+  for (const [name, input] of [["run_report", { report: "sales_by_month" }], ["run_report", { report: "top_customers" }], ["get_vat_summary", {}]] as const) {
+    const scope: string[] = [];
+    const client = { from(table: string) {
+      const b: Record<string, unknown> = {};
+      for (const method of ["select", "neq", "gte", "lte", "in"]) b[method] = () => b;
+      b.eq = (column: string, value: string) => { if (column === "org_id") scope.push(value); return b; };
+      b.then = (resolve: (value: unknown) => void) => resolve(table === "invoice_docs"
+        ? { data: [{ id: 1, issue_date: "2026-09-30", doc_type: "invoice" }], error: null }
+        : { data: null, error: { message: "offline" } });
+      return b;
+    } };
+    const result = await runTool(client, "ORG", name, input) as { error?: string };
+    assertEquals(typeof result.error, "string");
+    assertEquals(scope, ["ORG", "ORG"], "both header and child query must pin the workspace");
+  }
 });
