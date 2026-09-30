@@ -112,6 +112,7 @@ it("exports the selected sales journal instead of silently downloading the ledge
 });
 
 it("uses the saved customer ID after a rename and never inherits another customer's matching name", async () => {
+  const journal = vi.spyOn(salesJournal, "buildSalesJournal").mockRejectedValue(new Error("Journal probe"));
   vi.mocked(crm.customers).mockResolvedValue([customer, { ...customer, id: 2 }]);
   vi.mocked(billing.listDocs).mockResolvedValue([
     { ...doc, customer_id: 1, customer_name: "Name before rename" },
@@ -128,4 +129,8 @@ it("uses the saved customer ID after a rename and never inherits another custome
   expect(exported).toContain("$100.00");
   expect(exported).not.toContain("FOREIGN-INVOICE");
   expect(exported).not.toContain("AMBIGUOUS-");
+  fireEvent.click(view.getByRole("button", { name: "Sales Journal" }));
+  await waitFor(() => expect(journal).toHaveBeenCalledTimes(1));
+  expect(journal.mock.calls[0][0].invoiceIds).toEqual([doc.id]);
+  expect(journal.mock.calls[0][0].receipts).toEqual([]);
 });

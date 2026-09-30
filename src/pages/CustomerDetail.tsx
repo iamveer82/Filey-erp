@@ -230,14 +230,14 @@ export default function CustomerDetail() {
         customer,
         company,
         invoiceIds: ids,
-        receipts: allReceipts,
+        receipts: allReceipts.filter((r) => names.has(r.customer_name)),
       });
       if (alive) setJournalData(data);
     };
     loadJournal().catch(() => { if (alive) setJournalError(true); })
       .finally(() => { if (alive) setJournalLoading(false); });
     return () => { alive = false; };
-  }, [journalMode, customer, myInvoices, company, journalRetry]);
+  }, [journalMode, customer, myInvoices, company, names, journalRetry]);
   const myQuotes = useMemo(
     () => quotations.filter((d) => d.customer_id != null
       ? d.customer_id === customer?.id : names.has(d.customer_name)),
