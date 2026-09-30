@@ -11,6 +11,7 @@
 // Body: { to, subject, html }.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { acceptedEmailId } from "../_shared/email-delivery.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit } from "../_shared/rateLimit.ts";
@@ -147,8 +148,11 @@ serve(async (req) => {
       }),
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => null);
     if (!res.ok) return json({ error: data?.message ?? "Send failed" }, res.status === 429 ? 429 : 422);
+
+    const receipt = acceptedEmailId(data);
+    if (!receipt) return json({error: "Email acceptance could not be confirmed. Check delivery before retrying."},502);
 
     // Record accepted sends separately from the service's attempt budget.
     const ins = await supa.from("audit_log").insert({
@@ -160,7 +164,7 @@ serve(async (req) => {
     });
     if (ins.error) console.error("email_send audit insert failed", ins.error);
 
-    return json({ id: data?.id ?? null });
+    return json({ id: receipt });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

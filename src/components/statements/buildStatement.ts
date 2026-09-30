@@ -1,4 +1,5 @@
 import { fmtDate } from "../../lib/format";
+import { r2 } from "../../lib/money";
 import type {
   StatementData,
   StatementLine,
@@ -18,7 +19,11 @@ export interface StatementDocEntry {
    *  line cannot be placed honestly without one. */
   date?: string;
   total: number;
-  /** VAT rate (%) applied to this document — 0/undefined = no VAT. */
+  /** Exact signed amounts computed from saved items. Never derive them from
+   * a flat rate: documents may mix categories, discounts and tax rates. */
+  net?: number;
+  tax?: number;
+  /** Legacy metadata only; a rate alone cannot establish a tax breakdown. */
   taxRate?: number;
 }
 
@@ -95,6 +100,7 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
     credit: number;
     net?: number;
     vat?: number;
+    document?: boolean;
   };
   const events: Event[] = [];
 
@@ -102,11 +108,12 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
     const date = ymd(d.date);
     const total = Number(d.total) || 0;
     if (!date || total === 0) continue;
-    const rate = Number(d.taxRate) || 0;
-    const vat = rate > 0 ? total - total / (1 + rate / 100) : 0;
-    const net = total - vat;
+    const exact = typeof d.net === "number" && Number.isFinite(d.net)
+      && typeof d.tax === "number" && Number.isFinite(d.tax)
+      && r2(d.net + d.tax) === r2(total);
+    const breakdown = exact ? { net: d.net, vat: d.tax } : {};
     if (total > 0)
-      events.push({ date, ref: d.number, description: docLabel, debit: total, credit: 0, net, vat: vat || undefined });
+      events.push({ date, ref: d.number, description: docLabel, debit: total, credit: 0, document: true, ...breakdown });
     else
       events.push({
         date,
@@ -114,6 +121,8 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
         description: creditLabel,
         debit: 0,
         credit: Math.abs(total),
+        document: true,
+        ...breakdown,
       });
   }
   for (const p of input.payments) {
@@ -188,8 +197,13 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
 
   const totalDebit = within.reduce((s, e) => s + e.debit, 0);
   const totalCredit = within.reduce((s, e) => s + e.credit, 0);
-  const totalVat = within.reduce((s, e) => s + (e.vat || 0), 0);
-  const totalNet = within.reduce((s, e) => s + (e.net || e.debit), 0);
+  const documents = within.filter(e => e.document);
+  // A partial tax summary would still be labelled TOTAL VAT in a statement.
+  // Preserve the gross ledger but omit the breakdown until every document has
+  // exact saved-line amounts (legacy caches can legitimately lack them).
+  const exactBreakdown = documents.every(e => e.net !== undefined && e.vat !== undefined);
+  const totalVat = exactBreakdown ? r2(documents.reduce((s, e) => s + e.vat!, 0)) : null;
+  const totalNet = exactBreakdown ? r2(documents.reduce((s, e) => s + e.net!, 0)) : null;
   const closing = opening + totalDebit - totalCredit;
 
   const earliest = events.reduce((m, e) => (e.date < m ? e.date : m), "9999-12-31");
@@ -220,7 +234,7 @@ export function buildStatement(input: BuildStatementInput): BuiltStatement {
       totalVat,
       totalNet,
       generatedOn: fmtDate(new Date().toISOString()),
-      lines: lines.map((l) => ({ ...l, date: fmtDate(l.date) })),
+      lines: lines.map(({ document: _document, ...line }: StatementLine & { document?: boolean }) => ({ ...line, date: fmtDate(line.date) })),
     },
     hasContent: within.length > 0 || hasOpening,
   };

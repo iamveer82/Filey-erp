@@ -10,7 +10,7 @@ import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import ExpenseScanModal from "../components/ExpenseScanModal";
 import { SelectMenu } from "../components/ui-menu";
-import { aed, fmtDate, numInput, cn, getDisplayCurrency, todayYmd } from "../lib/format";
+import { aed, fmtDate, numInput, cn, getDisplayCurrency, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -175,15 +175,17 @@ export default function Accounting() {
     }
   };
 
-  const shareTxn = (kind: ShareKind, t: Txn) => {
+  const shareTxn = async (kind: ShareKind, t: Txn) => {
     const text = `Journal entry #${t.id} - ${t.account_name}: ${t.txn_type} ${aed(
       t.amount
     )} on ${fmtDate(t.txn_date)}${t.description ? `. ${t.description}` : ""}`;
-    shareVia(kind, {
-      text,
-      url: `${location.origin}${location.pathname}#/accounting`,
-    });
-    if (kind === "copyLink") toast.success("Accounting link copied");
+    try {
+      await shareVia(kind, {
+        text,
+        url: `${location.origin}${location.pathname}#/accounting`,
+      });
+      if (kind === "copyLink") toast.success("Accounting link copied");
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   const exportCsv = () => {

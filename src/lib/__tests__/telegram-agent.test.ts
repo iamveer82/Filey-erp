@@ -90,6 +90,17 @@ it("does not retry ambiguous replies or commit unseen approvals", async () => {
   expect(telegramState().error).toMatch(/not confirmed/);
 });
 
+it("never reports an unconfirmed document response as accepted or retries its send", async () => {
+  await pair();
+  mocks.run.mockResolvedValueOnce({ text: "Invoice ready", files: [{ name: "invoice.pdf", path: "generated-path" }], delivered: mocks.delivered });
+  const original = mocks.native.getMockImplementation()!;
+  mocks.native.mockImplementation((command, args) => args.method === "sendDocument" ? Promise.resolve({}) : original(command, args));
+  await feed([message(11, "Export invoice")]);
+  expect(mocks.native.mock.calls.filter(([, args]) => args.method === "sendDocument")).toHaveLength(1);
+  expect(mocks.delivered).toHaveBeenCalledWith(expect.stringContaining("delivery not confirmed"));
+  expect(mocks.delivered.mock.calls[0][0]).not.toContain("accepted by Telegram");
+});
+
 it("stops an active task immediately and closes its isolated agent browser", async () => {
   await pair();
   mocks.run.mockImplementationOnce(({ signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true })));

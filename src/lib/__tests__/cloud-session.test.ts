@@ -127,6 +127,15 @@ it("keeps workspace verification bounded and translates a persistent expired ses
   expect(f.auth.refreshSession).toHaveBeenCalledTimes(1);
 });
 
+it.each([null, { user: { id: "someone-else" }, access_token: "other" } as Session])("refuses a verified session if the active account changed during verification (%j)", async next => {
+  const f = fixture();
+  f.auth.getUser.mockImplementation(async () => {
+    f.setSession(next);
+    return { data: { user: f.original.user }, error: null };
+  });
+  await expect(verifyCloudSession(f.client, f.original)).rejects.toThrow("account changed");
+});
+
 it.each([false, true])("recovers through the real Supabase client (verify workspace first: %s)", async verifyFirst => {
   const { original } = fixture();
   const user = { id: original.user.id, aud: "authenticated", role: "authenticated", email: "owner@example.test" };

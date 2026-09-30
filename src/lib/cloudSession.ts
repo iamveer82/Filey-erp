@@ -48,6 +48,11 @@ export async function verifyCloudSession(client: SupabaseClient, session: Sessio
     throw new Error("Could not connect to Filey Cloud. Check your connection and try again.");
   }
   if (result.data.user?.id !== session.user.id) throw new Error(ACCOUNT_CHANGED);
+  // getUser verifies the supplied JWT, even if its owner signed out while the
+  // request was in flight. Fence the active account before any data transfer.
+  const active = await client.auth.getSession();
+  if (active.error) throw new Error(CLOUD_RECONNECT_MESSAGE);
+  if (active.data.session?.user.id !== session.user.id) throw new Error(ACCOUNT_CHANGED);
 }
 
 /** A rejected JWT has not executed the database/storage operation. Retry that

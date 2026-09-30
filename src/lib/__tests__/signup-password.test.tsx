@@ -72,7 +72,20 @@ beforeEach(() => {
     error: supplied === fixture.password ? null : new Error("Invalid login credentials"),
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  try {
+    cleanup();
+    if (vi.isFakeTimers()) {
+      // input-otp leaves its 0/10/50 ms selection timers queued on unmount.
+      // Run them while jsdom still exists, instead of leaking into its teardown.
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});
 
 it.each(["local", "cloud"])("saves the chosen password only after verification in %s mode, then supports password login", async (mode) => {
   localStorage.setItem("filey_data_mode", mode);
@@ -154,6 +167,7 @@ it("finishes signup when confirmation is disabled, but does not claim an existin
 });
 
 it("passes the signup form's password through code verification", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   render(<Login />, { wrapper });
   fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: credential.value.trim() } });
   fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: password } });
@@ -165,4 +179,5 @@ it("passes the signup form's password through code verification", async () => {
   fireEvent.click(verify);
   await waitFor(() => expect(fixture.updateUser).toHaveBeenCalledWith({ password }));
   await waitFor(() => expect(fixture.published).toBe(true));
+  await waitFor(() => expect(verify).toBeEnabled());
 });

@@ -41,6 +41,19 @@ try {
   console.log('PASS: eight concurrent Stripe deliveries record exactly one payment.');
   const workspaceAcl=sql('supabase/2026-09-30-workspace-billing-acl.sql');
   console.log(run('psql',args,sql('scripts/fixtures/workspace-billing-acl-setup.sql')+'\n'+workspaceAcl+'\n'+workspaceAcl+'\n'+sql('scripts/fixtures/workspace-billing-acl-assertions.sql')).trim());
+  const ownerIntegrity=sql('supabase/2026-10-01-team-owner-integrity.sql');
+  console.log(run('psql',args,sql('scripts/fixtures/team-owner-setup.sql')+'\n'+ownerIntegrity+'\n'+ownerIntegrity+'\n'+sql('scripts/fixtures/team-owner-assertions.sql')).trim());
+  const subscriptionIntegrity=sql('supabase/2026-10-01-stripe-subscription-integrity.sql');
+  console.log(run('psql',args,sql('scripts/fixtures/stripe-subscription-setup.sql')+'\n'+subscriptionIntegrity+'\n'+subscriptionIntegrity+'\n'+sql('scripts/fixtures/stripe-subscription-assertions.sql')).trim());
+  // Both equal-second delivery order and a newer cancellation race an older
+  // active retrieval. Row locks and observation/event clocks preserve the end.
+  await Promise.all(Array.from({length:8},(_,index)=>promisify(execFile)(join(bin,'psql'+(process.platform==='win32'?'.exe':'')),
+    [...args,'-tAc',`set role service_role; set test.claims='{"role":"service_role"}'; select test_stripe_state('sub_race','cus_race','${index===7?'past_due':'active'}',700,${700+index});`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(run('psql',[...args,'-tAc',"select plan_status from organizations where stripe_customer_id='cus_race'"]).trim(),'past_due');
+  await Promise.all(Array.from({length:8},(_,index)=>promisify(execFile)(join(bin,'psql'+(process.platform==='win32'?'.exe':'')),
+    [...args,'-tAc',`set role service_role; set test.claims='{"role":"service_role"}'; select test_stripe_state('sub_race','cus_race','${index===7?'canceled':'active'}',${index===7?800:799},${900-index});`],{encoding:'utf8',windowsHide:true})));
+  assert.equal(run('psql',[...args,'-tAc',"select plan||'/'||plan_status from organizations where stripe_customer_id='cus_race'"]).trim(),'free/canceled');
+  console.log('PASS: concurrent same-second and canceled/active Stripe deliveries preserve current state.');
 } catch(error) {
   console.error(error.stderr?.toString() || error.message);
   process.exitCode=1;

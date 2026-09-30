@@ -121,7 +121,7 @@ export default function People() {
     }
   };
 
-  const shareEmployee = (kind: "whatsapp" | "email" | "sms", e: Employee) => {
+  const shareEmployee = async (kind: "whatsapp" | "email" | "sms", e: Employee) => {
     const text = [
       `${e.name}${e.position ? ` - ${e.position}` : ""}${
         e.department ? `, ${e.department}` : ""
@@ -131,7 +131,8 @@ export default function People() {
     ]
       .filter(Boolean)
       .join("\n");
-    shareVia(kind, { phone: e.phone, email: e.email, text, url: e.name });
+    try { await shareVia(kind, { phone: e.phone, email: e.email, text, url: e.name }); }
+    catch (error) { toast.error(errMsg(error)); }
   };
 
   return (

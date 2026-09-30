@@ -217,6 +217,9 @@ interface TurnSlot {
   /** Every file attached to this turn, in attachment order — merge combines
    *  them in exactly this order. */
   files: File[];
+  /** Last fully successful document operation. Original attachment indices
+   *  remain available to tools with explicit reference_file selection. */
+  workingFiles?: File[];
   outputs: FileOutput[];
 }
 const turnSlots = new Map<string, TurnSlot>();
@@ -240,6 +243,7 @@ export function setTurnFile(turnId: string, f: File | null): void {
 export function setTurnFiles(turnId: string, files: File[], outputs?: FileOutput[]): void {
   const slot = slotFor(turnId);
   slot.files = files;
+  delete slot.workingFiles;
   if (outputs) slot.outputs = outputs;
   if (!slot.files.length && !slot.outputs.length) turnSlots.delete(turnId);
 }
@@ -262,7 +266,10 @@ const turnFiles = (tid: string): File[] => {
   if (slot && slot.scope !== agentStorageScope()) throw new DOMException("Workspace changed before reading this turn's files.", "AbortError");
   return slot?.files ?? [];
 };
-const turnFile = (tid: string): File | null => turnFiles(tid)[0] ?? null;
+const workingTurnFiles = (tid: string): File[] => {
+  const originals = turnFiles(tid); // validates the slot's workspace
+  return turnSlots.get(tid)?.workingFiles ?? originals;
+};
 const pushTurnOutput = (tid: string, o: FileOutput): void => {
   // A stopped/ended turn must not recreate an orphan output slot on late completion.
   if (tid && !turnSlots.has(tid)) return;
@@ -1815,7 +1822,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "run_file_tool",
     description:
-      "Run a document tool and return downloadable chat files. tool_id comes from list_file_tools (compress, pdf2txt, merge, ocr-pdf, word2pdf, encrypt, decrypt). Multi-file tools such as merge use all attachments in order. Single-file tools process each attachment separately. Pass options with the exact keys listed by the tool. Report partial failures and My Files save warnings accurately.",
+      "Run a document tool and return downloadable chat files. tool_id comes from list_file_tools (compress, pdf2txt, merge, ocr-pdf, word2pdf, encrypt, decrypt). Each fully successful operation becomes the input for the next run_file_tool in this turn (for example, decrypt then compress). Failed or partial operations leave the working input unchanged. Multi-file tools such as merge use all working files in order. Single-file tools process each working file separately. Pass options with the exact keys listed by the tool. Report partial failures and My Files save warnings accurately.",
     parameters: {
       type: "object",
       properties: {
@@ -1836,7 +1843,7 @@ export const TOOLS: ToolDef[] = [
         signal?.throwIfAborted();
         if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
       };
-      const files = turnFiles(tid);
+      const files = workingTurnFiles(tid);
       if (!files.length)
         return {
           error:
@@ -1926,6 +1933,12 @@ export const TOOLS: ToolDef[] = [
         }
       }
       const where = await outputDir();
+      assertCurrent();
+      if (!failures.length && turnSlots.has(tid)) {
+        const { fileFromOutput } = await import("./pdfTools");
+        assertCurrent();
+        slotFor(tid).workingFiles = out.map(fileFromOutput);
+      }
       const paths = saved.map((s) => s.path).filter(Boolean);
       const multi = files.length > 1;
       return {
@@ -2022,18 +2035,18 @@ export const TOOLS: ToolDef[] = [
   {
     name: "read_attached_document",
     description:
-      "Read the TEXT of the file the user attached to this chat, so you can act on its contents (e.g. read an invoice/receipt then create a draft). PDFs are extracted to text; images are already visible to you directly. Returns the document text (truncated for long files).",
+      "Read the TEXT of the first working PDF (the latest fully successful document-tool output, otherwise the first original attachment), so you can act on its contents (e.g. unlock then read an invoice/receipt and create a draft). Images need actual model vision input or an enabled OCR tool; generated images are not automatically added to vision context. Returns the document text (truncated for long files).",
     parameters: { type: "object", properties: {} },
     run: async () => {
       const tid = activeTurnId;
-      const f = turnFile(tid);
+      const f = workingTurnFiles(tid)[0];
       if (!f)
         return {
           error: "No file attached — ask the user to attach a PDF or image first.",
         };
       if (f.type.startsWith("image/"))
         return {
-          note: "The attached image is already visible to you in this conversation — read it directly.",
+          note: "This tool extracts PDF text only. Inspect this image only if it was included in the model's image input; otherwise use an enabled image OCR tool. A filename alone is not evidence of its contents.",
         };
       const pt = await import("./pdfTools");
       const out = await pt.pdfToText(f);

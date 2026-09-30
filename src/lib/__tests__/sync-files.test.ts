@@ -41,7 +41,7 @@ it("missing bytes are a failure; successful and already-present bytes use the sa
   await localClient.storage.from("files").upload(row.storage_path, new Blob(["invoice"]));
   const first = await pushFileBlobs(client, uid, [row]);
   expect(first.failed).toEqual([]);
-  expect(first.rows[0].storage_path).toMatch(/^file-test-owner\/synced\/[a-f0-9]{64}\/invoice.pdf$/);
+  expect(first.rows[0].storage_path).toMatch(/^file-test-owner\/synced\/file-1\/[a-f0-9]{64}\/invoice.pdf$/);
   upload.mockResolvedValue({ data: null, error: { statusCode: "409" } });
   expect((await pushFileBlobs(client, uid, [row])).rows).toEqual(first.rows);
   for (const error of [
@@ -58,6 +58,19 @@ it("missing bytes are a failure; successful and already-present bytes use the sa
   expect((await pushFileBlobs(client, uid, [row], report)).failed).toEqual([row.id]);
   expect(report).toHaveBeenCalledWith(expect.objectContaining({ kind: "file", recordId: row.id }));
   expect(upload.mock.calls[0][2].upsert).toBe(false);
+});
+it("keeps identical named files independently deletable and changes bytes without overwriting an earlier version", async () => {
+  const path = "local-user/invoice.pdf";
+  await localClient.storage.from("files").upload(path, new Blob(["same invoice"]));
+  const { client } = cloud();
+  const rows = ["file-1", "file-2"].map(id => ({ id, storage_path: path, mime: "application/pdf" }));
+  const first = await pushFileBlobs(client, uid, rows);
+  expect(first.failed).toEqual([]);
+  expect(new Set(first.rows.map(row => row.storage_path)).size).toBe(2);
+  expect((await pushFileBlobs(client, uid, rows)).rows).toEqual(first.rows);
+  await localClient.storage.from("files").upload(path, new Blob(["revised invoice"]));
+  const revised = await pushFileBlobs(client, uid, [rows[0]]);
+  expect(revised.rows[0].storage_path).not.toBe(first.rows[0].storage_path);
 });
 it("a second device caches cloud PDFs, and failed downloads never pretend the file is present", async () => {
   const { client, download } = cloud();

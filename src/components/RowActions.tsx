@@ -283,8 +283,9 @@ export function QuickViewModal({
 
 export type ShareKind = "whatsapp" | "email" | "sms" | "copyLink";
 
-/** Helper to build share URLs. Opens in a new tab (Filey-DEMO parity). */
-export function shareVia(
+/** Open a share destination or await a confirmed clipboard write. Callers must
+ *  await/catch before reporting success; clipboard permission may be denied. */
+export async function shareVia(
   kind: ShareKind,
   {
     phone,
@@ -292,7 +293,7 @@ export function shareVia(
     text,
     url,
   }: { phone?: string; email?: string; text?: string; url?: string }
-) {
+): Promise<void> {
   const body = encodeURIComponent(text || "");
   if (kind === "whatsapp") {
     const num = (phone || "").replace(/[^\d]/g, "");
@@ -309,6 +310,7 @@ export function shareVia(
     const link = `sms:${phone || ""}?body=${body}`;
     window.location.href = link;
   } else if (kind === "copyLink") {
-    navigator.clipboard.writeText(url || window.location.href);
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard is unavailable. Try again in a supported browser.");
+    await navigator.clipboard.writeText(url || window.location.href);
   }
 }

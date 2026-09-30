@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { DataTable, keyActivate } from "../ui";
+import { shareVia } from "../RowActions";
 
 afterEach(cleanup);
 
@@ -70,4 +71,25 @@ describe("keyActivate", () => {
     expect(inner).toHaveBeenCalledTimes(1);
     expect(outer).not.toHaveBeenCalled();
   });
+});
+
+it("keeps a copy request pending until the clipboard confirms and rejects unavailable clipboard access", async () => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  let confirm!: () => void;
+  const write = vi.fn(() => new Promise<void>(resolve => { confirm = resolve; }));
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
+  try {
+    let finished = false;
+    const pending = shareVia("copyLink", { url: "https://example.test/document" }).then(() => { finished = true; });
+    await Promise.resolve();
+    expect(write).toHaveBeenCalledExactlyOnceWith("https://example.test/document");
+    expect(finished).toBe(false);
+    confirm(); await pending;
+    expect(finished).toBe(true);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    await expect(shareVia("copyLink", {})).rejects.toThrow("Clipboard is unavailable");
+  } finally {
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  }
 });

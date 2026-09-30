@@ -196,11 +196,12 @@ export default function ChequeRegister() {
 
   // Cheques are device-local records with no public link or stored contact,
   // so sharing sends a plain-text summary (no copy-link).
-  const shareCheque = (kind: Exclude<ShareKind, "copyLink">, c: Cheque) => {
+  const shareCheque = async (kind: Exclude<ShareKind, "copyLink">, c: Cheque) => {
     const text = `Cheque #${c.cheque_no} (${c.type})\nParty: ${c.party}\nBank: ${
       c.bank || "—"
     }\nAmount: ${aed(c.amount)}\nDue: ${fmtDate(c.due_date)}\nStatus: ${c.status}`;
-    shareVia(kind, { text, url: `Cheque #${c.cheque_no}` });
+    try { await shareVia(kind, { text, url: `Cheque #${c.cheque_no}` }); }
+    catch (e) { toast.error(errMsg(e)); }
   };
 
   return (

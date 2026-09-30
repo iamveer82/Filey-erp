@@ -10,7 +10,7 @@ import { erp, crm, CrmCustomer, Order, OrderItem, Product } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { SelectMenu } from "../components/ui-menu";
-import { aed, fmtDate, numInput, num, cn, getDisplayCurrency } from "../lib/format";
+import { aed, fmtDate, numInput, num, cn, getDisplayCurrency, errMsg } from "../lib/format";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -191,13 +191,15 @@ export default function Orders() {
       }
       return;
     }
-    shareVia(kind, {
-      phone: cust?.phone_e164 || cust?.phone || "",
-      email: cust?.email || "",
-      text,
-      url: `${window.location.origin}/orders?id=${o.id}`,
-    });
-    if (kind === "copyLink") toast.success("Link copied.");
+    try {
+      await shareVia(kind, {
+        phone: cust?.phone_e164 || cust?.phone || "",
+        email: cust?.email || "",
+        text,
+        url: `${window.location.origin}/orders?id=${o.id}`,
+      });
+      if (kind === "copyLink") toast.success("Link copied.");
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   return (

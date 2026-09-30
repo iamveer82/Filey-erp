@@ -41,7 +41,7 @@ Deno.test("an HTTP-200 provider failure is a failure, and is not retried", async
 
 Deno.test("partial delivery is reported without leaking the token or resending", async () => {
   const { fn, calls } = fakeFetch([
-    new Response(JSON.stringify({ ok: true })),
+    new Response(JSON.stringify({ ok: true, result: {message_id: 1} })),
     // Telegram's own errors quote the request URL, which carries the bot token.
     new Error("https://api.telegram.org/botSECRET/sendMessage"),
   ]);
@@ -83,4 +83,12 @@ Deno.test("WhatsApp is only accepted once the provider returns a message id", as
     Error,
     "not confirmed",
   );
+});
+
+Deno.test("Telegram and Slack acceptance requires a message receipt, not only ok=true", async () => {
+  for (const channel of ["telegram", "slack"] as const) {
+    const missing = fakeFetch([new Response(JSON.stringify({ok: true}))]);
+    await assertRejects(() => sendChannelText(channel,"fixture","hello",{token:"fixture"},missing.fn));
+    assertEquals(missing.calls.length,1);
+  }
 });

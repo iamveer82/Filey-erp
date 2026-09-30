@@ -292,7 +292,7 @@ export default function DeclarationLetter() {
 
   /** Letters have no public link or recipient contact on the record, so the
    *  send menu shares a text summary of the letter (DEMO parity). */
-  const shareRow = (kind: ShareKind, d: SavedDecl) => {
+  const shareRow = async (kind: ShareKind, d: SavedDecl) => {
     const text = [
       `${letterName(d)} ${d.ref || d.lpo_ref || ""}`.trim(),
       `Recipient: ${d.recipient_name || "—"}`,
@@ -302,7 +302,8 @@ export default function DeclarationLetter() {
     ]
       .filter(Boolean)
       .join("\n");
-    shareVia(kind, { text });
+    try { await shareVia(kind, { text }); }
+    catch (e) { toast.error(errMsg(e)); }
   };
 
   if (editing) {

@@ -15,7 +15,7 @@ import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { AuthProvider } from "../../lib/auth";
-import { billing, quotes } from "../../lib/api";
+import { billing, crm, quotes, suppliers } from "../../lib/api";
 
 // ── Mock the data boundary: a chainable, awaitable stub that always yields
 // {data:[], error:null}. Covers pages that call sb() directly and via lib/api. ──
@@ -205,6 +205,39 @@ it.each([
   } finally {
     view.unmount();
     list.mockRestore();
+  }
+});
+
+it.each([
+  { label: "Customer", page: <Customers />, stub: () => vi.spyOn(crm, "customers").mockResolvedValue([{ id: 41, name: "Clipboard fixture" }] as Awaited<ReturnType<typeof crm.customers>>) },
+  { label: "Supplier", page: <Suppliers />, stub: () => vi.spyOn(suppliers, "list").mockResolvedValue([{ id: 41, name: "Clipboard fixture" }] as Awaited<ReturnType<typeof suppliers.list>>) },
+])("$label copy waits for permission, reports rejection and permits a deliberate retry", async ({ label, page, stub }) => {
+  const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  let reject!: (error: Error) => void;
+  const write = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
+  const list = stub();
+  const view = wrap(page);
+  const copy = () => {
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(view.getByRole("menuitem", { name: "Copy link" }));
+  };
+  try {
+    await view.findAllByText("Clipboard fixture");
+    copy();
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(view.queryByText(`${label} link copied.`)).toBeNull();
+    reject(new Error("Clipboard access denied"));
+    expect(await view.findByText("Clipboard access denied")).toBeTruthy();
+    expect(view.queryByText(`${label} link copied.`)).toBeNull();
+    write.mockResolvedValueOnce(undefined);
+    copy();
+    expect(await view.findByText(`${label} link copied.`)).toBeTruthy();
+    expect(write).toHaveBeenCalledTimes(2);
+  } finally {
+    view.unmount(); list.mockRestore();
+    if (previous) Object.defineProperty(navigator, "clipboard", previous);
+    else Reflect.deleteProperty(navigator, "clipboard");
   }
 });
 

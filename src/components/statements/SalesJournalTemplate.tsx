@@ -16,8 +16,9 @@ const num = (n: number) =>
  *  Dense, black & white, every invoice line item in one table with
  *  SL/Date/Description/Unit/Qty/Rate/Amount/VAT/Total/InvoiceNo/Received. */
 export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
-  const { company, customer, period, summary, transactions } = data;
-  const regime = taxRegimeFor("AED", company.country_code);
+  const { company, customer, period, summary, transactions, excludedCurrencies } = data;
+  const currency = data.currency || "AED";
+  const regime = taxRegimeFor(currency, company.country_code);
 
   return (
     <div
@@ -39,6 +40,12 @@ export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
         )}
       </div>
 
+      {!!excludedCurrencies?.length && (
+        <p className="my-2 text-[9px] text-neutral-600">
+          This journal contains {currency} transactions only. {excludedCurrencies.join(", ")} transactions are excluded; their amounts are not converted or added to these totals.
+        </p>
+      )}
+
       <div className="h-0.5 bg-neutral-900 my-2" />
 
       <div className="text-center">
@@ -53,11 +60,11 @@ export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
 
       {/* Summary boxes */}
       <div className="grid grid-cols-3 gap-2 my-3">
-        <SummaryBox label="TOTAL DOCUMENTED SALES" value={`AED ${num(summary.totalSales)}`} />
-        <SummaryBox label="TOTAL FUNDS RECEIVED" value={`AED ${num(summary.totalReceived)}`} />
+        <SummaryBox label="TOTAL DOCUMENTED SALES" value={`${currency} ${num(summary.totalSales)}`} />
+        <SummaryBox label="TOTAL FUNDS RECEIVED" value={`${currency} ${num(summary.totalReceived)}`} />
         <SummaryBox
           label="NET BALANCE (PENDING / ADVANCE)"
-          value={`AED ${num(summary.netBalance)}`}
+          value={`${currency} ${num(summary.netBalance)}`}
           tone={summary.netBalance < 0 ? "red" : "green"}
         />
       </div>
@@ -117,14 +124,14 @@ export function SalesJournalTemplate({ data }: SalesJournalTemplateProps) {
       <div className="mt-3 text-[9px] text-neutral-600 flex items-center justify-between">
         <span>Generated on {new Date().toLocaleDateString()}</span>
         <span>
-          PENDING / ADVANCE BALANCE: AED {num(summary.netBalance)}
+          PENDING / ADVANCE BALANCE: {currency} {num(summary.netBalance)}
         </span>
       </div>
 
-      {summary.totalVat > 0 && (
+      {summary.totalVat !== 0 && (
         <div className="mt-1 text-[9px] text-neutral-600">
-          VAT breakdown: Net AED {num(summary.totalSales - summary.totalVat)} +
-          VAT AED {num(summary.totalVat)} = Total AED {num(summary.totalSales)}
+          {regime.taxLabel} breakdown: Net {currency} {num(summary.totalSales - summary.totalVat)} +{" "}
+          {regime.taxLabel} {currency} {num(summary.totalVat)} = Total {currency} {num(summary.totalSales)}
         </div>
       )}
     </div>

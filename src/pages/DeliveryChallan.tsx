@@ -222,12 +222,14 @@ export default function DeliveryChallan() {
       return;
     }
     // shareVia reuses `url` as the email subject.
-    shareVia(kind, {
-      phone: cust?.phone || "",
-      email: cust?.email || "",
-      text,
-      url: `${typeLabel(r.dc_type)} ${r.number}`,
-    });
+    try {
+      await shareVia(kind, {
+        phone: cust?.phone || "",
+        email: cust?.email || "",
+        text,
+        url: `${typeLabel(r.dc_type)} ${r.number}`,
+      });
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   if (form) {

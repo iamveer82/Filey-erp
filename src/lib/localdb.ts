@@ -369,11 +369,17 @@ async function journalSave(j: SyncJournal): Promise<void> {
  *  `all: true` marks the whole collection. `silent` skips the write event —
  *  used when re-marking failed pushes, so a permanently bad row can't put the
  *  scheduler in a hot retry loop. No-op for collections the cloud doesn't take. */
-export async function journalMark(
+export function journalMark(
   coll: string,
   opts?: { changed?: any[]; deleted?: any[]; deletedRevisions?: Record<string, number | null>; all?: boolean; silent?: boolean }
 ): Promise<void> {
-  if (!PUSH_SET.has(coll)) return;
+  if (!PUSH_SET.has(coll)) return Promise.resolve();
+  return serializeWrite(() => markPendingChanges(coll, opts));
+}
+
+/** The public seed/import path shares the collection queue. Transaction commits
+ * already hold that queue and must not acquire it recursively. */
+async function markPendingChanges(coll: string, opts: Parameters<typeof journalMark>[1]): Promise<void> {
   const j = await journalLoad();
   markJournal(j, coll, opts);
   await journalSave(j);
@@ -800,7 +806,7 @@ class LocalBuilder implements PromiseLike<Result> {
           deleted: removed.map((r) => r.id),
           deletedRevisions: Object.fromEntries(removed.map((r) => [String(r.id), r.sync_revision ?? null])),
         });
-        result = null;
+        result = this.returnRows ? removed : null;
       }
 
       if (this.want !== "no") {
@@ -879,7 +885,7 @@ export function withLocalTransaction<T>(
         await saveColl(coll, rows);
         committed.push(coll);
       }
-      for (const [coll, opts] of changes) await journalMark(coll, { ...opts, silent: true });
+      for (const [coll, opts] of changes) await markPendingChanges(coll, { ...opts, silent: true });
     } catch (error) {
       const restored = await Promise.allSettled(
         committed.map((coll) => saveColl(coll, original.get(coll)!)),
@@ -1049,11 +1055,7 @@ async function diskRead(path: string): Promise<Uint8Array | null> {
   return arr ? Uint8Array.from(arr) : null;
 }
 async function diskDelete(path: string): Promise<void> {
-  try {
-    await invoke("blob_delete", { path });
-  } catch {
-    /* ignore */
-  }
+  await invoke("blob_delete", { path });
 }
 
 /** Read bytes for a storage key. Desktop: disk, migrating an old kv base64 blob
@@ -1091,7 +1093,9 @@ function localStorageApi() {
       async remove(paths: string[]) {
         for (const p of paths) {
           if (hasTauri) await diskDelete(p);
-          else await blobSet(p, null);
+          // Clear legacy base64 bytes too; otherwise a later read can resurrect
+          // a file deleted before its first migration to encrypted disk storage.
+          await blobSet(p, null);
         }
         return { data: null, error: null };
       },

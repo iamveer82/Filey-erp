@@ -21,6 +21,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
+import { runReminders } from "../_shared/overdue-reminders.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -30,13 +31,8 @@ const SITE_URL = Deno.env.get("SITE_URL") ?? "";
 const SECRET = Deno.env.get("AGENT_JOBS_SECRET") ?? "";
 const OWNER = Deno.env.get("OWNER_USER_ID") ?? "";
 
-// Customer names/numbers land in email HTML — escape them.
-const esc = (s: unknown) =>
-  String(s ?? "").replace(/[<>&"]/g, (c) =>
-    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c] ?? c
-  );
-
 Deno.serve(async (req) => {
+  if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
   // SECURITY: fail-closed cron auth. Deployed with --no-verify-jwt, so
   // without this check anyone with the URL could trigger a mass email
   // blast to every customer.
@@ -50,48 +46,31 @@ Deno.serve(async (req) => {
     return Response.json({ error: "OWNER_USER_ID not set" }, { status: 400 });
   }
   const supa = createClient(SUPABASE_URL, SERVICE_ROLE);
-  const today = new Date().toISOString().slice(0, 10);
 
   // Which org this deployment speaks for. No org, no mail — never fall back to
   // "every org", which is exactly the blast this function must not send.
   const org = await adminWorkspace(supa, OWNER);
-  if (!org) return Response.json({ error: "Owner workspace access is unavailable." }, { status: 403 });
+  if (!org)
+    return Response.json(
+      { error: "Owner workspace access is unavailable." },
+      { status: 403 }
+    );
 
-  // Issued (non-draft, unpaid) invoices past their due date, with an email.
-  // Cancelled/void invoices must never be chased.
-  const { data, error } = await supa
-    .from("invoice_docs")
-    .select("id, number, customer_name, customer_email, due_date, currency, share_token, status")
-    .eq("org_id", org)
-    .lt("due_date", today)
-    .not("status", "in", "(paid,draft,cancelled,void,voided,deleted)");
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-
-  let sent = 0;
-  for (const inv of data ?? []) {
-    if (!inv.customer_email) continue;
-    const link = inv.share_token ? `${SITE_URL}/#/portal/${inv.share_token}` : "";
-    const html = `
-      <p>Dear ${esc(inv.customer_name ?? "customer")},</p>
-      <p>This is a friendly reminder that invoice <b>${esc(inv.number)}</b> was due on
-         ${esc(inv.due_date)} and is currently outstanding.</p>
-      ${link ? `<p><a href="${link}" style="background:#FFD600;color:#0A0A0A;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:700;display:inline-block">View &amp; pay online</a></p>` : ""}
-      <p>Thank you.</p>`;
-    try {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from: FROM,
-          to: inv.customer_email,
-          subject: `Reminder: invoice ${inv.number} is overdue`,
-          html,
-        }),
-      });
-      if (res.ok) sent++;
-    } catch {
-      /* skip failures, continue */
-    }
+  try {
+    const results = await runReminders(supa, org, {
+      owner: OWNER,
+      key: RESEND_API_KEY,
+      from: FROM,
+      siteUrl: SITE_URL,
+    });
+    return Response.json(
+      { ok: results.failed === 0, ...results },
+      { status: results.failed ? 502 : 200 }
+    );
+  } catch {
+    return Response.json(
+      { ok: false, error: "Reminder data unavailable. Retry the scheduled job." },
+      { status: 503 }
+    );
   }
-  return Response.json({ ok: true, considered: data?.length ?? 0, sent });
 });

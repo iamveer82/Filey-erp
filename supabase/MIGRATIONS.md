@@ -179,14 +179,15 @@ the recovery RPC, authenticated-only execution, private eligibility helper,
 and both owner-only unlinked-row policies. The recovery RPC was **not called**
 against customer data; the 12 legacy workspace settings remained in place.
 
-## CRM custom fields — 28 September 2026 (not deployed)
+## CRM custom fields — verified present 1 October 2026
 
 Apply `2026-09-28-crm-custom-fields.sql` before releasing the expanded CRM field
 editor. Adds `custom_fields` JSONB to leads, opportunities, tasks, notes and
 activities; company/contact columns already exist. Definitions remain in scoped
 app settings. No permissions or record values are removed. The schema snapshot
 includes the same migration; disposable PostgreSQL tests apply it twice and
-verify stored values survive another application. Production remains on hold.
+verify stored values survive another application. Production catalog inspection
+confirmed all five new columns in `voyrjqgaypiylwskkwpr` on 1 October 2026.
 
 ## Avatar shape and colour choices — applied 30 September 2026
 
@@ -213,15 +214,16 @@ signatures or server trigger secrets inside their handlers. Disposable PostgreSQ
 checks reproduce the old billing exploit, test denial and normal workspace
 creation, and deliver eight concurrent Stripe callbacks to prove one settlement.
 
-## E-invoice document identity — 29 September 2026 (not deployed)
+## E-invoice document identity — applied 30 September 2026
 
 Apply `2026-09-29-einvoice-identity.sql` before releasing the expanded e-invoice
 save/export workflow. It adds the document and company e-invoice JSON fields,
 retains the existing UAE invoice columns and preserves an existing document
 UUID during updates from stale clients or sync. It rewrites no customer rows.
 This does not enable automatic provider submission or store provider credentials.
+Production catalog inspection confirmed the invoice JSON field on 1 October 2026.
 
-## Hosted agent draft transactions — 30 September 2026 (not deployed)
+## Hosted agent draft transactions — applied 30 September 2026
 
 Apply `2026-09-30-channel-agent-drafts.sql` before deploying the hardened
 `channel-webhook`. The service-only RPC verifies the current owner/admin
@@ -229,4 +231,29 @@ workspace and saves invoice, quotation or purchase-order headers, lines and
 audit entries in one transaction. It changes no existing customer records.
 `schema.sql` includes the same function. Disposable PostgreSQL checks cover
 role/workspace rejection, field allowlists and rollback after a failed line.
-Missing migration fails closed; production application remains pending.
+Missing migration fails closed. Production catalog inspection confirmed
+`filey_channel_create_draft` on 1 October 2026.
+
+## Scheduled jobs and license write integrity — applied 1 October 2026
+
+Apply `2026-09-30-scheduled-write-integrity.sql` before deploying `dodo`, `stripe` and `agent-jobs`. The service-only RPCs serialize device slot claims and commit scheduled PO headers, lines and audit together. Existing rows are not rewritten. Repeatability, denied callers, rollback, retry and concurrent claims/jobs are checked by `node scripts/test-channel-agent-local.mjs`. Deploy `overdue-reminders`, `send-email`, `team-invite` and `channel-webhook` for provider-receipt validation and truthful failure reporting. No new secrets are required.
+
+Applied to `voyrjqgaypiylwskkwpr`. Catalog read-back verified both RPCs are
+security-definer functions executable only by `service_role`; authenticated and
+anonymous clients cannot call them.
+
+## Team owner membership integrity — applied 1 October 2026
+
+Apply `2026-10-01-team-owner-integrity.sql` after `2026-09-30-workspace-billing-acl.sql` (the migration refuses insecure ownership grants) to protect actual owner memberships against API demotion, removal or identity replacement. The trigger also denies manufacturing another owner role. Normal member administration and non-owner leaving remain supported; trusted service-role account cleanup is unchanged. Existing rows are not rewritten. `node scripts/test-mfa-local.mjs` reproduces the old admin takeover, applies the migration twice and proves denial plus compatibility. There is currently no user-facing ownership transfer flow; any future transfer must be a trusted transaction that changes `organizations.owner_id` with the memberships.
+
+Applied to `voyrjqgaypiylwskkwpr`. Catalog read-back verified the enabled
+membership trigger and denied client updates to `organizations.owner_id`.
+
+## Stripe subscription ordering integrity — applied 1 October 2026
+
+Apply `2026-10-01-stripe-subscription-integrity.sql` after the deployed workspace billing ACL and before deploying `stripe`. It adds nullable subscription delivery timestamps and a service-only transaction; existing customer rows are not rewritten. The verified Stripe webhook retrieves current subscription state, matches the bound customer/workspace and rejects older events and replaced subscription IDs. Independent Dodo, Ultra and permanent license grants remain protected. Current active subscriptions require billing management rather than a second checkout; terminal subscriptions can renew. A missing migration or failed retrieval returns a retryable webhook error.
+
+`node scripts/test-mfa-local.mjs` applies the migration twice and checks authority, ordering, replacement, entitlement protection and concurrent delivery. Pure fake-provider Deno checks verify current-state retrieval and failures without Stripe calls. Existing event subscriptions and Stripe secrets remain sufficient. No historical payment reconciliation or provider subscription cancellation is performed. The unsupported legacy public `pay_invoice` action returns HTTP 410 with contact-seller guidance; verified historical settlement webhooks and authenticated plan/license actions remain supported. Seller invoice checkout requires a future configured seller payment destination.
+
+Applied to `voyrjqgaypiylwskkwpr`. Read-back verified the added observation
+column, denied client writes and service-only RPC execution.

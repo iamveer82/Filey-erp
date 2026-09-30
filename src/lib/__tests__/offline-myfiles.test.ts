@@ -35,14 +35,19 @@ test("private company documents round-trip locally and reject unsupported upload
   const large = new File(["data"], "large.pdf", {type:"application/pdf"});
   Object.defineProperty(large, "size", {value: 11 * 1024 * 1024});
   await expect(files.uploadUserFile(large, "company-gst")).rejects.toThrow("10 MB");
-  // Storage denial must leave metadata visible for retry, not claim deletion.
+  // Remove the selected entry first; failed cleanup must preserve its bytes
+  // and report that distinction instead of leaving a broken visible record.
   const {sb} = await import("../supabase");
   const storage = vi.spyOn(sb().storage, "from").mockReturnValue({remove: async () => ({error: new Error("Storage denied")})} as never);
-  await expect(files.deleteFile(saved)).rejects.toThrow("Storage denied");
+  await expect(files.deleteFile(saved)).rejects.toThrow("stored copy could not be deleted");
   storage.mockRestore();
-  expect((await files.listFiles()).some(f => f.id === id)).toBe(true);
-  await files.deleteFile(saved);
   expect((await files.listFiles()).some(f => f.id === id)).toBe(false);
+  expect(await files.fileBytes(saved)).not.toBeNull();
+  // With no metadata row left, a retry cannot authorize orphan cleanup. The
+  // unreferenced bytes remain safely retained; this is not a successful undo.
+  await expect(files.deleteFile(saved)).rejects.toThrow("not found or access denied");
+  expect((await files.listFiles()).some(f => f.id === id)).toBe(false);
+  expect(await files.fileBytes(saved)).not.toBeNull();
 });
 
 test("offline: create folder, save file, move it, read bytes back", async () => {

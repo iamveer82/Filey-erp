@@ -21,10 +21,16 @@
 
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { licenseActivate, licenseDeactivate } from "../_shared/license.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
-import { stripeAmountToMinorUnits, stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
+import { stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
+import { dispatchStripeAction } from "../_shared/stripe-actions.ts";
+import {
+  applyStripeSubscription,
+  stripeSubscriptionCheckoutAllowed,
+} from "../_shared/stripe-subscriptions.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -40,9 +46,6 @@ const PRICES: Record<string, string | undefined> = {
 };
 // One-time desktop license (Lite tier).
 const PRICE_LITE = Deno.env.get("STRIPE_PRICE_LITE");
-// ECDSA P-256 private key (PKCS8, base64) — signs desktop license tokens.
-const LICENSE_SIGNING_KEY = Deno.env.get("LICENSE_SIGNING_KEY") ?? "";
-const LICENSE_DEVICE_SLOTS = 2;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -81,277 +84,127 @@ Deno.serve(async (req) => {
   // ends up in Stripe success/cancel redirect URLs (open-redirect phishing on
   // the public pay_invoice path otherwise).
   const origin = SITE_URL || "https://app.gofiley.com";
-  const payload = await req.json().catch(() => ({} as Record<string, unknown>));
+  const payload = await req.json().catch(() => ({}) as Record<string, unknown>);
   const action = String(payload.action ?? "");
 
   try {
-    // PUBLIC: a customer paying a shared invoice (no Filey account / JWT).
-    if (action === "pay_invoice") return await payInvoice(String(payload.token ?? ""), origin);
+    return await dispatchStripeAction(
+      action,
+      async () => {
+        // AUTHENTICATED actions below (the account owner).
+        const supa = admin();
+        const jwt = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+        const { data: u } = await supa.auth.getUser(jwt);
+        const user = u?.user;
+        if (!user) return json({ error: "Unauthorized" }, 401);
+        if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
 
-    // AUTHENTICATED actions below (the account owner).
-    const supa = admin();
-    const jwt = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
-    const { data: u } = await supa.auth.getUser(jwt);
-    const user = u?.user;
-    if (!user) return json({ error: "Unauthorized" }, 401);
-    if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
+        // RATE LIMIT: max 20 Stripe actions per hour per user
+        const allowed = await rateLimit(supa, user.id, "stripe_action", 20, 3600);
+        if (!allowed)
+          return json({ error: "Rate limit exceeded — try again later." }, 429);
+        await logAction(supa, user.id, "stripe_action", { action });
 
-    // RATE LIMIT: max 20 Stripe actions per hour per user
-    const allowed = await rateLimit(supa, user.id, "stripe_action", 20, 3600);
-    if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
-    await logAction(supa, user.id, "stripe_action", { action });
+        // Desktop license actions don't need an org — they attach to the user.
+        if (action === "license_activate") {
+          const result = await licenseActivate(
+            supa,
+            user,
+            String(payload.fingerprint ?? ""),
+            String(payload.device_name ?? "")
+          );
+          return json(result.body, result.status);
+        }
+        if (action === "license_deactivate") {
+          const result = await licenseDeactivate(
+            supa,
+            user.id,
+            String(payload.fingerprint ?? "")
+          );
+          return json(result.body, result.status);
+        }
 
-    // Desktop license actions don't need an org — they attach to the user.
-    if (action === "license_activate")
-      return await licenseActivate(
-        supa,
-        user,
-        String(payload.fingerprint ?? ""),
-        String(payload.device_name ?? "")
-      );
-    if (action === "license_deactivate")
-      return await licenseDeactivate(supa, user.id, String(payload.fingerprint ?? ""));
+        const org = await userOrg(supa, user.id);
+        if (!org)
+          return json(
+            { error: "Workspace billing requires owner or administrator access." },
+            403
+          );
 
-    const org = await userOrg(supa, user.id);
-    if (!org) return json({ error: "Workspace billing requires owner or administrator access." }, 403);
+        const plan = payload.plan;
+        if (action === "checkout" && !stripeSubscriptionCheckoutAllowed(org))
+          return json(
+            {
+              error:
+                "Your workspace already has paid access. Manage the existing subscription from billing.",
+            },
+            409
+          );
 
-    const plan = payload.plan;
+        // ensure a Stripe customer for the org
+        let customerId = org.stripe_customer_id as string | null;
+        if (!customerId) {
+          const customer = await stripe.customers.create({
+            email: user.email ?? undefined,
+            name: org.name ?? undefined,
+            metadata: { org_id: org.id },
+          });
+          customerId = customer.id;
+          const { error } = await supa
+            .from("organizations")
+            .update({ stripe_customer_id: customerId })
+            .eq("id", org.id);
+          if (error) throw new Error("Billing customer could not be saved. Try again.");
+        }
 
-    // ensure a Stripe customer for the org
-    let customerId = org.stripe_customer_id as string | null;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email ?? undefined,
-        name: org.name ?? undefined,
-        metadata: { org_id: org.id },
-      });
-      customerId = customer.id;
-      await supa.from("organizations").update({ stripe_customer_id: customerId }).eq("id", org.id);
-    }
+        if (action === "portal") {
+          const session = await stripe.billingPortal.sessions.create({
+            customer: customerId,
+            return_url: `${origin}/#/settings?section=billing`,
+          });
+          return json({ url: session.url });
+        }
 
-    if (action === "portal") {
-      const session = await stripe.billingPortal.sessions.create({
-        customer: customerId,
-        return_url: `${origin}/#/settings?section=billing`,
-      });
-      return json({ url: session.url });
-    }
+        // One-time desktop license (Lite). invoice_creation makes Stripe email a
+        // proper invoice for the one-off payment (subscriptions do this natively).
+        if (action === "checkout_lite") {
+          if (!PRICE_LITE) return json({ error: "Lite price not configured" }, 400);
+          const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            customer: customerId,
+            line_items: [{ price: PRICE_LITE, quantity: 1 }],
+            invoice_creation: { enabled: true },
+            success_url: `${origin}/#/settings?section=license&checkout=success`,
+            cancel_url: `${origin}/#/settings?section=license&checkout=cancel`,
+            metadata: { type: "lite_license", user_id: user.id },
+          });
+          return json({ url: session.url });
+        }
 
-    // One-time desktop license (Lite). invoice_creation makes Stripe email a
-    // proper invoice for the one-off payment (subscriptions do this natively).
-    if (action === "checkout_lite") {
-      if (!PRICE_LITE) return json({ error: "Lite price not configured" }, 400);
-      const session = await stripe.checkout.sessions.create({
-        mode: "payment",
-        customer: customerId,
-        line_items: [{ price: PRICE_LITE, quantity: 1 }],
-        invoice_creation: { enabled: true },
-        success_url: `${origin}/#/settings?section=license&checkout=success`,
-        cancel_url: `${origin}/#/settings?section=license&checkout=cancel`,
-        metadata: { type: "lite_license", user_id: user.id },
-      });
-      return json({ url: session.url });
-    }
+        if (action === "checkout") {
+          const price = PRICES[plan as string];
+          if (!price)
+            return json({ error: `Unknown or unconfigured plan: ${plan}` }, 400);
+          const session = await stripe.checkout.sessions.create({
+            mode: "subscription",
+            customer: customerId,
+            line_items: [{ price, quantity: 1 }],
+            success_url: `${origin}/#/settings?section=billing&checkout=success`,
+            cancel_url: `${origin}/#/settings?section=billing&checkout=cancel`,
+            metadata: { org_id: org.id, plan: String(plan) },
+            subscription_data: { metadata: { org_id: org.id, plan: String(plan) } },
+          });
+          return json({ url: session.url });
+        }
 
-    if (action === "checkout") {
-      const price = PRICES[plan as string];
-      if (!price) return json({ error: `Unknown or unconfigured plan: ${plan}` }, 400);
-      const session = await stripe.checkout.sessions.create({
-        mode: "subscription",
-        customer: customerId,
-        line_items: [{ price, quantity: 1 }],
-        success_url: `${origin}/#/settings?section=billing&checkout=success`,
-        cancel_url: `${origin}/#/settings?section=billing&checkout=cancel`,
-        metadata: { org_id: org.id, plan: String(plan) },
-        subscription_data: { metadata: { org_id: org.id, plan: String(plan) } },
-      });
-      return json({ url: session.url });
-    }
-
-    return json({ error: "Unknown action" }, 400);
+        return json({ error: "Unknown action" }, 400);
+      },
+      CORS
+    );
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
-
-/* ---------------- desktop license: activation + signing ---------------- */
-
-const b64url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-/** Sign a license payload with the server-only ECDSA P-256 key. The desktop
- *  app verifies with the embedded public key — fully offline afterwards. */
-async function signLicense(payload: Record<string, unknown>): Promise<string> {
-  if (!LICENSE_SIGNING_KEY) throw new Error("LICENSE_SIGNING_KEY not configured");
-  const pkcs8 = Uint8Array.from(atob(LICENSE_SIGNING_KEY), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey(
-    "pkcs8",
-    pkcs8,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-  const body = new TextEncoder().encode(JSON.stringify(payload));
-  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, body);
-  return `${b64url(body)}.${b64url(new Uint8Array(sig))}`;
-}
-
-async function licenseActivate(
-  supa: ReturnType<typeof admin>,
-  user: { id: string; email?: string | null },
-  fingerprint: string,
-  deviceName: string
-): Promise<Response> {
-  if (!fingerprint) return json({ error: "Missing device fingerprint" }, 400);
-  const { data: lic } = await supa
-    .from("licenses")
-    .select("id, product, status")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
-  if (!lic) return json({ error: "No active license on this account" }, 404);
-
-  const { data: devices } = await supa
-    .from("license_devices")
-    .select("id, fingerprint, deactivated_at")
-    .eq("license_id", lic.id);
-  const active = (devices ?? []).filter((d) => !d.deactivated_at);
-  const mine = (devices ?? []).find((d) => d.fingerprint === fingerprint);
-
-  // SECURITY: the count check below races concurrent activations (TOCTOU).
-  // After claiming a slot, recount; if we overflowed, release our claim.
-  const claimedOverLimit = async (rowId: unknown): Promise<boolean> => {
-    const { data: act } = await supa
-      .from("license_devices")
-      .select("id")
-      .eq("license_id", lic.id)
-      .is("deactivated_at", null);
-    if ((act ?? []).length <= LICENSE_DEVICE_SLOTS) return false;
-    await supa
-      .from("license_devices")
-      .update({ deactivated_at: new Date().toISOString() })
-      .eq("id", rowId);
-    return true;
-  };
-  const slotsFull = json(
-    { error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` },
-    409
-  );
-
-  if (mine?.deactivated_at) {
-    // Re-activating a freed slot — only if a slot is open.
-    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
-    await supa
-      .from("license_devices")
-      .update({ deactivated_at: null, activated_at: new Date().toISOString(), device_name: deviceName || null })
-      .eq("id", mine.id);
-    if (await claimedOverLimit(mine.id)) return slotsFull;
-  } else if (!mine) {
-    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
-    const { data: ins, error } = await supa
-      .from("license_devices")
-      .insert({
-        license_id: lic.id,
-        fingerprint,
-        device_name: deviceName || null,
-      })
-      .select("id")
-      .single();
-    if (error) return json({ error: error.message }, 500);
-    if (await claimedOverLimit(ins.id)) return slotsFull;
-  }
-
-  const token = await signLicense({
-    email: user.email ?? "",
-    product: lic.product,
-    issued: new Date().toISOString().slice(0, 10),
-    device_id: fingerprint,
-    license_id: lic.id,
-  });
-  return json({ token });
-}
-
-async function licenseDeactivate(
-  supa: ReturnType<typeof admin>,
-  userId: string,
-  fingerprint: string
-): Promise<Response> {
-  if (!fingerprint) return json({ error: "Missing device fingerprint" }, 400);
-  const { data: lic } = await supa
-    .from("licenses")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
-  if (!lic) return json({ error: "No active license on this account" }, 404);
-  await supa
-    .from("license_devices")
-    .update({ deactivated_at: new Date().toISOString() })
-    .eq("license_id", lic.id)
-    .eq("fingerprint", fingerprint);
-  return json({ ok: true });
-}
-
-async function invoiceBalance(supa: ReturnType<typeof admin>, docId: number) {
-  const [{ data: doc }, { data: items }, { data: pays }] = await Promise.all([
-    supa.from("invoice_docs").select("*").eq("id", docId).maybeSingle(),
-    supa.from("invoice_doc_items").select("qty,unit_price").eq("invoice_id", docId),
-    supa.from("invoice_payments").select("amount").eq("invoice_id", docId),
-  ]);
-  if (!doc) return null;
-  const subtotal = (items ?? []).reduce(
-    (s: number, i: { qty: number; unit_price: number }) => s + Number(i.qty) * Number(i.unit_price),
-    0
-  );
-  const taxable = Math.max(0, subtotal - Number(doc.discount || 0));
-  const total = taxable + (taxable * Number(doc.tax_rate || 0)) / 100;
-  const paid = (pays ?? []).reduce((s: number, p: { amount: number }) => s + Number(p.amount), 0);
-  return { doc, total, paid, balance: Math.round((total - paid) * 100) / 100 };
-}
-
-// Public: create a one-off Checkout for the outstanding balance of a shared invoice.
-async function payInvoice(token: string, origin: string): Promise<Response> {
-  if (!token) return json({ error: "Missing token" }, 400);
-  const supa = admin();
-  const { data: doc } = await supa
-    .from("invoice_docs")
-    .select("id, number, currency, shared")
-    .eq("share_token", token)
-    .eq("shared", true)
-    .maybeSingle();
-  if (!doc) return json({ error: "Invoice not found or not shared" }, 404);
-  const bal = await invoiceBalance(supa, doc.id);
-  if (!bal || bal.balance <= 0) return json({ error: "This invoice is already paid." }, 400);
-  const currency = String(doc.currency || "AED").toLowerCase();
-  let unitAmount: number;
-  try {
-    unitAmount = stripeAmountToMinorUnits(bal.balance, currency);
-  } catch (error) {
-    return json({ error: error instanceof Error ? error.message : "Invalid invoice balance." }, 400);
-  }
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency,
-          product_data: { name: `Invoice ${doc.number}` },
-          unit_amount: unitAmount,
-        },
-        quantity: 1,
-      },
-    ],
-    success_url: `${origin}/#/portal/${token}?paid=1`,
-    cancel_url: `${origin}/#/portal/${token}`,
-    metadata: { type: "invoice_payment", invoice_id: String(doc.id) },
-  });
-  return json({ url: session.url });
-}
 
 async function handleWebhook(req: Request, sig: string): Promise<Response> {
   const raw = await req.text();
@@ -359,16 +212,12 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
   try {
     event = await stripe.webhooks.constructEventAsync(raw, sig, WEBHOOK_SECRET);
   } catch (e) {
-    return json({ error: `Webhook signature failed: ${e instanceof Error ? e.message : e}` }, 400);
+    return json(
+      { error: `Webhook signature failed: ${e instanceof Error ? e.message : e}` },
+      400
+    );
   }
   const supa = admin();
-
-  const setPlan = async (
-    match: { col: string; val: string },
-    patch: Record<string, unknown>
-  ) => {
-    await supa.from("organizations").update(patch).eq(match.col, match.val);
-  };
 
   try {
     switch (event.type) {
@@ -383,31 +232,26 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
           if (error) throw new Error("Stripe checkout settlement could not be saved.");
           break;
         }
-        // Otherwise it's a subscription checkout → set the org's plan.
-        await setPlan(
-          { col: "id", val: String(s.metadata?.org_id) },
-          {
-            plan: s.metadata?.plan ?? "pro",
-            plan_status: "active",
-            stripe_customer_id: String(s.customer),
-            stripe_subscription_id: String(s.subscription),
-          }
+        // An unrelated one-time payment cannot grant a subscription. The
+        // checkout only supplies an id: use Stripe's current state and the
+        // atomic customer/workspace binding, never delayed event metadata.
+        if (s.mode !== "subscription") break;
+        const id =
+          typeof s.subscription === "string" ? s.subscription : s.subscription?.id;
+        await applyStripeSubscription(
+          supa,
+          stripe,
+          id ?? "",
+          event.created,
+          true,
+          PRICES
         );
         break;
       }
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
-        const deleted = event.type === "customer.subscription.deleted";
-        await setPlan(
-          { col: "stripe_customer_id", val: String(sub.customer) },
-          {
-            plan: deleted ? "free" : (sub.metadata?.plan ?? "pro"),
-            plan_status: deleted ? "canceled" : sub.status,
-            stripe_subscription_id: sub.id,
-            current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
-          }
-        );
+        await applyStripeSubscription(supa, stripe, sub.id, event.created, false, PRICES);
         break;
       }
     }

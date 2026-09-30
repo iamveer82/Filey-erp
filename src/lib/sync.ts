@@ -383,9 +383,10 @@ export async function pushFileBlobs(
       if (!bytes) throw new Error("File is missing on this device");
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))))
         .map(n => n.toString(16).padStart(2, "0")).join("");
-      // Immutable content paths keep a failed/conflicting metadata upload from
-      // replacing a file already referenced by a newer cloud record.
-      const cloudPath = `${uid}/synced/${hash}/${String(localPath).split("/").pop()}`;
+      // Immutable, file-specific paths keep a failed/conflicting upload from
+      // replacing a newer copy or sharing deletable bytes with a different file.
+      const fileId = encodeURIComponent(String(f.id)).replace(/\./g, "%2E");
+      const cloudPath = `${uid}/synced/${fileId}/${hash}/${String(localPath).split("/").pop()}`;
       assertWorkspaceCurrent();
       if ((await freshSession(supa))?.user.id !== uid) throw new Error("Cloud account changed");
       const { error } = await supa.storage

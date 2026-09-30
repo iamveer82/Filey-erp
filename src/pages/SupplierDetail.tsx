@@ -40,7 +40,7 @@ import {
   type QuickViewData,
   type ShareKind,
 } from "../components/RowActions";
-import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
+import { num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { storedLineAmount } from "../lib/docItems";
 import { sendShareEmail } from "../lib/email";
 import { useUI } from "../lib/ui";
@@ -87,6 +87,8 @@ export default function SupplierDetail() {
   const [stmtPayments, setStmtPayments] = useState<StatementPaymentEntry[]>([]);
   const [stmtAdvances, setStmtAdvances] = useState<StatementAdvanceEntry[]>([]);
   const [stmtExtrasLoading, setStmtExtrasLoading] = useState(true);
+  const [stmtExtrasError, setStmtExtrasError] = useState(false);
+  const [stmtRetry, setStmtRetry] = useState(0);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +97,7 @@ export default function SupplierDetail() {
     Promise.all([
       suppliersApi.list(),
       pos.list(),
-      billing.getCompany().catch(() => null),
+      billing.getCompany(),
     ])
       .then(([ss, ps, co]) => {
         if (!alive) return;
@@ -119,7 +121,7 @@ export default function SupplierDetail() {
     return Promise.all([
       suppliersApi.list(),
       pos.list(),
-      billing.getCompany().catch(() => null),
+      billing.getCompany(),
     ])
       .then(([ss, ps, co]) => {
         setList(ss);
@@ -183,35 +185,37 @@ export default function SupplierDetail() {
         currency: o.currency,
         status: o.status,
         tax_rate: o.tax_rate,
+        net_total: o.net_total,
+        tax_total: o.tax_total,
       })),
     [myOrders]
   );
-  const totalValue = myOrders.reduce((s, o) => s + o.total, 0);
   const openCount = myOrders.filter(
     (o) => !["received", "cancelled"].includes(st(o))
   ).length;
-  const receivedValue = myOrders
-    .filter((o) => st(o) === "received")
-    .reduce((s, o) => s + o.total, 0);
+
+  const issuedOrders = useMemo(
+    () => myOrders.filter((o) => !["draft", "cancelled", "canceled", "void"].includes(st(o))),
+    [myOrders],
+  );
 
   /** Supplier currency: dominant across its POs, else the company default. */
   const currency = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const o of myOrders) {
+    for (const o of issuedOrders) {
       const c = (o.currency || "").trim();
       if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
     }
     const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
     return top || company?.currency || "AED";
-  }, [myOrders, company]);
+  }, [issuedOrders, company?.currency]);
 
   /** Live purchase orders only are statement debits (drafts and cancelled
    *  POs never hit the account) — the same rule the StatementModal applies. */
   const ledgerDocs = useMemo(
-    () => myOrders.filter((o) => st(o) !== "draft" && st(o) !== "cancelled" && (o.currency || company?.currency || "AED") === currency),
-    [myOrders, company?.currency, currency]
+    () => issuedOrders.filter((o) => !o.currency || o.currency === currency),
+    [issuedOrders, currency]
   );
-  const docKey = ledgerDocs.map((o) => o.id).join(",");
 
   /* Phase-2 statement data: dated PO payments + advance payments — the same
    *  fetches the StatementModal performs on open, keyed by the doc set. */
@@ -219,6 +223,7 @@ export default function SupplierDetail() {
     if (!supplier) return;
     let alive = true;
     setStmtExtrasLoading(true);
+    setStmtExtrasError(false);
     const perDoc: Promise<StatementPaymentEntry[]> = Promise.all(
       ledgerDocs.map((o) =>
         pos
@@ -231,12 +236,11 @@ export default function SupplierDetail() {
               docNumber: o.po_number,
             }))
           )
-          .catch(() => [] as StatementPaymentEntry[])
       )
     ).then((all) => all.flat());
     Promise.all([
       perDoc,
-      advances.forParty("supplier", supplier.id).catch(() => []),
+      advances.forParty("supplier", supplier.id),
     ])
       .then(([pays, advs]) => {
         if (!alive) return;
@@ -252,7 +256,7 @@ export default function SupplierDetail() {
             }))
         );
       })
-      .catch(() => {})
+      .catch(() => { if (alive) setStmtExtrasError(true); })
       .finally(() => {
         if (alive) setStmtExtrasLoading(false);
       });
@@ -260,7 +264,8 @@ export default function SupplierDetail() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supplier?.id, docKey, currency]);
+  }, [supplier?.id, ledgerDocs, currency, stmtRetry]);
+  const stmtReady = !loading && !stmtExtrasLoading && !stmtExtrasError;
 
   /** The all-time purchase-order statement — one derivation behind the KPI grid,
    *  the Purchases & Payments ledger, the download panel and the preview.
@@ -271,6 +276,8 @@ export default function SupplierDetail() {
       date: o.order_date,
       total: o.total,
       taxRate: o.tax_rate ?? 0,
+      net: o.net_total,
+      tax: o.tax_total,
     }));
     return buildStatement({
       kind: "supplier",
@@ -347,20 +354,24 @@ export default function SupplierDetail() {
     }));
   }, [stmt.lines, tplMeta.paginates]);
 
-  const copyStatementLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success("Link copied");
+  const copyStatementLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Link copied");
+    } catch (error) { toast.error(`Could not copy the link: ${errMsg(error)}`); }
   };
 
-  const emailStatement = () => {
-    shareVia("email", {
+  const emailStatement = async () => {
+    if (!stmtReady) return;
+    await shareVia("email", {
       email: supplier?.email,
       text: `Purchase order statement for ${supplier?.name || "Supplier"} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
       url: `Statement of account - ${supplier?.name || "Supplier"}`,
-    });
+    }).catch((error) => toast.error(errMsg(error)));
   };
 
   const downloadStatementPdf = async () => {
+    if (!stmtReady || !built.hasContent || exporting) return;
     const el = exportRef.current;
     if (!el) {
       window.print();
@@ -428,7 +439,7 @@ export default function SupplierDetail() {
     try {
       const token = await pos.publicLink(o.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Purchase order ${o.po_number} - ${aed(o.total)}. View online: ${url}`;
+      const text = `Purchase order ${o.po_number} - ${money(o.total, o.currency || "AED")}. View online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
       if (kind === "email") {
@@ -437,7 +448,7 @@ export default function SupplierDetail() {
         reload();
         return;
       }
-      shareVia(kind, {
+      await shareVia(kind, {
         phone: supplier?.phone,
         email: supplier?.email,
         text,
@@ -549,7 +560,7 @@ export default function SupplierDetail() {
                 shareVia("email", {
                   email: supplier.email,
                   url: supplier.name,
-                })
+                }).catch((error) => toast.error(errMsg(error)))
               }
               className="btn-ghost"
             >
@@ -613,16 +624,16 @@ export default function SupplierDetail() {
         <KpiCell
           className="border-b lg:border-b-0 lg:border-r border-border"
           label="Paid"
-          value={money(stmt.totalCredit, currency)}
+          value={stmtReady ? money(stmt.totalCredit, currency) : "—"}
           hint={
-            paymentCount > 0
+            !stmtReady ? "Statement unavailable" : paymentCount > 0
               ? `${paymentCount} settlement${paymentCount === 1 ? "" : "s"}`
               : "No payments yet"
           }
         />
         <KpiCell
           label="PO remainder"
-          value={money(netBalance, currency)}
+          value={stmtReady ? money(netBalance, currency) : "—"}
           valueClass={
             netBalance > 0.005
               ? "text-danger"
@@ -632,7 +643,7 @@ export default function SupplierDetail() {
           }
           hint={
             <span className="inline-flex items-center gap-1">
-              {netBalance > 0.005 ? (
+              {!stmtReady ? "Statement unavailable" : netBalance > 0.005 ? (
                 <>
                   <TrendingDown className="h-3 w-3" /> You owe
                 </>
@@ -748,7 +759,7 @@ export default function SupplierDetail() {
                 </tr>
               </thead>
               <tbody>
-                {stmtExtrasLoading && ledgerRows.length === 0 ? (
+                {stmtExtrasLoading ? (
                   Array.from({ length: 3 }).map((_, r) => (
                     <tr key={`lsk${r}`} className="border-b border-border last:border-0">
                       {Array.from({ length: 5 }).map((_, c) => (
@@ -758,6 +769,8 @@ export default function SupplierDetail() {
                       ))}
                     </tr>
                   ))
+                ) : stmtExtrasError ? (
+                  <tr><td colSpan={5} className="px-5 py-6 text-muted-foreground">Statement unavailable</td></tr>
                 ) : ledgerRows.length === 0 ? (
                   <tr>
                     <td
@@ -797,6 +810,19 @@ export default function SupplierDetail() {
         </div>
       </div>
 
+      {stmtExtrasError && (
+        <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+          <span>The statement could not be loaded. Retry before sharing it.</span>
+          <button className="btn-secondary" onClick={() => setStmtRetry((n) => n + 1)}>Retry statement</button>
+        </div>
+      )}
+      {(currency !== "AED" || issuedOrders.some((o) => o.currency && o.currency !== currency)) && (
+        <p role="status" className="mb-4 text-sm text-muted-foreground">
+          This statement contains {currency} transactions only. Documents in other currencies are excluded.
+          {currency !== "AED" && " AED advances are excluded."}
+        </p>
+      )}
+
       {/* DEMO parity: download panel - template picker + selected-template
           summary. The header's amber button smooth-scrolls here. */}
       <div
@@ -816,6 +842,7 @@ export default function SupplierDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => window.print()}
+                disabled={!stmtReady || !built.hasContent}
                 className="btn-ghost"
               >
                 <Printer className="h-3.5 w-3.5" /> Print
@@ -828,14 +855,14 @@ export default function SupplierDetail() {
               </button>
               <button
                 onClick={emailStatement}
-                disabled={!supplier}
+                disabled={!supplier || !stmtReady}
                 className="btn-ghost"
               >
                 <Send className="h-3.5 w-3.5" /> Email
               </button>
               <button
                 onClick={downloadStatementPdf}
-                disabled={!supplier || exporting || !built.hasContent}
+                disabled={!supplier || exporting || !stmtReady || !built.hasContent}
                 className="btn-primary"
               >
                 <FileDown className="h-3.5 w-3.5" />{" "}
@@ -870,7 +897,7 @@ export default function SupplierDetail() {
             </div>
             <div className="mt-3 text-[11.5px] text-muted-foreground">
               Includes: {stmt.lines.length} entries · balance{" "}
-              {money(netBalance, currency)}
+              {stmtReady ? money(netBalance, currency) : "—"}
             </div>
           </div>
         </div>
@@ -881,8 +908,10 @@ export default function SupplierDetail() {
         <div className="text-[13px] text-muted-foreground mb-3">
           Live preview - how the exported {tplMeta.name} will look
         </div>
-        {stmtExtrasLoading && !built.hasContent ? (
+        {stmtExtrasLoading ? (
           <Skeleton className="h-[420px] w-full" />
+        ) : stmtExtrasError ? (
+          <p className="py-8 text-center text-muted-foreground">Retry to load the complete statement.</p>
         ) : !built.hasContent ? (
           <div className="py-16 text-center text-[13px] text-muted-foreground">
             No statement activity yet - the preview appears once this supplier
@@ -897,7 +926,7 @@ export default function SupplierDetail() {
 
       {/* Off-screen A4 stack captured for the PDF export - every slice a real
           page (same pattern as the StatementModal export). */}
-      {built.hasContent && (
+      {stmtReady && built.hasContent && (
         <div
           ref={exportRef}
           aria-hidden
@@ -1000,7 +1029,7 @@ export default function SupplierDetail() {
                       <Badge tone={statusTone(o.status)}>{o.status}</Badge>
                     </td>
                     <td className="px-5 py-3 text-right text-foreground tabular-nums">
-                      {aed(o.total)}
+                      {money(o.total, o.currency || "AED")}
                     </td>
                     <td className="px-5 py-3">
                       <RowActions
@@ -1029,7 +1058,6 @@ export default function SupplierDetail() {
             partyType="supplier"
             partyId={supplier.id}
             partyName={supplier.name}
-            outstanding={Math.max(0, totalValue - receivedValue)}
           />
         </div>
       )}
