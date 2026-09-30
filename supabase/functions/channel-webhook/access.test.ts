@@ -1,6 +1,6 @@
 // Runnable check for owner pinning + pairing:  deno test supabase/functions/channel-webhook/
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { ownerRefusal, tryPair } from "./access.ts";
+import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { channelCredentials, ownerRefusal, tryPair } from "./access.ts";
 import type { InboundMsg } from "./parse.ts";
 
 const tg = (over: Partial<InboundMsg> = {}): InboundMsg => ({
@@ -12,6 +12,45 @@ const tg = (over: Partial<InboundMsg> = {}): InboundMsg => ({
 });
 
 const io = (env: Record<string, string> = {}, dbOwner = "") => ({ env: (k: string) => env[k], dbOwner });
+
+Deno.test("revoked channel refuses owner traffic even if legacy environment pins still match", async () => {
+  for (const channel of ["telegram","whatsapp","slack"] as const) {
+    const message = tg({ channel, userId:"42" });
+    const reply = await ownerRefusal(message,{ ...io({ TELEGRAM_OWNER_CHAT_ID:"42", WHATSAPP_OWNER_PHONE:"42",SLACK_OWNER_USER_ID:"42" }), disabled:true });
+    assertEquals(reply,"This channel is disconnected. Reconnect it in Filey.");
+  }
+});
+
+Deno.test("channel connection lookup failures never permit environment fallback", async () => {
+  const filters: unknown[]=[];
+  const query={ select:()=>query, eq:(column:string,value:unknown)=>{filters.push([column,value]);return query;},
+    maybeSingle:()=>Promise.resolve({data:null,error:{message:"unavailable"}}) };
+  await assertRejects(()=>channelCredentials({from:()=>query},"OWNER","whatsapp"));
+  assertEquals(filters,[["user_id","OWNER"],["provider","whatsapp"]]);
+});
+
+Deno.test("a successful absent channel permits env setup but a disabled row remains disabled", async () => {
+  for (const [data,expected] of [[null,{}],[{enabled:false,credentials:{token:"old"},owner_ref:"42"},{disabled:"true"}]] as const) {
+    const query={select:()=>query,eq:()=>query,maybeSingle:()=>Promise.resolve({data,error:null})};
+    assertEquals(await channelCredentials({from:()=>query},"OWNER","telegram"),expected);
+  }
+});
+
+Deno.test("an enabled unpaired DB connection never inherits an old environment owner pin", async () => {
+  for (const channel of ["telegram","whatsapp","slack"] as const) {
+    const query={select:()=>query,eq:()=>query,maybeSingle:()=>Promise.resolve({
+      data:{enabled:true,owner_ref:null,credentials:{pair_code:"654321",owner_ref:"42"}},error:null,
+    })};
+    const credentials=await channelCredentials({from:()=>query},"OWNER",channel);
+    assertEquals(credentials.owner_ref,"");
+    assertEquals(credentials.configured,"true");
+    const reply=await ownerRefusal(tg({channel,userId:"42"}),{
+      ...io({TELEGRAM_OWNER_CHAT_ID:"42",WHATSAPP_OWNER_PHONE:"42",SLACK_OWNER_USER_ID:"42"},credentials.owner_ref),
+      configured:!!credentials.configured,
+    });
+    assertEquals(reply,"This assistant isn't paired yet. Complete pairing in Filey.");
+  }
+});
 
 Deno.test("private telegram chat still pins on the chat id alone", async () => {
   assertEquals(await ownerRefusal(tg(), io({ TELEGRAM_OWNER_CHAT_ID: "42" })), null);

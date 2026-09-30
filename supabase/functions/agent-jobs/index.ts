@@ -22,6 +22,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import { adminWorkspace } from "../_shared/admin-workspace.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -37,8 +38,7 @@ const aed = (n: number) =>
   "AED " + Math.round(n).toLocaleString("en-AE");
 
 async function orgOf(supa: Client): Promise<string | null> {
-  const { data } = await supa.from("profiles").select("org_id").eq("id", OWNER).maybeSingle();
-  return data?.org_id ?? null;
+  return await adminWorkspace(supa, OWNER);
 }
 
 async function tell(supa: Client, text: string): Promise<boolean> {

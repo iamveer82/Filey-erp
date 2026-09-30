@@ -22,6 +22,9 @@
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import { adminWorkspace } from "../_shared/admin-workspace.ts";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
+import { stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -58,22 +61,7 @@ function admin() {
 }
 
 async function userOrg(supa: ReturnType<typeof admin>, userId: string) {
-  const { data: m } = await supa
-    .from("org_members")
-    .select("org_id")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
-  let orgId = m?.org_id as string | undefined;
-  if (!orgId) {
-    const { data: o } = await supa
-      .from("organizations")
-      .select("id")
-      .eq("owner_id", userId)
-      .limit(1)
-      .maybeSingle();
-    orgId = o?.id as string | undefined;
-  }
+  const orgId = await adminWorkspace(supa, userId);
   if (!orgId) return null;
   const { data: org } = await supa
     .from("organizations")
@@ -92,7 +80,7 @@ Deno.serve(async (req) => {
   // SECURITY: SITE_URL wins — the Origin header is caller-controlled, and it
   // ends up in Stripe success/cancel redirect URLs (open-redirect phishing on
   // the public pay_invoice path otherwise).
-  const origin = SITE_URL || req.headers.get("origin") || "";
+  const origin = SITE_URL || "https://app.gofiley.com";
   const payload = await req.json().catch(() => ({} as Record<string, unknown>));
   const action = String(payload.action ?? "");
 
@@ -106,6 +94,7 @@ Deno.serve(async (req) => {
     const { data: u } = await supa.auth.getUser(jwt);
     const user = u?.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
+    if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
 
     // RATE LIMIT: max 20 Stripe actions per hour per user
     const allowed = await rateLimit(supa, user.id, "stripe_action", 20, 3600);
@@ -124,7 +113,7 @@ Deno.serve(async (req) => {
       return await licenseDeactivate(supa, user.id, String(payload.fingerprint ?? ""));
 
     const org = await userOrg(supa, user.id);
-    if (!org) return json({ error: "No organization found" }, 400);
+    if (!org) return json({ error: "Workspace billing requires owner or administrator access." }, 403);
 
     const plan = payload.plan;
 
@@ -376,37 +365,15 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
 
   try {
     switch (event.type) {
-      case "checkout.session.completed": {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded": {
         const s = event.data.object as Stripe.Checkout.Session;
-        // A customer paid a shared invoice → record the payment.
-        if (s.metadata?.type === "invoice_payment") {
-          const invId = Number(s.metadata.invoice_id);
-          const { data: doc } = await supa
-            .from("invoice_docs")
-            .select("user_id, org_id")
-            .eq("id", invId)
-            .maybeSingle();
-          await supa.from("invoice_payments").insert({
-            invoice_id: invId,
-            amount: (s.amount_total ?? 0) / 100,
-            method: "card",
-            paid_at: new Date().toISOString(),
-            user_id: doc?.user_id,
-            org_id: doc?.org_id,
-          });
-          const bal = await invoiceBalance(supa, invId);
-          if (bal && bal.balance <= 0)
-            await supa.from("invoice_docs").update({ status: "paid" }).eq("id", invId);
-          break;
-        }
-        // A one-time desktop license purchase → issue the license.
-        if (s.metadata?.type === "lite_license") {
-          await supa.from("licenses").insert({
-            user_id: s.metadata.user_id,
-            product: "filey-desktop",
-            status: "active",
-            stripe_payment_intent: String(s.payment_intent ?? ""),
-          });
+        // Completion alone is not payment for delayed payment methods.
+        if (s.payment_status !== "paid") break;
+        const settlement = stripeCheckoutArgs(s);
+        if (settlement) {
+          const { error } = await supa.rpc("filey_settle_stripe_checkout", settlement);
+          if (error) throw new Error("Stripe checkout settlement could not be saved.");
           break;
         }
         // Otherwise it's a subscription checkout → set the org's plan.

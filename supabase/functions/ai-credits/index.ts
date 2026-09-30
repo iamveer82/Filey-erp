@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { CORS_HEADERS, json, rateLimit } from "../_shared/rateLimit.ts";
 import { creditGateway, gatewayReceipt } from "../_shared/ai-credit-gateway.ts";
 import {
@@ -71,6 +72,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     );
   }
   const user = auth.user;
+  if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
   const wallet = async (action: string, args: Record<string, unknown> = {}) => {
     const { data, error } = await admin.rpc("filey_ai_wallet", {
       p_action: action,

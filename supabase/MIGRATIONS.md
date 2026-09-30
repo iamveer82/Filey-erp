@@ -196,3 +196,19 @@ local Blobatar shape/colour SVG paths. Read-back confirmed the new constraint,
 authenticated RPC execution, and denied anonymous execution. No customer
 records or RPC permissions were changed. Disposable RLS tests cover self/admin
 updates and reject arbitrary URLs and cross-workspace updates.
+
+## Security boundaries — applied 30 September 2026
+
+Applied to `voyrjqgaypiylwskkwpr` in this order:
+
+1. `2026-09-30-tool-path-integrity.sql`: canonical owner-scoped tool paths.
+2. `2026-09-30-stripe-payment-integrity.sql`: service-only atomic paid-checkout settlement.
+3. `2026-09-30-workspace-billing-acl.sql`: protected billing columns and owner-only workspace deletion.
+4. `2026-09-30-mfa-enforcement.sql`: verified-factor assurance checks in RLS, Storage and the PostgREST pre-request hook.
+
+These migrations change permissions and add settlement receipts; they do not
+rewrite customer records or reconcile historical payments. The matching edge
+functions retain their existing JWT gateway settings and verify users, provider
+signatures or server trigger secrets inside their handlers. Disposable PostgreSQL
+checks reproduce the old billing exploit, test denial and normal workspace
+creation, and deliver eight concurrent Stripe callbacks to prove one settlement.

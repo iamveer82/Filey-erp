@@ -29,6 +29,7 @@ import { sendConfirmed } from "./delivery.mjs";
 import { ownerIdentity, phoneNumber } from "./identity.mjs";
 import { bridgeLaunch } from "./launch.mjs";
 import { whatsappClock } from "./clock.mjs";
+import { mediaRequestOptions } from "./media.mjs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
@@ -253,19 +254,27 @@ function askAgent(jid, event) {
 }
 
 async function downloadLimited(message, limit) {
-  const stream = await downloadMediaMessage(message, "stream", {});
-  const timer = setTimeout(() => stream.destroy(new Error("Attachment download timed out")), 30_000);
+  const content = normalizeMessageContent(message.message) ?? {};
+  const media = content.documentMessage || content.imageMessage || content.audioMessage || content.videoMessage;
+  const options = mediaRequestOptions(media);
+  const controller = new AbortController();
+  let stream;
+  const timer = setTimeout(() => {
+    controller.abort();
+    stream?.destroy(new Error("Attachment download timed out"));
+  }, 30_000);
   timer.unref?.();
   const chunks = [];
   let size = 0;
   try {
+    stream = await downloadMediaMessage(message, "stream", { options: { ...options, signal: controller.signal } });
     for await (const chunk of stream) {
       size += chunk.length;
       if (size > limit) throw new Error("Attachment exceeds its size limit");
       chunks.push(chunk);
     }
     return Buffer.concat(chunks, size);
-  } finally { clearTimeout(timer); stream.destroy?.(); }
+  } finally { clearTimeout(timer); stream?.destroy?.(); }
 }
 
 /** Reconnect ONCE per drop, on a fresh socket, with the dead one fully torn
@@ -505,8 +514,8 @@ async function start() {
             } else {
               console.error("voice note too large, skipped");
             }
-          } catch (e) {
-            console.error("voice download failed:", e?.message);
+          } catch {
+            console.error("WhatsApp voice attachment could not be downloaded.");
           }
         }
         continue;

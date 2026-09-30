@@ -5,6 +5,12 @@
 // apply here.
 
 import { randomCode } from "./security.ts";
+import type { InboundMsg } from "./parse.ts";
+
+type ApprovalSource = Pick<InboundMsg, "channel" | "externalId">;
+const approvalBinding = (source?: ApprovalSource) => source
+  ? { approval_channel: source.channel, approval_chat_id: source.externalId }
+  : {};
 
 export const num = (v: unknown, d = 0): number => {
   const n = Number(v);
@@ -151,7 +157,7 @@ export function rankMemories<T extends { text: string; tag?: string | null }>(ro
  *  owner replies APPROVE <code>. Validates the invoice up front so the owner
  *  only ever approves something executable. */
 // deno-lint-ignore no-explicit-any
-export async function proposePaymentReminder(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
+export async function proposePaymentReminder(client: any, org: string, ownerId: string, input: any, source?: ApprovalSource): Promise<unknown> {
   const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
   if (!number) return { error: "invoice_number is required" };
   const { data: inv, error } = await client
@@ -172,6 +178,7 @@ export async function proposePaymentReminder(client: any, org: string, ownerId: 
     org_id: org,
     action: "send_payment_reminder",
     payload: {
+      ...approvalBinding(source),
       invoice_id: inv.id,
       number: inv.number,
       customer_name: inv.customer_name,
@@ -392,7 +399,7 @@ export async function runWriteTool(
  *  can talk to the books and must cross the same APPROVE gate as sending money
  *  out. The approval handler in index.ts does the real work. */
 // deno-lint-ignore no-explicit-any
-export async function proposeConnectChannel(client: any, ownerId: string, input: any): Promise<unknown> {
+export async function proposeConnectChannel(client: any, ownerId: string, input: any, source?: ApprovalSource): Promise<unknown> {
   const provider = String(input?.provider ?? "").trim().toLowerCase();
   if (!["telegram", "whatsapp", "slack"].includes(provider))
     return { error: "provider must be telegram, whatsapp or slack" };
@@ -410,6 +417,7 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
     org_id: "default",
     action: "connect_channel",
     payload: {
+      ...approvalBinding(source),
       provider,
       token,
       phone_number_id: String(input?.phone_number_id ?? "").trim() || null,
@@ -428,49 +436,12 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
   };
 }
 
-/** mark_invoice_paid { invoice_number } — propose flipping an invoice to
- *  paid. This moves money in the books, so it parks a pending action and
- *  NEVER executes here: the approval executor in approvals.ts does the flip,
- *  deterministically, only after the owner replies APPROVE <code>. */
-// deno-lint-ignore no-explicit-any
-export async function proposeMarkInvoicePaid(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
-  const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
-  if (!number) return { error: "invoice_number is required" };
-  const { data: inv, error } = await client
-    .from("invoice_docs")
-    .select("id,number,status")
-    .eq("org_id", org)
-    .eq("number", number)
-    .maybeSingle();
-  if (error) return { error: error.message };
-  if (!inv) return { error: `invoice ${number} not found` };
-  if (inv.status === "paid") return { error: `invoice ${number} is already paid` };
-  if (inv.status === "draft")
-    return { error: `invoice ${number} is still a draft — finalize it in Filey first` };
-
-  const res = await insertPendingAction(client, {
-    user_id: ownerId,
-    org_id: org,
-    action: "mark_invoice_paid",
-    payload: { invoice_id: inv.id, invoice_number: inv.number },
-  });
-  if (!res.ok) return { error: res.error };
-  return {
-    proposed: "mark_invoice_paid",
-    invoice: inv.number,
-    approval_code: res.code,
-    note:
-      `Nothing changed yet. Tell the owner to reply "APPROVE ${res.code}" to ` +
-      `mark ${inv.number} paid, or "CANCEL ${res.code}" to drop it.`,
-  };
-}
-
 /** send_message { channel, to | customer_name, text } — propose sending a chat
  *  message out to someone who is NOT the owner. Confirm-gated for the obvious
  *  reason: this is the agent talking to your customers in your name, and a
  *  wrong number or a wrong draft is not retractable once delivered. */
 // deno-lint-ignore no-explicit-any
-export async function proposeSendMessage(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
+export async function proposeSendMessage(client: any, org: string, ownerId: string, input: any, source?: ApprovalSource): Promise<unknown> {
   const channel = String(input?.channel ?? "").trim().toLowerCase();
   if (!["whatsapp", "telegram", "slack"].includes(channel))
     return { error: "channel must be whatsapp, telegram or slack" };
@@ -502,7 +473,7 @@ export async function proposeSendMessage(client: any, org: string, ownerId: stri
     user_id: ownerId,
     org_id: org,
     action: "send_message",
-    payload: { channel, to, who, text },
+    payload: { channel, to, who, text, ...approvalBinding(source) },
   });
   if (!res.ok) return { error: res.error };
   return {

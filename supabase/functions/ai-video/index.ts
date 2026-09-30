@@ -3,6 +3,7 @@ import {
   type SupabaseClient,
 } from "https://esm.sh/@supabase/supabase-js@2";
 import { CORS_HEADERS, json, rateLimit } from "../_shared/rateLimit.ts";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import {
   boundedJson,
   higgsfield,
@@ -180,6 +181,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       401
     );
   const user = auth.user;
+  if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
   try {
     const body = await boundedJson(req);
     const action = body.action;

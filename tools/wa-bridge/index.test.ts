@@ -207,7 +207,7 @@ it("does not execute synchronized history, missing dates, strangers or Filey's o
 
 it("forwards owner documents with captions and refuses stranger downloads", async () => {
   transport.download.mockImplementation(async () => Readable.from([Buffer.from("%PDF-test")]));
-  const message = { key: { id: "pdf-1", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { fileName: "../Invoice.pdf", mimetype: "application/pdf", caption: "Read this invoice" } } };
+  const message = { key: { id: "pdf-1", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "../Invoice.pdf", mimetype: "application/pdf", caption: "Read this invoice" } } };
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [message] });
   expect(emitted("message")[0]).toMatchObject({ from: "971500000001", text: "Read this invoice", attachment: { name: "Invoice.pdf", mimetype: "application/pdf", b64: Buffer.from("%PDF-test").toString("base64") } });
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ ...message, key: { id: "stranger-file", remoteJid: "971599999999@s.whatsapp.net" } }] });
@@ -217,7 +217,7 @@ it("forwards owner documents with captions and refuses stranger downloads", asyn
 it("stops oversized media streams even when the provider omits the file length", async () => {
   const stream = Readable.from([Buffer.alloc(13 * 1024 * 1024)]);
   transport.download.mockResolvedValueOnce(stream);
-  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "large-file", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { fileName: "huge.pdf" } } }] });
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "large-file", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "huge.pdf" } } }] });
   expect(emitted("message")).toHaveLength(0);
   expect(stream.destroyed).toBe(true);
   expect(transport.send).toHaveBeenCalledWith("971500000001@s.whatsapp.net", { text: expect.stringContaining("under 12 MB") }, expect.any(Object));
@@ -238,10 +238,12 @@ it("forwards a downloaded voice note with its sender, then confirms the reply", 
   const message = {
     key: { id: "voice-1", remoteJid: "971500000001@s.whatsapp.net" },
     pushName: "Owner",
-    message: { audioMessage: { mimetype: "audio/ogg" } },
+    message: { audioMessage: { directPath: "/v/test-audio.enc", mimetype: "audio/ogg" } },
   };
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [message] });
-  expect(transport.download).toHaveBeenCalledWith(message, "stream", {});
+  expect(transport.download).toHaveBeenCalledWith(message, "stream", { options: {
+    timeout: 30_000, maxRedirects: 0, signal: expect.any(AbortSignal),
+  } });
   const incoming = emitted("voice_note")[0];
   expect(incoming).toMatchObject({
     from: "971500000001",
@@ -285,7 +287,7 @@ it("reports file upload failure instead of acknowledging a pipe write as deliver
       type: "delivery",
       requestId: "file",
       ok: false,
-      error: "upload failed",
+      error: "WhatsApp did not confirm acceptance. Check the chat before retrying.",
     })
   );
 });
@@ -296,6 +298,43 @@ it("requires a provider message ID before reporting success", async () => {
   await vi.waitFor(() =>
     expect(emitted("delivery")[0]).toMatchObject({ requestId: "unconfirmed", ok: false })
   );
+});
+
+it("rejects attachment metadata that changes the download authority before making a request", async () => {
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "ssrf-file", remoteJid: "971500000001@s.whatsapp.net" },
+    message: { documentMessage: { directPath: "@127.0.0.1/private", fileName: "document.pdf" } },
+  }] });
+  expect(transport.download).not.toHaveBeenCalled();
+  expect(emitted("message")).toHaveLength(0);
+});
+
+it("aborts an attachment request that never produces a stream", async () => {
+  let signal: AbortSignal | undefined;
+  transport.download.mockImplementationOnce((_message, _type, options) => new Promise((_resolve, reject) => {
+    signal = options.options.signal;
+    signal!.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+  }));
+  const incoming = transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "hung-file", remoteJid: "971500000001@s.whatsapp.net" },
+    message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "document.pdf" } },
+  }] });
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  await vi.advanceTimersByTimeAsync(30_000);
+  await incoming;
+  expect(signal?.aborted).toBe(true);
+  expect(emitted("message")).toHaveLength(0);
+});
+
+it("never exposes provider session errors or private filesystem paths in delivery results", async () => {
+  transport.send.mockRejectedValueOnce(new Error("private-session-material https://provider.invalid/private-token"));
+  command({ type: "send", to: "971500000001", text: "hello", requestId: "private-provider" });
+  await vi.waitFor(() => expect(emitted("delivery")).toHaveLength(1));
+  transport.stat.mockRejectedValueOnce(new Error("private-path C:/Users/owner/private.pdf"));
+  command({ type: "send_file", to: "971500000001", path: "/private.pdf", requestId: "private-path" });
+  await vi.waitFor(() => expect(emitted("delivery")).toHaveLength(2));
+  expect(emitted("delivery").every(event => event.ok === false)).toBe(true);
+  expect(JSON.stringify(emitted("delivery"))).not.toMatch(/private-session-material|private-token|C:\/Users\/owner/);
 });
 
 it("reports disconnected sends and expired requests without sending", async () => {

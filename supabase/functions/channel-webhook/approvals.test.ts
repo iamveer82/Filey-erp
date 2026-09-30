@@ -1,6 +1,6 @@
 // Runnable check for the approval engine:
 //   deno test supabase/functions/channel-webhook/
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { handleApproval, type ApprovalIO } from "./approvals.ts";
 
 /**
@@ -28,6 +28,7 @@ function fakeClient(
   function pendingActionsUpdate(patch: Record<string, unknown>) {
     const builder: Record<string, unknown> = {};
     builder.eq = () => builder;
+    builder.gt = () => builder;
     // Terminal transitions end .eq("status","pending").select(); the scrub
     // follow-up ends bare (awaited without select).
     builder.select = () => {
@@ -37,6 +38,7 @@ function fakeClient(
       }
       if (!claimed) {
         claimed = true;
+        if (patch.payload) scrubPatches.push(patch.payload);
         return Promise.resolve({ data: [{ id: initialRow?.id }], error: null });
       }
       return Promise.resolve({ data: [], error: null });
@@ -54,25 +56,12 @@ function fakeClient(
       from(table: string) {
         if (table === "agent_pending_actions") {
           return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    gt: () => ({
-                      order: () => ({
-                        limit: () => ({
-                          maybeSingle: () =>
-                            Promise.resolve({
-                              data: initialRow ? { ...initialRow } : null,
-                              error: null,
-                            }),
-                        }),
-                      }),
-                    }),
-                  }),
-                }),
-              }),
-            }),
+            select: () => {
+              const query: Record<string, unknown> = {};
+              for (const method of ["eq", "gt", "order", "limit"]) query[method] = () => query;
+              query.maybeSingle = () => Promise.resolve({ data: initialRow ? { ...initialRow } : null, error: null });
+              return query;
+            },
             update: pendingActionsUpdate,
           };
         }
@@ -251,7 +240,7 @@ Deno.test("connect_channel approval scrubs parked credentials from the row", asy
   }
 });
 
-Deno.test("mark_invoice_paid executor flips the invoice and audits owner approval", async () => {
+Deno.test("legacy mark-paid approval cannot invent a payment without accounting", async () => {
   const f = fakeClient(
     {
       id: "pa-3",
@@ -266,15 +255,34 @@ Deno.test("mark_invoice_paid executor flips the invoice and audits owner approva
     { id: 77, number: "INV-2026-0077", status: "sent" },
   );
   const reply = await handleApproval(f.client, "OWNER", "APPROVE 3456", io);
-  assertEquals(reply, "✅ Invoice INV-2026-0077 is marked paid.");
-  assertEquals(f.state.invoiceFlipped, true);
-  assertEquals(f.state.invoice?.status, "paid");
-  assertEquals(f.state.auditRows.length, 1);
-  assertEquals(f.state.auditRows[0].actor, "agent");
-  assertEquals(f.state.auditRows[0].action, "agent.mark_invoice_paid");
-  assertEquals(String(f.state.auditRows[0].details).includes("3456"), true);
+  assertEquals(reply?.includes("No payment was recorded"), true);
+  assertEquals(f.state.invoiceFlipped, false);
+  assertEquals(f.state.invoice?.status, "sent");
+  assertEquals(f.state.auditRows.length, 0);
 
   // Re-approval can't re-run anything: the action row is terminal.
   const again = await handleApproval(f.client, "OWNER", "APPROVE 3456", io);
   assertEquals(again?.includes("already handled"), true);
+});
+
+Deno.test("approval is bound to the original channel, chat and current workspace", async () => {
+  const bound = { ...reminderRow, payload: { ...reminderRow.payload, approval_channel: "telegram", approval_chat_id: "42" } };
+  for (const [channel, externalId, org] of [["whatsapp", "42", "ORG"], ["telegram", "43", "ORG"], ["telegram", "42", "OTHER"]] as const) {
+    const f = fakeClient(bound);
+    const reply = await handleApproval(f.client, "OWNER", "APPROVE 1234", io, { channel, externalId }, org);
+    assertEquals(typeof reply, "string");
+    assertEquals(f.state.claimed, false, "a mismatched approval must not claim or execute");
+  }
+  const unbound = fakeClient(reminderRow);
+  await handleApproval(unbound.client, "OWNER", "APPROVE 1234", io, { channel: "telegram", externalId: "42" }, "ORG");
+  assertEquals(unbound.state.claimed, false, "legacy unbound codes require a new proposal");
+});
+
+Deno.test("credential payload is scrubbed in the claim even if setup throws", async () => {
+  const f = fakeClient({ ...reminderRow, action: "connect_channel", payload: { provider: "telegram", token: "BOT_SECRET" } });
+  const original = f.client.from.bind(f.client);
+  f.client.from = ((table: string) => table === "agent_channels" ? { upsert: () => { throw new Error("unavailable"); } } : original(table)) as typeof f.client.from;
+  await assertRejects(() => handleApproval(f.client, "OWNER", "APPROVE 1234", io));
+  assertEquals(f.state.claimed, true);
+  assertEquals((f.state.scrubPatches[0] as Record<string, unknown>).token, "[scrubbed]");
 });

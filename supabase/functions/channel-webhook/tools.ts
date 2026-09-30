@@ -341,23 +341,6 @@ export const CONFIRM_TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "propose_mark_invoice_paid",
-    description:
-      "Propose marking an invoice as PAID in the books. This does NOT change " +
-      "anything — it returns an approval code the owner must reply with " +
-      "(APPROVE <code>) before the invoice is flipped to paid. Use " +
-      "list_invoices first to find the invoice number, and confirm with the " +
-      "owner when they say 'invoice X is paid'.",
-    input_schema: {
-      type: "object",
-      properties: {
-        invoice_number: { type: "string", description: "Exact invoice number, e.g. INV-2026-0042." },
-      },
-      required: ["invoice_number"],
-      additionalProperties: false,
-    },
-  },
-  {
     name: "connect_channel",
     description:
       "Propose connecting a NEW chat channel (telegram, whatsapp or slack) so " +
@@ -440,13 +423,13 @@ export const ALL_TOOLS: ToolDef[] = [...TOOLS, ...WRITE_TOOLS, ...CONFIRM_TOOLS,
 import {
   num,
   proposeConnectChannel,
-  proposeMarkInvoicePaid,
   proposeSendMessage,
   proposePaymentReminder,
   recallMemories,
   rememberMemory,
   runWriteTool,
 } from "./tools-writes.ts";
+import type { InboundMsg } from "./parse.ts";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -460,6 +443,7 @@ export async function runTool(
   input: any,
   /** Required for write tools: the account the rows belong to. */
   ownerId?: string,
+  source?: Pick<InboundMsg, "channel" | "externalId">,
 ): Promise<unknown> {
   const org = String(orgId);
 
@@ -472,19 +456,15 @@ export async function runTool(
   // ---- confirm-gated proposals ----
   if (name === "request_payment_reminder") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposePaymentReminder(client, org, ownerId, input);
-  }
-  if (name === "propose_mark_invoice_paid") {
-    if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposeMarkInvoicePaid(client, org, ownerId, input);
+    return proposePaymentReminder(client, org, ownerId, input, source);
   }
   if (name === "connect_channel") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposeConnectChannel(client, ownerId, input);
+    return proposeConnectChannel(client, ownerId, input, source);
   }
   if (name === "send_message") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposeSendMessage(client, org, ownerId, input);
+    return proposeSendMessage(client, org, ownerId, input, source);
   }
 
   // ---- durable memory ----

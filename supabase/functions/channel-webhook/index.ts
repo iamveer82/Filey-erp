@@ -106,8 +106,10 @@ import { ALL_TOOLS, runTool } from "./tools.ts";
 import { rankMemories } from "./tools-writes.ts";
 import { sendChannelText } from "./delivery.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import { adminWorkspace } from "../_shared/admin-workspace.ts";
 import {
   claimSeenMessage,
+  readWebhookBody,
   timingSafeEqualStr,
   verifySlackSignature,
   verifyWhatsAppSignature,
@@ -118,6 +120,7 @@ import {
 import { handleApproval, type ApprovalIO } from "./approvals.ts";
 import {
   ownerRefusal as ownerRefusalChecked,
+  channelCredentials,
   tryPair as tryPairChannel,
 } from "./access.ts";
 
@@ -233,8 +236,8 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
         `never sent automatically), plus new customers, products and logged ` +
         `expenses (log_expense). Look up the customer/supplier first so names ` +
         `match existing records. For payment reminders use ` +
-        `request_payment_reminder; to mark an invoice PAID use ` +
-        `propose_mark_invoice_paid — both return an approval code, never claim ` +
+        `request_payment_reminder; record payments in Filey with their amounts and accounting entries. ` +
+        `External actions return an approval code; never claim ` +
         `anything happened until the owner replies APPROVE <code>. You cannot ` +
         `finalize, send, delete or edit existing records — if asked, say that ` +
         `needs to happen in Filey. After creating a draft, give its number and ` +
@@ -299,7 +302,7 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
           if (block?.type !== "tool_use") continue;
           let out: unknown;
           try {
-            out = await runTool(client, orgId as string, block.name, block.input, ownerId);
+            out = await runTool(client, orgId as string, block.name, block.input, ownerId, { channel, externalId: chatId });
           } catch (e) {
             out = { error: String(e) };
           }
@@ -333,17 +336,11 @@ async function aiReply(userText: string, name: string, client: any, orgId: strin
  *  Returns a reply when it handled the message, else null. */
 // (moved to access.ts — throttled, timing-safe, audit-logged)
 
-/** The org whose data this install can read. Single-owner: derived from the
- *  owner's profile. Null disables data tools (chat-only fallback). */
+/** Hosted service-role tools require current owner/admin workspace access.
+ *  A normal team membership cannot bypass module/RLS restrictions here. */
 // deno-lint-ignore no-explicit-any
 async function ownerOrgId(client: any, ownerId: string): Promise<string | null> {
-  try {
-    const { data } = await client.from("profiles").select("org_id").eq("id", ownerId).maybeSingle();
-    return data?.org_id ?? null;
-  } catch (e) {
-    console.error("ownerOrgId", e);
-    return null;
-  }
+  return await adminWorkspace(client, ownerId);
 }
 
 // (hmacSha256Hex and the per-provider signature verifiers moved to
@@ -368,23 +365,12 @@ async function chanCreds(provider: Channel): Promise<Record<string, string>> {
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
       );
-      const { data } = await admin
-        .from("agent_channels")
-        .select("credentials,enabled,owner_ref")
-        .eq("user_id", owner)
-        .eq("provider", provider)
-        .maybeSingle();
-      if (data && !data.enabled) creds = { disabled: "true" };
-      else if (data?.enabled)
-        creds = {
-          ...((data.credentials ?? {}) as Record<string, string>),
-          // Flattened alongside the secrets so callers get the paired owner
-          // (chat id / phone / slack uid) from the same lookup.
-          ...(data.owner_ref ? { owner_ref: String(data.owner_ref) } : {}),
-        };
+      creds = await channelCredentials(admin,owner,provider);
     }
   } catch {
-    /* table missing or unreachable — fall back to env */
+    // A failed lookup might hide a revoked connection. Do not resurrect old
+    // environment credentials when its current state cannot be verified.
+    throw new Error("Channel connection state could not be checked.");
   }
   credsCache.set(provider, { at: Date.now(), credentials: creds });
   return creds;
@@ -444,8 +430,9 @@ async function log(client: any, ownerId: string, channel: Channel, row: {
 async function ownerRefusal(msg: InboundMsg): Promise<string | null> {
   // A channel the agent connected itself pairs through agent_channels.owner_ref;
   // one an admin configured by hand still pairs through the env secret.
-  const dbOwner = (await chanCreds(msg.channel)).owner_ref ?? "";
-  return ownerRefusalChecked(msg, { env: (k) => Deno.env.get(k), dbOwner });
+  const config = await chanCreds(msg.channel);
+  const dbOwner = config.owner_ref ?? "";
+  return ownerRefusalChecked(msg, { env: (k) => Deno.env.get(k), dbOwner, disabled: !!config.disabled, configured: !!config.configured });
 }
 
 const json = (body: unknown, status = 200) =>
@@ -487,8 +474,8 @@ async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<strin
   }
 
   const io = client ? approvalIOFor(client, ownerId) : null;
-  const approval = io ? await handleApproval(client, ownerId, msg.body, io) : null;
   const orgId = client ? await ownerOrgId(client, ownerId) : null;
+  const approval = io ? await handleApproval(client, ownerId, msg.body, io, msg, orgId) : null;
   const reply =
     approval ??
     (await aiReply(msg.body, msg.fromName, client, orgId, ownerId, msg.channel, msg.externalId));
@@ -505,6 +492,7 @@ async function handleBridgeMessage(msg: InboundMsg, raw: unknown): Promise<strin
 }
 
 serve(async (req) => {
+ try {
   // ── WhatsApp webhook verification (Meta calls GET once at setup) ──
   if (req.method === "GET") {
     if ((await chanCreds("whatsapp")).disabled) return new Response("forbidden", { status: 403 });
@@ -533,7 +521,7 @@ serve(async (req) => {
 
   // Read the RAW body first — Slack/WhatsApp signature checks need the exact
   // bytes, and JSON.parse(req.json()) would consume them.
-  const rawBody = await req.text();
+  const rawBody = await readWebhookBody(req);
   let body: unknown;
   try {
     body = JSON.parse(rawBody);
@@ -685,9 +673,8 @@ serve(async (req) => {
 
       const io = client ? approvalIOFor(client, ownerId) : null;
       // Approvals bypass the model entirely — a confirm must be deterministic.
-      const approval = io ? await handleApproval(client, ownerId, msg.body, io) : null;
-
       const orgId = client ? await ownerOrgId(client, ownerId) : null;
+      const approval = io ? await handleApproval(client, ownerId, msg.body, io, msg, orgId) : null;
       const reply = approval ?? (await aiReply(msg.body, msg.fromName, client, orgId, ownerId, msg.channel, msg.externalId));
       await sendReply(msg, reply);
 
@@ -712,4 +699,8 @@ serve(async (req) => {
   }
 
   return new Response("ok");
+ } catch (error) {
+   console.error("channel webhook unavailable", error instanceof Error ? error.name : "unknown");
+   return new Response("temporarily unavailable", { status: error instanceof RangeError ? 413 : 503 });
+ }
 });

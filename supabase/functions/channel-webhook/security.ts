@@ -60,6 +60,30 @@ export function fourDigitCode(): string {
   return randomCode(4);
 }
 
+/** Bound public request bytes before parsing or authenticating a large body. */
+export async function readWebhookBody(req: Request, limit = 262_144): Promise<string> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > limit) {
+        await reader.cancel();
+        throw new RangeError("Webhook body is too large.");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** Slack Events API auth: X-Slack-Signature must be "v0=" + HMAC-SHA256 hex
  *  of `v0:<X-Slack-Request-Timestamp>:<rawBody>` keyed with the signing
  *  secret, and the timestamp must be within 5 minutes (replay guard).
@@ -97,9 +121,10 @@ export async function verifyWhatsAppSignature(
  *  channel_seen_messages (migration 2026-08-22-agent-hardening.sql); returns
  *  true only when THIS request's row won — a redelivered webhook loses the
  *  unique(channel, external_id) race and gets swallowed with a plain 200.
- *  Fail-open on storage errors (e.g. migration not applied yet): a duplicated
- *  reply is annoying, silently dropping messages is worse. */
+ *  Storage errors fail closed BEFORE any model call or business write. The
+ *  webhook can return 503 and let the provider retry safely. */
 export async function claimSeenMessage(
+  // deno-lint-ignore no-explicit-any
   client: any,
   channel: string,
   externalId: string,
@@ -119,11 +144,11 @@ export async function claimSeenMessage(
       .select("id");
     if (error) {
       console.error("channel_seen_messages", error.message ?? error);
-      return true; // fail open — process rather than lose the message
+      throw new Error("Message tracking is temporarily unavailable. Please retry later.");
     }
     return Array.isArray(data) && data.length > 0;
   } catch (e) {
     console.error("channel_seen_messages", e);
-    return true;
+    throw new Error("Message tracking is temporarily unavailable. Please retry later.");
   }
 }

@@ -109,14 +109,13 @@ function DeviceLimitScreen() {
   );
 }
 
-function ProfileLoadError({ onRetry }: { onRetry: () => void }) {
+function ProfileLoadError({ onRetry, title = "Couldn't load your profile", description = "You're signed in, but we couldn't read your account details. This is usually a connection problem — your data is untouched." }: { onRetry: () => void; title?: string; description?: string }) {
   return (
     <div className="min-h-screen grid place-items-center p-6 bg-canvas">
       <div className="card max-w-sm w-full text-center space-y-3">
-        <h1 className="text-lg font-semibold text-ink">Couldn't load your profile</h1>
+        <h1 className="text-lg font-semibold text-ink">{title}</h1>
         <p className="text-sm text-brand-500">
-          You're signed in, but we couldn't read your account details. This is
-          usually a connection problem — your data is untouched.
+          {description}
         </p>
         <button
           className="btn-primary"
@@ -140,6 +139,9 @@ function Gate() {
     profileError,
     reloadProfile,
     mfaPending,
+    mfaLoading,
+    mfaError,
+    refreshMfaPending,
     deviceLimitBlocked,
   } = useAuth();
   // Desktop app, first sign-in on this device: offer to place a Desktop
@@ -160,7 +162,9 @@ function Gate() {
   if (!user) return <Login />;
   // A correct password yields a real session that still sits at aal1 when the
   // account has an authenticator app. Nothing else may render until the code
-  // is accepted — this is the whole enforcement point for 2FA.
+  // is accepted. Cloud APIs also enforce assurance independently of this UI.
+  if (mfaLoading) return <Splash />;
+  if (mfaError) return <ProfileLoadError title="Couldn't verify sign-in" description={mfaError} onRetry={() => void refreshMfaPending().catch(() => {})} />;
   if (mfaPending) return <TwoFactorGate />;
   // Signed in but still fetching the profile — show the splash, not the
   // profile-setup form (which would otherwise flash for existing users).

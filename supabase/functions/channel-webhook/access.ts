@@ -15,15 +15,35 @@ export interface AccessIO {
   env: (key: string) => string | undefined;
 }
 
+/** Only a successful no-row lookup permits operator-configured env fallback.
+ *  Lookup failure may hide a disabled/revoked channel and must fail closed. */
+export async function channelCredentials(
+  // deno-lint-ignore no-explicit-any
+  client: any,
+  ownerId: string,
+  provider: InboundMsg["channel"],
+): Promise<Record<string, string>> {
+  const { data, error } = await client.from("agent_channels")
+    .select("credentials,enabled,owner_ref").eq("user_id",ownerId).eq("provider",provider).maybeSingle();
+  if (error) throw new Error("Channel connection state could not be checked.");
+  if (!data) return {};
+  if (!data.enabled) return { disabled: "true" };
+  return { ...((data.credentials ?? {}) as Record<string,string>),
+    owner_ref: String(data.owner_ref ?? ""), configured: "true" };
+}
+
 /** Owner pinning, fail-closed per channel (mirrors TELEGRAM_OWNER_CHAT_ID):
  *  WhatsApp compares digit-normalized phone numbers; Slack compares the
  *  sender's user id. Returns the refusal/guidance text to send back, or null
  *  when the sender IS the owner. */
 export async function ownerRefusal(
   msg: InboundMsg,
-  io: AccessIO & { dbOwner: string },
+  io: AccessIO & { dbOwner: string; disabled?: boolean; configured?: boolean },
 ): Promise<string | null> {
+  if (io.disabled) return "This channel is disconnected. Reconnect it in Filey.";
   const dbOwner = io.dbOwner;
+  if (io.configured && !dbOwner)
+    return "This assistant isn't paired yet. Complete pairing in Filey.";
   if (msg.channel === "whatsapp") {
     const owner = (dbOwner || io.env("WHATSAPP_OWNER_PHONE") || "").replace(/\D/g, "");
     const sender = msg.externalId.replace(/\D/g, "");

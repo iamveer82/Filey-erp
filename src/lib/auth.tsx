@@ -169,6 +169,8 @@ interface AuthValue {
    *  the account has a verified factor, so "signed in" is not "allowed in" —
    *  App gates on this before rendering anything. */
   mfaPending: boolean;
+  mfaLoading: boolean;
+  mfaError: string | null;
   /** Re-check the assurance level (after a code is accepted). */
   refreshMfaPending: () => Promise<void>;
   /** True when the org is at its cloud device limit and THIS device was
@@ -415,16 +417,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // flow — before they saw whether their password change worked. Those call
   // sites invoke refreshMfaPending themselves once they're finished, which is
   // also how the gate clears itself after a code is accepted.
-  const [mfaPending, setMfaPending] = useState(false);
-  const refreshMfaPending = async () => setMfaPending(await mfaRequired());
-  useEffect(() => {
-    if (local || !session?.user) {
-      setMfaPending(false);
-      return;
+  const mfaIdentity = local ? null : session?.user?.id ?? null;
+  const mfaIdentityRef = useRef(mfaIdentity);
+  mfaIdentityRef.current = mfaIdentity;
+  const mfaReadRevision = useRef(0);
+  const [mfaCheck, setMfaCheck] = useState<{ userId: string | null; required: boolean; checking: boolean; error: string | null }>({ userId: null, required: true, checking: false, error: null });
+  const refreshMfaPending = useCallback(async () => {
+    const userId = mfaIdentity;
+    const revision = ++mfaReadRevision.current;
+    if (!userId) return;
+    setMfaCheck({ userId, required: true, checking: true, error: null });
+    try {
+      const required = await mfaRequired();
+      if (mfaIdentityRef.current === userId && revision === mfaReadRevision.current)
+        setMfaCheck({ userId, required, checking: false, error: null });
+    } catch (error) {
+      if (mfaIdentityRef.current !== userId || revision !== mfaReadRevision.current) return;
+      setMfaCheck({ userId, required: true, checking: false, error: "We couldn't verify your sign-in. Check your connection and try again." });
+      throw error;
     }
-    void refreshMfaPending();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id, local]);
+  }, [mfaIdentity]);
+  const mfaLoading = !!mfaIdentity && (mfaCheck.userId !== mfaIdentity || mfaCheck.checking);
+  const mfaPending = !!mfaIdentity && (mfaCheck.userId !== mfaIdentity || mfaCheck.required);
+  const mfaError = mfaIdentity && mfaCheck.userId === mfaIdentity ? mfaCheck.error : null;
+  useEffect(() => {
+    void refreshMfaPending().catch(() => {});
+    return () => {
+      // Invalidate whichever read is latest, including a manual retry after mount.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++mfaReadRevision.current;
+    };
+  }, [refreshMfaPending]);
 
   // Cloud device registry (20 per workspace): claim/refresh this device's slot on
   // session start. Best-effort — a network blip must not lock the app.
@@ -822,6 +845,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithPassword,
     signInWithGoogle,
     mfaPending,
+    mfaLoading,
+    mfaError,
     refreshMfaPending,
     deviceLimitBlocked,
     retryDeviceRegistration,

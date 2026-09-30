@@ -303,7 +303,7 @@ Deno.test("stock_valuation sums quantity × cost across products", async () => {
   assertEquals(out.retail_value, 250);
 });
 
-// ---- propose_mark_invoice_paid ----
+// ---- confirmation gate ----
 
 /** Fake for proposals: invoice lookup by number + pending-action inserts
  *  (with an optional unique-violation on the first N attempts to prove the
@@ -339,26 +339,24 @@ function fakeProposalClient(invoice: unknown, failInserts = 0) {
   return { client, inserts, codes, get attempts() { return attempts; } };
 }
 
-Deno.test("propose_mark_invoice_paid parks a pending action, never executes", async () => {
-  const f = fakeProposalClient({ id: 77, number: "INV-77", status: "sent" });
-  const out = (await runTool(f.client, "ORG-9", "propose_mark_invoice_paid", {
-    invoice_number: "INV-77",
-  }, "OWNER")) as { proposed?: string; approval_code?: string };
-
-  assertEquals(out.proposed, "mark_invoice_paid");
+Deno.test("payment reminder proposal binds trusted source without accepting model-supplied approval metadata", async () => {
+  const f = fakeProposalClient({ id: 77, number: "INV-77", status: "sent", customer_email: "customer@example.invalid" });
+  const out = (await runTool(f.client, "ORG-9", "request_payment_reminder", {
+    invoice_number: "INV-77", approval_channel: "whatsapp", approval_chat_id: "ATTACKER",
+  }, "OWNER", { channel: "telegram", externalId: "42" })) as { proposed?: string; approval_code?: string };
+  assertEquals(out.proposed, "send_payment_reminder");
   assertEquals(/^\d{4}$/.test(out.approval_code ?? ""), true);
   const parked = f.inserts[0][1];
-  assertEquals(parked.action, "mark_invoice_paid");
   assertEquals(parked.org_id, "ORG-9");
-  assertEquals(parked.payload, { invoice_id: 77, invoice_number: "INV-77" });
-  assertEquals(parked.status, undefined, "DB default is pending — no explicit override needed");
+  const payload = parked.payload as Record<string, unknown>;
+  assertEquals(payload.approval_channel, "telegram");
+  assertEquals(payload.approval_chat_id, "42");
   assertEquals(typeof parked.expires_at, "string");
-  assertEquals(f.inserts.length, 1);
 });
 
 Deno.test("proposal codes come from the CSPRNG and retry on live-code collision", async () => {
-  const f = fakeProposalClient({ id: 78, number: "INV-78", status: "sent" }, 2);
-  const out = (await runTool(f.client, "ORG", "propose_mark_invoice_paid", {
+  const f = fakeProposalClient({ id: 78, number: "INV-78", status: "sent", customer_email: "customer@example.invalid" }, 2);
+  const out = (await runTool(f.client, "ORG", "request_payment_reminder", {
     invoice_number: "INV-78",
   }, "OWNER")) as { approval_code?: string };
   assertEquals(typeof out.approval_code, "string");
@@ -366,10 +364,10 @@ Deno.test("proposal codes come from the CSPRNG and retry on live-code collision"
   assertEquals(new Set(f.codes).size, f.codes.length, "a colliding code must never be reused");
 });
 
-Deno.test("propose_mark_invoice_paid validates status before parking anything", async () => {
+Deno.test("payment reminder validates status before parking anything", async () => {
   for (const status of ["paid", "draft"]) {
     const f = fakeProposalClient({ id: 79, number: "INV-79", status });
-    const out = (await runTool(f.client, "ORG", "propose_mark_invoice_paid", {
+    const out = (await runTool(f.client, "ORG", "request_payment_reminder", {
       invoice_number: "INV-79",
     }, "OWNER")) as { error?: string };
     assertEquals(typeof out.error, "string", `${status} must be refused`);
@@ -377,7 +375,7 @@ Deno.test("propose_mark_invoice_paid validates status before parking anything", 
   }
 
   const missing = fakeProposalClient(null);
-  const nf = (await runTool(missing.client, "ORG", "propose_mark_invoice_paid", {
+  const nf = (await runTool(missing.client, "ORG", "request_payment_reminder", {
     invoice_number: "NOPE",
   }, "OWNER")) as { error?: string };
   assertEquals(typeof nf.error, "string");

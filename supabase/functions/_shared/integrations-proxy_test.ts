@@ -1,4 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { fixtureJwt } from "./test-auth-fixture.ts";
 
 Deno.test("integration writes reserve quota before calling providers and fail closed on settings errors", async () => {
   const savedFetch = globalThis.fetch, savedServe = Deno.serve;
@@ -8,12 +9,12 @@ Deno.test("integration writes reserve quota before calling providers and fail cl
   let handler!: (req: Request) => Promise<Response>;
   Deno.serve = ((fn: typeof handler) => { handler = fn; return {}; }) as typeof Deno.serve;
   const calls: string[] = [];
-  let permitted = false, quotaError = false, keyError = false;
+  let permitted = false, quotaError = false, keyError = false, verifiedFactor = false;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const name = url.pathname.split("/").pop()!;
     calls.push(name);
-    if (name === "user") return Response.json({ id: "fixture-user" });
+    if (name === "user") return Response.json({ id: "fixture-user", factors: verifiedFactor ? [{ status: "verified" }] : [] });
     if (name === "profiles") return Response.json({ org_id: "fixture-org" });
     if (name === "org_members") return Response.json({ role: "owner", modules: null });
     if (name === "integration_keys") return keyError ? Response.json({ message: "unavailable" }, { status: 503 }) : Response.json(null);
@@ -29,8 +30,12 @@ Deno.test("integration writes reserve quota before calling providers and fail cl
   try {
     await import("../integrations/index.ts");
     Deno.serve = savedServe;
-    const request = () => new Request("https://fixture.test", { method: "POST", headers: { Authorization: "Bearer fixture-token" },
+    const request = () => new Request("https://fixture.test", { method: "POST", headers: { Authorization: `Bearer ${fixtureJwt("fixture-user")}` },
       body: JSON.stringify({ provider: "composio", action: "execute", payload: { tool_slug: "FIXTURE_TOOL", arguments: {} } }) });
+    verifiedFactor = true;
+    assertEquals((await handler(request())).status, 403);
+    assertEquals(calls, ["user"], "MFA refusal must happen before credentials, quota or provider calls");
+    verifiedFactor = false; calls.length = 0;
     assertEquals((await handler(request())).status, 429);
     assertEquals(calls.includes("FIXTURE_TOOL"), false);
     calls.length = 0; quotaError = true;

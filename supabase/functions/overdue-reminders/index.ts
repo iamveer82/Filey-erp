@@ -20,6 +20,7 @@
 //       '{}'::jsonb, headers:='{"Content-Type":"application/json","x-agent-secret":"<AGENT_JOBS_SECRET>"}'::jsonb); $$);
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { adminWorkspace } from "../_shared/admin-workspace.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -53,11 +54,8 @@ Deno.serve(async (req) => {
 
   // Which org this deployment speaks for. No org, no mail — never fall back to
   // "every org", which is exactly the blast this function must not send.
-  const { data: profile, error: profileError } = await supa
-    .from("profiles").select("org_id").eq("id", OWNER).maybeSingle();
-  if (profileError) return Response.json({ error: profileError.message }, { status: 500 });
-  const org = profile?.org_id ?? null;
-  if (!org) return Response.json({ error: "owner org not found" }, { status: 400 });
+  const org = await adminWorkspace(supa, OWNER);
+  if (!org) return Response.json({ error: "Owner workspace access is unavailable." }, { status: 403 });
 
   // Issued (non-draft, unpaid) invoices past their due date, with an email.
   // Cancelled/void invoices must never be chased.

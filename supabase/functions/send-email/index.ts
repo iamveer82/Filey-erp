@@ -12,6 +12,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit } from "../_shared/rateLimit.ts";
 
 // SECURITY: per-user DAILY cap so a compromised account can't mass-mail from
@@ -46,6 +47,7 @@ serve(async (req) => {
     if (!jwt) return json({ error: "Sign in to use email." }, 401);
     const { data: auth, error: authError } = await supa.auth.getUser(jwt);
     if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
+    if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
     const userId = auth.user.id;
     if (body.action === "status") return json({ configured: !!RESEND && !!FROM, from: FROM || null });
     const { to, subject, html, attachments, requestId } = body;

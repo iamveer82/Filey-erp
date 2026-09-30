@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   bridgeState: vi.fn(),
   ttsAvailable: vi.fn(),
   textToSpeech: vi.fn(),
+  deliverFile: vi.fn(),
 }));
 vi.mock("../agentStorage", () => ({
   agentStorageScope: () => state.scope,
@@ -38,6 +39,7 @@ vi.mock("../api", () => ({ billing: { getCompany: async () => null } }));
 vi.mock("../waLog", () => ({ waLogAdd: mocks.log }));
 vi.mock("../agentSessions", () => ({ whatsappContext: () => [] }));
 vi.mock("../agentComputer", () => ({ stopAgentComputer: vi.fn(async () => {}) }));
+vi.mock("../agentFiles", () => ({ deliverFile: mocks.deliverFile }));
 vi.mock("../log", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("../voice", () => ({
   sttAvailable: () => true,
@@ -69,6 +71,7 @@ beforeEach(async () => {
   mocks.sendFile.mockResolvedValue("accepted-file-id");
   mocks.bridgeState.mockReset().mockResolvedValue({ state: "connected", me: "971500000001@s.whatsapp.net", sessionId: "session-one" });
   mocks.ttsAvailable.mockReturnValue(false);
+  mocks.deliverFile.mockReset().mockResolvedValue({ name: "reply.mp3", path: "C:/Exports/Filey AI/602f50ce-5d84-4f65-80c8-2b72e59d9e3a/reply.mp3" });
   mocks.endTurn.mockReset().mockReturnValue([]);
   const { startWaAgent } = await import("../waAgent");
   startWaAgent();
@@ -360,6 +363,35 @@ it("stop releases a hanging spoken reply so new tasks can proceed", async () => 
   send("after-speech", "Hello again");
   await answered("after-speech");
   expect(mocks.agent).toHaveBeenCalledTimes(2);
+  expect(mocks.sendFile).not.toHaveBeenCalled();
+});
+
+it("saves spoken replies through managed output delivery before sending the original session", async () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  mocks.transcribe.mockResolvedValueOnce("Tell me my totals");
+  mocks.ttsAvailable.mockReturnValueOnce(true);
+  mocks.textToSpeech.mockResolvedValueOnce(bytes);
+  state.voice({ id: "voice-output", bridgeSession: "session-one", from: "971500000001", b64: "YQ==" });
+  await vi.waitFor(() => expect(mocks.sendFile).toHaveBeenCalledOnce());
+  expect(mocks.deliverFile).toHaveBeenCalledExactlyOnceWith({ name: expect.stringMatching(/^filey-voice-\d+\.mp3$/), bytes });
+  expect(mocks.sendFile).toHaveBeenCalledExactlyOnceWith("971500000001@s.whatsapp.net", {
+    path: "C:/Exports/Filey AI/602f50ce-5d84-4f65-80c8-2b72e59d9e3a/reply.mp3",
+    filename: "filey-reply.mp3", mimetype: "audio/mpeg", caption: undefined,
+  }, "session-one");
+});
+
+it("does not send a spoken file when stop arrives while managed output is saving", async () => {
+  let saved!: (file: { name: string; path: string }) => void;
+  mocks.transcribe.mockResolvedValueOnce("Tell me my totals");
+  mocks.ttsAvailable.mockReturnValueOnce(true);
+  mocks.textToSpeech.mockResolvedValueOnce(new Uint8Array([1, 2, 3]));
+  mocks.deliverFile.mockImplementationOnce(() => new Promise(resolve => { saved = resolve; }));
+  state.voice({ id: "voice-save", bridgeSession: "session-one", from: "971500000001", b64: "YQ==" });
+  await vi.waitFor(() => expect(saved).toBeTypeOf("function"));
+  send("stop-save", "/stop");
+  await answered("stop-save");
+  saved({ name: "reply.mp3", path: "C:/Exports/Filey AI/602f50ce-5d84-4f65-80c8-2b72e59d9e3a/reply.mp3" });
+  await new Promise(resolve => setTimeout(resolve, 10));
   expect(mocks.sendFile).not.toHaveBeenCalled();
 });
 

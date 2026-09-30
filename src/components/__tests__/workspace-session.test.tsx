@@ -3,6 +3,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 const fixture = vi.hoisted(() => ({
   user: { id: "owner", email: "owner@example.test" },
   signOut: vi.fn(),
+  assurance: vi.fn(),
   expired: false,
   refreshSession: vi.fn(),
   getSession: vi.fn(),
@@ -50,7 +51,7 @@ vi.mock("../../lib/license", () => ({
   collectPurchases: async () => false,
   clearEntitlementCache: vi.fn(),
 }));
-vi.mock("../../lib/mfa", () => ({ mfaRequired: async () => false }));
+vi.mock("../../lib/mfa", () => ({ mfaRequired: fixture.assurance }));
 import { AuthProvider, adoptLocalProfile, useAuth } from "../../lib/auth";
 import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
 import * as localAuth from "../../lib/localAuth";
@@ -118,6 +119,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   fixture.expired = false;
+  fixture.assurance.mockReset().mockResolvedValue(false);
   fixture.scope = "previous-org:previous-user";
   fixture.onAuth = undefined;
   fixture.getSession.mockResolvedValue({ data: { session: { user: fixture.user } } });
@@ -131,6 +133,68 @@ beforeEach(() => {
   vi.spyOn(localAuth, "rememberLocalCredential").mockImplementation(async (email, userId) => { rememberLocalIdentity(email, userId); });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it("blocks a loaded cloud profile until security verification completes, keeps it blocked on failure and supports retry", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  let fail!: (error: Error) => void;
+  fixture.assurance.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(fixture.assurance).toHaveBeenCalledOnce());
+  expect(currentAuth.profileLoading).toBe(false);
+  expect(currentAuth.mfaLoading).toBe(true);
+  expect(currentAuth.mfaPending).toBe(true);
+  await act(async () => { fail(new Error("Offline")); });
+  expect(currentAuth.mfaLoading).toBe(false);
+  expect(currentAuth.mfaPending).toBe(true);
+  expect(currentAuth.mfaError).toMatch(/couldn't verify/i);
+  await act(async () => { await currentAuth.refreshMfaPending(); });
+  expect(currentAuth.mfaPending).toBe(false);
+  expect(currentAuth.mfaError).toBeNull();
+});
+
+it("cannot unlock another cloud account with an earlier account's security response", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  let finish!: (required: boolean) => void;
+  fixture.assurance.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValueOnce(true);
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(fixture.assurance).toHaveBeenCalledOnce());
+  await act(async () => { fixture.onAuth?.("SIGNED_IN", { user: { id: "second", email: "second@example.test" } }); });
+  await waitFor(() => expect(fixture.assurance).toHaveBeenCalledTimes(2));
+  await act(async () => { finish(false); });
+  expect(currentAuth.user?.id).toBe("second");
+  expect(currentAuth.mfaPending).toBe(true);
+  expect(currentAuth.mfaLoading).toBe(false);
+});
+
+it("keeps the authorized device workspace available offline while cloud security lookup failures stay blocked", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  rememberLocalIdentity(fixture.user.email, fixture.user.id);
+  adoptLocalProfile({ ...fixture.user, name: "Owner", company: "Example", org_id: "org" });
+  setLocalSignedIn(false);
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  vi.spyOn(localAuth, "hasLocalPassword").mockReturnValue(true);
+  vi.spyOn(localAuth, "verifyLocalPassword").mockResolvedValue(true);
+  fixture.assurance.mockRejectedValue(new Error("Offline"));
+  const device = render(<AuthProvider><SessionProbe /></AuthProvider>);
+  expect(currentAuth.user).toBeNull();
+  await act(async () => {
+    await currentAuth.signInWithPassword({ channel: "email", value: fixture.user.email }, "test-password");
+    await currentAuth.refreshMfaPending();
+  });
+  expect(screen.getByText("owner:Example:ready")).toBeTruthy();
+  expect(currentAuth.mfaLoading).toBe(false);
+  expect(currentAuth.mfaPending).toBe(false);
+  expect(currentAuth.mfaError).toBeNull();
+  expect(fixture.assurance).not.toHaveBeenCalled();
+  expect(fixture.signIn).not.toHaveBeenCalled();
+  device.unmount();
+
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.mfaError).toMatch(/couldn't verify/i));
+  expect(currentAuth.mfaLoading).toBe(false);
+  expect(currentAuth.mfaPending).toBe(true);
+  expect(fixture.assurance).toHaveBeenCalledOnce();
+});
 it("restores the real AuthProvider in local, cloud and local again without signing out or repeating setup", async () => {
   localStorage.clear();
   rememberLocalIdentity(fixture.user.email, fixture.user.id);

@@ -15,6 +15,8 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
+import { ownedToolPath, toolFilename } from "../_shared/tool-path.ts";
 import { PDFDocument, degrees } from "https://esm.sh/pdf-lib@1.17.1";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 
@@ -47,6 +49,7 @@ serve(async (req) => {
     const { data: u } = await client.auth.getUser();
     const user = u.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
+    if (!mfaAllowed(user, auth.replace(/^Bearer\s+/i, ""))) return json(MFA_REQUIRED, 403);
 
     // RATE LIMIT: max 15 tool runs per hour per user
     const adminClient = createClient(
@@ -72,7 +75,7 @@ serve(async (req) => {
     // Defense in depth: the input must live under the caller's own folder.
     // (Storage RLS already enforces this for the caller's token, but reject
     // explicitly so a tampered input_path can never be processed.)
-    if (!String(job.input_path).startsWith(`${user.id}/`)) {
+    if (!ownedToolPath(job.input_path, user.id)) {
       return json({ error: "Forbidden: input path mismatch" }, 403);
     }
 
@@ -93,7 +96,8 @@ serve(async (req) => {
     let total = 0;
     for (let i = 0; i < outputs.length; i++) {
       const o = outputs[i];
-      const path = `${user.id}/${jobId}/${i}_${o.name}`;
+      const path = `${user.id}/${job.id}/${i}_${toolFilename(o.name)}`;
+      if (!ownedToolPath(path, user.id)) throw new Error("Invalid tool output path.");
       const up = await client.storage
         .from("tool-outputs")
         // `as BlobPart`: newer Deno lib types declare Uint8Array over
