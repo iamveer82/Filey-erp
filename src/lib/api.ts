@@ -488,7 +488,7 @@ export type InvoiceDocInput = Omit<
   "id" | "created_at" | "updated_at"
 > & { id?: number };
 export interface CompanyProfile {
-  einvoice?: import("./einvoice").EInvoiceParty;
+  einvoice?: import("./einvoice").EInvoiceParty | null;
   country_code?: string;
   name: string;
   business_type?: string;

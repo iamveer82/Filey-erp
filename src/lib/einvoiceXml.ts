@@ -321,7 +321,7 @@ function partyXml(
     city?: string | null;
     emirate?: string | null;
     country?: string | null;
-    identity?: EInvoiceParty;
+    identity?: EInvoiceParty | null;
     endpoint?: { id: string; scheme: string };
     taxRegistration?: string;
   }
