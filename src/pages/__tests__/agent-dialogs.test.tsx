@@ -61,7 +61,7 @@ it("keeps phone Enter for a new line and sends using the arrow, with a compact c
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Your draft is ready.");
   expect(stream).toHaveBeenCalledOnce();
-  expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 2400 }));
+  await waitFor(() => expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ top: 2400 })));
   expect(scroll.mock.contexts.every(target => target === conversation)).toBe(true);
   expect(scrollPage).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Copy reply" })).not.toHaveTextContent("Copy");
