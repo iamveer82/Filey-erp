@@ -2719,3 +2719,226 @@ revoke all on function public.filey_direct_message_page(uuid,bigint,integer),pub
 grant execute on function public.filey_direct_message_page(uuid,bigint,integer),public.filey_unread_direct_messages(),public.filey_mark_direct_read(uuid,bigint) to authenticated;
 notify pgrst,'reload schema';
 commit;
+
+-- Profile avatar choices, 30 September 2026.
+-- Apply after 2026-09-28-member-avatars.sql, before shipping the new picker.
+-- Expand preset choices only; existing values and RPC permissions are unchanged.
+begin;
+alter table public.org_members drop constraint if exists org_members_avatar_preset;
+alter table public.org_members add constraint org_members_avatar_preset check (
+  avatar is null or avatar in (
+    '/avatars/sun.svg','/avatars/mint.svg','/avatars/coral.svg','/avatars/sky.svg',
+    '/avatars/lilac.svg','/avatars/peach.svg','/avatars/slate.svg','/avatars/sage.svg',
+    '/avatars/sunburst.svg','/avatars/triangle.svg'
+  ) or avatar ~ '^/avatars/blobatar/(round|organic|boxy|capsule|nub|cloud|droplet|hexagon|sunburst|triangle)-(sun|mint|coral|sky|lilac|peach|slate|sage|amber|rose)[.]svg$'
+);
+comment on constraint org_members_avatar_preset on public.org_members is
+  'Only ten legacy Filey presets or an exact supported Blobatar shape-colour SVG; no arbitrary URLs.';
+notify pgrst, 'reload schema';
+commit;
+
+
+-- Optional MFA must be an API boundary, not only a login-screen check.
+-- Additive/idempotent: no account or business rows are changed.
+-- Deploy before publishing the matching login/edge-function changes.
+-- Existing verified factors require aal2; unverified enrollment does not lock
+-- out its owner. Auth's challenge/verify/recovery APIs are unaffected.
+begin;
+
+create or replace function public.filey_mfa_allowed()
+returns boolean language sql stable security definer
+set search_path = public, pg_temp as $$
+  select coalesce(auth.jwt()->>'aal','') = 'aal2'
+    or not exists (
+      select 1 from auth.mfa_factors
+      where user_id = auth.uid() and status = 'verified'
+    );
+$$;
+revoke all on function public.filey_mfa_allowed() from public;
+grant execute on function public.filey_mfa_allowed() to anon, authenticated, service_role;
+
+-- RLS also protects Storage and Realtime; db_pre_request alone does not.
+do $$ declare t record; begin
+  for t in
+    select n.nspname, c.relname from pg_class c
+    join pg_namespace n on n.oid=c.relnamespace
+    where c.relrowsecurity and c.relkind in ('r','p')
+      and (n.nspname='public' or (n.nspname='storage' and c.relname='objects'))
+  loop
+    execute format('drop policy if exists filey_mfa_required on %I.%I', t.nspname,t.relname);
+    execute format('create policy filey_mfa_required on %I.%I as restrictive for all to authenticated using ((select public.filey_mfa_allowed())) with check ((select public.filey_mfa_allowed()))',t.nspname,t.relname);
+  end loop;
+end $$;
+
+-- SECURITY DEFINER RPCs bypass RLS; enforce the same check before PostgREST
+-- dispatches table reads, writes or RPCs. Provider webhooks and cron calls use
+-- service_role with their own signature/secret checks and remain unaffected.
+create or replace function public.filey_assert_mfa()
+returns void language plpgsql stable security definer
+set search_path = public, pg_temp as $$
+begin
+  if auth.jwt()->>'role' = 'authenticated' and not public.filey_mfa_allowed() then
+    raise exception 'Complete two-step verification in Filey to continue.' using errcode='42501';
+  end if;
+end;
+$$;
+revoke all on function public.filey_assert_mfa() from public;
+grant execute on function public.filey_assert_mfa() to anon, authenticated, service_role;
+
+-- Refuse to overwrite an unrelated deployment hook. Review/integrate that
+-- hook first; a silent replacement would remove its own security checks.
+do $$ declare existing text; begin
+  select substring(setting from length('pgrst.db_pre_request=')+1) into existing
+    from pg_roles r cross join lateral unnest(r.rolconfig) setting
+    where r.rolname='authenticator' and setting like 'pgrst.db_pre_request=%';
+  if coalesce(existing,'') not in ('','public.filey_assert_mfa') then
+    raise exception 'An existing PostgREST pre-request hook must be integrated with filey_assert_mfa before this migration.';
+  end if;
+  alter role authenticator set pgrst.db_pre_request = 'public.filey_assert_mfa';
+end $$;
+notify pgrst, 'reload config';
+notify pgrst, 'reload schema';
+commit;
+
+
+-- Legacy Stripe checkout settlement: service-role only, paid events only.
+-- Additive and repeatable; historical invoices, payments and licenses are
+-- not changed. Deploy before the matching Stripe edge function update.
+begin;
+create table if not exists public.stripe_settled_checkouts (
+  session_id text primary key,
+  payment_intent text not null unique,
+  kind text not null check (kind in ('invoice_payment','lite_license')),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  invoice_id bigint references public.invoice_docs(id) on delete set null,
+  amount numeric(14,2) not null check(amount>0),
+  currency text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.stripe_settled_checkouts enable row level security;
+revoke all on public.stripe_settled_checkouts from anon, authenticated;
+grant select,insert on public.stripe_settled_checkouts to service_role;
+
+create or replace function public.filey_settle_stripe_checkout(
+  p_session text,p_kind text,p_user uuid,p_invoice bigint,
+  p_amount numeric,p_currency text,p_intent text
+) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare doc public.invoice_docs%rowtype; existing public.stripe_settled_checkouts%rowtype;
+  buyer uuid; subtotal numeric; total numeric; paid numeric;
+begin
+  if auth.role() is distinct from 'service_role' then
+    raise exception 'Service-role settlement required' using errcode='42501';
+  end if;
+  if p_session is null or p_session !~ '^cs_[A-Za-z0-9_]+$' or length(p_session)>255
+    or p_intent is null or p_intent !~ '^pi_[A-Za-z0-9_]+$' or length(p_intent)>255
+    or p_currency is null or p_currency !~ '^[A-Z]{3}$'
+    or p_amount is null or p_amount::text in ('NaN','Infinity','-Infinity') or p_amount<=0 or p_amount>999999999999.99
+    or round(p_amount,2)<>p_amount or p_kind is null or p_kind not in ('invoice_payment','lite_license') then
+    raise exception 'Invalid Stripe settlement';
+  end if;
+  if p_kind='invoice_payment' then
+    if p_user is not null or p_invoice is null then raise exception 'Invalid invoice settlement'; end if;
+    select * into doc from invoice_docs where id=p_invoice for update;
+    if not found or upper(coalesce(doc.currency,''))<>p_currency then raise exception 'Invoice currency or reference mismatch'; end if;
+    buyer:=doc.user_id;
+  else
+    if p_user is null or p_invoice is not null then raise exception 'Invalid license settlement'; end if;
+    buyer:=p_user;
+  end if;
+  insert into stripe_settled_checkouts(session_id,payment_intent,kind,user_id,invoice_id,amount,currency)
+    values(p_session,p_intent,p_kind,buyer,p_invoice,p_amount,p_currency)
+    on conflict do nothing;
+  if not found then
+    select * into existing from stripe_settled_checkouts where session_id=p_session;
+    if not found or existing.payment_intent<>p_intent or existing.kind<>p_kind or existing.user_id<>buyer
+      or existing.invoice_id is distinct from p_invoice or existing.amount<>p_amount or existing.currency<>p_currency then
+      raise exception 'Stripe settlement replay mismatch';
+    end if;
+    return jsonb_build_object('received',true,'duplicate',true);
+  end if;
+  if p_kind='lite_license' then
+    -- An older deployment may already have fulfilled this payment. Do not
+    -- rewrite that license or issue another one while registering its receipt.
+    if not exists(select 1 from licenses where stripe_payment_intent=p_intent) then
+      insert into licenses(user_id,product,status,stripe_payment_intent)
+        values(buyer,'filey-desktop','active',p_intent);
+    end if;
+  else
+    insert into invoice_payments(invoice_id,user_id,org_id,amount,method,paid_at)
+      values(doc.id,doc.user_id,doc.org_id,p_amount,'card',now());
+    select coalesce(sum(qty*unit_price),0) into subtotal from invoice_doc_items where invoice_id=doc.id and org_id=doc.org_id;
+    total:=greatest(0,subtotal-coalesce(doc.discount,0));
+    total:=round(total*(1+coalesce(doc.tax_rate,0)/100),2);
+    select coalesce(sum(amount),0) into paid from invoice_payments where invoice_id=doc.id and org_id=doc.org_id;
+    if paid>=total and doc.status in ('sent','overdue') then
+      update invoice_docs set status='paid',updated_at=now() where id=doc.id;
+    end if;
+  end if;
+  return jsonb_build_object('received',true,'duplicate',false);
+end;
+$$;
+revoke all on function public.filey_settle_stripe_checkout(text,text,uuid,bigint,numeric,text,text) from public,anon,authenticated;
+grant execute on function public.filey_settle_stripe_checkout(text,text,uuid,bigint,numeric,text,text) to service_role;
+notify pgrst,'reload schema';
+commit;
+
+
+-- Prefix-only job paths can escape folders when a service-role worker's URL
+-- parser normalizes dot segments. Add a restrictive policy without rewriting
+-- historical jobs. Unsafe old jobs are also refused by the worker/edge guard.
+begin;
+create or replace function public.filey_tool_path_owned(p_path text,p_owner uuid)
+returns boolean language sql immutable strict set search_path=public,pg_temp as $$
+  select length(p_path)<=1024 and split_part(p_path,'/',1)=p_owner::text
+    and position('/' in p_path)>0 and position(chr(92) in p_path)=0
+    and position('%' in p_path)=0 and position('?' in p_path)=0 and position('#' in p_path)=0
+    and p_path !~ '[[:cntrl:]]'
+    and not exists(select 1 from unnest(string_to_array(p_path,'/')) segment where segment in ('','.','..'));
+$$;
+revoke all on function public.filey_tool_path_owned(text,uuid) from public;
+grant execute on function public.filey_tool_path_owned(text,uuid) to authenticated,service_role;
+do $$ begin
+  if to_regclass('public.tool_jobs') is not null then
+    drop policy if exists filey_tool_paths_required on public.tool_jobs;
+    create policy filey_tool_paths_required on public.tool_jobs as restrictive for all to authenticated
+      using(user_id=auth.uid())
+      with check(user_id=auth.uid() and public.filey_tool_path_owned(input_path,auth.uid())
+        and not exists(select 1 from unnest(output_paths) path where public.filey_tool_path_owned(path,auth.uid()) is not true));
+  end if;
+end $$;
+notify pgrst,'reload schema';
+commit;
+
+-- Workspace billing ACL hardening — 30 September 2026
+-- Column-only REVOKEs cannot override a table-level INSERT/UPDATE grant.
+-- Keep direct workspace creation/renaming, but billing and ownership changes
+-- belong to trusted server code. DELETE is reserved to the actual owner.
+-- Additive and repeatable; no workspace or customer records are rewritten.
+begin;
+revoke insert, update, delete on public.organizations from public, anon, authenticated;
+
+-- Remove older column grants too before granting the small editable set.
+do $$ declare columns text; begin
+  select string_agg(quote_ident(attname), ', ') into columns
+    from pg_attribute where attrelid='public.organizations'::regclass
+      and attnum>0 and not attisdropped;
+  execute format('revoke insert (%s), update (%s) on public.organizations from public, anon, authenticated', columns, columns);
+end $$;
+grant insert (id, name, owner_id), update (name) on public.organizations to authenticated;
+grant delete on public.organizations to authenticated;
+
+drop policy if exists organizations_access on public.organizations;
+drop policy if exists organizations_read on public.organizations;
+drop policy if exists organizations_create on public.organizations;
+drop policy if exists organizations_rename on public.organizations;
+drop policy if exists organizations_remove on public.organizations;
+create policy organizations_read on public.organizations for select to authenticated
+  using (id::text=public.current_org() or owner_id=auth.uid());
+create policy organizations_create on public.organizations for insert to authenticated
+  with check (owner_id=auth.uid());
+create policy organizations_rename on public.organizations for update to authenticated
+  using (owner_id=auth.uid()) with check (owner_id=auth.uid());
+create policy organizations_remove on public.organizations for delete to authenticated
+  using (owner_id=auth.uid());
+notify pgrst, 'reload schema';
+commit;

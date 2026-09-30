@@ -131,7 +131,18 @@ export interface ConnectLink {
 export async function composioConnect(
   toolkit: string
 ): Promise<ConnectLink> {
-  return request("connect", "composio_connect", { toolkit });
+  const link = await request<ConnectLink>("connect", "composio_connect", { toolkit });
+  if (link.redirect_url) {
+    // The provider's reply is data, never permission to execute a custom scheme
+    // in a browser tab or through the desktop OS opener.
+    let url: URL;
+    try { url = new URL(link.redirect_url); }
+    catch { throw new Error("The connection provider returned an invalid sign-in link."); }
+    if (url.protocol !== "https:" || url.username || url.password || link.redirect_url.length > 8192 || [...link.redirect_url].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+      throw new Error("The connection provider returned an unsafe sign-in link.");
+    return { ...link, redirect_url: url.href };
+  }
+  return link;
 }
 
 export interface ConnectionStatus {

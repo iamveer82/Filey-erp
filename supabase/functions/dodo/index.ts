@@ -29,6 +29,7 @@ import { appCheckoutReturn } from "../_shared/checkout-return.ts";
 
 import DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 import {
   licenseActivate,
@@ -117,6 +118,7 @@ Deno.serve(async (req) => {
     const { data: u } = await supa.auth.getUser(jwt);
     const user = u?.user;
     if (!user) return json({ error: "Unauthorized" }, 401);
+    if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
 
     // Signed-in checkouts come from the app or from gofiley.com; /thanks words
     // the next step differently for each.

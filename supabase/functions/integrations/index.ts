@@ -14,6 +14,7 @@
 // Bring-your-own-key still works and bypasses this entirely (see lib/composio,
 // lib/zernio) — that path is for offline installs and self-hosters.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
 import { cachedCatalog } from "../_shared/catalog-cache.ts";
 import { rateLimit } from "../_shared/rateLimit.ts";
@@ -60,6 +61,7 @@ Deno.serve(async (req) => {
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: auth, error: authError } = await supa.auth.getUser(jwt);
     if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
+    if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
     const userId = auth.user.id;
     const { data: profile, error: profileError } = await supa.from("profiles").select("org_id").eq("id",userId).maybeSingle();
     if (profileError || !profile?.org_id) return json({error:"Workspace access could not be verified."},403);

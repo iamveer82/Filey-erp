@@ -612,18 +612,12 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
         if (ttsAvailable()) {
           const mp3 = await withTimeout<Uint8Array | null>(textToSpeech(text), Math.max(1, deadline - Date.now()), null, () => {}, opts.signal);
           if (!mp3 || scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted || Date.now() >= deadline) return;
-          const { outputDir } = await import("./agentFiles");
-          const target = await outputDir();
-          if (target) {
-            const { writeDocFile } = await import("./localPaths");
-            const path = await writeDocFile(
-              target.dir,
-              `filey-voice-${Date.now()}.mp3`,
-              mp3
-            );
-            if (scope !== agentStorageScope() || epoch !== generation) return;
+          const { deliverFile } = await import("./agentFiles");
+          const saved = await deliverFile({ name: `filey-voice-${Date.now()}.mp3`, bytes: mp3 });
+          if (saved.path) {
+            if (scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted || Date.now() >= deadline) return;
             await sendWaFile(m.chatJid || `${m.from}@s.whatsapp.net`, {
-              path,
+              path: saved.path,
               filename: "filey-reply.mp3",
               mimetype: "audio/mpeg",
               caption: undefined,

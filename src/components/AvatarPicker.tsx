@@ -1,20 +1,12 @@
 import { Check, UserRound } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../lib/format";
-
-export const AVATARS = [
-  "Sun",
-  "Mint",
-  "Coral",
-  "Sky",
-  "Lilac",
-  "Peach",
-  "Slate",
-  "Sage",
-].map((name) => ({
-  name,
-  src: `/avatars/${name.toLowerCase()}.svg`,
-}));
+import {
+  AVATAR_SHAPES,
+  AVATAR_COLOURS,
+  avatarChoice,
+  avatarUrl,
+} from "../lib/profileAvatars";
 
 export function UserAvatar({
   src,
@@ -63,29 +55,84 @@ export default function AvatarPicker({
   onChange: (src: string) => void;
   resetLabel?: string;
 }) {
+  const choice = avatarChoice(value);
+  const shape = choice?.shape ?? AVATAR_SHAPES[0];
+  const colour = choice?.colour ?? AVATAR_COLOURS[1];
   return (
-    <div className="space-y-3">
-      <div role="group" aria-label="Choose an avatar" className="flex flex-wrap gap-3">
-        {AVATARS.map((avatar) => (
-          <button
-            key={avatar.src}
-            type="button"
-            aria-label={`${avatar.name} avatar`}
-            aria-pressed={value === avatar.src}
-            onClick={() => onChange(avatar.src)}
-            className={cn(
-              "relative rounded-full border-2 p-1 transition-colors hover:border-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              value === avatar.src ? "border-foreground" : "border-transparent"
-            )}
-          >
-            <img src={avatar.src} alt="" className="h-12 w-12 rounded-full" />
-            {value === avatar.src && (
-              <span className="absolute -bottom-0.5 -right-0.5 grid h-5 w-5 place-items-center rounded-full bg-foreground text-background">
-                <Check size={12} strokeWidth={2.5} />
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Choose a shape and colour, or keep your profile photo. Motion follows your
+        device’s reduced-motion setting.
+      </p>
+      <div className="space-y-2">
+        <p className="text-xs font-medium">
+          Shape
+          {choice && (
+            <span className="font-normal text-muted-foreground"> · {shape.name}</span>
+          )}
+        </p>
+        <div
+          role="group"
+          aria-label="Avatar shape"
+          className="flex flex-wrap gap-2"
+        >
+          {AVATAR_SHAPES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-label={`${option.name} shape`}
+              title={option.name}
+              aria-pressed={choice?.shape.id === option.id}
+              onClick={() => onChange(avatarUrl(option.id, colour.id))}
+              className={cn(
+                "relative grid min-h-11 min-w-11 place-items-center rounded-xl border p-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                choice?.shape.id === option.id
+                  ? "border-foreground bg-muted"
+                  : "border-transparent"
+              )}
+            >
+              <img
+                src={avatarUrl(option.id, colour.id)}
+                alt=""
+                className="h-10 w-10 rounded-full"
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <p className="text-xs font-medium">
+          Colour
+          {choice && (
+            <span className="font-normal text-muted-foreground"> · {colour.name}</span>
+          )}
+        </p>
+        <div role="group" aria-label="Avatar colour" className="flex flex-wrap gap-2">
+          {AVATAR_COLOURS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              aria-label={`${option.name} colour`}
+              title={option.name}
+              aria-pressed={choice?.colour.id === option.id}
+              onClick={() => onChange(avatarUrl(shape.id, option.id))}
+              className="grid h-11 w-11 place-items-center rounded-full transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <span
+                className="grid h-7 w-7 place-items-center rounded-full border border-black/10"
+                style={{ backgroundColor: option.swatch }}
+              >
+                {choice?.colour.id === option.id && (
+                  <Check
+                    size={14}
+                    strokeWidth={2.5}
+                    className={option.id === "slate" ? "text-white" : "text-black"}
+                  />
+                )}
               </span>
-            )}
-          </button>
-        ))}
+            </button>
+          ))}
+        </div>
       </div>
       <button
         type="button"

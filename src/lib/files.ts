@@ -6,6 +6,17 @@ import type { OutFile } from "./pdfTools";
 import { errMsg } from "./format";
 import { useLiveSync } from "./realtime";
 import { validateDocumentUpload } from "./documentUpload";
+import { getCacheScope } from "./api";
+
+/** Never carry a pending file operation into a different account or store. */
+function fileWorkspace() {
+  const scope = getCacheScope(), local = isLocalMode();
+  return () => {
+    sb(); // Also refuses a signed-out device or another tab's pending transition.
+    if (scope !== getCacheScope() || local !== isLocalMode())
+      throw new Error("Your workspace changed. Open the file again before saving it.");
+  };
+}
 
 const fileToDataUrl = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -95,9 +106,12 @@ export async function canSaveFiles(): Promise<boolean> {
 /** Upload a tool output to the user's account. Returns the saved file's id so
  *  a caller can reference it later (a cheque photo, for instance, is attached
  *  to its record by id rather than re-found by name). */
-export async function saveOutput(out: OutFile, tool?: string): Promise<string> {
+export async function saveOutput(out: OutFile, tool?: string, expectedUserId?: string): Promise<string> {
+  const current = fileWorkspace();
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to save files to your account.");
+  if (expectedUserId && uid !== expectedUserId) throw new Error("Your account changed. Generate the document again before saving it.");
   const id = newId();
   const mime = mimeOf(out.name);
   const path = `${uid}/${id}/${safeName(out.name)}`;
@@ -106,6 +120,7 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<string> {
     .from(BUCKET)
     .upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
+  current();
   const ins = await sb().from("user_files").insert({
     id,
     owner: uid,
@@ -115,6 +130,7 @@ export async function saveOutput(out: OutFile, tool?: string): Promise<string> {
     storage_path: path,
     tool: tool ?? null,
   });
+  current();
   if (ins.error) {
     // Roll back the orphaned object if the metadata row failed.
     await sb().storage.from(BUCKET).remove([path]);
@@ -136,11 +152,17 @@ export async function autoSaveDocument(
   gen: () => Promise<OutFile>
 ): Promise<boolean> {
   try {
-    if (!(await canSaveFiles())) return false;
+    const current = fileWorkspace();
+    const uid = await userId();
+    current();
+    if (!uid) return false;
     const existing = await listFiles();
+    current();
     if (existing.some((f) => f.name === name && f.tool === tool)) return false;
     const out = await gen();
-    await saveOutput(out, tool);
+    current();
+    await saveOutput(out, tool, uid);
+    current();
     await exportToFolder(name, out.bytes); // real file to the chosen folder
     return true;
   } catch (e) {
@@ -150,7 +172,9 @@ export async function autoSaveDocument(
 }
 
 export async function listFiles(): Promise<SavedFile[]> {
+  const current = fileWorkspace();
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to access your files.");
   const files: SavedFile[] = [];
   for (let offset = 0; ; offset += 500) {
@@ -161,6 +185,7 @@ export async function listFiles(): Promise<SavedFile[]> {
       .order("id", { ascending: true });
     if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
     const { data, error } = await query;
+    current();
     if (error) throw error;
     files.push(...(data ?? []).map((r) => ({
       id: r.id as string,
@@ -178,7 +203,9 @@ export async function listFiles(): Promise<SavedFile[]> {
 
 /** Read one linked receipt without downloading the user's whole file library. */
 export async function getSavedFile(id: string): Promise<SavedFile> {
+  const current = fileWorkspace();
   const { data, error } = await sb().from("user_files").select("*").eq("id", id).single();
+  current();
   if (error || !data) throw new Error("This attachment is unavailable or you do not have access to it.");
   return { id: data.id, name: data.name, mime: data.mime, size: Number(data.size), storagePath: data.storage_path,
     tool: data.tool ?? null, folderId: data.folder_id ?? null, createdAt: Date.parse(data.created_at) };
@@ -187,7 +214,9 @@ export async function getSavedFile(id: string): Promise<SavedFile> {
 /* ---------------- User folders ---------------- */
 
 export async function listFolders(): Promise<UserFolder[]> {
+  const current = fileWorkspace();
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to access your folders.");
   const folders: UserFolder[] = [];
   for (let offset = 0; ; offset += 500) {
@@ -198,6 +227,7 @@ export async function listFolders(): Promise<UserFolder[]> {
       .order("id", { ascending: true });
     if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
     const { data, error } = await query;
+    current();
     if (error) throw error;
     folders.push(...(data ?? []).map((r) => ({
       id: r.id as string,
@@ -213,7 +243,9 @@ export async function createFolder(
   name: string,
   parentId: string | null
 ): Promise<void> {
+  const current = fileWorkspace();
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to create folders.");
   const n = name.trim();
   if (!n) throw new Error("Folder name cannot be empty.");
@@ -271,7 +303,9 @@ export async function moveFolder(
  * the desktop CSP and in WebView2's PDF viewer. Caller must revokeObjectURL. */
 export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
   if (!isConfigured) return null;
+  const current = fileWorkspace();
   const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
+  current();
   if (error) throw new Error(error.message || "Could not open this file.");
   return data ? URL.createObjectURL(data) : null;
 }
@@ -280,18 +314,25 @@ export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
  * through a blob: URL + fetch() (which the webview CSP blocks on connect-src). */
 export async function fileBytes(f: SavedFile): Promise<Uint8Array | null> {
   if (!isConfigured) return null;
+  const current = fileWorkspace();
   const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
+  current();
   if (error) throw new Error(error.message || "Could not open this file.");
-  return data ? new Uint8Array(await data.arrayBuffer()) : null;
+  if (!data) return null;
+  const bytes = new Uint8Array(await data.arrayBuffer());
+  current();
+  return bytes;
 }
 
 /** Signed URL that forces a download (Content-Disposition: attachment) using
  * the file's display name — used by the explicit Download action. */
 export async function downloadUrl(f: SavedFile): Promise<string | null> {
   if (!isConfigured) return null;
+  const current = fileWorkspace();
   const { data, error } = await sb().storage
     .from(BUCKET)
     .createSignedUrl(f.storagePath, 300, { download: f.name });
+  current();
   if (error) throw new Error(error.message || "Could not create a download link.");
   return data?.signedUrl ?? null;
 }
@@ -318,9 +359,11 @@ export async function shareFileLink(
   expiresSec = 604800
 ): Promise<string | null> {
   if (!isConfigured) return null;
+  const current = fileWorkspace();
   const { data } = await sb().storage
     .from(BUCKET)
     .createSignedUrl(f.storagePath, expiresSec);
+  current();
   return data?.signedUrl ?? null;
 }
 
@@ -355,18 +398,22 @@ export function folderOf(f: SavedFile): string {
 
 /** Upload a user-selected file directly to My Files. */
 export async function uploadUserFile(file: File, tool?: string, folderId?: string | null): Promise<string> {
+  const current = fileWorkspace();
   const documentType = COMPANY_DOCUMENT_TYPES.find(t => t.key === tool);
   const documentMime = documentType ? validateDocumentUpload(file) : undefined;
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
   const mime = documentMime || file.type || mimeOf(file.name);
   const path = `${uid}/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
+  current();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
   const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
+  current();
   const ins = await sb().from("user_files").insert({
     id,
     owner: uid,
@@ -377,6 +424,7 @@ export async function uploadUserFile(file: File, tool?: string, folderId?: strin
     storage_path: path,
     tool: tool ?? null,
   });
+  current();
   if (ins.error) {
     await sb().storage.from(BUCKET).remove([path]);
     throw ins.error;
@@ -386,8 +434,10 @@ export async function uploadUserFile(file: File, tool?: string, folderId?: strin
 
 export async function deleteFile(f: SavedFile): Promise<void> {
   if (!isConfigured) throw new Error("File storage is not configured.");
+  const current = fileWorkspace();
   const { error: storageError } = await sb().storage.from(BUCKET).remove([f.storagePath]);
   if (storageError) throw storageError;
+  current();
   const { error } = await sb().from("user_files").delete().eq("id", f.id);
   if (error) throw error;
 }
@@ -398,25 +448,31 @@ export async function deleteFile(f: SavedFile): Promise<void> {
  * short-lived signed URL the preview can use. The path is what gets persisted in
  * app_settings so the image follows the user across devices and sessions. */
 export async function uploadCompanyAsset(file: File): Promise<{ path: string; url: string }> {
+  const current = fileWorkspace();
   // Local mode: embed the image directly as a data: URL stored in app_settings.
   // Avoids the Storage path + signed-URL round-trip (disk write, keyring-encrypted
   // read), which can silently fail to resolve offline and leaves the stamp blank.
   // Stamp/signature/logo PNGs are small enough to live in settings.
   if (isLocalMode()) {
     const dataUrl = await fileToDataUrl(file);
+    current();
     return { path: dataUrl, url: dataUrl };
   }
   const uid = await userId();
+  current();
   if (!uid || !isConfigured) throw new Error("Sign in to upload company assets.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
   const path = `${uid}/company/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
+  current();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
   const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
+  current();
   const { data: urlData, error: urlErr } = await sb().storage.from(BUCKET).createSignedUrl(path, 300);
+  current();
   if (urlErr) throw urlErr;
   return { path, url: urlData?.signedUrl ?? "" };
 }
@@ -424,7 +480,9 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
 /** Re-create a signed URL for a previously-uploaded company asset path. */
 export async function companyAssetUrl(path: string, expiresSec = 300): Promise<string | null> {
   if (!isConfigured) return null;
+  const current = fileWorkspace();
   const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(path, expiresSec);
+  current();
   if (error) {
     console.warn("Failed to create signed URL for company asset", path, error.message);
     return null;

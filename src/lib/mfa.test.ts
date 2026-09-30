@@ -96,6 +96,14 @@ describe("mfaVerify", () => {
 });
 
 describe("mfaRequired", () => {
+  it.each(["returned error", "missing assurance", "thrown request"])("never treats %s as proof that MFA is disabled", async (failure) => {
+    const { client } = fakeAuth();
+    client.auth.mfa.getAuthenticatorAssuranceLevel = async () => {
+      if (failure === "thrown request") throw new Error("Network unavailable");
+      return { data: null, error: failure === "returned error" ? { message: "Read failed" } : null };
+    };
+    await expect(mfaRequired(client)).rejects.toThrow();
+  });
   it("is true when the session sits at aal1 but could reach aal2", async () => {
     const { client } = fakeAuth({ aal: { currentLevel: "aal1", nextLevel: "aal2" } });
     expect(await mfaRequired(client)).toBe(true);

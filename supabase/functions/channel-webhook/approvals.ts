@@ -69,6 +69,7 @@ async function claimPending(
   // deno-lint-ignore no-explicit-any
   client: any,
   id: string,
+  ownerId: string,
   patch: Record<string, unknown>,
 ): Promise<boolean> {
   try {
@@ -76,7 +77,9 @@ async function claimPending(
       .from("agent_pending_actions")
       .update(patch)
       .eq("id", id)
+      .eq("user_id", ownerId)
       .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
       .select("id");
     if (error) {
       console.error("claimPending", error.message ?? error);
@@ -98,6 +101,8 @@ export async function handleApproval(
   ownerId: string,
   text: string,
   io: ApprovalIO,
+  source?: Pick<InboundMsg, "channel" | "externalId">,
+  currentOrg?: string | null,
 ): Promise<string | null> {
   const m = text.trim().match(/^(approve|cancel)\s+(\d{4})$/i);
   if (!m) return null;
@@ -107,24 +112,33 @@ export async function handleApproval(
   // Expiry is part of the lookup itself: codes older than 24h simply don't
   // match, whatever their status column still says.
   const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: row } = await client
+  const { data: row, error } = await client
     .from("agent_pending_actions")
     .select("*")
     .eq("user_id", ownerId)
     .eq("code", code)
     .eq("status", "pending")
+    .gt("expires_at", new Date().toISOString())
     .gt("created_at", sinceIso)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) return "I couldn't check that approval. Please try again.";
   if (!row)
     return `No pending action with code ${code}. It may have expired or already run.`;
+  if (row.user_id !== ownerId) return "That approval is not available for this account.";
+  // A code is a confirmation for one proposed conversation, never a reusable
+  // capability from a different channel or an old unbound desktop proposal.
+  if (source && (row.payload?.approval_channel !== source.channel || row.payload?.approval_chat_id !== source.externalId))
+    return "Approve this action in the conversation where it was proposed, or ask me to propose it here again.";
+  if (source && (!currentOrg || (row.action !== "connect_channel" && row.org_id !== currentOrg)))
+    return "That action belongs to a different or unavailable workspace. Open Filey and propose it again from the current workspace.";
 
   const already = `Action ${row.code} was already handled — nothing re-ran.`;
 
   if (verdict === "cancel") {
     const scrubbed = scrubPayload(row.payload);
-    const won = await claimPending(client, row.id, {
+    const won = await claimPending(client, row.id, ownerId, {
       status: "rejected",
       ...(scrubbed ? { payload: scrubbed } : {}),
     });
@@ -133,18 +147,15 @@ export async function handleApproval(
 
   // Claim BEFORE any side effect: losing here means another APPROVE/CANCEL
   // got there first and the action must not fire a second time.
-  const won = await claimPending(client, row.id, {
+  const scrubbed = scrubPayload(row.payload);
+  const won = await claimPending(client, row.id, ownerId, {
     status: "approved",
-    executed_at: new Date().toISOString(),
+    ...(scrubbed ? { payload: scrubbed } : {}),
   });
   if (!won) return already;
 
-  // Terminal from here on — scrub parked credentials out of the payload.
-  const scrubAfter = async () => {
-    const scrubbed = scrubPayload(row.payload);
-    if (scrubbed)
-      await client.from("agent_pending_actions").update({ payload: scrubbed }).eq("id", row.id);
-  };
+  // Credentials were scrubbed atomically with the claim. Only this in-memory
+  // row retains them, including when provider fetch or channel setup throws.
 
   if (row.action === "send_payment_reminder") {
     const p = row.payload ?? {};
@@ -170,12 +181,12 @@ export async function handleApproval(
           (p.due_date ? ` (due ${esc(p.due_date)})` : "") +
           ` is awaiting payment.</p><p>Thank you.</p>`,
       }),
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) {
       console.error("resend", res.status, await res.text());
       return "Approved, but the email failed to send — ask me to propose it again.";
     }
-    await scrubAfter();
     try {
       await client.from("audit_log").insert({
         user_id: ownerId,
@@ -191,16 +202,17 @@ export async function handleApproval(
   if (row.action === "send_message") {
     const p = row.payload ?? {};
     const chan = String(p.channel) as Channel;
+    if (!["telegram", "whatsapp", "slack"].includes(chan) || typeof p.to !== "string" || !p.to.trim() || p.to.length>200
+      || typeof p.text !== "string" || !p.text.trim() || p.text.length>4000)
+      return "That proposed message is incomplete. Ask me to prepare it again; nothing was sent.";
     try {
       if (chan === "whatsapp") await io.sendWhatsApp(String(p.to), String(p.text));
       else if (chan === "slack") await io.sendSlack(String(p.to), String(p.text));
       else await io.sendTelegram(String(p.to), String(p.text));
     } catch (e) {
       console.error("send_message", e);
-      await scrubAfter();
       return `Approved, but delivery on ${chan} was not confirmed. Check the conversation before asking me to send again; part of the message may have arrived.`;
     }
-    await scrubAfter();
     try {
       // Logged as an outbound message on that channel so the desktop app's
       // conversation view shows what was sent in your name.
@@ -222,7 +234,6 @@ export async function handleApproval(
     if (!["telegram", "whatsapp", "slack"].includes(provider) || !p.token ||
       (provider === "whatsapp" && (!p.phone_number_id || !p.app_secret)) ||
       (provider === "slack" && !p.signing_secret)) {
-      await scrubAfter();
       return "Approved, but channel credentials are incomplete. Ask me to propose the connection again with the required verification secret.";
     }
     const rand = () => crypto.randomUUID().replace(/-/g, "");
@@ -251,11 +262,9 @@ export async function handleApproval(
       { onConflict: "user_id,provider" }
     );
     if (ue) {
-      await scrubAfter();
       return "Approved, but saving the channel failed. Check the deployment and propose the connection again.";
     }
     io.forgetCreds(provider);
-    await scrubAfter();
 
     if (provider === "telegram") {
       const base = (io.env("SUPABASE_URL") ?? "").replace(/\/+$/, "");
@@ -304,45 +313,9 @@ export async function handleApproval(
   }
 
   if (row.action === "mark_invoice_paid") {
-    const p = row.payload ?? {};
-    // Org scope rides along on the pending action row itself.
-    const { data: inv } = await client
-      .from("invoice_docs")
-      .select("id,number,status")
-      .eq("user_id", ownerId)
-      .eq("org_id", String(row.org_id ?? ""))
-      .eq("id", p.invoice_id)
-      .maybeSingle();
-    if (!inv)
-      return `Approved, but invoice ${p.invoice_number ?? ""} couldn't be found — no change made.`;
-    if (inv.status !== "paid") {
-      // Conditional flip: a payment recorded in the app between proposal and
-      // approval must not be clobbered back into "paid" blindly.
-      const { data: flipped, error: fe } = await client
-        .from("invoice_docs")
-        .update({ status: "paid" })
-        .eq("id", inv.id)
-        .eq("org_id", String(row.org_id ?? ""))
-        .neq("status", "paid")
-        .select("id");
-      if (fe) {
-        console.error("mark_invoice_paid", fe.message ?? fe);
-        return `Approved, but marking ${p.invoice_number} paid failed — do it in Filey.`;
-      }
-      if (!flipped || !flipped.length)
-        return `✅ Invoice ${inv.number} was already marked paid — nothing to do.`;
-    }
-    try {
-      await client.from("audit_log").insert({
-        user_id: ownerId,
-        actor: "agent",
-        action: "agent.mark_invoice_paid",
-        entity: `invoice_docs:${inv.id}`,
-        details:
-          `${inv.number} marked paid by owner approval ${code} via chat channel`,
-      });
-    } catch { /* best-effort */ }
-    return `✅ Invoice ${inv.number} is marked paid.`;
+    // Flipping status alone invents a payment without recording its amount,
+    // method or accounting entries. Legacy approvals must fail closed too.
+    return "No payment was recorded. Open the invoice in Filey to record the payment and keep the books correct.";
   }
 
   return `I don't know how to execute "${row.action}" — it may need a newer agent version.`;

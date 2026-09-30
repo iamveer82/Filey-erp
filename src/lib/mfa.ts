@@ -9,20 +9,13 @@
 // ask (mfaRequired) and act on (Login signs the session out if the user backs
 // out of the prompt).
 //
-// ponytail: enforcement is app-side only. Nothing in the database refuses an
-// aal1 session, so this stops someone who has the password and the app — not
-// someone driving supabase-js directly with the anon key that ships in the
-// build. Upgrade path when that matters: add `(auth.jwt()->>'aal') = 'aal2'`
-// to the RLS policies in schema.sql, guarded so accounts with no verified
-// factor still pass.
+// The UI gate complements the server's assurance checks; it is not an API
+// authorization boundary. Cloud data and endpoints independently require aal2
+// when the account has a verified factor.
 //
-// Cloud-only by nature: an offline install authenticates against the device's
-// own PBKDF2 hash (localAuth.ts) and never reaches Supabase, so every call
-// here degrades to "no 2FA" when there is no client. That also means
-// sync.ts's cloudSignIn — the separate password sign-in that connects an
-// offline install to the cloud for syncing — gets an aal1 session and is not
-// gated here. It syncs fine (no RLS policy checks assurance), but 2FA is not
-// protecting that path; it protects getting into the app.
+// Device-local access remains separate: AuthProvider authenticates the device
+// owner with localAuth.ts and does not run this cloud gate in local mode.
+// Connecting that workspace to cloud sync does not waive cloud verification.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
@@ -41,7 +34,7 @@ export interface MfaEnrolment {
   secret: string;
 }
 
-const client = (c?: SupabaseClient | null): SupabaseClient | null => c ?? supabase;
+const client = (c?: SupabaseClient | null): SupabaseClient | null => c === undefined ? supabase : c;
 
 /** The account's verified TOTP factor, or null when 2FA is off. */
 export async function mfaFactor(c?: SupabaseClient | null): Promise<MfaFactor | null> {
@@ -112,18 +105,13 @@ export async function mfaDisable(
   if (error) throw error;
 }
 
-/** True when the current session has a verified factor it hasn't satisfied —
- *  i.e. signed in with a password, still owes a code. False whenever the
- *  answer is unknown (no client, offline install, read failed): 2FA must
- *  never be the reason a legitimate user can't reach their own data. */
+/** Unknown cloud assurance is not evidence that two-factor verification is off.
+ * Offline device authentication has its own boundary and needs no cloud call. */
 export async function mfaRequired(c?: SupabaseClient | null): Promise<boolean> {
   const supa = client(c);
   if (!supa) return false;
-  try {
-    const { data, error } = await supa.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (error) return false;
-    return data?.currentLevel === "aal1" && data?.nextLevel === "aal2";
-  } catch {
-    return false;
-  }
+  const { data, error } = await supa.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (error || !data || !["aal1", "aal2"].includes(data.currentLevel ?? "") || !["aal1", "aal2"].includes(data.nextLevel ?? ""))
+    throw new Error("Could not verify sign-in security. Please try again.");
+  return data.currentLevel === "aal1" && data.nextLevel === "aal2";
 }

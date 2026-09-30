@@ -1,3 +1,4 @@
+import { fixtureJwt } from "./test-auth-fixture.ts";
 function assert(ok: unknown, message = "Assertion failed"): asserts ok {
   if (!ok) throw new Error(message);
 }
@@ -17,6 +18,7 @@ Deno.test(
     const originalFetch = globalThis.fetch;
     let allowed = true,
       authenticated = true,
+      verifiedFactor = false,
       upstreamStatus = 200,
       cost = 0,
       calls = 0;
@@ -28,6 +30,7 @@ Deno.test(
             ? {
                 id: "30000000-0000-4000-8000-000000000001",
                 email_confirmed_at: "2026-09-21",
+                factors: verifiedFactor ? [{ status: "verified" }] : [],
               }
             : { message: "Invalid token" },
           { status: authenticated ? 200 : 401 }
@@ -77,7 +80,7 @@ Deno.test(
         handleRequest(
           new Request("https://fixture/ai-credits", {
             method: "POST",
-            headers: { Authorization: "Bearer fixture" },
+            headers: { Authorization: `Bearer ${fixtureJwt("30000000-0000-4000-8000-000000000001")}` },
             body: JSON.stringify({
               action: "completion",
               funding,
@@ -92,6 +95,9 @@ Deno.test(
       assert(
         result.status === 200 && body.charged_micros === 0 && !body.account && calls === 1
       );
+      verifiedFactor = true;
+      assert((await request()).status === 403 && calls === 1, "aal1 with verified MFA cannot call a model or spend credits");
+      verifiedFactor = false;
       assert((await request("free", "openai/gpt-4.1-mini")).status === 400);
       assert((await request("credits")).status === 400);
       assert(calls === 1, "Changing funding or model cannot start a paid call");

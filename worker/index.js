@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ownedInputPath } from "./paths.js";
 
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -181,11 +182,9 @@ async function processJob(job) {
     // RLS), so it MUST only ever read the job owner's own input. The
     // input_path is a client-set field — reject anything not under the
     // owner's folder, or a user could read another user's files.
-    if (!job.input_path || !String(job.input_path).startsWith(`${job.user_id}/`)) {
-      throw new Error("input_path does not belong to the job owner.");
-    }
+    const inputPath = ownedInputPath(job.user_id, job.input_path);
 
-    const dl = await sb.storage.from(INPUT_BUCKET).download(job.input_path);
+    const dl = await sb.storage.from(INPUT_BUCKET).download(inputPath);
     if (dl.error || !dl.data) throw new Error("Input file not found.");
 
     const safeName = (job.file_name || "input").replace(/[^\w.\-]+/g, "_");

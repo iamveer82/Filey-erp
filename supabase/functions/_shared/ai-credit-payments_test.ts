@@ -1,3 +1,4 @@
+import { fixtureJwt } from "./test-auth-fixture.ts";
 import { createCreditCheckout, reconcileCreditPayment } from "./ai-credit-payments.ts";
 function assert(ok: unknown, message = "Assertion failed"): asserts ok {
   if (!ok) throw new Error(message);
@@ -135,7 +136,7 @@ Deno.test("wallet advertises custom amounts only with configured AI and payments
     const { handleRequest } = await import("../ai-credits/index.ts");
     const status = async () => {
       const response = await handleRequest(new Request("https://fixture/ai-credits", {
-        method: "POST", headers: { Authorization: "Bearer fixture" }, body: JSON.stringify({ action: "status" }),
+        method: "POST", headers: { Authorization: `Bearer ${fixtureJwt(order.user_id)}` }, body: JSON.stringify({ action: "status" }),
       }));
       assert(response.status === 200);
       return response.json();

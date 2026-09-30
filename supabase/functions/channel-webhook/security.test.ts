@@ -1,8 +1,9 @@
 // Runnable check for the webhook security primitives.
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   claimSeenMessage,
   randomCode,
+  readWebhookBody,
   timingSafeEqualStr,
   verifySlackSignature,
   verifyWhatsAppSignature,
@@ -15,6 +16,16 @@ Deno.test("timingSafeEqualStr matches equal strings and rejects others", async (
   assertEquals(await timingSafeEqualStr("abc", "ab"), false);
   assertEquals(await timingSafeEqualStr("", ""), true);
   assertEquals(await timingSafeEqualStr("", "x"), false);
+});
+
+Deno.test("dedup storage errors fail before business work rather than replay writes", async () => {
+  const client = { from: () => ({ upsert: () => ({ select: () => Promise.resolve({ data: null, error: { message: "offline" } }) }) }) };
+  await assertRejects(() => claimSeenMessage(client, "telegram", "123"), Error, "temporarily unavailable");
+});
+
+Deno.test("public webhook body limit counts bytes, including streamed Unicode", async () => {
+  assertEquals(await readWebhookBody(new Request("https://test.invalid", { method: "POST", body: "👋" }), 4), "👋");
+  await assertRejects(() => readWebhookBody(new Request("https://test.invalid", { method: "POST", body: "👋" }), 3), RangeError, "too large");
 });
 
 Deno.test("randomCode draws only valid digit codes and varies", () => {

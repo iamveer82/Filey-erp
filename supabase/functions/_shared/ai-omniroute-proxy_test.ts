@@ -1,3 +1,4 @@
+import { fixtureJwt } from "./test-auth-fixture.ts";
 function assert(ok: unknown, message = "Assertion failed"): asserts ok {
   if (!ok) throw new Error(message);
 }
@@ -264,7 +265,7 @@ Deno.test("OmniRoute uses authenticated, reserved Paper with verified cost and n
       return handleRequest(
         new Request("https://fixture/ai-credits", {
           method: "POST",
-          headers: { Authorization: "Bearer fixture-user-token" },
+          headers: { Authorization: `Bearer ${fixtureJwt(userId)}` },
           body: JSON.stringify({
             action: "completion",
             funding,

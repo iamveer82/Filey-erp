@@ -5294,6 +5294,8 @@ export async function runTool(
       throw new DOMException("Workspace changed before execution.", "AbortError");
     if (browserAction && getBrowserPanelState().paused)
       throw new DOMException("Browser control changed before execution.", "AbortError");
+    if (!isToolAllowed(name) || gateFor(name, tool.sensitive) === "block")
+      return { error: "Agent permissions changed before execution. This action was not run.", retry_safe: false };
     log.info("agent", `${name} running`, redactArgs(name, args));
     // Stamped immediately before the call and captured as each tool's first
     // statement — synchronous, so interleaved runs resolve their own turn.

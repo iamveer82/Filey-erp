@@ -12,10 +12,14 @@ export async function sendConfirmed(socket, command, remember = () => {}) {
   const jid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
   let content;
   if (command.type === "send_file") {
-    const size = await fs.stat(command.path);
+    const size = await fs.stat(command.path).catch(() => {
+      throw new Error("The file is unavailable. Choose it again before sending.");
+    });
     if (!size.isFile() || size.size < 1 || size.size > 50 * 1024 * 1024)
       throw new Error("Choose a non-empty file smaller than 50 MB.");
-    const data = await fs.readFile(command.path);
+    const data = await fs.readFile(command.path).catch(() => {
+      throw new Error("The file could not be read. Choose it again before sending.");
+    });
     if (!data.length || data.length > 50 * 1024 * 1024) throw new Error("File size changed before upload.");
     const known = { ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".csv": "text/csv", ".txt": "text/plain", ".zip": "application/zip" };
     const mime = command.mimetype || known[path.extname(command.filename || command.path).toLowerCase()] || "application/octet-stream";
@@ -39,7 +43,14 @@ export async function sendConfirmed(socket, command, remember = () => {}) {
   // Self-chat echoes can arrive before sendMessage resolves. Register the ID
   // first so Filey never treats its own answer as another owner command.
   remember(messageId);
-  const result = await socket.sendMessage(jid, content, { messageId });
+  let result;
+  try {
+    result = await socket.sendMessage(jid, content, { messageId });
+  } catch {
+    // Provider exceptions can contain private request/session information.
+    // Keep an ambiguous outcome explicit without forwarding those details.
+    throw new Error("WhatsApp did not confirm acceptance. Check the chat before retrying.");
+  }
   if (!result?.key?.id)
     throw new Error(
       "WhatsApp did not confirm acceptance. Check the chat before retrying."

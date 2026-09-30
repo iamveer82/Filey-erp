@@ -2,6 +2,7 @@
 // checked here and in the caller-scoped RPC. Resend keys never reach the app.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { CORS_HEADERS, json } from "../_shared/rateLimit.ts";
 import { sendInvitation, type TeamInvitation } from "../_shared/team-invitation.ts";
 
@@ -15,6 +16,7 @@ serve(async (req) => {
     const { data: auth, error: authError } = await admin.auth.getUser(jwt);
     if (authError || !auth.user?.email_confirmed_at)
       return json({ error: "Sign in with a verified email to invite teammates." }, 401);
+    if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object")
       return json({ error: "Invalid invitation" }, 400);

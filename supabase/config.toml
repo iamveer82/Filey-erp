@@ -25,3 +25,27 @@ verify_jwt = false
 # Validate current signing keys inside the function.
 [functions.integrations]
 verify_jwt = false
+
+# Stripe verifies webhook signatures; account actions validate auth.getUser.
+[functions.stripe]
+verify_jwt = false
+
+# Cron jobs verify their configured server-only trigger secret.
+[functions.agent-jobs]
+verify_jwt = false
+
+# Incoming channels verify provider signatures or their bridge secret.
+[functions.channel-webhook]
+verify_jwt = false
+
+# Reminder cron requests verify the configured server-only trigger secret.
+[functions.overdue-reminders]
+verify_jwt = false
+
+# Invitations validate the current account with auth.getUser.
+[functions.team-invite]
+verify_jwt = false
+
+# Keep the existing gateway JWT check; the handler also validates auth.getUser.
+[functions.run-tool]
+verify_jwt = true

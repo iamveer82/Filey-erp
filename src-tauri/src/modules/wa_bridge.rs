@@ -338,6 +338,27 @@ pub async fn wa_bridge_send(window: Webview, to: String, text: String, session_i
     send_command(serde_json::json!({ "type": "send", "to": to, "text": text }), session_id).await
 }
 
+/// Native boundary for generated agent files and saved invoice PDFs.
+fn generated_file_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let candidate = std::path::Path::new(path);
+    if !candidate.is_absolute() {
+        return Err("Only files produced by Filey can be attached.".into());
+    }
+    // Resolve aliases before checking the output folder. A symlink or ../
+    // segment must not turn an allowed-looking name into a private file.
+    let path = candidate.canonicalize()
+        .map_err(|_| "The generated file is unavailable. Create it again before sending.".to_string())?;
+    let parent = path.parent().ok_or("Only files produced by Filey can be attached.")?;
+    let task = parent.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let folder = parent.parent().and_then(|dir| dir.file_name()).and_then(|name| name.to_str()).unwrap_or("");
+    // deliverFile uses this shape for agent outputs and invoice sharing,
+    // including the owner's configured export folder or desktop.
+    if uuid::Uuid::parse_str(task).is_err() || folder != "Filey AI" || !path.is_file() {
+        return Err("Only files produced by Filey can be attached.".into());
+    }
+    Ok(path)
+}
+
 /// Send a FILE (PDF, photo, document) to a JID. The sidecar reads the file off
 /// the same disk and uploads it — a document for most types, a photo for
 /// images — so a merged PDF or a payslip lands straight in the owner's chat.
@@ -352,11 +373,7 @@ pub async fn wa_bridge_send_file(
     session_id: String,
 ) -> Result<String, String> {
     super::computer_use::check_window(&window)?;
-    // The path is the contract: it must exist NOW, before the sidecar races to
-    // read it. A missing file is an error here rather than a silent no-send.
-    if !std::path::Path::new(&path).exists() {
-        return Err(format!("file not found: {path}"));
-    }
+    let path = generated_file_path(&path)?;
     send_command(serde_json::json!({
         "type": "send_file",
         "to": to,
@@ -487,6 +504,69 @@ fn bridge_snapshot() -> BridgeState {
 
 #[cfg(test)]
 mod tests {
+    struct OutputFixture(std::path::PathBuf);
+    impl OutputFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("filey-wa-output-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&root).unwrap();
+            Self(root)
+        }
+        fn file(&self, relative: impl AsRef<std::path::Path>) -> std::path::PathBuf {
+            let path = self.0.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"generated fixture").unwrap();
+            path
+        }
+    }
+    impl Drop for OutputFixture {
+        fn drop(&mut self) {
+            assert_eq!(self.0.parent(), Some(std::env::temp_dir().as_path()));
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn attachments_accept_generated_documents_in_any_export_folder() {
+        let fixture = OutputFixture::new();
+        for name in ["invoice.pdf", "photo.png", "report.csv"] {
+            let path = fixture.file(std::path::Path::new("custom export").join("Filey AI")
+                .join(uuid::Uuid::new_v4().to_string()).join(name));
+            assert_eq!(super::generated_file_path(path.to_str().unwrap()).unwrap(), path.canonicalize().unwrap());
+        }
+    }
+
+    #[test]
+    fn attachments_refuse_arbitrary_files_aliases_directories_and_private_path_errors() {
+        let fixture = OutputFixture::new();
+        let private = fixture.file("private.pdf");
+        let task = fixture.0.join("Filey AI").join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&task).unwrap();
+        let not_task = fixture.file("Filey AI/not-a-task/invoice.pdf");
+        let wrong_folder = fixture.file(std::path::Path::new("Other exports")
+            .join(uuid::Uuid::new_v4().to_string()).join("invoice.pdf"));
+        let nested = fixture.file(task.join("extra folder/invoice.pdf"));
+        for path in [private, task.join("../../private.pdf"), not_task, wrong_folder, nested, task.clone()] {
+            assert_eq!(super::generated_file_path(path.to_str().unwrap()).unwrap_err(), "Only files produced by Filey can be attached.");
+        }
+        assert!(super::generated_file_path("relative.pdf").is_err());
+        let missing = task.join("sensitive-private-name.pdf");
+        let error = super::generated_file_path(missing.to_str().unwrap()).unwrap_err();
+        assert_eq!(error, "The generated file is unavailable. Create it again before sending.");
+        assert!(!error.contains("sensitive-private-name") && !error.contains(fixture.0.to_str().unwrap()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attachments_cannot_follow_an_output_symlink_to_a_private_file() {
+        let fixture = OutputFixture::new();
+        let private = fixture.file("private.pdf");
+        let task = fixture.0.join("Filey AI").join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&task).unwrap();
+        let link = task.join("invoice.pdf");
+        std::os::unix::fs::symlink(private, &link).unwrap();
+        assert!(super::generated_file_path(link.to_str().unwrap()).is_err());
+    }
+
     #[test]
     fn outgoing_work_is_bound_to_its_connected_session() {
         let mut state = super::BridgeState {

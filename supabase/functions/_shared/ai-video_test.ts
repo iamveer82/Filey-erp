@@ -1,3 +1,4 @@
+import { fixtureJwt } from "./test-auth-fixture.ts";
 import {
   videoInput,
   videoQuote,
@@ -180,7 +181,7 @@ Deno.test(
       const res = await handleRequest(
         new Request(`https://fixture.supabase.co/functions/v1/ai-video${query}`, {
           method: "POST",
-          headers: { Authorization: "Bearer fixture-user" },
+          headers: { Authorization: `Bearer ${fixtureJwt(user)}` },
           body: JSON.stringify(body),
         })
       );

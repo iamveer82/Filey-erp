@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
+      - run: npm audit
       - run: node scripts/check-release-recovery.mjs
       # Bridge tests import its isolated Node dependencies, not the web bundle.
       - run: npm ci --prefix tools/wa-bridge --no-audit --no-fund
@@ -22,6 +23,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run test:rls:local
+      - run: node scripts/test-mfa-local.mjs
+      - run: node --test worker/paths.test.js
       - run: npm run test:browser:tools
       - run: node tools/wa-bridge/check-media.mjs
       - run: npm audit --omit=dev --prefix tools/wa-bridge
@@ -32,6 +35,6 @@ jobs:
       - run: deno check --lock=deno.lock --frozen supabase/functions/integrations/index.ts
       - run: deno check --lock=deno.lock --frozen supabase/functions/team-invite/index.ts
       - run: deno check --lock=deno.lock --frozen supabase/functions/ai-video/index.ts supabase/functions/ai-credits/index.ts
-      - run: deno check --lock=deno.lock --frozen supabase/functions/dodo/index.ts supabase/functions/stripe/index.ts supabase/functions/agent-jobs/index.ts supabase/functions/run-tool/index.ts supabase/functions/channel-webhook/index.ts supabase/functions/send-email/index.ts
+      - run: deno check --lock=deno.lock --frozen supabase/functions/dodo/index.ts supabase/functions/stripe/index.ts supabase/functions/agent-jobs/index.ts supabase/functions/run-tool/index.ts supabase/functions/channel-webhook/index.ts supabase/functions/send-email/index.ts supabase/functions/overdue-reminders/index.ts
       - run: npm run build -- --manifest
       - run: node scripts/check-route-bundles.mjs

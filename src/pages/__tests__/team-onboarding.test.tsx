@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   avatar: vi.fn(),
+  profileUpdate: vi.fn(),
   role: "owner",
   incoming: [] as unknown[],
 }));
@@ -16,7 +17,7 @@ vi.mock("../../lib/auth", () => ({
   useAuth: () => ({
     user: { id: "owner" },
     profile: { org_id: "one", name: "Owner", company: "Acme" },
-    updateProfile: vi.fn(),
+    updateProfile: mocks.profileUpdate,
     reloadProfile: mocks.reload,
   }),
 }));
@@ -66,21 +67,44 @@ beforeEach(() => {
   mocks.role = "owner";
   mocks.reload.mockResolvedValue(undefined);
   mocks.accept.mockResolvedValue(undefined);
+  mocks.avatar.mockReset().mockResolvedValue(undefined);
 });
 afterEach(cleanup);
-it("keeps the workspace avatar draft on failure and saves it with the member and workspace IDs", async () => {
+it("keeps a custom workspace avatar on failure, retries it and leaves the personal profile unchanged", async () => {
   mocks.avatar.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(undefined);
   render(<MemoryRouter><UsersRoles /></MemoryRouter>);
   fireEvent.click(await screen.findByRole("button", { name: "Change avatar for Teammate" }));
-  expect(screen.getByRole("button", { name: "Mint avatar" })).toHaveAttribute("aria-pressed", "true");
-  fireEvent.click(screen.getByRole("button", { name: "Sky avatar" }));
+  expect(screen.getByRole("button", { name: "Organic shape" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Mint colour" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Cloud shape" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rose colour" }));
+  expect(mocks.avatar).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Save avatar" }));
   await waitFor(() => expect(mocks.error).toHaveBeenCalled());
   expect(screen.getByRole("dialog")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Sky avatar" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Cloud shape" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Rose colour" })).toHaveAttribute("aria-pressed", "true");
+  expect(mocks.success).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Save avatar" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  expect(mocks.avatar).toHaveBeenLastCalledWith(2, "one", "/avatars/sky.svg");
+  expect(mocks.avatar).toHaveBeenLastCalledWith(2, "one", "/avatars/blobatar/cloud-rose.svg");
+  expect(mocks.avatar).toHaveBeenCalledTimes(2);
+  expect(mocks.profileUpdate).not.toHaveBeenCalled();
+});
+it("discards a cancelled avatar choice and resets only the saved workspace override", async () => {
+  render(<MemoryRouter><UsersRoles /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", { name: "Change avatar for Teammate" }));
+  fireEvent.click(screen.getByRole("button", { name: "Triangle shape" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(mocks.avatar).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Change avatar for Teammate" }));
+  expect(screen.getByRole("button", { name: "Organic shape" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Use profile photo or initials" }));
+  expect(mocks.avatar).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save avatar" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(mocks.avatar).toHaveBeenCalledExactlyOnceWith(2, "one", null);
+  expect(mocks.profileUpdate).not.toHaveBeenCalled();
 });
 it("lets staff choose their own workspace avatar but not a colleague's", async () => {
   mocks.role = "staff";

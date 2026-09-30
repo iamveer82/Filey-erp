@@ -13,14 +13,14 @@
   },
   "description": "Filey mobile shell. React/Vite/Tailwind resolve from the repo root node_modules (single dependency tree with the desktop app); this manifest only adds what the desktop lacks — the Capacitor native stack and Tailwind's Vite plugin.",
   "dependencies": {
-    "@capacitor/core": "^6.2.0",
-    "@capacitor/preferences": "^6.0.2",
-    "@capacitor/share": "^6.0.3"
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "@capacitor/share": "^7.0.0"
   },
   "devDependencies": {
-    "@capacitor/android": "^6.2.0",
-    "@capacitor/cli": "^6.2.0",
-    "@capacitor/ios": "^6.2.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.6.9",
+    "@capacitor/ios": "^7.0.0",
     "@tailwindcss/vite": "^4.3.0"
   }
 }

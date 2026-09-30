@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
 import { setCacheOrg } from "../api";
+import { setCapabilityEnabled } from "../capabilities";
 
 const sendWa = vi.fn();
 vi.mock("../waBridge", () => ({
@@ -29,6 +30,17 @@ beforeEach(() => {
 });
 
 describe("Auto mode vs a caller-supplied confirm", () => {
+  it.each(["capability", "plan mode"])("honors %s revocation while an outbound approval is pending", async (change) => {
+    setAgentMode("auto");
+    let approve!: (value: boolean) => void;
+    const result = runTool("send_whatsapp", { to: "971509999999", text: "approved draft" }, () => new Promise<boolean>(resolve => { approve = resolve; }), true);
+    await vi.waitFor(() => expect(approve).toBeTypeOf("function"));
+    if (change === "capability") setCapabilityEnabled("channels", false);
+    else setAgentMode("plan");
+    approve(true);
+    expect(await result).toMatchObject({ error: expect.stringContaining("permissions changed"), retry_safe: false });
+    expect(sendWa).not.toHaveBeenCalled();
+  });
   it("refuses a sensitive tool when the caller's confirm says no, even in Auto", async () => {
     setAgentMode("auto");
     const deny = vi.fn(() => false);

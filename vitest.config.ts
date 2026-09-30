@@ -24,6 +24,7 @@ export default defineConfig({
     maxWorkers: process.env.CI ? undefined : 2,
     // supabase/ holds Deno edge functions + Deno tests (https: imports) — run
     // those with `deno test`, not vitest.
-    exclude: [...configDefaults.exclude, "supabase/**", "output/**"],
+    // Worker path checks use Node's test runner, separately in CI.
+    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**"],
   },
 });

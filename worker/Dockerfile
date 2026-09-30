@@ -17,7 +17,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY index.js ./
+COPY index.js paths.js ./
 
 # Long-running worker; no port needed (it polls Supabase).
 CMD ["node", "index.js"]
