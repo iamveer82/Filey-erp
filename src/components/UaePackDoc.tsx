@@ -21,6 +21,7 @@ import {
 } from "../lib/einvoice";
 import type { DocViewForm, DocViewItem, DocViewLabels } from "./DocView";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
+import { BankDetailsBlock, type BankInfo } from "./BankDetails";
 
 /** Map a code to its human label (falls back to the raw code) — DocView pattern. */
 const codeLabel = (list: Code[], code?: string | null): string =>
@@ -514,6 +515,7 @@ export default function UaePackDoc({
   itemStartIndex = 0,
   showTotals = true,
   showFooter = true,
+  bank,
   labels,
 }: {
   form: UaePackForm;
@@ -521,6 +523,7 @@ export default function UaePackDoc({
   itemStartIndex?: number;
   showTotals?: boolean;
   showFooter?: boolean;
+  bank?: BankInfo;
   labels?: DocViewLabels;
 }) {
   const cfg = UAE_PACK[(form.template || "").toLowerCase()] ?? UAE_PACK["uae-full"];
@@ -615,9 +618,8 @@ export default function UaePackDoc({
     </div>
   );
 
-  // Second box next to Bill To, driven by cfg.box2. "payment" would carry
-  // bank details, but the form does not expose them (bank info is overlaid
-  // outside DocView in Invoicing) — so it renders nothing.
+  // Second box next to Bill To, driven by cfg.box2. Payment details have
+  // their own shared block after the notes, so "payment" needs no party box.
   const box2 = (() => {
     if (cfg.box2 === "originalRef" && form.original_invoice_number) {
       return (
@@ -1009,7 +1011,7 @@ export default function UaePackDoc({
           </div>
           <div className="invoice-legal pt-2 border-t border-[#e3e9f0]">
             {!notesInSlot && form.notes && (
-              <p className="text-xs text-neutral-500 mb-1">{form.notes}</p>
+              <p dir="auto" className="whitespace-pre-line text-xs text-neutral-500 mb-1">{form.notes}</p>
             )}
             {form.terms && <p className="text-xs text-neutral-400 mb-1">{form.terms}</p>}
             <p className="text-[10.8px] text-[#68798c]">{cfg.note}</p>
@@ -1017,6 +1019,7 @@ export default function UaePackDoc({
               <p className="text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>
             )}
           </div>
+          {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
         </>
       )}
     </InvoiceLayoutFrame>

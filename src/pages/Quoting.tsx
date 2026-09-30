@@ -118,11 +118,9 @@ import { ResizablePanels } from "../components/ResizablePanels";
 import {
   StampSignatureLayer,
   StampSigAdjust,
-  DraggableBlock,
   type StampSig,
 } from "../components/StampSignature";
 import {
-  BankDetailsBlock,
   loadBankInfo,
   EMPTY_BANK,
   type BankInfo,
@@ -695,8 +693,6 @@ export default function Quoting() {
   const [showBank, setShowBank] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
-  const [bankX, setBankX] = useState(50);
-  const [bankY, setBankY] = useState(93);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
@@ -1232,9 +1228,7 @@ export default function Quoting() {
                             options={[
                               {
                                 value: "",
-                                label: customers.length
-                                  ? "Select saved customer…"
-                                  : "No saved customers",
+                                label: customers.length ? "Select saved customer…" : "No saved customers",
                               },
                               ...customers.map((c) => ({
                                 value: String(c.id),
@@ -2060,6 +2054,7 @@ export default function Quoting() {
                           }}
                         />
                         <DocView
+                          bank={showBank ? bank : undefined}
                           form={docViewForm}
                           pageItems={pages[curPageIdx]?.map(
                             asDocViewItem
@@ -2075,18 +2070,6 @@ export default function Quoting() {
                             totalLabel: `Total (${form.currency})`,
                           }}
                         />
-                        {showBank && (
-                          <DraggableBlock
-                            x={bankX}
-                            y={bankY}
-                            onMove={(x, y) => {
-                              setBankX(x);
-                              setBankY(y);
-                            }}
-                          >
-                            <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                          </DraggableBlock>
-                        )}
                       </div>
                     </div>
                   </FitPreview>
@@ -2151,6 +2134,7 @@ export default function Quoting() {
                                   />
                                 )}
                                 <DocView
+                                  bank={showBank ? bank : undefined}
                                   form={docViewForm}
                                   pageItems={group.map(
                                     asDocViewItem
@@ -2166,15 +2150,6 @@ export default function Quoting() {
                                     totalLabel: `Total (${form.currency})`,
                                   }}
                                 />
-                                {showBank && isLast && (
-                                  <DraggableBlock
-                                    x={bankX}
-                                    y={bankY}
-                                    onMove={() => {}}
-                                  >
-                                    <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                                  </DraggableBlock>
-                                )}
                               </div>
                             </div>
                           );
@@ -2258,6 +2233,7 @@ export default function Quoting() {
                           }}
                         />}
                         <DocView
+                          bank={showBank ? bank : undefined}
                           form={docViewForm}
                           pageItems={viewPages[viewPageIdx]?.map(
                             asDocViewItem
@@ -2273,18 +2249,6 @@ export default function Quoting() {
                             totalLabel: `Total (${form.currency})`,
                           }}
                         />
-                        {showBank && isLastViewPage && (
-                          <DraggableBlock
-                            x={bankX}
-                            y={bankY}
-                            onMove={(x, y) => {
-                              setBankX(x);
-                              setBankY(y);
-                            }}
-                          >
-                            <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                          </DraggableBlock>
-                        )}
                       </div>
             </FitPreview>
           </Modal>}

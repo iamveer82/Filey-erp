@@ -1,3 +1,4 @@
+import { SelectMenu } from "../ui-menu";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileText, Plus } from "lucide-react";
@@ -99,20 +100,18 @@ export default function RecordSales({ kind, row }: { kind: CrmObject; row: CrmRo
           {availableLoaded && !available.length && <p className="text-xs text-muted-foreground">No quotations for this company yet. Prepare one above.</p>}
           {!!available.length && (
             <>
-              <select
-                className="select flex-1 min-w-40"
-                aria-label="Quotation to link"
-                value={selected}
+              <SelectMenu
+                value={String(selected)}
+                searchPlaceholder="Find quotation…"
+                onChange={(nextValue) => setSelected(nextValue)}
+                options={[
+                  { value: "", label: "Choose quotation" },
+                  ...available.map((d) => ({ value: String(d.id), label: String(d.number) })),
+                ]}
                 disabled={busy}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                <option value="">Choose quotation</option>
-                {available.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.number}
-                  </option>
-                ))}
-              </select>
+                ariaLabel={"Quotation to link"}
+                className="flex-1 min-w-40"
+              />
               <button
                 className="btn-primary"
                 disabled={busy || !selected}

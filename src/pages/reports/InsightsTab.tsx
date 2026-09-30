@@ -1,3 +1,4 @@
+import { SelectMenu } from "../../components/ui-menu";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
@@ -102,11 +103,20 @@ export default function InsightsTab() {
     <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
       <div><h2 className="text-base font-semibold">Workspace insights</h2><p className="mt-1 text-sm text-muted-foreground">Explore record counts and trends across your workspace.</p></div>
       <label className="text-sm font-medium">Section
-        <select className="select mt-1 w-full sm:w-64" aria-label="Insight section" value={section} onChange={e => {
-          const next = new URLSearchParams(params);
-          next.set("section", e.target.value);
-          setParams(next);
-        }}>{Object.entries(SOURCES).map(([id, source]) => <option key={id} value={id}>{source.label}</option>)}</select>
+        <SelectMenu
+          value={String(section)}
+          onChange={(nextValue) => {
+            const next = new URLSearchParams(params);
+            next.set("section", nextValue);
+            setParams(next);
+          }}
+          options={Object.entries(SOURCES).map(([id, source]) => ({
+            value: String(id),
+            label: String(source.label),
+          }))}
+          ariaLabel={"Insight section"}
+          className="mt-1 w-full sm:w-64"
+        />
       </label>
     </div>
     <SectionInsights key={section} source={SOURCES[section]} />

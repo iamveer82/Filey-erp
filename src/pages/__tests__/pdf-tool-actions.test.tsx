@@ -178,7 +178,8 @@ it("passes output bytes to the next compatible tool without reuploading or cloud
   upload(view.container);
   fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   await view.findByRole("region", { name: "Your results" });
-  fireEvent.change(view.getByRole("combobox", { name: "Next tool" }), { target: { value: "beta" } });
+  fireEvent.click(view.getByRole("combobox", { name: "Next tool" }));
+  fireEvent.click(view.getByRole("option", { name: "Beta tool" }));
   fireEvent.click(view.getByRole("button", { name: "Continue" }));
   expect(await view.findByRole("button", { name: "Remove output.pdf" })).toBeEnabled();
   fireEvent.click(view.getByRole("button", { name: "Beta tool" }));

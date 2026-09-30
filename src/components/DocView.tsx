@@ -9,6 +9,7 @@ import TemplateBackground from "./TemplateBackground";
 import { resolveTemplateId } from "./DocTemplates";
 import UaePackDoc from "./UaePackDoc";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
+import { BankDetailsBlock, type BankInfo } from "./BankDetails";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   INVOICE_TYPE_CODES,
@@ -134,6 +135,8 @@ interface DocViewProps {
   itemStartIndex?: number;
   showTotals?: boolean;
   showFooter?: boolean;
+  /** Payment details follow the notes on the final document page. */
+  bank?: BankInfo;
   labels?: DocViewLabels;
   /** The gallery already loaded this layout in the current workspace. */
   customTemplate?: CustomTemplate;
@@ -145,6 +148,7 @@ export default function DocView({
   itemStartIndex = 0,
   showTotals = true,
   showFooter = true,
+  bank,
   labels,
   customTemplate: providedTemplate,
 }: DocViewProps) {
@@ -196,6 +200,7 @@ export default function DocView({
         itemStartIndex={itemStartIndex}
         showTotals={showTotals}
         showFooter={showFooter}
+        bank={bank}
         labels={labels}
       />
     );
@@ -290,16 +295,20 @@ export default function DocView({
   // Free-tier branding line — volume+branding are the only free limits.
   const freeWatermark = ENFORCE_LICENSING && currentTier() === "free";
 
-  const Footer = () =>
-    showFooter && (form.notes || form.terms || freeWatermark) ? (
-      <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
-        {form.notes && <p dir="auto">{form.notes}</p>}
-        {form.terms && <p dir="auto" className="text-neutral-400">{form.terms}</p>}
-        {freeWatermark && (
-          <p className="text-[9px] text-neutral-400">Made with Filey — the free plan</p>
-        )}
-      </div>
-    ) : null;
+  const Footer = () => showFooter ? (
+    <>
+      {(form.notes || form.terms || freeWatermark) && (
+        <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
+          {form.notes && <p dir="auto" className="whitespace-pre-line">{form.notes}</p>}
+          {form.terms && <p dir="auto" className="whitespace-pre-line text-neutral-400">{form.terms}</p>}
+          {freeWatermark && (
+            <p className="text-[9px] text-neutral-400">Made with Filey — the free plan</p>
+          )}
+        </div>
+      )}
+      {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
+    </>
+  ) : null;
 
   // Logo is hidden when the doc explicitly turns it off (show_logo === false).
   // Other doc types leave show_logo undefined, so their logo still shows.
@@ -400,11 +409,13 @@ export default function DocView({
     const ac = customTemplate.accent || a;
 
     const Section = ({ k, children }: { k: string; children: React.ReactNode }) => {
-      const p = pos[k];
+      const p = pos[k] || (k === "footer" && bank ? { x: 6, y: 88 } : undefined);
       if (!p) return null;
       const section = DRAGGABLE_SECTIONS.find((item) => item.key === k);
       return (
-        <div className="absolute break-words" style={{ left: `${p.x}%`, top: `${p.y}%`, width: `${Math.min((section?.w || 280) / pw * 100, Math.max(0, 100 - p.x))}%` }}>
+        <div className="absolute break-words" style={k === "footer" && bank
+          ? { left: "6%", bottom: "3%", width: "88%" }
+          : { left: `${p.x}%`, top: `${p.y}%`, width: `${Math.min((section?.w || 280) / pw * 100, Math.max(0, 100 - p.x))}%` }}>
           {children}
         </div>
       );
@@ -436,13 +447,14 @@ export default function DocView({
         </Section>}
         <Section k="items"><Items headerBg={ac} compact /></Section>
         <Section k="totals"><Totals compact /></Section>
-        <Section k="footer">
-          {form.notes && <p dir="auto" className="text-[10px] text-neutral-600">{form.notes}</p>}
+        {showFooter && <Section k="footer">
+          {form.notes && <p dir="auto" className="whitespace-pre-line text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p dir="auto" className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
+          {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
           {freeWatermark && (
             <p className="text-[8px] text-neutral-400 mt-0.5">Made with Filey — the free plan</p>
           )}
-        </Section>
+        </Section>}
         <div className="absolute bottom-2 right-2 z-20">
           <span className="text-[8px] text-neutral-400 bg-white/60 px-1.5 py-0.5 rounded-full">{customTemplate.name}</span>
         </div>

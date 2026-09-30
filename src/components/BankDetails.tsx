@@ -86,14 +86,14 @@ export function BankDetailsBlock({
   return (
     <div
       data-bank-details
-      className={`mt-5 min-w-0 border-t border-neutral-200 pt-3 text-neutral-900 ${className}`}
+      className={`mt-4 min-w-0 break-inside-avoid border-t border-neutral-200 pt-2 text-left text-neutral-900 ${className}`}
     >
-      <p className="mb-2 text-xs font-semibold">Bank details</p>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[11px] leading-4">
+      <p className="mb-1 text-xs font-semibold">Bank details</p>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-[11px] leading-4">
         {rows.map((f) => (
           <div key={f.key} className={`min-w-0 ${f.wide ? "col-span-2" : ""}`}>
             <dt className="text-neutral-500">{f.label}</dt>
-            <dd className="break-words font-medium text-neutral-800 [overflow-wrap:anywhere]">
+            <dd dir="auto" className="break-words font-medium tabular-nums text-neutral-800 [overflow-wrap:anywhere]">
               {bank[f.key as BankFieldKey]}
             </dd>
           </div>

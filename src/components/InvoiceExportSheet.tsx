@@ -7,8 +7,8 @@
 // mount it off-screen as before AND lets renderInvoicePdf() mount it headlessly.
 
 import DocView from "./DocView";
-import { DraggableBlock, StampSignatureLayer } from "./StampSignature";
-import { BankDetailsBlock, type BankInfo } from "./BankDetails";
+import { StampSignatureLayer } from "./StampSignature";
+import type { BankInfo } from "./BankDetails";
 import { EMPTY_STAMP_SIG, type CompanyStampSig } from "./StampSignatureSettings";
 import { paginateItems, type DocItem } from "../lib/docItems";
 
@@ -32,14 +32,10 @@ export default function InvoiceExportSheet({
   form,
   companyStampSig = EMPTY_STAMP_SIG,
   bank,
-  bankX = 50,
-  bankY = 88,
 }: {
   form: InvoiceExportForm;
   companyStampSig?: CompanyStampSig;
   bank: BankInfo;
-  bankX?: number;
-  bankY?: number;
 }) {
   const pages = paginateItems(form.items);
   return (
@@ -95,12 +91,8 @@ export default function InvoiceExportSheet({
                 itemStartIndex={startIdx}
                 showTotals={isLast}
                 showFooter={isLast}
+                bank={form.show_bank ? bank : undefined}
               />
-              {isLast && form.show_bank && (
-                <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                  <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                </DraggableBlock>
-              )}
             </div>
           </div>
         );

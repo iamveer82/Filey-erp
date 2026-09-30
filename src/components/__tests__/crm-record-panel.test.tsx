@@ -79,7 +79,8 @@ it("preserves a failed task draft, captures the native date, and blocks duplicat
   await screen.findByText("No notes yet.");
   fireEvent.click(screen.getByRole("button", { name: "tasks" }));
   const date = screen.getByLabelText("Due date") as HTMLInputElement;
-  date.value = "2026-09-10";
+  fireEvent.change(date, { target: { value: "10/09/2026" } });
+  fireEvent.blur(date);
   fireEvent.change(screen.getByLabelText("New task"), {
     target: { value: "Call customer" },
   });
@@ -101,7 +102,7 @@ it("preserves a failed task draft, captures the native date, and blocks duplicat
   await act(async () => rejectSave(new Error("Write denied")));
   expect(mocks.error).toHaveBeenCalledWith("Write denied");
   expect(screen.getByLabelText("New task")).toHaveValue("Call customer");
-  expect(date).toHaveValue("2026-09-10");
+  expect(date).toHaveValue("10/09/2026");
   expect(screen.getByLabelText("New task")).not.toBeDisabled();
 });
 

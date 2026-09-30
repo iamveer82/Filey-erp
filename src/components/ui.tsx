@@ -202,8 +202,7 @@ export function Delta({
  *  scrolls into view. */
 /** Shrink an element's font-size until its text fits the available width, down
  *  to a floor — so a big number stays fully visible instead of truncating to an
- *  ellipsis. Re-fits when `dep` (the value) changes or the window resizes.
- *  ponytail: scrollWidth-based, no ResizeObserver — window resize covers grid reflow. */
+ *  ellipsis. Re-fits when the value or available card width changes. */
 function useFitText<T extends HTMLElement>(dep: unknown, max = 18, min = 11) {
   const ref = useRef<T>(null);
   useLayoutEffect(() => {
@@ -211,15 +210,23 @@ function useFitText<T extends HTMLElement>(dep: unknown, max = 18, min = 11) {
     if (!el) return;
     const fit = () => {
       let size = max;
+      el.style.whiteSpace = "nowrap";
       el.style.fontSize = size + "px";
       while (el.scrollWidth > el.clientWidth && size > min) {
         size -= 1;
         el.style.fontSize = size + "px";
       }
+      // Extremely long totals still remain readable at the minimum font size.
+      el.style.whiteSpace = el.scrollWidth > el.clientWidth ? "normal" : "nowrap";
     };
     fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", fit);
+      return () => window.removeEventListener("resize", fit);
+    }
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [dep, max, min]);
   return ref;
 }
@@ -276,7 +283,8 @@ export function MetricCard({
           </p>
           <p
             ref={numRef}
-            className="text-[22px] leading-tight font-semibold text-foreground mt-0.5 tabular-nums tracking-tight whitespace-nowrap overflow-hidden"
+            title={display}
+            className="text-[22px] leading-tight font-semibold text-foreground mt-0.5 tabular-nums tracking-tight whitespace-nowrap [overflow-wrap:anywhere]"
           >
             {display}
           </p>

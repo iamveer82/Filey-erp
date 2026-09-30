@@ -1,3 +1,4 @@
+import { SelectMenu } from "../components/ui-menu";
 import { DateField } from "../components/DatePicker";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -383,30 +384,23 @@ export default function Work() {
           </div>
           <div className="space-y-4 min-w-0">
             <Field label="Status">
-              <select
-                aria-label="Status"
-                className="select"
-                value={draft.status}
-                onChange={(e) => patch({ status: e.target.value })}
-              >
-                {WORK_STATUSES[kind].map((s) => (
-                  <option key={s} value={s}>
-                    {s.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
+              <SelectMenu
+                value={String(draft.status)}
+                onChange={(nextValue) => patch({ status: nextValue })}
+                options={WORK_STATUSES[kind].map((s) => ({
+                  value: String(s),
+                  label: String(s.replace(/_/g, " ")),
+                }))}
+                ariaLabel={"Status"}
+              />
             </Field>
             <Field label="Priority">
-              <select
-                aria-label="Priority"
-                className="select"
-                value={draft.priority}
-                onChange={(e) => patch({ priority: e.target.value })}
-              >
-                {WORK_PRIORITIES.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
+              <SelectMenu
+                value={String(draft.priority)}
+                onChange={(nextValue) => patch({ priority: nextValue })}
+                options={WORK_PRIORITIES.map((s) => ({ value: String(s), label: String(s) }))}
+                ariaLabel={"Priority"}
+              />
             </Field>
             <Field label="Owner">
               <input
@@ -437,19 +431,16 @@ export default function Work() {
               />
             </Field>
             <Field label="Customer">
-              <select
-                aria-label="Customer"
-                className="select"
-                value={draft.customer_id || ""}
-                onChange={(e) => patch({ customer_id: Number(e.target.value) || null })}
-              >
-                <option value="">No linked customer</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.company || c.name}
-                  </option>
-                ))}
-              </select>
+              <SelectMenu
+                value={String(draft.customer_id || "")}
+                searchPlaceholder="Find customer…"
+                onChange={(nextValue) => patch({ customer_id: Number(nextValue) || null })}
+                options={[
+                  { value: "", label: "No linked customer" },
+                  ...customers.map((c) => ({ value: String(c.id), label: String(c.company || c.name) })),
+                ]}
+                ariaLabel={"Customer"}
+              />
             </Field>
             {draft.customer_id && (
               <Link
@@ -462,19 +453,19 @@ export default function Work() {
               </Link>
             )}
             <Field label="Invoice">
-              <select
-                aria-label="Invoice"
-                className="select"
-                value={draft.invoice_id || ""}
-                onChange={(e) => patch({ invoice_id: Number(e.target.value) || null })}
-              >
-                <option value="">No linked invoice</option>
-                {invoices.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.number} · {d.customer_name}
-                  </option>
-                ))}
-              </select>
+              <SelectMenu
+                value={String(draft.invoice_id || "")}
+                searchPlaceholder="Find invoice…"
+                onChange={(nextValue) => patch({ invoice_id: Number(nextValue) || null })}
+                options={[
+                  { value: "", label: "No linked invoice" },
+                  ...invoices.map((d) => ({
+                    value: String(d.id),
+                    label: [String(d.number), "·", String(d.customer_name)].join(" "),
+                  })),
+                ]}
+                ariaLabel={"Invoice"}
+              />
             </Field>
             <p className="text-xs text-muted-foreground leading-relaxed">
               Owner is a coordination label, not an access grant. This record belongs to
@@ -588,20 +579,20 @@ export default function Work() {
           onChange={setSearch}
           placeholder={`Search ${label.toLowerCase()}`}
         />
-        <select
-          className="select w-auto"
-          aria-label="Filter status"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value="open_work">Open work</option>
-          <option value="all">All records</option>
-          {WORK_STATUSES[kind].map((s) => (
-            <option key={s} value={s}>
-              {s.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
+        <SelectMenu
+          value={String(status)}
+          onChange={(nextValue) => setStatus(nextValue)}
+          options={[
+            { value: "open_work", label: "Open work" },
+            { value: "all", label: "All records" },
+            ...WORK_STATUSES[kind].map((s) => ({
+              value: String(s),
+              label: String(s.replace(/_/g, " ")),
+            })),
+          ]}
+          ariaLabel={"Filter status"}
+          className="w-auto"
+        />
         <button
           className="btn-ghost"
           disabled={!filtered.length}

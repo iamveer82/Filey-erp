@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { FileySpinner as Loader2 } from "./FileySpinner";
 import {
   useEffect,
@@ -471,20 +472,21 @@ export default function InlinePdfEditor({
                   updateMark({ ...selectedText, text: event.target.value });
               }}
             />
-            <select
-              aria-label="Text font"
-              className="select w-24"
-              value={selectedText?.family ?? family}
-              onChange={(event) => {
-                const value = event.target.value as typeof family;
+            <SelectMenu
+              value={String(selectedText?.family ?? family)}
+              onChange={(nextValue) => {
+                const value = nextValue as typeof family;
                 setFamily(value);
                 if (selectedText) updateMark({ ...selectedText, family: value });
               }}
-            >
-              <option>Sans</option>
-              <option>Serif</option>
-              <option>Mono</option>
-            </select>
+              options={[
+                { value: "Sans", label: "Sans" },
+                { value: "Serif", label: "Serif" },
+                { value: "Mono", label: "Mono" },
+              ]}
+              ariaLabel={"Text font"}
+              className="w-24"
+            />
             <input
               type="number"
               aria-label="Text size"

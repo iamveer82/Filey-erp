@@ -1,5 +1,5 @@
 import { FileySpinner } from "../../components/FileySpinner";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Cloud, Check, Download, Upload, FolderOpen, ShieldCheck } from "lucide-react";
 import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
@@ -47,6 +47,7 @@ import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout"
 import SyncConflictReview from "../../components/SyncConflictReview";
 import { Modal, Switch } from "../../components/ui";
 import { log } from "../../lib/log";
+import { useUI } from "../../lib/ui";
 
 const RETRY_MESSAGE = "Couldn't finish syncing. Your saved data is safe.";
 
@@ -54,6 +55,8 @@ const RETRY_MESSAGE = "Couldn't finish syncing. Your saved data is safe.";
 // syncs both ways — local changes upload within a second, and edits from your
 // other devices or teammates download automatically.
 function CloudSyncCard() {
+  const { confirm } = useUI();
+  const uploadPending = useRef(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [signup, setSignup] = useState(false);
@@ -138,15 +141,12 @@ function CloudSyncCard() {
   };
 
   const uploadAll = async () => {
-    if (
-      !window.confirm(
-        "Upload all device data now? If both sides have changed, you can choose which version to keep."
-      )
-    )
-      return;
+    if (busy || uploadPending.current) return;
+    uploadPending.current = true;
     setBusy(true);
-    setErr("");
     try {
+      if (!await confirm({ title: "Upload all device data?", message: "If both sides have changed, you can choose which version to keep.", confirmLabel: "Upload data" })) return;
+      setErr("");
       await markAllForSync();
       const ok = await syncNow(null, { manual: true });
       // syncNow reports its own reason via sync status; surface anything left.
@@ -157,6 +157,7 @@ function CloudSyncCard() {
       // catch, and the rejection vanished into an unhandled promise.
       setErr("Couldn't finish uploading. Your saved data is safe. Check your connection and try again.");
     } finally {
+      uploadPending.current = false;
       setBusy(false);
     }
   };
@@ -308,6 +309,8 @@ function CloudSyncCard() {
 // device, on puts it in their Filey account so it follows them between devices.
 // Switching transfers the current workspace first and preserves the account.
 export default function DataModePanel() {
+  const { confirm } = useUI();
+  const transferPending = useRef(false);
   const mode: DataMode = effectiveDataMode();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<MigrateResult[] | null>(null);
@@ -349,7 +352,7 @@ export default function DataModePanel() {
     setStorageBusy(true); setErr("");
     try {
       const dir = await pickFolder();
-      if (!dir || !window.confirm(`Copy the Filey database and saved files to:\n${dir}\n\nChoose an empty folder. Filey will verify the copy and restart. The original folder is preserved.`)) return;
+      if (!dir || !await confirm({ title: "Move device storage?", message: `Copy the Filey database and saved files to:\n${dir}\n\nChoose an empty folder. Filey will verify the copy and restart. The original folder is preserved.`, confirmLabel: "Copy and restart" })) return;
       await setDataDir(dir);
       await restartApp();
     } catch (error) { setErr(error instanceof Error ? error.message : String(error)); }
@@ -470,23 +473,22 @@ export default function DataModePanel() {
   };
 
   const runImport = async (retry = false) => {
-    if (busy) return;
+    if (busy || transferPending.current) return;
     if (isMigrating()) {
       setErr("Wait for the active transfer to finish before importing.");
       return;
     }
-    if (
-      !retry && !window.confirm(
-        "Copy your cloud data onto this device? This replaces any existing local data. You must be signed in to your cloud account."
-      )
-    )
-      return;
+    transferPending.current = true;
+    let started = false;
     setRetryAction("import");
     setBusy(true);
     setErr("");
     setResult(null);
-    setMigrating(true);
     try {
+      if (!retry && !await confirm({ title: "Copy cloud data to this device?", message: "This replaces any existing local data. You must be signed in to your cloud account.", confirmLabel: "Copy cloud data", danger: true })) return;
+      if (isMigrating()) throw new Error("Wait for the active transfer to finish before importing.");
+      setMigrating(true);
+      started = true;
       const res = await migrateCloudToLocal(() => setProgress("Saving cloud data on this device…"));
       setResult(res);
       if (res.some(r => r.error)) transferFailed(res.filter(r => r.error));
@@ -494,29 +496,29 @@ export default function DataModePanel() {
       transferFailed(e);
     } finally {
       setBusy(false);
-      setMigrating(false);
+      if (started) setMigrating(false);
+      transferPending.current = false;
       setProgress("");
     }
   };
 
   const runPush = async (retry = false) => {
-    if (busy) return;
+    if (busy || transferPending.current) return;
     if (isMigrating()) {
       setErr("Wait for the active transfer to finish before uploading.");
       return;
     }
-    if (
-      !retry && !window.confirm(
-        "Upload this device's local data to your cloud account? Newer cloud edits are preserved as conflicts. You must be signed in."
-      )
-    )
-      return;
+    transferPending.current = true;
+    let started = false;
     setRetryAction("push");
     setBusy(true);
     setErr("");
     setResult(null);
-    setMigrating(true);
     try {
+      if (!retry && !await confirm({ title: "Upload device data to Filey Cloud?", message: "Newer cloud edits are preserved as conflicts. You must be signed in.", confirmLabel: "Upload data" })) return;
+      if (isMigrating()) throw new Error("Wait for the active transfer to finish before uploading.");
+      setMigrating(true);
+      started = true;
       const res = await migrateLocalToCloud(() => setProgress("Saving device data to Filey Cloud…"));
       setResult(res);
       if (res.some(r => r.error)) transferFailed(res.filter(r => r.error));
@@ -524,7 +526,8 @@ export default function DataModePanel() {
       transferFailed(e);
     } finally {
       setBusy(false);
-      setMigrating(false);
+      if (started) setMigrating(false);
+      transferPending.current = false;
       setProgress("");
     }
   };

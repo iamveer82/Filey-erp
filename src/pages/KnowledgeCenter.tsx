@@ -1,3 +1,4 @@
+import { SelectMenu } from "../components/ui-menu";
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, BookOpen, Download, Search } from "lucide-react";
@@ -398,19 +399,16 @@ export default function KnowledgeCenter() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <select
-            aria-label="Choose a help article"
-            className="select mt-3 lg:hidden"
-            value={article?.id || ""}
-            onChange={(e) => setParams(e.target.value ? { article: e.target.value } : {})}
-          >
-            <option value="">Choose a guide</option>
-            {filtered.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.title}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={String(article?.id || "")}
+            onChange={(nextValue) => setParams(nextValue ? { article: nextValue } : {})}
+            options={[
+              { value: "", label: "Choose a guide" },
+              ...filtered.map((g) => ({ value: String(g.id), label: String(g.title) })),
+            ]}
+            ariaLabel={"Choose a help article"}
+            className="mt-3 lg:hidden"
+          />
           <nav aria-label="Help topics" className="hidden lg:block mt-4 space-y-5">
             {[...new Set(filtered.map((g) => g.category))].map((category) => (
               <div key={category}>
