@@ -72,11 +72,9 @@ import {
   STAMP_DEFAULT,
   SIGN_DEFAULT,
   StampSigAdjust,
-  DraggableBlock,
   type StampSig,
 } from "../components/StampSignature";
 import {
-  BankDetailsBlock,
   loadBankInfo,
   hasBankInfo,
   EMPTY_BANK,
@@ -913,8 +911,6 @@ function Editor({
   const [viewPage, setViewPage] = useState(1);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
-  const [bankX, setBankX] = useState(50);
-  const [bankY, setBankY] = useState(88);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierModal, setSupplierModal] = useState(false);
   const [invOpen, setInvOpen] = useState(false);
@@ -1456,9 +1452,7 @@ function Editor({
                         options={[
                           {
                             value: "",
-                            label: suppliers.length
-                              ? "Select saved supplier…"
-                              : "No saved suppliers yet",
+                            label: suppliers.length ? "Select saved supplier…" : "No saved suppliers yet",
                           },
                           ...suppliers.map((s) => ({ value: String(s.id), label: s.name })),
                         ]}
@@ -2076,6 +2070,7 @@ function Editor({
                       onSignatureMove={onSignatureMove}
                     />
                     <DocView
+                      bank={form.show_bank ? bank : undefined}
                       form={docViewForm as any}
                       pageItems={
                         docViewForm.items.slice(
@@ -2088,15 +2083,6 @@ function Editor({
                       showFooter={isLastPreviewPage}
                       labels={docViewLabels}
                     />
-                    {form.show_bank && (
-                      <DraggableBlock
-                        x={bankX}
-                        y={bankY}
-                        onMove={(x, y) => { setBankX(x); setBankY(y); }}
-                      >
-                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                      </DraggableBlock>
-                    )}
                     </div>
                   </div>
                 </div>
@@ -2186,6 +2172,7 @@ function Editor({
                       />
                     )}
                     <DocView
+                      bank={form.show_bank ? bank : undefined}
                       form={docViewForm as any}
                       pageItems={
                         docViewForm.items.slice(
@@ -2198,11 +2185,6 @@ function Editor({
                       showFooter={isLast}
                       labels={docViewLabels}
                     />
-                    {isLast && form.show_bank && (
-                      <DraggableBlock x={bankX} y={bankY} onMove={() => {}}>
-                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                      </DraggableBlock>
-                    )}
                   </div>
                 </div>
               );
@@ -2231,6 +2213,7 @@ function Editor({
                       onSignatureMove={onSignatureMove}
                     />}
                     <DocView
+                      bank={form.show_bank ? bank : undefined}
                       form={docViewForm as any}
                       pageItems={
                         docViewForm.items.slice(
@@ -2243,11 +2226,6 @@ function Editor({
                       showFooter={isLastViewPage}
                       labels={docViewLabels}
                     />
-                    {isLastViewPage && form.show_bank && (
-                      <DraggableBlock x={bankX} y={bankY} onMove={(x, y) => { setBankX(x); setBankY(y); }}>
-                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                      </DraggableBlock>
-                    )}
                   </div>
             </FitPreview>
           </Modal>}

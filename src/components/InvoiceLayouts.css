@@ -156,6 +156,10 @@
 .invoice-layout:is([data-invoice-layout="uae-recurring"], [data-invoice-layout="uae-restaurant"]) .invoice-words { margin-top: 10px; padding-top: 8px; padding-bottom: 8px; }
 .invoice-layout:is([data-invoice-layout="uae-recurring"], [data-invoice-layout="uae-restaurant"]) .invoice-signatures { margin-top: 24px; }
 .invoice-layout:is([data-invoice-layout="uae-recurring"], [data-invoice-layout="uae-restaurant"]) .invoice-legal { margin-top: 14px; }
+/* Keep payment details inside the margins of the taller centered layout. */
+.invoice-layout.centered.summary-strip:has([data-bank-details]) .invoice-letterhead { gap: 10px; padding-bottom: 12px; }
+.invoice-layout.centered.summary-strip:has([data-bank-details]) .invoice-heading { padding-top: 12px; }
+.invoice-layout.centered.summary-strip:has([data-bank-details]) .invoice-signatures { margin-top: 16px; }
 @media print {
   .invoice-layout { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .invoice-letterhead, .invoice-parties, .invoice-summary, .invoice-signatures { break-inside: avoid; }

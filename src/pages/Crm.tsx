@@ -1,3 +1,4 @@
+import { SelectMenu } from "../components/ui-menu";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import {
@@ -433,18 +434,13 @@ function CrmWorkspace({
       <div className="flex min-w-0 flex-col gap-5">
         <label className="sm:hidden text-sm font-medium">
           CRM section
-          <select
-            aria-label="CRM section"
-            className="select w-full mt-2"
-            value={view}
-            onChange={(e) => go(e.target.value as View)}
-          >
-            {navItems.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
+          <SelectMenu
+            value={String(view)}
+            onChange={(nextValue) => go(nextValue as View)}
+            options={navItems.map((item) => ({ value: String(item.id), label: String(item.title) }))}
+            ariaLabel={"CRM section"}
+            className="w-full mt-2"
+          />
         </label>
         <nav
           aria-label="CRM sections"
@@ -568,35 +564,38 @@ function CrmWorkspace({
                       onChange={(e) => filter("q", e.target.value)}
                     />
                   </label>
-                  <select
-                    aria-label={`Filter ${label(spec.group)}`}
-                    className="select w-auto max-w-48"
-                    value={status}
-                    onChange={(e) => filter("status", e.target.value)}
-                  >
-                    <option value="">{label(spec.group)}: all</option>
-                    {groups.map((g) => (
-                      <option key={g} value={g}>
-                        {label(g)}
-                      </option>
-                    ))}
-                  </select>
+                  <SelectMenu
+                    value={String(status)}
+                    onChange={(nextValue) => filter("status", nextValue)}
+                    options={[
+                      { value: "", label: `${label(spec.group)}: all` },
+                      ...groups.map((g) => ({ value: String(g), label: String(label(g)) })),
+                    ]}
+                    ariaLabel={`Filter ${label(spec.group)}`}
+                    className="w-auto max-w-48"
+                  />
                   {owners.length > 0 && spec.group !== "owner" && (
-                    <select
-                      aria-label="Filter owner"
-                      className="select w-auto max-w-44"
-                      value={owner}
-                      onChange={(e) => filter("owner", e.target.value)}
-                    >
-                      <option value="">All owners</option>
-                      {owners.map((o) => (
-                        <option key={o}>{o}</option>
-                      ))}
-                    </select>
+                    <SelectMenu
+                      value={String(owner)}
+                      onChange={(nextValue) => filter("owner", nextValue)}
+                      options={[
+                        { value: "", label: "All owners" },
+                        ...owners.map((o) => ({ value: String(o), label: String(o) })),
+                      ]}
+                      ariaLabel={"Filter owner"}
+                      className="w-auto max-w-44"
+                    />
                   )}
-                  {kind === "tasks" && <select className="select w-auto max-w-48" aria-label="Task due date" value={due} onChange={event => filter("due", event.target.value)}>
-                    {DUE_FILTERS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>}
+                  {kind === "tasks" && <SelectMenu
+                    value={String(due)}
+                    onChange={(nextValue) => filter("due", nextValue)}
+                    options={DUE_FILTERS.map((item) => ({
+                      value: String(item.value),
+                      label: String(item.label),
+                    }))}
+                    ariaLabel={"Task due date"}
+                    className="w-auto max-w-48"
+                  />}
                   {(kind === "deals" || kind === "tasks") && (
                     <div className="inline-flex items-center gap-2">
                       <button
@@ -722,47 +721,39 @@ function CrmWorkspace({
                     <div className="flex flex-wrap gap-4">
                       <label className="text-sm flex-1 min-w-40">
                         <span className="label">Sort by</span>
-                        <select
-                          className="select"
-                          value={sort?.key || ""}
-                          onChange={(e) =>
-                            changeSort(
-                              e.target.value
-                                ? { key: e.target.value, dir: sort?.dir || 1 }
-                                : null
-                            )
+                        <SelectMenu
+                          value={String(sort?.key || "")}
+                          onChange={(nextValue) =>
+                            changeSort(nextValue ? { key: nextValue, dir: sort?.dir || 1 } : null)
                           }
-                        >
-                          <option value="">Default order</option>
-                          <option value="record">
-                            {kind === "notes" ? "Note" : "Name"}
-                          </option>
-                          {availableColumns
-                            .filter((field) => selectedColumns.includes(field.key))
-                            .map((field) => (
-                              <option key={field.key} value={field.key}>
-                                {field.label}
-                              </option>
-                            ))}
-                        </select>
+                          options={[
+                            { value: "", label: "Default order" },
+                            { value: "record", label: String(kind === "notes" ? "Note" : "Name") },
+                            ...availableColumns
+                              .filter((field) => selectedColumns.includes(field.key))
+                              .map((field) => ({ value: String(field.key), label: String(field.label) })),
+                          ]}
+                          ariaLabel="Sort by"
+                        />
                       </label>
                       <label className="text-sm flex-1 min-w-40">
                         <span className="label">Sort direction</span>
-                        <select
-                          className="select"
-                          disabled={!sort}
-                          value={sort?.dir === -1 ? "desc" : "asc"}
-                          onChange={(e) =>
+                        <SelectMenu
+                          value={String(sort?.dir === -1 ? "desc" : "asc")}
+                          onChange={(nextValue) =>
                             sort &&
                             changeSort({
                               key: sort.key,
-                              dir: e.target.value === "desc" ? -1 : 1,
+                              dir: nextValue === "desc" ? -1 : 1,
                             })
                           }
-                        >
-                          <option value="asc">Ascending</option>
-                          <option value="desc">Descending</option>
-                        </select>
+                          options={[
+                            { value: "asc", label: "Ascending" },
+                            { value: "desc", label: "Descending" },
+                          ]}
+                          disabled={!sort}
+                          ariaLabel="Sort direction"
+                        />
                       </label>
 
                     </div>
@@ -1001,30 +992,16 @@ function CrmWorkspace({
                                       {fmtDate(text(row.expected_close || row.due_date))}
                                     </p>
                                   ) : null}
-                                  <select
-                                    className="select mt-3 text-xs"
-                                    aria-label={`Move ${recordName(kind, row)}`}
-                                    value={text(row[spec.group]) || stage}
+                                  <SelectMenu
+                                    value={String(text(row[spec.group]) || stage)}
+                                    onChange={(nextValue) => void changeStatus(row, nextValue)}
+                                    options={(kind === "deals" ? STAGES : TASK_STATUSES)
+                                      .concat(groups.filter((g) => !(kind === "deals" ? STAGES : TASK_STATUSES).includes(g)))
+                                      .map((s) => ({ value: String(s), label: String(label(s)) }))}
                                     disabled={busy || loading || !!error}
-                                    onChange={(e) =>
-                                      void changeStatus(row, e.target.value)
-                                    }
-                                  >
-                                    {(kind === "deals" ? STAGES : TASK_STATUSES)
-                                      .concat(
-                                        groups.filter(
-                                          (g) =>
-                                            !(
-                                              kind === "deals" ? STAGES : TASK_STATUSES
-                                            ).includes(g)
-                                        )
-                                      )
-                                      .map((s) => (
-                                        <option key={s} value={s}>
-                                          {label(s)}
-                                        </option>
-                                      ))}
-                                  </select>
+                                    ariaLabel={`Move ${recordName(kind, row)}`}
+                                    className="mt-3 text-xs"
+                                  />
                                 </article>
                               ))}
                               {!cards.length && (

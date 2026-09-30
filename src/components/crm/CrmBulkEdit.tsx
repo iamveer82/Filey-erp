@@ -1,3 +1,5 @@
+import { SelectMenu } from "../ui-menu";
+import { DateField } from "../DatePicker";
 import { useRef, useState } from "react";
 import { Modal, ErrorBanner } from "../ui";
 import { bulkUpdateCrm, crmBulkFields } from "../../lib/crmOrganization";
@@ -83,20 +85,15 @@ export default function CrmBulkEdit({
         <fieldset disabled={busy || !pending.length} className="space-y-4">
           <label className="block">
             <span className="label">Field to update</span>
-            <select
-              className="select"
-              value={key}
-              onChange={(e) => {
-                setKey(e.target.value);
+            <SelectMenu
+              value={String(key)}
+              onChange={(nextValue) => {
+                setKey(nextValue);
                 setValue("");
               }}
-            >
-              {fields.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              options={fields.map((item) => ({ value: String(item.key), label: String(item.label) }))}
+              ariaLabel="Field to update"
+            />
           </label>
           <label className="block">
             <span className="label">New {field.label.toLowerCase()}</span>
@@ -114,10 +111,12 @@ export default function CrmBulkEdit({
                   </option>
                 ))}
               </select>
+            ) : field.type === "date" ? (
+              <DateField aria-label={`New ${field.label.toLowerCase()}`} value={value} onChange={setValue} />
             ) : (
               <input
-                type={field.type === "date" ? "date" : "text"}
-                list={field.type === "date" ? undefined : "crm-bulk-values"}
+                type="text"
+                list="crm-bulk-values"
                 className="input"
                 maxLength={500}
                 value={value}

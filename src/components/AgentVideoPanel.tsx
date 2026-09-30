@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { useEffect, useId, useRef, useState } from "react";
 import { Film, ArrowUpRight, ImagePlus, X, Check } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -357,30 +358,31 @@ export default function AgentVideoPanel({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-3">
           <label className="space-y-2 text-sm">
             <span className="block font-medium">Length</span>
-            <select
-              className="input w-full"
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-            >
-              {[4, 5, 6, 8, 10, 12, 15].map((v) => (
-                <option key={v} value={v}>
-                  {v} seconds
-                </option>
-              ))}
-            </select>
+            <SelectMenu
+              value={String(duration)}
+              onChange={(nextValue) => setDuration(Number(nextValue))}
+              options={[4, 5, 6, 8, 10, 12, 15].map((v) => ({
+                value: String(v),
+                label: [String(v), "seconds"].join(" "),
+              }))}
+              ariaLabel="Video length"
+              className="w-full"
+            />
           </label>
           <label className="space-y-2 text-sm">
             <span className="block font-medium">Format</span>
-            <select
-              className="input w-full"
-              value={aspect}
+            <SelectMenu
+              value={String(aspect)}
+              onChange={(nextValue) => setAspect(nextValue)}
+              options={[
+                { value: "9:16", label: "Portrait · 9:16" },
+                { value: "16:9", label: "Landscape · 16:9" },
+                { value: "1:1", label: "Square · 1:1" },
+              ]}
               disabled={!!file}
-              onChange={(e) => setAspect(e.target.value)}
-            >
-              <option value="9:16">Portrait · 9:16</option>
-              <option value="16:9">Landscape · 16:9</option>
-              <option value="1:1">Square · 1:1</option>
-            </select>
+              ariaLabel="Video format"
+              className="w-full"
+            />
           </label>
         </div>
         <div className="flex flex-wrap items-center gap-3">

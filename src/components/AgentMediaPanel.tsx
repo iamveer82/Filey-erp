@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { useEffect, useId, useState } from "react";
 import { ImageIcon, Film, X, Download, ArrowUpRight } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -444,16 +445,16 @@ export default function AgentMediaPanel({
                 <label htmlFor={`${id}-aspect`} className="label">
                   Framing
                 </label>
-                <select
+                <SelectMenu
+                  value={String(aspect)}
+                  onChange={(nextValue) => setAspect(nextValue)}
+                  options={[
+                    { value: "9:16", label: "Portrait · 9:16" },
+                    { value: "16:9", label: "Landscape · 16:9" },
+                    { value: "1:1", label: "Square · 1:1" },
+                  ]}
                   id={`${id}-aspect`}
-                  className="input"
-                  value={aspect}
-                  onChange={(e) => setAspect(e.target.value)}
-                >
-                  <option value="9:16">Portrait · 9:16</option>
-                  <option value="16:9">Landscape · 16:9</option>
-                  <option value="1:1">Square · 1:1</option>
-                </select>
+                />
               </div>
             )}
             {kind === "video" && (
@@ -461,15 +462,15 @@ export default function AgentMediaPanel({
                 <label htmlFor={`${id}-duration`} className="label">
                   Length
                 </label>
-                <select
+                <SelectMenu
+                  value={String(duration)}
+                  onChange={(nextValue) => setDuration(Number(nextValue))}
+                  options={[
+                    { value: String(5), label: "About 5 seconds" },
+                    { value: String(10), label: "About 10 seconds" },
+                  ]}
                   id={`${id}-duration`}
-                  className="input"
-                  value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value))}
-                >
-                  <option value={5}>About 5 seconds</option>
-                  <option value={10}>About 10 seconds</option>
-                </select>
+                />
               </div>
             )}
           </div>

@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowUpRight, CalendarDays, Mail, MessageCircle, Globe, Sparkles } from "lucide-react";
@@ -122,35 +123,29 @@ export default function FreeConnections() {
           </label>
           <label>
             <span className="label">From</span>
-            <select
-              className="select"
-              disabled={busy}
-              value={base}
-              onChange={(e) => {
-                setBase(e.target.value);
+            <SelectMenu
+              value={String(base)}
+              onChange={(nextValue) => {
+                setBase(nextValue);
                 setResult(null);
               }}
-            >
-              {currencies.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+              options={currencies.map((c) => ({ value: String(c), label: String(c) }))}
+              disabled={busy}
+              ariaLabel="From currency"
+            />
           </label>
           <label>
             <span className="label">To</span>
-            <select
-              className="select"
-              disabled={busy}
-              value={quote}
-              onChange={(e) => {
-                setQuote(e.target.value);
+            <SelectMenu
+              value={String(quote)}
+              onChange={(nextValue) => {
+                setQuote(nextValue);
                 setResult(null);
               }}
-            >
-              {currencies.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
+              options={currencies.map((c) => ({ value: String(c), label: String(c) }))}
+              disabled={busy}
+              ariaLabel="To currency"
+            />
           </label>
           <button className="btn-primary" disabled={busy}>
             {busy ? "Fetching…" : "Convert"}

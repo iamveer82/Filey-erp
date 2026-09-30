@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { ChartTooltip, ChartTooltipContent } from "./ui/chart";
 import { toast } from "./Toaster";
 import { ChartFrame } from "./charts";
@@ -101,15 +102,16 @@ export default function RecordInsights<T>({
                 title={dateLabel}
                 subtitle={`${months} calendar months${undated ? ` · ${undated} without a valid date excluded` : ""}`}
                 action={
-                  <select
-                    aria-label={`${title} trend period`}
-                    className="select w-auto"
-                    value={months}
-                    onChange={(e) => setMonths(Number(e.target.value))}
-                  >
-                    <option value={6}>6 months</option>
-                    <option value={12}>12 months</option>
-                  </select>
+                  <SelectMenu
+                    value={String(months)}
+                    onChange={(nextValue) => setMonths(Number(nextValue))}
+                    options={[
+                      { value: String(6), label: "6 months" },
+                      { value: String(12), label: "12 months" },
+                    ]}
+                    ariaLabel={`${title} trend period`}
+                    className="w-auto"
+                  />
                 }
               >
                 <div

@@ -74,7 +74,8 @@ it("uses the helpdesk lifecycle on the support route", async () => {
   const create = screen.getByRole("button", { name: "New ticket" });
   await waitFor(() => expect(create).toBeEnabled());
   fireEvent.click(create);
-  expect(screen.getByLabelText("Status")).toHaveValue("open");
+  expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("open");
+  fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
   expect(screen.getByRole("option", { name: "resolved" })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: "planned" })).not.toBeInTheDocument();
 });

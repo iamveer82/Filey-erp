@@ -1,3 +1,4 @@
+import { SelectMenu } from "./ui-menu";
 import { useState, useRef, useEffect } from "react";
 import {
   Save,
@@ -495,14 +496,12 @@ export default function TemplateDesigner({
                 <label className="text-xs font-medium text-brand-500 flex items-center gap-1">
                   <Type size={13} /> Font Family
                 </label>
-                <select
-                  aria-label="Font family"
-                  className="input"
-                  value={tpl.font}
-                  onChange={(event) => set("font", event.target.value)}
-                >
-                  {FONTS.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
-                </select>
+                <SelectMenu
+                  value={String(tpl.font)}
+                  onChange={(nextValue) => set("font", nextValue)}
+                  options={FONTS.map((font) => ({ value: String(font.value), label: String(font.label) }))}
+                  ariaLabel={"Font family"}
+                />
               </div>
 
               {/* Layout */}

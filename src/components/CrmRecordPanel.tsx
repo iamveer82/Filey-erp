@@ -12,6 +12,7 @@ import { useLiveSync } from "../lib/realtime";
 import { cn, errMsg, fmtDate, localYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { ErrorBanner } from "./ui";
+import { DateField } from "./DatePicker";
 
 type Tab = "notes" | "tasks";
 type Props = { targetType: CrmTargetType; targetId: number; className?: string };
@@ -33,6 +34,7 @@ function RecordContext({ targetType, targetId, className }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [drafts, setDrafts] = useState({ notes: "", tasks: "" });
+  const [due, setDue] = useState("");
   const [busy, setBusy] = useState(false);
   const request = useRef(0);
   const active = useRef(false);
@@ -62,7 +64,7 @@ function RecordContext({ targetType, targetId, className }: Props) {
       active.current = false;
     };
   }, [reload]);
-  useLiveSync(reload);
+  useLiveSync(reload, ["crm_notes", "crm_tasks"]);
 
   const sortedNotes = useMemo(
     () =>
@@ -95,6 +97,7 @@ function RecordContext({ targetType, targetId, className }: Props) {
       if (!active.current) return;
       if (clearDraft) {
         setDrafts((previous) => ({ ...previous, [tab]: "" }));
+        if (tab === "tasks") setDue("");
         form.current?.reset();
       }
       await reload();
@@ -205,12 +208,10 @@ function RecordContext({ targetType, targetId, className }: Props) {
             className="input min-w-0 flex-1"
           />
           {tab === "tasks" && (
-            <input
-              type="date"
-              name="due"
-              className="input sm:w-40"
-              aria-label="Due date"
-            />
+            <>
+              <DateField value={due} onChange={setDue} className="sm:w-40" aria-label="Due date" />
+              <input type="hidden" name="due" value={due} />
+            </>
           )}
           <button
             type="submit"

@@ -154,7 +154,6 @@ it.each(["local", "cloud"] as const)("retries the failed %s workspace switch wit
 });
 
 it("retries a partial upload without displaying the table failure list or repeating confirmation", async () => {
-  const confirmation = vi.spyOn(window, "confirm").mockReturnValue(true);
   cloud.migrateLocalToCloud.mockResolvedValueOnce([{table: "invoice_docs", rows: 2, error: "SQLSTATE 42501"}]);
   try {
     render(<DataModePanel />);
@@ -163,11 +162,11 @@ it("retries a partial upload without displaying the table failure list or repeat
     expect(screen.queryByText(/invoice_docs|SQLSTATE|Transfer needs attention|view details/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", {name: "Try again"}));
     await waitFor(() => expect(cloud.migrateLocalToCloud).toHaveBeenCalledTimes(2));
-    expect(confirmation).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledTimes(1);
     await screen.findByText("Transfer completed. Storage mode has not changed.");
     expect(screen.queryByRole("button", {name: "Try again"})).toBeNull();
     expect(cloud.reload).toBe(false);
-  } finally { confirmation.mockRestore(); }
+  } finally { cleanup(); }
 });
 
 it("turning the store off never uploads and never asks", async () => {
@@ -178,6 +177,22 @@ it("turning the store off never uploads and never asks", async () => {
   expect(confirm).not.toHaveBeenCalled();
   expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
   await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("local", expect.any(Function)));
+});
+
+it("does not upload after a declined dialog or submit twice while approval is pending", async () => {
+  let answer!: (accepted: boolean) => void;
+  confirm.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+  render(<DataModePanel />);
+  const upload = screen.getByRole("button", { name: "Push local data to cloud" });
+  fireEvent.click(upload);
+  fireEvent.click(upload);
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "Push local data to cloud" })).toBeNull();
+  expect(screen.getByRole("status", { name: "Syncing" })).toBeInTheDocument();
+  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
+  await act(async () => { answer(false); });
+  expect(screen.getByRole("button", { name: "Push local data to cloud" })).toBeEnabled();
+  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
 });
 
 it("sends the user to connect an account rather than opening an empty store", async () => {

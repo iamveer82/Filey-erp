@@ -29,7 +29,8 @@ it("loads only the selected section and passes its actual records to chart data 
   expect(document.querySelector("table")?.textContent).toContain("Sent1");
   expect(reads.accounts).not.toHaveBeenCalled();
   expect(reads.customers).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Insight section"), { target: { value: "customers" } });
+  fireEvent.click(screen.getByLabelText("Insight section"));
+  fireEvent.click(screen.getByRole("option", { name: "Customers / companies" }));
   await waitFor(() => expect(document.querySelector("table")?.textContent).toContain("Retail1"));
   expect(screen.queryByText("Invoices by status", { selector: "caption" })).toBeNull();
 });
@@ -38,7 +39,8 @@ it("does not let a previous section's slow result replace the selected section",
   let finish!: (rows: unknown[]) => void;
   reads.invoices.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   open();
-  fireEvent.change(screen.getByLabelText("Insight section"), { target: { value: "customers" } });
+  fireEvent.click(screen.getByLabelText("Insight section"));
+  fireEvent.click(screen.getByRole("option", { name: "Customers / companies" }));
   await screen.findByText("1 records in this chart");
   finish([{ status: "cancelled" }, { status: "cancelled" }]);
   await waitFor(() => expect(document.querySelector("table")?.textContent).toContain("Retail1"));

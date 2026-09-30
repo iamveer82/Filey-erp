@@ -119,11 +119,9 @@ import {
   STAMP_DEFAULT,
   SIGN_DEFAULT,
   StampSigAdjust,
-  DraggableBlock,
   type StampSig,
 } from "../components/StampSignature";
 import {
-  BankDetailsBlock,
   loadBankInfo,
   hasBankInfo,
   EMPTY_BANK,
@@ -2109,9 +2107,6 @@ function Editor({
   const [invOpen, setInvOpen] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
-  // Free-drag position for the bank-details block (% of the A4 content area).
-  const [bankX, setBankX] = useState(50);
-  const [bankY, setBankY] = useState(88);
   // Customer advance credit applicable to the open invoice.
   const [availAdvance, setAvailAdvance] = useState(0);
   useEffect(() => {
@@ -2529,19 +2524,25 @@ function Editor({
                       options={[
                         {
                           value: "",
-                          label: loadingParties ? `Loading ${partyLabel.toLowerCase()}s…` : partyError ? "Directory unavailable" : (supplierMode ? vendors.length : customers.length)
-                            ? `Select saved ${partyLabel.toLowerCase()}…`
-                            : `No saved ${partyLabel.toLowerCase()}s yet`,
+                          label: loadingParties
+                            ? `Loading ${partyLabel.toLowerCase()}s…`
+                            : partyError
+                              ? "Directory unavailable"
+                              : (supplierMode ? vendors.length : customers.length)
+                                ? `Select saved ${partyLabel.toLowerCase()}…`
+                                : `No saved ${partyLabel.toLowerCase()}s yet`,
                         },
-                        ...(supplierMode ? vendors.map((supplier) => ({ value: String(supplier.id), label: supplier.name })) : customers.map((c) => {
-                          const bal = balFor(c.company || c.name);
-                          return {
-                            value: String(c.id),
-                            label: `${c.company || c.name}${
-                              bal > 0 ? ` · BAL ${Math.round(bal).toLocaleString()}` : ""
-                            }`,
-                          };
-                        })),
+                        ...(supplierMode
+                          ? vendors.map((supplier) => ({ value: String(supplier.id), label: supplier.name }))
+                          : customers.map((c) => {
+                              const bal = balFor(c.company || c.name);
+                              return {
+                                value: String(c.id),
+                                label: `${c.company || c.name}${
+                                  bal > 0 ? ` · BAL ${Math.round(bal).toLocaleString()}` : ""
+                                }`,
+                              };
+                            })),
                       ]}
                     />
                     <button
@@ -3654,24 +3655,13 @@ function Editor({
                     }}
                   />
                   <DocView
+                    bank={form.show_bank ? bank : undefined}
                     form={form}
                     pageItems={pages[curPageIdx] ?? []}
                     itemStartIndex={pageStartIndex}
                     showTotals={isLastPreviewPage}
                     showFooter={isLastPreviewPage}
                   />
-                  {form.show_bank && (
-                    <DraggableBlock
-                      x={bankX}
-                      y={bankY}
-                      onMove={(x, y) => {
-                        setBankX(x);
-                        setBankY(y);
-                      }}
-                    >
-                      <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                    </DraggableBlock>
-                  )}
                   </div>
                 </div>
               </div>
@@ -3736,8 +3726,6 @@ function Editor({
           form={form as never}
           companyStampSig={companyStampSig}
           bank={bank}
-          bankX={bankX}
-          bankY={bankY}
         />
       </div>
 
@@ -3781,24 +3769,13 @@ function Editor({
                       }}
                     />}
                     <DocView
+                      bank={form.show_bank ? bank : undefined}
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
                       itemStartIndex={viewPageStart}
                       showTotals={isLastViewPage}
                       showFooter={isLastViewPage}
                     />
-                    {form.show_bank && isLastViewPage && (
-                      <DraggableBlock
-                        x={bankX}
-                        y={bankY}
-                        onMove={(x, y) => {
-                          setBankX(x);
-                          setBankY(y);
-                        }}
-                      >
-                        <BankDetailsBlock bank={bank} accent={form.accent} countryCode={form.tax_country_code} />
-                      </DraggableBlock>
-                    )}
                   </div>
             </FitPreview>
       </Modal>
