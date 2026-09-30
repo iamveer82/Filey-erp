@@ -21,6 +21,10 @@ The desktop update remains on hold at the user's request.
 - Payment, receipt and advance read errors could become empty arrays and overstate
   a party's debt. Required reads fail visibly with retry, incomplete exports are
   blocked, and delayed responses cannot replace a different party's data.
+- Renamed customers lost linked invoices, while customers sharing a name could
+  inherit another customer's invoices, orders or deals. Saved customer IDs take
+  precedence; legacy names and receipts must resolve to one customer using the
+  existing customer matching helper.
 - Customer/supplier statements mixed currencies, estimated tax from a flat rate,
   and the Sales Journal button exported the ordinary ledger. Statements now keep
   one document currency, reuse exact saved-line tax/net totals, retain signed

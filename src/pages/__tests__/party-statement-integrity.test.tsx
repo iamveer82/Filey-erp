@@ -110,3 +110,22 @@ it("exports the selected sales journal instead of silently downloading the ledge
   expect(element.textContent).toContain("Unique journal line");
   expect(name).toMatch(/^Sales-Journal-/);
 });
+
+it("uses the saved customer ID after a rename and never inherits another customer's matching name", async () => {
+  vi.mocked(crm.customers).mockResolvedValue([customer, { ...customer, id: 2 }]);
+  vi.mocked(billing.listDocs).mockResolvedValue([
+    { ...doc, customer_id: 1, customer_name: "Name before rename" },
+    { ...doc, id: 3, number: "FOREIGN-INVOICE", customer_id: 2, total: 900 },
+    { ...doc, id: 4, number: "AMBIGUOUS-LEGACY", total: 450 },
+  ]);
+  vi.mocked(receipts.list).mockResolvedValue([{ id: 5, number: "AMBIGUOUS-RECEIPT", customer_name: customer.name, status: "issued", template: "voucher", currency: "USD", amount: 800, payment_date: "2026-09-02", updated_at: "2026-09-02" }]);
+  const view = open("customer");
+  await waitFor(() => expect(view.getByRole("button", { name: "Download PDF" })).toBeEnabled());
+  fireEvent.click(view.getByRole("button", { name: "Download PDF" }));
+  await waitFor(() => expect(pdfTools.downloadElementAsPdf).toHaveBeenCalledTimes(1));
+  const exported = vi.mocked(pdfTools.downloadElementAsPdf).mock.calls[0][0].textContent;
+  expect(exported).toContain(doc.number);
+  expect(exported).toContain("$100.00");
+  expect(exported).not.toContain("FOREIGN-INVOICE");
+  expect(exported).not.toContain("AMBIGUOUS-");
+});

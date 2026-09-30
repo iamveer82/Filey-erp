@@ -27,6 +27,7 @@ import {
   quotes,
   erp,
   receipts as receiptsApi,
+  matchCustomerId,
   type CompanyProfile,
   type CrmCustomer,
   type InvoiceDocSummary,
@@ -197,15 +198,16 @@ export default function CustomerDetail() {
   const names = useMemo(() => {
     const s = new Set<string>();
     if (customer) {
-      s.add(customer.company || customer.name);
-      s.add(customer.name);
+      for (const name of [customer.company, customer.name])
+        if (name && matchCustomerId(name, customers) === customer.id) s.add(name);
     }
     return s;
-  }, [customer]);
+  }, [customer, customers]);
 
   const myInvoices = useMemo(
-    () => invoices.filter((d) => names.has(d.customer_name)),
-    [invoices, names]
+    () => invoices.filter((d) => d.customer_id != null
+      ? d.customer_id === customer?.id : names.has(d.customer_name)),
+    [invoices, names, customer?.id]
   );
 
   // Fetch the itemised Sales & Collections Journal (DEMO parity) — loads
@@ -237,21 +239,22 @@ export default function CustomerDetail() {
     return () => { alive = false; };
   }, [journalMode, customer, myInvoices, company, journalRetry]);
   const myQuotes = useMemo(
-    () => quotations.filter((d) => names.has(d.customer_name)),
-    [quotations, names]
+    () => quotations.filter((d) => d.customer_id != null
+      ? d.customer_id === customer?.id : names.has(d.customer_name)),
+    [quotations, names, customer?.id]
   );
   const myOrders = useMemo(
     () =>
       orders.filter(
         (o) =>
-          (customer != null && o.customer_id === customer.id) ||
-          names.has(o.customer_name)
+          o.customer_id != null ? o.customer_id === customer?.id : names.has(o.customer_name)
       ),
     [orders, names, customer]
   );
   const myOpps = useMemo(
-    () => opps.filter((o) => names.has(o.customer_name)),
-    [opps, names]
+    () => opps.filter((o) => o.customer_id != null
+      ? o.customer_id === customer?.id : names.has(o.customer_name)),
+    [opps, names, customer?.id]
   );
 
   /** Invoice docs handed to the Statement of Account modal (it derives the
