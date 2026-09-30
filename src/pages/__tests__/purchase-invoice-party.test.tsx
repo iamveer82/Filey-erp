@@ -60,7 +60,8 @@ async function openPurchase() {
   const view = render(<MemoryRouter><AuthProvider><UIProvider><Invoicing mode="purchase" /></UIProvider></AuthProvider></MemoryRouter>);
   await view.findByText("PINV-PARTY");
   setCacheOrg("purchase-test-org", "purchase-test-user");
-  fireEvent.click(view.getByRole("button", { name: "Edit" }));
+  fireEvent.click(view.getByRole("button", { name: "More actions" }));
+  fireEvent.click(view.getByRole("menuitem", { name: "Edit" }));
   await view.findByLabelText("Supplier name");
   return view;
 }
@@ -147,8 +148,8 @@ describe("purchase invoice parties", () => {
     const view = await openPurchase();
     const selector = view.getByLabelText("Select saved supplier");
     await waitFor(() => expect(selector).not.toBeDisabled());
-    fireEvent.click(selector);
-    fireEvent.click(within(view.getByRole("menu")).getByText(vendor.name));
+    fireEvent.keyDown(selector, { key: "Enter" });
+    fireEvent.keyDown(view.getByRole("option", { name: vendor.name }), { key: "Enter" });
     expect(view.getByLabelText("Supplier name")).toHaveValue(vendor.name);
     expect(view.getByLabelText("Supplier email")).toHaveValue(vendor.email);
     expect(view.queryByText("Apply customer advance")).toBeNull();

@@ -79,7 +79,7 @@ describe("document template browser", () => {
     fireEvent.click(view.getByRole("button", { name: "Browse templates" }));
     fireEvent.click(await view.findByRole("button", { name: "Delete template Studio letterhead" }));
     expect(loadCustomTemplates()).toHaveLength(1);
-    fireEvent.click(within(await view.findByRole("dialog", { name: "Delete template" })).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(await view.findByRole("alertdialog", { name: "Delete template" })).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(change).toHaveBeenCalledExactlyOnceWith("voucher"));
     expect(loadCustomTemplates()).toEqual([]);
     expect(view.getByRole("button", { name: "Use Receipt Voucher template" })).toHaveAttribute("aria-pressed", "true");
@@ -97,7 +97,7 @@ describe("document template browser", () => {
       return original.call(this, key, value);
     });
     fireEvent.click(view.getByRole("button", { name: "Delete template Studio letterhead" }));
-    fireEvent.click(within(await view.findByRole("dialog", { name: "Delete template" })).getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(await view.findByRole("alertdialog", { name: "Delete template" })).getByRole("button", { name: "Delete" }));
     expect(await view.findByText("Could not delete template: Device storage is full")).toBeTruthy();
     expect(change).not.toHaveBeenCalled();
     expect(loadCustomTemplates()).toEqual([custom]);

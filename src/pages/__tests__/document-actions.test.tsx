@@ -132,7 +132,8 @@ describe("invoice editor actions", () => {
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
     setCacheOrg("document-test-org", "document-test-user");
-    fireEvent.click(view.getByRole("button", { name: "Edit" }));
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
     await view.findByDisplayValue("Example customer");
     const exportButton = view.getByTitle("Download PDF (Ctrl+P)");
     fireEvent.click(exportButton);
@@ -146,7 +147,8 @@ describe("invoice editor actions", () => {
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
     setCacheOrg("document-test-org", "document-test-user");
-    fireEvent.click(view.getByRole("button", { name: "Edit" }));
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
     const section = (await view.findByText("E-invoice details")).closest("details")!;
     const disclosure = section.querySelector("summary")!;
     expect(section).not.toHaveAttribute("open");
@@ -172,7 +174,8 @@ describe("invoice editor actions", () => {
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
     setCacheOrg("document-test-org", "document-test-user");
-    fireEvent.click(view.getByRole("button", { name: "Edit" }));
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
     fireEvent.click(await view.findByRole("button", { name: "More" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "XML" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("INV-AUDIT.xml", new TextEncoder().encode("<Invoice />")));

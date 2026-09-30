@@ -71,7 +71,6 @@ export async function saveBankInfo(b: BankInfo): Promise<void> {
  *  is printed — never hide what a customer already recorded. */
 export function BankDetailsBlock({
   bank,
-  accent,
   countryCode,
   className = "",
 }: {
@@ -80,30 +79,26 @@ export function BankDetailsBlock({
   countryCode?: string | null;
   className?: string;
 }) {
-  if (!hasBankInfo(bank)) return null;
   const rows = bankFieldsFor(countryCode).filter(
     (f) => (bank[f.key as BankFieldKey] ?? "").trim()
   );
+  if (!rows.length) return null;
   return (
     <div
-      className={`mt-6 pt-3 border-t border-neutral-200 text-neutral-900 ${className}`}
+      data-bank-details
+      className={`mt-5 min-w-0 border-t border-neutral-200 pt-3 text-neutral-900 ${className}`}
     >
-      <p
-        className="text-xs font-medium mb-1.5"
-        style={accent ? { color: accent } : undefined}
-      >
-        Bank Details
-      </p>
-      <div className="grid grid-cols-2 gap-x-8 gap-y-0.5 text-[11px] text-neutral-600">
+      <p className="mb-2 text-xs font-semibold">Bank details</p>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-[11px] leading-4">
         {rows.map((f) => (
-          <div key={f.key} className="flex justify-between gap-3">
-            <span className="text-neutral-400">{f.label}</span>
-            <span className="font-medium text-neutral-800 text-right">
+          <div key={f.key} className={`min-w-0 ${f.wide ? "col-span-2" : ""}`}>
+            <dt className="text-neutral-500">{f.label}</dt>
+            <dd className="break-words font-medium text-neutral-800 [overflow-wrap:anywhere]">
               {bank[f.key as BankFieldKey]}
-            </span>
+            </dd>
           </div>
         ))}
-      </div>
+      </dl>
     </div>
   );
 }

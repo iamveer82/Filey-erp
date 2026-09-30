@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import CompanyDetails from "../settings/CompanyDetails";
 import { billing, tools, type CompanyProfile } from "../../lib/api";
 import { changeCompanyCountry, companyCountryCurrency, companyPhoneHint } from "../../lib/companyCountry";
@@ -26,8 +26,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 async function chooseCountry(name: string) {
-  fireEvent.click(screen.getByLabelText("Business country"));
-  fireEvent.click(within(screen.getByRole("menu")).getByText(name, {exact: true}));
+  fireEvent.keyDown(screen.getByLabelText("Business country"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("option", { name }), { key: "Enter" });
 }
 
 it("switches the real company form to India and preserves registration and bank details across save/reopen", async () => {
@@ -97,8 +97,8 @@ it("allows a foreign currency override without changing the company's country", 
   await screen.findByLabelText("Business country");
   await chooseCountry("India");
   expect(screen.getByLabelText("Default currency")).toHaveTextContent("INR");
-  fireEvent.click(screen.getByLabelText("Default currency"));
-  fireEvent.click(within(screen.getByRole("menu")).getByText("USD — US Dollar"));
+  fireEvent.keyDown(screen.getByLabelText("Default currency"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("option", { name: "USD — US Dollar" }), { key: "Enter" });
   fireEvent.click(screen.getByRole("button", {name: "Save Changes"}));
   await waitFor(() => expect(company).toMatchObject({country_code: "IN", currency: "USD"}));
 });

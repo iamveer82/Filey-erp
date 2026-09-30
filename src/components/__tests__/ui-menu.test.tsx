@@ -9,15 +9,15 @@ afterEach(cleanup);
 it("focuses the selected option and closes without rewriting an unchanged value", async () => {
   const change = vi.fn();
   const view = render(<SelectMenu value="second" ariaLabel="Template" onChange={change} options={[{value:"first",label:"Corporate"},{value:"second",label:"Minimal"}]} />);
-  fireEvent.click(screen.getByRole("button", {name:"Template"}));
-  const selected = screen.getByRole("menuitem", {name:"Minimal"});
+  fireEvent.keyDown(screen.getByRole("combobox", {name:"Template"}), { key: "Enter" });
+  const selected = screen.getByRole("option", {name:"Minimal"});
   await waitFor(() => expect(selected).toHaveFocus());
-  fireEvent.click(selected);
+  fireEvent.keyDown(selected, { key: "Enter" });
   expect(change).not.toHaveBeenCalled();
-  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", {name:"Template"}));
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole("combobox", {name:"Template"}), { key: "Enter" });
   view.rerender(<SelectMenu disabled value="second" ariaLabel="Template" onChange={change} options={[]} />);
-  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 });
 
 it("filters grouped options, preserves the selection and supports keyboard dismissal", async () => {
@@ -57,15 +57,32 @@ it("keeps dialog menus interactive and keyboard focus inside the active menu", a
       options={[{value:'chat',label:'Team chat'},{value:'sales',label:'Sales'}]}/></Modal>;
   }
   render(<Example/>);
-  fireEvent.click(screen.getByRole('button',{name:'App access'}));
-  const first=screen.getByRole('menuitem',{name:'Team chat'});
+  fireEvent.keyDown(screen.getByRole('combobox',{name:'App access'}),{key:'Enter'});
+  const first=screen.getByRole('option',{name:'Team chat'});
   await waitFor(()=>expect(first).toHaveFocus());
-  expect(screen.getByRole('menu')).toHaveStyle({pointerEvents:'auto'});
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
   fireEvent.keyDown(first,{key:'ArrowDown'});
-  expect(screen.getByRole('menuitem',{name:'Sales'})).toHaveFocus();
-  fireEvent.click(screen.getByRole('menuitem',{name:'Sales'}));
+  await waitFor(()=>expect(screen.getByRole('option',{name:'Sales'})).toHaveFocus());
+  fireEvent.keyDown(screen.getByRole('option',{name:'Sales'}),{key:'Enter'});
   expect(screen.getByRole('dialog',{name:'Approve teammate'})).toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'App access'})).toHaveTextContent('Sales');
+  expect(screen.getByRole('combobox',{name:'App access'})).toHaveTextContent('Sales');
+});
+
+it("keeps an empty default value selectable and restores focus after Escape", async () => {
+  function Example() {
+    const [value, setValue] = useState("bank");
+    return <SelectMenu ariaLabel="Paid from" value={value} onChange={setValue}
+      options={[{ value: "", label: "Default account" }, { value: "bank", label: "Bank" }]} />;
+  }
+  render(<Example />);
+  const trigger = screen.getByRole("combobox", { name: "Paid from" });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("option", { name: "Default account" }), { key: "Enter" });
+  expect(trigger).toHaveTextContent("Default account");
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("option", { name: "Default account" }), { key: "Escape" });
+  await waitFor(() => expect(trigger).toHaveFocus());
+  expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 });
 
 it("Escape closes the menu without dismissing its parent drawer and restores trigger focus", () => {

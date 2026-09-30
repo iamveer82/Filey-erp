@@ -960,6 +960,7 @@ function ZernioProvider() {
 
 /* ── WhatsApp bridge: QR-paired session, no per-message cost ─────────────── */
 function WhatsAppBridgeProvider() {
+  const { confirm } = useUI();
   const desktop = waHasDesktop;
   const [cfg, setCfg] = useState<BridgeConfig>(() =>
     desktop ? getBridgeConfig() : { autoStart: false, ownerNumber: "" }
@@ -1131,12 +1132,12 @@ function WhatsAppBridgeProvider() {
               ? "Needs the desktop app"
               : "Forget the pairing and show a fresh QR. Use this if your phone shows “Waiting for this message”."
           }
-          onClick={() => {
-            if (
-              window.confirm(
-                "Unpair this WhatsApp session and start over? You'll scan a new QR code."
-              )
-            )
+          onClick={async () => {
+            if (await confirm({
+              title: "Reconnect WhatsApp?",
+              message: "Unpair this WhatsApp session and start over? You'll scan a new QR code.",
+              confirmLabel: "Re-pair",
+            }))
               void run(resetBridge);
           }}
         >

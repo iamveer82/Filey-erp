@@ -20,8 +20,8 @@ it("keeps saved documents across country switches and wires private upload, prev
   vi.stubGlobal("URL", class extends URL { static revokeObjectURL = revoke; });
   const view = render(<CompanyDocuments country="IN" />);
   expect(screen.getByText(file.name)).toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Document type"));
-  fireEvent.click(within(screen.getByRole("menu")).getByText("GST certificate"));
+  fireEvent.keyDown(screen.getByRole("combobox", { name: "Document type" }), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("option", { name: "GST certificate" }), { key: "Enter" });
   const pdf = new File(["%PDF"], "GST.pdf", {type:"application/pdf"});
   fireEvent.change(screen.getByLabelText("Upload company document"), {target:{files:[pdf]}});
   await waitFor(() => expect(mocks.upload).toHaveBeenCalledWith(pdf, "company-gst"));

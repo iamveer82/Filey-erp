@@ -1,4 +1,8 @@
 import "@testing-library/jest-dom/vitest";
+import { expect } from "vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
+
+expect.extend(matchers);
 
 // jsdom lacks some canvas/PDF globals that heavy libs (pdfjs) touch at import
 // time. Minimal stubs so those modules import in tests; not exercised by render

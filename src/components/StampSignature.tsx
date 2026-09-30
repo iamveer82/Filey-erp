@@ -261,6 +261,7 @@ export function DraggableBlock({
         cursor: "grab",
         touchAction: "none",
         zIndex: 5,
+        width: "90%",
         maxWidth: "90%",
       }}
     >

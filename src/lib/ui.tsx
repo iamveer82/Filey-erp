@@ -8,6 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { Modal } from "../components/ui";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../components/Dialog";
+import { Button } from "../components/Button";
 import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
 
 type ToastKind = "success" | "error" | "info";
@@ -68,7 +70,7 @@ let nextId = 1;
 export function UIProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<
-    (ConfirmOpts & { resolve: (v: boolean) => void }) | null
+    (ConfirmOpts & { resolve: (v: boolean) => void; returnFocus: Element | null }) | null
   >(null);
   const [promptState, setPromptState] = useState<
     (PromptOpts & { resolve: (v: string | null) => void }) | null
@@ -107,7 +109,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
 
   const confirm = useCallback(
     (opts: ConfirmOpts) =>
-      new Promise<boolean>((resolve) => setConfirmState({ ...opts, resolve })),
+      new Promise<boolean>((resolve) => setConfirmState({ ...opts, resolve, returnFocus: document.activeElement })),
     []
   );
 
@@ -126,6 +128,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
           confirmLabel: "OK",
           hideCancel: true,
           resolve: () => resolve(),
+          returnFocus: document.activeElement,
         })
       ),
     []
@@ -201,13 +204,22 @@ export function UIProvider({ children }: { children: ReactNode }) {
       </div>
 
       {confirmState && (
-        <Modal open title={confirmState.title} onClose={() => closeConfirm(false)}>
-          {confirmState.message && <p className="text-sm text-muted-foreground leading-relaxed">{confirmState.message}</p>}
-          <div className="flex flex-wrap justify-end gap-2 mt-5">
-            {!confirmState.hideCancel && <button className="btn-ghost" onClick={() => closeConfirm(false)}>{confirmState.cancelLabel ?? "Cancel"}</button>}
-            <button className={confirmState.danger ? "btn-danger" : "btn-primary"} onClick={() => closeConfirm(true)}>{confirmState.confirmLabel ?? "Confirm"}</button>
-          </div>
-        </Modal>
+        <Dialog open onOpenChange={open => { if (!open) closeConfirm(false); }}>
+          <DialogContent role="alertdialog" showClose={false} className="max-w-md" aria-describedby={confirmState.message ? "filey-confirm-description" : undefined}
+            onCloseAutoFocus={event => {
+              event.preventDefault();
+              if (confirmState.returnFocus instanceof HTMLElement && confirmState.returnFocus.isConnected) confirmState.returnFocus.focus({ preventScroll: true });
+            }}>
+            <DialogHeader>
+              <DialogTitle>{confirmState.title}</DialogTitle>
+              {confirmState.message && <DialogDescription id="filey-confirm-description" className="whitespace-pre-line break-words leading-relaxed text-muted-foreground">{confirmState.message}</DialogDescription>}
+            </DialogHeader>
+            <DialogFooter className="flex-wrap">
+              {!confirmState.hideCancel && <Button variant="ghost" onClick={() => closeConfirm(false)}>{confirmState.cancelLabel ?? "Cancel"}</Button>}
+              <Button variant={confirmState.danger ? "danger" : "primary"} onClick={() => closeConfirm(true)}>{confirmState.confirmLabel ?? "Confirm"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       {promptState && (
         <Modal open title={promptState.title} onClose={() => closePrompt(null)}>
