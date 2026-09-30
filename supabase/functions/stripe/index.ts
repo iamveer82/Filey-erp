@@ -24,7 +24,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
-import { stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
+import { stripeAmountToMinorUnits, stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
@@ -327,14 +327,21 @@ async function payInvoice(token: string, origin: string): Promise<Response> {
   if (!doc) return json({ error: "Invoice not found or not shared" }, 404);
   const bal = await invoiceBalance(supa, doc.id);
   if (!bal || bal.balance <= 0) return json({ error: "This invoice is already paid." }, 400);
+  const currency = String(doc.currency || "AED").toLowerCase();
+  let unitAmount: number;
+  try {
+    unitAmount = stripeAmountToMinorUnits(bal.balance, currency);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "Invalid invoice balance." }, 400);
+  }
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     line_items: [
       {
         price_data: {
-          currency: String(doc.currency || "AED").toLowerCase(),
+          currency,
           product_data: { name: `Invoice ${doc.number}` },
-          unit_amount: Math.round(bal.balance * 100),
+          unit_amount: unitAmount,
         },
         quantity: 1,
       },
