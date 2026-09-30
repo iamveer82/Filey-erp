@@ -12,11 +12,13 @@ export function useSidebarSwipe(
   useEffect(() => {
     const host = root.current, panel = sidebar.current;
     const backdrop = host?.querySelector<HTMLElement>(".workspace-drawer-backdrop");
-    if (!enabled || !host || !panel || !backdrop) return;
+    const main = host?.querySelector<HTMLElement>(".workspace-main");
+    if (!enabled || !host || !panel || !backdrop || !main) return;
     let gesture: { id: number; x: number; y: number; time: number; width: number; distance: number; dragging: boolean } | null = null;
     const reset = () => {
       gesture = null;
-      host.style.removeProperty("--workspace-reveal");
+      main.style.removeProperty("transform");
+      panel.style.removeProperty("transform");
       delete host.dataset.sidebarDragging;
     };
     const start = (event: TouchEvent) => {
@@ -42,16 +44,24 @@ export function useSidebarSwipe(
       const dx = touch.clientX - gesture.x, dy = touch.clientY - gesture.y;
       if (!gesture.dragging) {
         if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) { reset(); return; }
-        if (Math.abs(dx) < 20 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        // The open drawer already reserves its horizontal axis with touch-action.
+        // Keep finger jitter on navigation links/buttons as an ordinary tap.
+        if (open && Math.abs(dx) < 10) return;
+        // Claim clear horizontal intent on the first move. Waiting for a large
+        // distance at the closed page edge lets mobile scrolling own the touch.
+        // Ambiguous/diagonal movement still belongs to the native scroller.
+        if (dx === 0 || Math.abs(dx) < Math.abs(dy) * 2) return;
         if ((open && dx > 0) || (!open && dx < 0)) { reset(); return; }
         gesture.dragging = true;
+        host.dataset.sidebarDragging = "true";
       }
       event.preventDefault();
       gesture.distance = Math.max(0, Math.min(gesture.width, open ? -dx : dx));
       const reveal = open ? gesture.width - gesture.distance : gesture.distance;
-      // One position drives the page and sidebar; no React render per touch frame.
-      host.dataset.sidebarDragging = "true";
-      host.style.setProperty("--workspace-reveal", `${reveal}px`);
+      // Only the two moving layers change. An inherited workspace variable
+      // would invalidate styles throughout every open page on each touch frame.
+      main.style.transform = `translate3d(${reveal}px, 0, 0)`;
+      panel.style.transform = `translate3d(${reveal - gesture.width}px, 0, 0)`;
     };
     const end = (event: TouchEvent) => {
       if (!gesture?.dragging) { reset(); return; }

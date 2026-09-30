@@ -41,8 +41,8 @@ export interface EInvoiceParty {
 /** Stored with the document, so identities survive offline saves and sync. */
 export interface EInvoiceDetails {
   uuid?: string;
-  seller?: EInvoiceParty;
-  buyer?: EInvoiceParty;
+  seller?: EInvoiceParty | null;
+  buyer?: EInvoiceParty | null;
   credit_reason?: string;
   payment_account_id?: string;
   payment_account_name?: string;
@@ -59,7 +59,7 @@ export function buyerEndpoint(details: EInvoiceDetails | undefined, country = UA
     scheme: predefined ? UAE_EAS_SCHEME : details?.buyer?.endpoint_scheme || (country === UAE_COUNTRY_CODE ? UAE_EAS_SCHEME : "") };
 }
 
-export function partyTin(party?: EInvoiceParty): string {
+export function partyTin(party?: EInvoiceParty | null): string {
   return party?.tin?.trim() || tinFromCorporateTrn(party?.corporate_trn);
 }
 

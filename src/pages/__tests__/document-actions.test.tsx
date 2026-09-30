@@ -127,6 +127,9 @@ describe("invoice editor actions", () => {
   });
 
   it("makes e-invoice checking and messaging directly accessible beside save and PDF", async () => {
+    // Cloud rows created before electronic identities were added contain null.
+    vi.spyOn(billing, "getCompany").mockResolvedValue({ ...company, einvoice: null });
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, einvoice: { seller: null, buyer: null } });
     const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
@@ -140,7 +143,15 @@ describe("invoice editor actions", () => {
     const check = actions.getByRole("button", { name: "Check e-invoice" });
     expect(check).toHaveClass("btn-primary");
     fireEvent.click(check);
-    expect(await view.findByRole("dialog", { name: "Check e-invoice" })).toBeVisible();
+    const review = within(await view.findByRole("dialog", { name: "Check e-invoice" }));
+    expect(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })).toHaveLength(2);
+    fireEvent.change(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })[0], { target: { value: "123456789012345" } });
+    expect(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })[0]).toHaveValue("123456789012345");
+    expect(review.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
+    fireEvent.click(review.getByRole("button", { name: "Back to invoice" }));
+    await waitFor(() => expect(view.queryByRole("dialog", { name: "Check e-invoice" })).toBeNull());
+    fireEvent.click(actions.getByRole("button", { name: "Check e-invoice" }));
+    expect(within(await view.findByRole("dialog", { name: "Check e-invoice" })).getAllByRole("textbox", { name: "Corporate Tax TRN" })[0]).toHaveValue("123456789012345");
     expect(save).not.toHaveBeenCalled();
   });
 
