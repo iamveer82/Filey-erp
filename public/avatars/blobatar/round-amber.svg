@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out 0.00s infinite}.bob{animation:bob 3.4s ease-in-out 0.00s infinite}.eyes{animation:blink 5.20s linear 0.00s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-sun","shape":"round","options":{"background":"circle","hue":65,"tone":0.5,"traits":{"shape":0.11},"title":"Round Amber avatar"},"shapeId":"round","colourId":"amber"}</metadata><title>Round Amber avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#f8f2ed"/><g class="breathe"><g class="bob"><g fill="#e19440"><path d="M83.11 50.83C83.11 71.75 69.89 84.92 48.91 84.92C27.92 84.92 14.7 71.75 14.7 50.83C14.7 29.92 27.92 16.75 48.91 16.75C69.89 16.75 83.11 29.92 83.11 50.83Z"/></g><g class="eyes" fill="#150e06"><path d="M42.49 48.82C41.33 56.55 40.99 57.17 38.18 56.75C35.37 56.33 35.23 55.63 36.39 47.9C37.55 40.18 37.89 39.55 40.7 39.97C43.51 40.39 43.65 41.09 42.49 48.82Z"/><path d="M58.87 49.13C57.63 54.98 57.32 55.44 54.89 54.93C52.46 54.41 52.36 53.87 53.6 48.01C54.84 42.16 55.16 41.7 57.58 42.21C60.01 42.73 60.11 43.27 58.87 49.13Z"/></g></g></g></svg>

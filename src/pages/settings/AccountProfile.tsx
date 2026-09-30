@@ -376,7 +376,7 @@ export default function AccountProfile() {
         </div>
         <div className="mt-5 border-t border-border pt-5">
           <p className="mb-1 text-sm font-medium">Choose an avatar</p>
-          <p className="mb-3 text-[13px] text-muted-foreground">Pick a Filey face, or use the pencil to upload your own photo. Save changes when you’re ready.</p>
+          <p className="mb-3 text-[13px] text-muted-foreground">Save changes when you’re ready. Use the pencil to upload your own photo.</p>
           <AvatarPicker value={p.avatar} onChange={value => set("avatar", value)} />
         </div>
       </SettingsSection>

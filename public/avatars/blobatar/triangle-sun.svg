@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out -3.33s infinite}.bob{animation:bob 3.4s ease-in-out -3.33s infinite}.eyes{animation:blink 7.27s linear -3.33s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-triangle","shape":"triangle","options":{"background":"circle","hue":85,"tone":0.85,"traits":{"shape":0.99},"title":"Triangle Sun avatar"},"shapeId":"triangle","colourId":"sun"}</metadata><title>Triangle Sun avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#f6f3ec"/><g class="breathe"><g class="bob"><g fill="#ffcc59"><path d="M42.27 15.59Q46.88 5.4 52.87 14.75L81.88 60.04Q87.87 69.39 77.27 70.24L25.92 74.35Q15.33 75.19 19.94 65L42.27 15.59Z"/></g><g class="eyes" fill="#130f06"><path d="M46.17 54.99C46.09 61.76 46.06 61.83 43.43 61.8C40.8 61.76 40.78 61.7 40.86 54.92C40.94 48.15 40.97 48.08 43.6 48.11C46.23 48.14 46.25 48.21 46.17 54.99Z"/><path d="M61.14 54.63C60.79 61.93 60.76 62 57.86 61.86C54.96 61.72 54.94 61.65 55.29 54.35C55.64 47.06 55.67 46.99 58.57 47.13C61.47 47.27 61.49 47.34 61.14 54.63Z"/></g></g></g></svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out -2.22s infinite}.bob{animation:bob 3.4s ease-in-out -2.22s infinite}.eyes{animation:blink 6.58s linear -2.22s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-slate","shape":"droplet","options":{"background":"circle","hue":160,"tone":0.12,"traits":{"shape":0.887},"title":"Droplet Mint avatar"},"shapeId":"droplet","colourId":"mint"}</metadata><title>Droplet Mint avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#eef6f1"/><g class="breathe"><g class="bob"><g fill="#a0e3be"><path d="M28.59 35L46.37 17.6Q49.27 14.76 52.17 17.6L69.95 35Z"/><path d="M78.45 55.05C78.45 70.75 65.39 83.47 49.27 83.47C33.15 83.47 20.09 70.75 20.09 55.05C20.09 39.35 33.15 26.63 49.27 26.63C65.39 26.63 78.45 39.35 78.45 55.05Z"/></g><g class="eyes" fill="#08120c"><path d="M45.47 52.32C44.96 58.31 44.96 58.31 42.67 58.11C40.38 57.92 40.38 57.92 40.9 51.93C41.41 45.94 41.41 45.94 43.7 46.13C45.99 46.33 45.99 46.33 45.47 52.32Z"/><path d="M58.7 52.88C58.04 59.87 58.04 59.87 55.63 59.64C53.22 59.42 53.22 59.42 53.88 52.43C54.55 45.44 54.55 45.44 56.96 45.67C59.36 45.9 59.36 45.9 58.7 52.88Z"/></g></g></g></svg>

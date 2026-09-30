@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out -1.11s infinite}.bob{animation:bob 3.4s ease-in-out -1.11s infinite}.eyes{animation:blink 5.89s linear -1.11s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-sky","shape":"capsule","options":{"background":"circle","hue":250,"tone":0.97,"traits":{"shape":0.65},"title":"Capsule Slate avatar"},"shapeId":"capsule","colourId":"slate"}</metadata><title>Capsule Slate avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#eff4fa"/><g class="breathe"><g class="bob"><g fill="#2a394a"><circle cx="35.43" cy="48.91" r="22.6"/><circle cx="66.42" cy="48.91" r="22.6"/><path d="M35.43 26.31H66.42V71.51H35.43Z"/></g><g class="eyes" fill="#eff6fd"><path d="M45.61 48.89C44.95 57.45 44.95 57.45 41.72 57.2C38.5 56.95 38.5 56.95 39.16 48.39C39.82 39.83 39.82 39.83 43.04 40.08C46.27 40.33 46.27 40.33 45.61 48.89Z"/><path d="M66.54 49.48C65.13 60.02 65.13 60.02 61.39 59.52C57.65 59.02 57.65 59.02 59.06 48.48C60.46 37.94 60.46 37.94 64.2 38.44C67.94 38.94 67.94 38.94 66.54 49.48Z"/></g></g></g></svg>

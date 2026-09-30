@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out -0.37s infinite}.bob{animation:bob 3.4s ease-in-out -0.37s infinite}.eyes{animation:blink 5.43s linear -0.37s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-mint","shape":"organic","options":{"background":"circle","hue":85,"tone":0.85,"traits":{"shape":0.35},"title":"Organic Sun avatar"},"shapeId":"organic","colourId":"sun"}</metadata><title>Organic Sun avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#f6f3ec"/><g class="breathe"><g class="bob"><g fill="#ffcc59"><path d="M92.92 48.63C92.49 60.28 78.99 76.19 69.31 81.22C59.63 86.26 43.62 84.26 34.86 78.83C26.09 73.4 17.28 59.73 16.71 48.63C16.15 37.54 22.27 18.47 31.47 12.26C40.66 6.04 61.65 5.29 71.89 11.35C82.13 17.41 93.35 36.99 92.92 48.63Z"/></g><g class="eyes" fill="#130f06"><path d="M39.74 49.84C40.18 58.47 40.18 58.47 36.56 58.66C32.93 58.84 32.93 58.84 32.49 50.21C32.05 41.58 32.05 41.58 35.67 41.39C39.29 41.21 39.29 41.21 39.74 49.84Z"/><path d="M65.09 49.67C65.8 59.52 65.8 59.52 62.07 59.79C58.34 60.06 58.34 60.06 57.63 50.21C56.92 40.36 56.92 40.36 60.65 40.09C64.38 39.82 64.38 39.82 65.09 49.67Z"/></g></g></g></svg>

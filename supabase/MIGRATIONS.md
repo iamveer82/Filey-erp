@@ -187,3 +187,12 @@ activities; company/contact columns already exist. Definitions remain in scoped
 app settings. No permissions or record values are removed. The schema snapshot
 includes the same migration; disposable PostgreSQL tests apply it twice and
 verify stored values survive another application. Production remains on hold.
+
+## Avatar shape and colour choices — applied 30 September 2026
+
+`2026-09-30-avatar-choices.sql` is applied to `voyrjqgaypiylwskkwpr` before the
+web picker rollout. The constraint accepts ten legacy presets and exactly 100
+local Blobatar shape/colour SVG paths. Read-back confirmed the new constraint,
+authenticated RPC execution, and denied anonymous execution. No customer
+records or RPC permissions were changed. Disposable RLS tests cover self/admin
+updates and reject arbitrary URLs and cross-workspace updates.

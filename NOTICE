@@ -33,3 +33,15 @@ Material Design icons
   Google — Apache License, Version 2.0.
   Selected SVGs adapted into React in src/components/SidebarIcon.tsx.
   Full original terms: licenses/material-icons.txt.
+
+Blobatar profile avatars
+  Source: https://github.com/RayZhao1998/BlobatarSwift
+  Swift reference revision: 12ec93251e8a88b613caf3937b5c4fc7934bd516
+  The ten profile silhouettes in ten selectable colours use Blobatar's
+  generation-2 SVG geometry and palette, also ported by BlobatarSwift.
+  Upstream: https://github.com/Alain00/blobatar
+  SVG renderer revision: a7fd546ebede49d0a9fa638945b9e534489782a2
+  Copyright (c) 2026 Alain; Copyright (c) 2026 BlobatarSwift contributors.
+  MIT License. Full terms: licenses/blobatar.txt and licenses/blobatar-swift.txt.
+  Generated vector assets: public/avatars/. Filey adds reduced-motion-aware
+  idle animation and retains existing profile URLs and uploaded photos.

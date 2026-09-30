@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><!--
+MIT License
+
+Copyright (c) 2026 Alain
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR OTHER DEALINGS IN THE SOFTWARE.
+--><style>.breathe,.eyes{transform-box:fill-box;transform-origin:center}.breathe{animation:breathe 2.8s ease-in-out -2.59s infinite}.bob{animation:bob 3.4s ease-in-out -2.59s infinite}.eyes{animation:blink 6.81s linear -2.59s infinite}@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.018)}}@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-.75px)}}@keyframes blink{0%,96%,100%{transform:scaleY(1)}98%{transform:scaleY(.08)}}@media(prefers-reduced-motion:reduce){.breathe,.bob,.eyes{animation:none;transform:none}}</style><metadata>{"renderer":"https://github.com/Alain00/blobatar","revision":"a7fd546ebede49d0a9fa638945b9e534489782a2","swift":"https://github.com/RayZhao1998/BlobatarSwift","swiftRevision":"12ec93251e8a88b613caf3937b5c4fc7934bd516","generation":2,"seed":"filey-profile-sage","shape":"hexagon","options":{"background":"circle","hue":45,"tone":0.12,"traits":{"shape":0.932},"title":"Hexagon Peach avatar"},"shapeId":"hexagon","colourId":"peach"}</metadata><title>Hexagon Peach avatar</title><path d="M100 50C100 77.61 77.61 100 50 100C22.39 100 0 77.61 0 50C0 22.39 22.39 0 50 0C77.61 0 100 22.39 100 50Z" fill="#faf1ee"/><g class="breathe"><g class="bob"><g fill="#ffc1a5"><path d="M51.18 18.49Q57.37 16.24 62.27 20.87L77.36 35.09Q82.27 39.72 80.99 46.58L77.04 67.71Q75.76 74.57 69.57 76.82L50.54 83.72Q44.35 85.96 39.44 81.33L24.35 67.11Q19.44 62.49 20.72 55.62L24.67 34.5Q25.95 27.63 32.14 25.39L51.18 18.49Z"/></g><g class="eyes" fill="#170d08"><path d="M43.06 46.44C43.65 53.35 43.65 53.35 40.86 53.59C38.08 53.82 38.08 53.82 37.49 46.92C36.89 40.01 36.89 40.01 39.68 39.77C42.46 39.53 42.46 39.53 43.06 46.44Z"/><path d="M62.33 47.16C62.67 56.66 62.67 56.66 59.21 56.78C55.75 56.91 55.75 56.91 55.41 47.4C55.06 37.9 55.06 37.9 58.53 37.78C61.99 37.65 61.99 37.65 62.33 47.16Z"/></g></g></g></svg>
