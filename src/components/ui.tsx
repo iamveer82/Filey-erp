@@ -69,6 +69,8 @@ export function ShareToggle({
 }) {
   return (
     <button
+      type="button"
+      aria-pressed={!!shared}
       onClick={() => onToggle(!shared)}
       title={
         shared
@@ -76,7 +78,7 @@ export function ShareToggle({
           : "Private to you - click to share with your team"
       }
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors",
+        "inline-flex min-h-7 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         shared
           ? "bg-info/15 text-info hover:bg-info/25"
           : "bg-muted text-muted-foreground hover:bg-hover"
@@ -832,8 +834,8 @@ export function Modal({
   );
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <FormField label={label}>{children}</FormField>;
+export function Field(props: React.ComponentProps<typeof FormField>) {
+  return <FormField {...props} />;
 }
 
 /** Reusable form field with label, inline validation error (animated slide-in),
@@ -868,8 +870,10 @@ export function FormField({
     labelRef.current.htmlFor = control.id;
     const describedBy = control.getAttribute("aria-describedby");
     const invalid = control.getAttribute("aria-invalid");
+    const wasRequired = control.getAttribute("aria-required");
     if (error || hint) control.setAttribute("aria-describedby", [describedBy, messageId].filter(Boolean).join(" "));
     if (error) control.setAttribute("aria-invalid", "true");
+    if (required) control.setAttribute("aria-required", "true");
     return () => {
       if (error || hint) {
         if (describedBy) control.setAttribute("aria-describedby", describedBy);
@@ -879,13 +883,17 @@ export function FormField({
         if (invalid) control.setAttribute("aria-invalid", invalid);
         else control.removeAttribute("aria-invalid");
       }
+      if (required) {
+        if (wasRequired) control.setAttribute("aria-required", wasRequired);
+        else control.removeAttribute("aria-required");
+      }
     };
   });
   return (
     <div ref={fieldRef} className={cn("flex min-w-0 flex-col", className)}>
       <label ref={labelRef} className="label" htmlFor={htmlFor}>
         {label}
-        {required && <span className="text-danger ml-0.5">*</span>}
+        {required && <span aria-hidden="true" className="text-danger ml-0.5">*</span>}
       </label>
       {children}
       {error ? (
@@ -945,13 +953,13 @@ export function PageSection({
 }) {
   return (
     <section className="space-y-3">
-      {(title || action) && (
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            {title && <h2 className="text-base font-bold text-ink">{title}</h2>}
-            {subtitle && <p className="text-xs text-brand-400 mt-0.5">{subtitle}</p>}
+      {(title || subtitle || action) && (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            {title && <h2 className="text-sm font-semibold text-foreground">{title}</h2>}
+            {subtitle && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{subtitle}</p>}
           </div>
-          {action}
+          {action && <div className="flex max-w-full flex-wrap items-center gap-2">{action}</div>}
         </div>
       )}
       {children}

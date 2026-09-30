@@ -41,7 +41,7 @@ it("locks file, mapping and close controls while importing exactly the submitted
   expect(onImport).toHaveBeenCalledTimes(1);
   expect(onImport).toHaveBeenCalledWith([{ name: "North Harbour" }]);
   expect(fileInput).toBeDisabled();
-  expect(screen.getByRole("button", { name: "CSV column for Name" })).toBeDisabled();
+  expect(screen.getByRole("combobox", { name: "CSV column for Name" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
   fireEvent.keyDown(document, { key: "Escape" });
   expect(onClose).not.toHaveBeenCalled();

@@ -142,9 +142,9 @@ describe("DataTable responsive quick view", () => {
       expect(view.getByRole("button", { name: "Open invoice" })).toBeVisible();
       fireEvent.click(view.getByRole("checkbox", { name: "Select row" }));
       expect(view.getByText("1 selected")).toBeVisible();
-      fireEvent.click(view.getByRole("button", { name: "Sort records" }));
-      fireEvent.click(view.getByRole("menuitem", { name: "Total ↓" }));
-      expect(view.getByRole("button", { name: "Sort records" })).toHaveTextContent("Total ↓");
+      fireEvent.keyDown(view.getByRole("combobox", { name: "Sort records" }), { key: "Enter" });
+      fireEvent.keyDown(view.getByRole("option", { name: "Total ↓" }), { key: "Enter" });
+      expect(view.getByRole("combobox", { name: "Sort records" })).toHaveTextContent("Total ↓");
     } finally { restore(); }
   });
 });

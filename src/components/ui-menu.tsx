@@ -10,6 +10,7 @@ import {
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { cn } from "../lib/format";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 /* ── ui-menu — the one dropdown-menu primitive for the whole app ─────
  * Matches the composer "+" menu pattern: a fixed, anchor-positioned
@@ -215,6 +216,21 @@ export function SelectMenu({
     setQuery("");
     setOpen(v => !v);
   };
+  if (!searchPlaceholder && !options.some(option => option.group)) {
+    // Radix reserves empty values; encoding keeps Filey's default options selectable.
+    return <Select value={JSON.stringify(value)} disabled={disabled} open={open && !disabled}
+      onOpenChange={setOpen} onValueChange={encoded => {
+        const next = JSON.parse(encoded) as string;
+        if (next !== value) onChange(next);
+      }}>
+      <SelectTrigger id={id} aria-label={ariaLabel} size={size === "sm" ? "sm" : "default"} className={className}>
+        <SelectValue>{current?.label ?? placeholder}</SelectValue>
+      </SelectTrigger>
+      <SelectContent sideOffset={6} collisionPadding={8} onEscapeKeyDown={event => event.stopPropagation()}>
+        {options.map(option => <SelectItem key={option.value} value={JSON.stringify(option.value)}>{option.label}</SelectItem>)}
+      </SelectContent>
+    </Select>;
+  }
   return (
     <>
       <button

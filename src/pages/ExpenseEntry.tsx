@@ -5,6 +5,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Check, Download, FileText, Paperclip, Plus, Receipt, Trash2, X } from "lucide-react";
 import { fin, type Account, type Expense } from "../lib/api";
 import { PageHeader, Field, ErrorBanner } from "../components/ui";
+import { SelectMenu } from "../components/ui-menu";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useUI } from "../lib/ui";
 import { CURRENCIES, errMsg, getDisplayCurrency, money, todayYmd } from "../lib/format";
 import { r2 } from "../lib/money";
@@ -137,17 +139,19 @@ export default function ExpenseEntry() {
     <form id="expense-form" onSubmit={event => { event.preventDefault(); void save(); }}>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
         <fieldset disabled={locked} className="min-w-0 space-y-6" aria-busy={saving}>
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-4 text-sm font-semibold">Purchase details</h2>
+          <Card>
+            <CardHeader><CardTitle><h2>Purchase details</h2></CardTitle></CardHeader>
+            <CardContent>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Vendor / paid to"><input aria-label="Vendor / paid to" className="input" required={!readonly} maxLength={200} value={details.vendor} onChange={event => set("vendor", event.target.value)} placeholder="Business or person you paid" /></Field>
               <Field label="Expense date"><DateField aria-label="Expense date" required value={date} onChange={value => { setDate(value); setDirty(true); }} /></Field>
-              <Field label="Category"><select aria-label="Expense category" className="select" value={category} onChange={event => { setCategory(event.target.value); setDirty(true); }}>{[...new Set([...EXPENSE_CATEGORIES, category])].map(value => <option key={value}>{value}</option>)}</select></Field>
+              <Field label="Category"><SelectMenu ariaLabel="Expense category" disabled={locked} value={category} onChange={value => { setCategory(value); setDirty(true); }} options={[...new Set([...EXPENSE_CATEGORIES, category])].map(value => ({ value, label: value }))} /></Field>
               <Field label="Receipt / invoice number"><input aria-label="Receipt / invoice number" className="input" maxLength={200} value={details.reference} onChange={event => set("reference", event.target.value)} placeholder="Optional reference" /></Field>
-              <Field label="Currency"><select aria-label="Expense currency" className="select" value={details.currency} onChange={event => { set("currency", event.target.value); set("fx_rate", event.target.value === "AED" ? 1 : 0); }}>{CURRENCIES.map(currency => <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>)}</select></Field>
+              <Field label="Currency"><SelectMenu ariaLabel="Expense currency" disabled={locked} value={details.currency} searchPlaceholder="Search currencies…" onChange={value => { set("currency", value); set("fx_rate", value === "AED" ? 1 : 0); }} options={CURRENCIES.map(currency => ({ value: currency.code, label: `${currency.code} — ${currency.name}` }))} /></Field>
               {details.currency !== "AED" && <Field label={`Exchange rate · AED per 1 ${details.currency}`}><input aria-label="Exchange rate" className="input" type="number" min="0.000001" step="any" required value={details.fx_rate || ""} onChange={event => set("fx_rate", Number(event.target.value))} /><p className="mt-1 text-xs text-muted-foreground">Confirm the rate on your receipt. Saved with this expense.</p></Field>}
             </div>
-          </section>
+            </CardContent>
+          </Card>
           <section className="overflow-hidden rounded-xl border border-border bg-card">
             <div className="flex items-center justify-between gap-3 p-5"><div><h2 className="text-sm font-semibold">Items</h2><p className="mt-1 text-xs text-muted-foreground">Enter prices before tax.</p></div><span className="text-xs text-muted-foreground">{details.items.length} {details.items.length === 1 ? "item" : "items"}</span></div>
             <div className="divide-y divide-border">
@@ -163,16 +167,18 @@ export default function ExpenseEntry() {
             {!readonly && <div className="border-t border-border px-5 py-3"><button type="button" className="btn-ghost" disabled={details.items.length >= 100} onClick={() => set("items", [...details.items, { description: "", qty: 1, unit: "pcs", unit_price: 0 }])}><Plus size={15} />Add item</button></div>}
             <datalist id="expense-units">{["pcs", "item", "box", "pack", "kg", "litre", "hour", "day", "month", "service"].map(unit => <option key={unit} value={unit} />)}</datalist>
           </section>
-          <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-4 text-sm font-semibold">Payment & notes</h2>
+          <Card>
+            <CardHeader><CardTitle><h2>Payment & notes</h2></CardTitle></CardHeader>
+            <CardContent>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Payment method"><select aria-label="Payment method" className="select" value={details.payment_method} onChange={event => set("payment_method", event.target.value)}>{EXPENSE_METHODS.map(value => <option key={value}>{value}</option>)}</select></Field>
-              <Field label="Paid from"><select aria-label="Paid from account" className="select" value={details.payment_account_id ?? ""} onChange={event => set("payment_account_id", event.target.value ? Number(event.target.value) : null)}><option value="">Default Cash & Bank</option>{accounts.filter(account => account.account_type === "asset" && /cash|bank/i.test(account.name)).map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
-              <Field label="Expense account"><select aria-label="Expense account" className="select" value={accountId ?? ""} onChange={event => { setAccountId(event.target.value ? Number(event.target.value) : null); setDirty(true); }}><option value="">Default Operating Expenses</option>{accounts.filter(account => account.account_type === "expense").map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
+              <Field label="Payment method"><SelectMenu ariaLabel="Payment method" disabled={locked} value={details.payment_method} onChange={value => set("payment_method", value)} options={EXPENSE_METHODS.map(value => ({ value, label: value }))} /></Field>
+              <Field label="Paid from"><SelectMenu ariaLabel="Paid from account" disabled={locked} value={String(details.payment_account_id ?? "")} onChange={value => set("payment_account_id", value ? Number(value) : null)} options={[{ value: "", label: "Default Cash & Bank" }, ...accounts.filter(account => account.account_type === "asset" && /cash|bank/i.test(account.name)).map(account => ({ value: String(account.id), label: account.name }))]} /></Field>
+              <Field label="Expense account"><SelectMenu ariaLabel="Expense account" disabled={locked} value={String(accountId ?? "")} onChange={value => { setAccountId(value ? Number(value) : null); setDirty(true); }} options={[{ value: "", label: "Default Operating Expenses" }, ...accounts.filter(account => account.account_type === "expense").map(account => ({ value: String(account.id), label: account.name }))]} /></Field>
               <p className="self-center text-xs text-muted-foreground">Logs a paid expense, including tax. For unpaid supplier bills or recoverable input tax, use Purchase Invoices.</p>
               <div className="sm:col-span-2"><Field label="Notes"><textarea aria-label="Expense notes" className="textarea min-h-20" rows={3} maxLength={5000} value={details.notes} onChange={event => set("notes", event.target.value)} placeholder="Business purpose or extra details (optional)" /></Field></div>
             </div>
-          </section>
+            </CardContent>
+          </Card>
         </fieldset>
         <aside className="min-w-0 space-y-5 xl:sticky xl:top-5">
           <section className="rounded-xl border border-border bg-card p-5">
