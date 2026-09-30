@@ -38,6 +38,8 @@ export interface StatementDocRef {
   currency?: string;
   status?: string;
   tax_rate?: number;
+  net_total?: number;
+  tax_total?: number;
 }
 
 export interface StatementPartyRef {
@@ -112,9 +114,7 @@ export default function StatementModal({
     () =>
       docs.filter((d) => {
         const st = (d.status || "").toLowerCase();
-        return partyType === "customer"
-          ? st !== "draft"
-          : st !== "draft" && st !== "cancelled";
+        return !["draft", "cancelled", "canceled", "void"].includes(st);
       }),
     [docs, partyType]
   );
@@ -149,7 +149,7 @@ export default function StatementModal({
       ].sort(),
     [ledgerDocs, currency]
   );
-  const docKey = statementDocs.map((d) => d.id).join(",");
+  const partyNamesKey = partyNames.join("\n");
 
   useEffect(() => {
     if (!open) return;
@@ -231,7 +231,11 @@ export default function StatementModal({
             }))
         );
       })
-      .catch((e) => toast.error(errMsg(e)))
+      .catch((e) => {
+        if (!alive) return;
+        setMissing(["statement records"]);
+        toast.error(errMsg(e));
+      })
       .finally(() => {
         if (alive) setLoading(false);
       });
@@ -239,7 +243,7 @@ export default function StatementModal({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, partyType, party.id, docKey, currency]);
+  }, [open, partyType, party.id, statementDocs, partyNamesKey, currency]);
 
 
   const built = useMemo(() => {
@@ -248,6 +252,8 @@ export default function StatementModal({
       date: d.date,
       total: d.total,
       taxRate: d.tax_rate ?? 0,
+      net: d.net_total,
+      tax: d.tax_total,
     }));
     return buildStatement({
       kind: partyType,
@@ -309,6 +315,7 @@ export default function StatementModal({
     `Statement-${party.name.replace(/[^\w.-]+/g, "_").slice(0, 40)}-${todayYmd()}`;
 
   const downloadPdf = async () => {
+    if (loading || isEmpty || exporting || missing.length > 0) return;
     const el = exportRef.current;
     if (!el) {
       window.print();

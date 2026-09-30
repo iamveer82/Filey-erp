@@ -19,7 +19,7 @@ Deno.test(
     const keys: string[] = [];
     const send: typeof fetch = async (_url, init) => {
       keys.push(new Headers(init?.headers).get("Idempotency-Key")!);
-      return new Response("{}", { status: 200 });
+      return new Response('{"id":"test-receipt"}', { status: 200 });
     };
     const config = {
       key: "test",

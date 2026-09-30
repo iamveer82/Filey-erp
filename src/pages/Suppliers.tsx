@@ -24,7 +24,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { aed, num, money, cn } from "../lib/format";
+import { aed, num, money, cn, errMsg } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { Button, Card, Field, Badge, Modal, PageHeader, ErrorBanner } from "../components/primitives";
@@ -389,12 +389,12 @@ export default function Suppliers() {
                                   shareVia("whatsapp", {
                                     phone: s.phone,
                                     text: `Hello ${s.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                                 sms: () =>
                                   shareVia("sms", {
                                     phone: s.phone,
                                     text: `Hello ${s.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                               }
                             : {}),
                           ...(s.email
@@ -404,14 +404,16 @@ export default function Suppliers() {
                                     email: s.email,
                                     url: s.name,
                                     text: `Hello ${s.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                               }
                             : {}),
-                          copyLink: () => {
-                            shareVia("copyLink", {
-                              url: `${window.location.origin}/suppliers/${s.id}`,
-                            });
-                            toast.success("Supplier link copied.");
+                          copyLink: async () => {
+                            try {
+                              await shareVia("copyLink", {
+                                url: `${window.location.origin}/suppliers/${s.id}`,
+                              });
+                              toast.success("Supplier link copied.");
+                            } catch (e) { toast.error(errMsg(e)); }
                           },
                         }}
                         onDelete={async () => {

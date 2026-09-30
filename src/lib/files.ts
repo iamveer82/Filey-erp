@@ -436,11 +436,29 @@ export async function uploadUserFile(file: File, tool?: string, folderId?: strin
 export async function deleteFile(f: SavedFile): Promise<void> {
   if (!isConfigured) throw new Error("File storage is not configured.");
   const current = fileWorkspace();
-  const { error: storageError } = await sb().storage.from(BUCKET).remove([f.storagePath]);
-  if (storageError) throw storageError;
-  current();
-  const { error } = await sb().from("user_files").delete().eq("id", f.id);
+  const { data: removed, error } = await sb().from("user_files").delete().eq("id", f.id).select("id");
   if (error) throw error;
+  current();
+  // RLS can acknowledge a DELETE while matching no accessible row. That is
+  // not permission to remove an object's bytes from another workspace.
+  if (!Array.isArray(removed) || removed.length !== 1 || removed[0].id !== f.id)
+    throw new Error("File not found or access denied. Refresh your files.");
+  const parts = f.storagePath.split("/");
+  const fileId = encodeURIComponent(f.id).replace(/\./g, "%2E");
+  const dedicated = (parts.length === 3 && parts[1] === f.id)
+    || (parts.length === 5 && parts[1] === "synced" && parts[2] === fileId && /^[a-f0-9]{64}$/.test(parts[3]));
+  // Older synced objects were shared by content, even across workspaces. RLS
+  // cannot prove they are unreferenced, so retain them rather than break another
+  // file. New uploads bind their object to this file's ID.
+  if (!dedicated) return;
+  const { data: references, error: lookupError } = await sb().from("user_files")
+    .select("id").eq("storage_path", f.storagePath).limit(1);
+  current();
+  if (lookupError) throw new Error("The file entry was removed, but its stored copy could not be checked.");
+  if (references?.length) return;
+  const { error: storageError } = await sb().storage.from(BUCKET).remove([f.storagePath]);
+  current();
+  if (storageError) throw new Error("The file entry was removed, but its stored copy could not be deleted.");
 }
 
 
@@ -536,7 +554,17 @@ export function useFiles() {
       await refresh();
     },
     remove: async (f: SavedFile) => {
-      await deleteFile(f);
+      const current = fileWorkspace();
+      try {
+        await deleteFile(f);
+      } catch (cause) {
+        // Metadata may already be removed even though byte cleanup failed.
+        // Show the current ledger without turning that failure into success.
+        current();
+        await refresh();
+        throw cause;
+      }
+      current();
       setFiles((prev) => prev.filter((x) => x.id !== f.id));
     },
     rename: async (f: SavedFile, newName: string) => {

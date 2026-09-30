@@ -1,26 +1,39 @@
 import { File as NodeFile } from "node:buffer";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 
-const fixture = vi.hoisted(() => ({ uid: "owner-a", scope: "org-a:owner-a", local: false, upload: vi.fn(), insert: vi.fn(), remove: vi.fn(), download: vi.fn(), signedUrl: vi.fn() }));
+const fixture = vi.hoisted(() => ({ uid: "owner-a", scope: "org-a:owner-a", local: false, upload: vi.fn(), insert: vi.fn(), remove: vi.fn(), download: vi.fn(), signedUrl: vi.fn(), deleteRow: vi.fn(), lookup: vi.fn() }));
 vi.mock("../api", () => ({ getCacheScope: () => fixture.scope }));
 vi.mock("../dataMode", () => ({ isLocalMode: () => fixture.local }));
 vi.mock("../supabase", () => {
-  const query = { select: () => query, order: () => query, eq: () => query, range: () => query, then: (resolve: (value: unknown) => void) => resolve({ data: [], error: null }), insert: fixture.insert };
+  const query = { select: () => query, order: () => query, eq: () => query, range: () => query, limit: () => query,
+    then: (resolve: (value: unknown) => void) => fixture.lookup().then(resolve), insert: fixture.insert,
+    delete: () => {
+      let removal: Promise<unknown>;
+      const deleted = {
+        eq: (column: string, id: string) => { removal = fixture.deleteRow(column, id); return deleted; },
+        select: () => deleted,
+        then: (resolve: (value: unknown) => void) => removal.then(resolve),
+      };
+      return deleted;
+    } };
   const client = { auth: { getSession: async () => ({ data: { session: { user: { id: fixture.uid } } } }) }, from: () => query, storage: { from: () => ({ upload: fixture.upload, download: fixture.download, createSignedUrl: fixture.signedUrl, remove: fixture.remove }) } };
   return { isConfigured: true, sb: () => client };
 });
 vi.mock("../realtime", () => ({ useLiveSync: vi.fn() }));
-import { autoSaveDocument, fileBytes, downloadUrl, saveOutput, uploadUserFile, type SavedFile } from "../files";
+import { autoSaveDocument, deleteFile, fileBytes, downloadUrl, saveOutput, uploadUserFile, useFiles, type SavedFile } from "../files";
 
 beforeEach(() => {
   fixture.uid = "owner-a"; fixture.scope = "org-a:owner-a"; fixture.local = false;
   fixture.upload.mockReset().mockResolvedValue({ error: null });
   fixture.insert.mockReset().mockResolvedValue({ error: null });
   fixture.remove.mockReset().mockResolvedValue({ error: null });
+  fixture.deleteRow.mockReset().mockResolvedValue({ data: [{ id: "file-one" }], error: null });
+  fixture.lookup.mockReset().mockResolvedValue({ data: [], error: null });
   fixture.download.mockReset(); fixture.signedUrl.mockReset();
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 it.each(["account", "workspace", "storage mode"])("does not upload an earlier customer's generated document after a %s switch", async (change) => {
   const saved = await autoSaveDocument("private-invoice.pdf", "invoice", async () => {
@@ -81,4 +94,61 @@ it.each(["download bytes", "signed link"])("discards a private %s response after
   if (kind === "download bytes") fixture.download.mockImplementation(async () => { switchAccount(); return { data: new Blob(["private"]), error: null }; });
   else fixture.signedUrl.mockImplementation(async () => { switchAccount(); return { data: { signedUrl: "https://example.test/private?token=private" }, error: null }; });
   await expect(kind === "download bytes" ? fileBytes(file) : downloadUrl(file)).rejects.toThrow("workspace changed");
+});
+
+const selectedFile = { id: "file-one", name: "invoice.pdf", storagePath: "owner-a/file-one/invoice.pdf" } as SavedFile;
+it("preserves file bytes when deleting the metadata is denied", async () => {
+  fixture.deleteRow.mockResolvedValue({ error: new Error("Metadata denied") });
+  await expect(deleteFile(selectedFile)).rejects.toThrow("Metadata denied");
+  expect(fixture.remove).not.toHaveBeenCalled();
+});
+
+it.each([{ data: [] }, { data: null }, { data: [{ id: "another-file" }] }])("does not remove bytes when metadata deletion confirms no matching ID ($data)", async ({ data }) => {
+  fixture.deleteRow.mockResolvedValue({ data, error: null });
+  await expect(deleteFile(selectedFile)).rejects.toThrow("not found or access denied");
+  expect(fixture.lookup).not.toHaveBeenCalled();
+  expect(fixture.remove).not.toHaveBeenCalled();
+});
+
+it("deletes metadata before cleaning a dedicated object and reports cleanup failure honestly", async () => {
+  fixture.remove.mockResolvedValueOnce({ error: new Error("Storage denied") });
+  await expect(deleteFile(selectedFile)).rejects.toThrow("entry was removed, but its stored copy could not be deleted");
+  expect(fixture.deleteRow.mock.invocationCallOrder[0]).toBeLessThan(fixture.remove.mock.invocationCallOrder[0]);
+  expect(fixture.remove).toHaveBeenCalledWith([selectedFile.storagePath]);
+  fixture.deleteRow.mockResolvedValueOnce({ data: [], error: null });
+  await expect(deleteFile(selectedFile)).rejects.toThrow("not found or access denied");
+  expect(fixture.remove).toHaveBeenCalledTimes(1);
+});
+
+it("refreshes the visible file ledger after partial removal but still rejects failed byte cleanup", async () => {
+  let removed = false;
+  fixture.lookup.mockImplementation(async () => ({ data: removed ? [] : [{ id: selectedFile.id, name: selectedFile.name, storage_path: selectedFile.storagePath, mime: "application/pdf", size: 12, created_at: "2026-09-30" }], error: null }));
+  fixture.deleteRow.mockImplementation(async () => { removed = true; return { data: [{ id: selectedFile.id }], error: null }; });
+  fixture.remove.mockResolvedValueOnce({ error: new Error("Storage denied") });
+  const { result } = renderHook(() => useFiles());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.files).toHaveLength(1);
+  await act(async () => { await expect(result.current.remove(result.current.files[0])).rejects.toThrow("stored copy could not be deleted"); });
+  expect(result.current.files).toEqual([]);
+  expect(result.current.loading).toBe(false);
+});
+
+it("retains legacy content-addressed objects whose other references may be hidden by RLS", async () => {
+  await deleteFile({ ...selectedFile, storagePath: `owner-a/synced/${"a".repeat(64)}/invoice.pdf` });
+  expect(fixture.deleteRow).toHaveBeenCalledWith("id", selectedFile.id);
+  expect(fixture.lookup).not.toHaveBeenCalled();
+  expect(fixture.remove).not.toHaveBeenCalled();
+});
+
+it.each([true, false])("retains bytes if another reference exists or its lookup fails (reference exists: %s)", async exists => {
+  fixture.lookup.mockResolvedValue({ data: exists ? [{ id: "another-file" }] : null, error: exists ? null : new Error("Lookup denied") });
+  if (exists) await deleteFile(selectedFile);
+  else await expect(deleteFile(selectedFile)).rejects.toThrow("stored copy could not be checked");
+  expect(fixture.remove).not.toHaveBeenCalled();
+});
+
+it("does not clean a file in a new account when metadata deletion settles after switching", async () => {
+  fixture.deleteRow.mockImplementation(async () => { fixture.scope = "org-b:owner-b"; return { error: null }; });
+  await expect(deleteFile(selectedFile)).rejects.toThrow("workspace changed");
+  expect(fixture.remove).not.toHaveBeenCalled();
 });

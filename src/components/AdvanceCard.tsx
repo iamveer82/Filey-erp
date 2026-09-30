@@ -1,5 +1,5 @@
 import { DateField } from "./DatePicker";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Wallet, Plus, Trash2, Pencil } from "lucide-react";
 import { advances, crm, type Advance, type CrmCustomer } from "../lib/api";
 import { aed, errMsg, fmtDate, todayYmd } from "../lib/format";
@@ -7,20 +7,16 @@ import { useUI } from "../lib/ui";
 import { Modal, Field } from "./ui";
 import { SelectMenu } from "./ui-menu";
 
-/** Per-party advance/prepayment card. Shows the credit balance, lets the user
- *  record or remove advances, and (when `outstanding` is given) the net still
- *  due after the advance is applied. Used on customer + supplier detail pages. */
+/** Per-party advance/prepayment card. Shows AED credit and lets the user
+ *  record or remove advances. The party statement owns the account balance. */
 export default function AdvanceCard({
   partyType,
   partyId,
   partyName,
-  outstanding,
 }: {
   partyType: "customer" | "supplier";
   partyId: number;
   partyName: string;
-  /** Gross amount owed; when provided a "net after advance" line is shown. */
-  outstanding?: number;
 }) {
   const { toast, confirm } = useUI();
   const [rows, setRows] = useState<Advance[]>([]);
@@ -30,28 +26,48 @@ export default function AdvanceCard({
   const [note, setNote] = useState("");
   const [date, setDate] = useState(() => todayYmd());
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadedParty, setLoadedParty] = useState("");
+  const request = useRef(0);
+  const partyGeneration = useRef(0);
+  const mounted = useRef(false);
+  const partyKey = `${partyType}:${partyId}`;
+  const currentParty = useRef(partyKey);
+  currentParty.current = partyKey;
+  const stopRequests = useCallback(() => { mounted.current = false; request.current++; partyGeneration.current++; }, []);
 
   // A failed read left rows empty, so the advance total read as zero and the
-  // "net after advance" line showed the party owing the FULL amount despite
-  // having paid. Money on screen must not be a guess.
+  // party appeared to have no credit despite having paid. Money on screen must
+  // not be a guess.
   const [loadErr, setLoadErr] = useState("");
-  const load = () =>
-    advances
-      .forParty(partyType, partyId)
-      .then((r) => {
-        setRows(r);
-        setLoadErr("");
-      })
-      .catch((e) => setLoadErr(errMsg(e)));
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const load = useCallback(async () => {
+    const version = ++request.current;
+    setLoading(true);
+    setLoadErr("");
+    setRows([]);
+    try {
+      const next = await advances.forParty(partyType, partyId);
+      if (!mounted.current || version !== request.current) return;
+      setRows(next);
+      setLoadedParty(`${partyType}:${partyId}`);
+    } catch (error) {
+      if (mounted.current && version === request.current) setLoadErr(errMsg(error));
+    } finally {
+      if (mounted.current && version === request.current) setLoading(false);
+    }
   }, [partyType, partyId]);
+  useEffect(() => {
+    mounted.current = true;
+    setOpen(false);
+    setEditing(null);
+    setSaving(false);
+    void load();
+    return stopRequests;
+  }, [load, stopRequests]);
+  const ready = !loading && !loadErr && loadedParty === partyKey;
+  const isCurrentParty = (generation: number) => mounted.current && currentParty.current === partyKey && partyGeneration.current === generation;
 
   const total = rows.reduce((s, a) => s + Number(a.amount), 0);
-  // Suppress the net line when advances failed to load — it would be wrong.
-  const net =
-    outstanding != null && !loadErr ? Math.max(0, outstanding - total) : undefined;
   const label = partyType === "customer" ? "Advance received" : "Advance paid";
 
   const openAdd = () => {
@@ -71,8 +87,10 @@ export default function AdvanceCard({
   };
 
   const save = async () => {
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
+    const generation = partyGeneration.current;
+    if (saving || !ready || !isCurrentParty(generation)) return;
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
       toast.error("Enter a valid amount.");
       return;
     }
@@ -80,6 +98,7 @@ export default function AdvanceCard({
     try {
       if (editing) {
         await advances.update(editing.id, { amount: amt, note: note || undefined, paid_at: date });
+        if (!isCurrentParty(generation)) return;
         toast.success("Advance updated.");
       } else {
         await advances.add({
@@ -90,30 +109,32 @@ export default function AdvanceCard({
           note: note || undefined,
           paid_at: date,
         });
+        if (!isCurrentParty(generation)) return;
         toast.success("Advance recorded.");
       }
       setOpen(false);
-      load();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to save advance.");
+      await load();
+    } catch (error) {
+      if (isCurrentParty(generation)) toast.error(errMsg(error));
     } finally {
-      setSaving(false);
+      if (isCurrentParty(generation)) setSaving(false);
     }
   };
 
   const remove = async (a: Advance) => {
+    const generation = partyGeneration.current;
     const ok = await confirm({
       title: "Remove advance",
       message: `Remove the ${aed(a.amount)} advance? This cannot be undone.`,
       confirmLabel: "Remove",
       danger: true,
     });
-    if (!ok) return;
+    if (!ok || !isCurrentParty(generation)) return;
     try {
       await advances.remove(a.id);
-      load();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to remove.");
+      if (isCurrentParty(generation)) await load();
+    } catch (error) {
+      if (isCurrentParty(generation)) toast.error(errMsg(error));
     }
   };
 
@@ -127,16 +148,19 @@ export default function AdvanceCard({
         <button
           className="btn-ghost text-xs !py-1 !px-2.5"
           onClick={openAdd}
+          disabled={!ready || saving}
         >
           <Plus size={13} /> Add
         </button>
       </div>
 
-      {loadErr ? (
-        <p className="text-sm text-danger">
-          Could not load advances, so no credit balance is shown here - it would
-          read as zero and overstate what is owed. ({loadErr})
-        </p>
+      {loading || (!loadErr && !ready) ? (
+        <p role="status" className="text-sm text-muted-foreground">Loading advances…</p>
+      ) : loadErr ? (
+        <div role="alert" className="space-y-2 text-sm">
+          <p className="text-danger">Could not load advances. Retry before using this credit balance. ({loadErr})</p>
+          <button className="btn-secondary" onClick={() => void load()}>Retry advances</button>
+        </div>
       ) : (
         <div className="flex items-baseline gap-2">
           <span className="text-2xl font-semibold text-ink">{aed(total)}</span>
@@ -148,15 +172,7 @@ export default function AdvanceCard({
           </span>
         </div>
       )}
-      {net != null && (
-        <p className="text-xs text-brand-500 mt-1">
-          Net {partyType === "customer" ? "due from customer" : "payable"}:{" "}
-          <span className="font-medium text-ink">{aed(net)}</span>
-          {total > 0 && <span className="text-brand-400"> (after advance)</span>}
-        </p>
-      )}
-
-      {rows.length > 0 ? (
+      {ready && (rows.length > 0 ? (
         <ul className="divide-y divide-brand-100 border-t border-brand-100 mt-3">
           {rows.map((a) => (
             <li
@@ -191,7 +207,7 @@ export default function AdvanceCard({
         </ul>
       ) : (
         <p className="text-xs text-brand-400 mt-3">No advances recorded yet.</p>
-      )}
+      ))}
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit advance" : label}>
         <div className="space-y-3">
@@ -225,7 +241,7 @@ export default function AdvanceCard({
             <button className="btn-ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
-            <button className="btn-primary" disabled={saving} onClick={save}>
+            <button className="btn-primary" disabled={saving || !ready} onClick={save}>
               {saving ? "Saving…" : editing ? "Update advance" : "Save advance"}
             </button>
           </div>
@@ -250,16 +266,34 @@ export function CustomerAdvancesPanel() {
   const [note, setNote] = useState("");
   const [date, setDate] = useState(() => todayYmd());
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
+  const request = useRef(0);
+  const mounted = useRef(false);
+  const stopRequests = useCallback(() => { mounted.current = false; request.current++; }, []);
 
-  const load = () =>
-    advances
-      .list()
-      .then((all) => setRows(all.filter((a) => a.party_type === "customer")))
-      .catch(() => {});
-  useEffect(() => {
-    load();
-    crm.customers().then(setCustomers).catch(() => {});
+  const load = useCallback(async () => {
+    const version = ++request.current;
+    setLoading(true);
+    setLoadErr("");
+    setRows([]);
+    try {
+      const [all, nextCustomers] = await Promise.all([advances.list(), crm.customers()]);
+      if (!mounted.current || version !== request.current) return;
+      setRows(all.filter((a) => a.party_type === "customer"));
+      setCustomers(nextCustomers);
+    } catch (error) {
+      if (mounted.current && version === request.current) setLoadErr(errMsg(error));
+    } finally {
+      if (mounted.current && version === request.current) setLoading(false);
+    }
   }, []);
+  useEffect(() => {
+    mounted.current = true;
+    void load();
+    return stopRequests;
+  }, [load, stopRequests]);
+  const ready = !loading && !loadErr;
 
   const byParty = new Map<number, { name: string; total: number }>();
   for (const a of rows) {
@@ -292,8 +326,9 @@ export function CustomerAdvancesPanel() {
   };
 
   const save = async () => {
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
+    if (saving || !ready || !mounted.current) return;
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
       toast.error("Enter a valid amount.");
       return;
     }
@@ -301,6 +336,7 @@ export function CustomerAdvancesPanel() {
     try {
       if (editing) {
         await advances.update(editing.id, { amount: amt, note: note || undefined, paid_at: date });
+        if (!mounted.current) return;
         toast.success("Advance updated.");
       } else {
         const c = customers.find((x) => String(x.id) === custId);
@@ -317,14 +353,15 @@ export function CustomerAdvancesPanel() {
           note: note || undefined,
           paid_at: date,
         });
+        if (!mounted.current) return;
         toast.success("Advance recorded.");
       }
       setOpen(false);
-      load();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to save advance.");
+      await load();
+    } catch (error) {
+      if (mounted.current) toast.error(errMsg(error));
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
 
@@ -335,12 +372,12 @@ export function CustomerAdvancesPanel() {
       confirmLabel: "Remove",
       danger: true,
     });
-    if (!ok) return;
+    if (!ok || !mounted.current) return;
     try {
       await advances.remove(a.id);
-      load();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to remove.");
+      if (mounted.current) await load();
+    } catch (error) {
+      if (mounted.current) toast.error(errMsg(error));
     }
   };
 
@@ -350,18 +387,26 @@ export function CustomerAdvancesPanel() {
         <div className="flex items-center gap-2">
           <Wallet size={16} className="text-brand-400" />
           <h2 className="text-sm font-medium text-ink">Customer advances</h2>
-          {total > 0 && (
+          {ready && total > 0 && (
             <span className="text-sm font-semibold text-ink">· {aed(total)}</span>
           )}
         </div>
         <button
           className="btn-ghost text-xs !py-1 !px-2.5"
           onClick={openAdd}
+          disabled={!ready || saving}
         >
           <Plus size={13} /> Add advance
         </button>
       </div>
-      {list.length > 0 ? (
+      {loading ? (
+        <p role="status" className="text-sm text-muted-foreground">Loading advances…</p>
+      ) : loadErr ? (
+        <div role="alert" className="space-y-2 text-sm">
+          <p className="text-danger">Could not load customer advances. ({loadErr})</p>
+          <button className="btn-secondary" onClick={() => void load()}>Retry advances</button>
+        </div>
+      ) : list.length > 0 ? (
         <div className="space-y-1">
           {list.map((p) => {
             const partyRows = rows
@@ -475,7 +520,7 @@ export function CustomerAdvancesPanel() {
             <button className="btn-ghost" onClick={() => setOpen(false)}>
               Cancel
             </button>
-            <button className="btn-primary" disabled={saving} onClick={save}>
+            <button className="btn-primary" disabled={saving || !ready} onClick={save}>
               {saving ? "Saving…" : editing ? "Update advance" : "Save advance"}
             </button>
           </div>

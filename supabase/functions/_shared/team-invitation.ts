@@ -1,3 +1,5 @@
+import { acceptedEmailId } from "./email-delivery.ts";
+
 export interface TeamInvitation {
   id: string;
   email: string;
@@ -52,6 +54,11 @@ export async function sendInvitation(
         status: response.status >= 500 || response.status === 409 ? "unknown" : "failed",
         error:
           "The email provider could not confirm this invitation. Retry from Pending invitations.",
+      };
+    if (!acceptedEmailId(await response.json().catch(() => null)))
+      return {
+        status: "unknown",
+        error: "Email acceptance could not be confirmed. Retry from Pending invitations.",
       };
     return { status: "accepted", error: null };
   } catch {

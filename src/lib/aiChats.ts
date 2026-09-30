@@ -1,7 +1,7 @@
 /* Local store for the copilot's chat sessions. Each session keeps its own
  * rolling memory (last TURN_CAP turns). Persisted in this browser only. */
 
-import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+import { agentStorageScope, readAgentStorage, requireAgentStorageScope, writeAgentStorage } from "./agentStorage";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -36,6 +36,26 @@ export const TURN_CAP = 30;
  *  persisting — newest wins now, and history stays readable. */
 export const MAX_CHATS = 50;
 
+// Browser output cannot be persisted, but switching chats in this page should
+// not discard it. Keep only the live URLs in memory, with their owning scope
+// and exact message, and release them when history no longer references them.
+type LiveTurn = { index: number; role: ChatTurn["role"]; text: string; files: NonNullable<ChatTurn["files"]> };
+let liveScope: string | null = null;
+let liveFiles = new Map<string, LiveTurn[]>();
+function liveUrls(files: Map<string, LiveTurn[]>): Set<string> {
+  return new Set([...files.values()].flatMap(turns => turns.flatMap(turn => turn.files.flatMap(file => file.url ? [file.url] : []))));
+}
+function replaceLiveFiles(next: Map<string, LiveTurn[]>): void {
+  const retained = liveUrls(next);
+  for (const url of liveUrls(liveFiles)) if (!retained.has(url)) URL.revokeObjectURL?.(url);
+  liveFiles = next;
+}
+function syncLiveScope(scope = agentStorageScope()): void {
+  if (scope === liveScope) return;
+  replaceLiveFiles(new Map());
+  liveScope = scope;
+}
+
 function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
@@ -54,8 +74,15 @@ export function newChat(): Chat {
 
 export function loadChats(): Chat[] {
   try {
+    syncLiveScope();
     const raw = readAgentStorage(CHATS_KEY);
-    if (raw) return JSON.parse(raw) as Chat[];
+    if (raw) return (JSON.parse(raw) as Chat[]).map(chat => ({
+      ...chat,
+      turns: chat.turns.map((turn, index) => {
+        const live = liveFiles.get(chat.id)?.find(saved => saved.index === index && saved.role === turn.role && saved.text === turn.text);
+        return live ? { ...turn, files: [...(turn.files ?? []), ...live.files] } : turn;
+      }),
+    }));
     return [];
   } catch {
     console.error("Failed to load chats from localStorage");
@@ -70,10 +97,14 @@ let saveFailed = false;
  *  stop saving with nothing but a console line. */
 export function saveChats(chats: Chat[], expectedScope?: string): boolean {
   try {
+    const scope = requireAgentStorageScope(expectedScope);
+    syncLiveScope(scope);
+    // Bound live files and persisted sessions in the same order.
+    const bounded = [...chats].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CHATS);
     // A blob URL dies with the page that made it, so persisting one leaves a
     // download chip that silently does nothing tomorrow. Paths survive; URLs
     // are dropped on the way to disk and simply aren't offered after a reload.
-    const clean = chats.map((c) => ({
+    const clean = bounded.map((c) => ({
       ...c,
       turns: c.turns.map((t) => ({
         role: t.role,
@@ -101,11 +132,16 @@ export function saveChats(chats: Chat[], expectedScope?: string): boolean {
           : {}),
       })),
     }));
-    // Newest sessions win when over the cap.
-    const bounded = [...clean]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, MAX_CHATS);
-    writeAgentStorage(CHATS_KEY, JSON.stringify(bounded), expectedScope);
+    writeAgentStorage(CHATS_KEY, JSON.stringify(clean), scope);
+    const next = new Map<string, LiveTurn[]>();
+    for (const chat of bounded) {
+      const turns = chat.turns.flatMap((turn, index) => {
+        const files = turn.files?.filter(file => file.url?.startsWith("blob:")).map(file => ({ ...file })) ?? [];
+        return files.length ? [{ index, role: turn.role, text: turn.text, files }] : [];
+      });
+      if (turns.length) next.set(chat.id, turns);
+    }
+    replaceLiveFiles(next);
     saveFailed = false;
     return true;
   } catch (e) {

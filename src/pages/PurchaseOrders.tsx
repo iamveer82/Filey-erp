@@ -414,7 +414,7 @@ export default function PurchaseOrders() {
         toast.success(`Purchase order emailed to ${email}`);
         return;
       }
-      shareVia(kind, {
+      await shareVia(kind, {
         phone,
         email,
         text,

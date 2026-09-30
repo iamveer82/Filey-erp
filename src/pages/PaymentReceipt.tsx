@@ -502,13 +502,15 @@ export default function PaymentReceipt() {
       }
       return;
     }
-    shareVia(kind, {
-      phone: cust?.phone || "",
-      email: cust?.email || "",
-      text,
-      url,
-    });
-    if (kind === "copyLink") toast.success("Public receipt link copied");
+    try {
+      await shareVia(kind, {
+        phone: cust?.phone || "",
+        email: cust?.email || "",
+        text,
+        url,
+      });
+      if (kind === "copyLink") toast.success("Public receipt link copied");
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   const duplicateRow = async (id: number) => {

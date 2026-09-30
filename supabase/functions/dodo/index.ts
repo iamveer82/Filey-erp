@@ -159,6 +159,7 @@ Deno.serve(async (req) => {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
       if (!PRODUCT_FREEDOM) return json({ error: "Freedom product not configured" }, 503);
       const already = await licenseStatus(supa, user.id);
+      if (already.status !== 200) return reply(already);
       if (already.body.licensed)
         return json({ error: "This account already owns Ultra." }, 409);
 
@@ -186,6 +187,7 @@ Deno.serve(async (req) => {
       if (org.plan !== "free" && ["active", "trialing", "past_due"].includes(org.plan_status))
         return json({ error: "This workspace already has a paid plan. Use Manage billing." }, 409);
       const owned = await licenseStatus(supa, String(org.owner_id));
+      if (owned.status !== 200) return reply(owned);
       if (owned.body.licensed)
         return json({ error: "This workspace already includes cloud access through Ultra." }, 409);
 
@@ -271,11 +273,12 @@ async function parkOrGrant(
   email: string,
   refs: { payment_id?: string; subscription_id?: string; customer_id?: string }
 ): Promise<string> {
-  const { data: user } = await supa
+  const { data: user, error: lookupError } = await supa
     .from("filey_users_by_email")
     .select("id")
     .eq("email", email.toLowerCase())
     .maybeSingle();
+  if (lookupError) throw new Error("Buyer account lookup unavailable");
 
   if (user?.id && kind === "freedom" && refs.payment_id) {
     const outcome = await grantLicense(supa, String(user.id), refs.payment_id);

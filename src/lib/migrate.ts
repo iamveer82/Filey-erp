@@ -5,7 +5,6 @@
 // shows the imported data. File bytes from the "files" bucket are pulled down
 // and stored as base64 blobs so My Files works offline too.
 
-import { invoke } from "@tauri-apps/api/core";
 import { supabase } from "./supabase";
 import { normalizeEmirate } from "./einvoice";
 import { PUSH_TABLES } from "./syncTables";
@@ -13,18 +12,16 @@ import { prepareSyncRows, pushCollection, pullPaged, pullManifest, pullIncrement
 import {
   loadColl,
   replaceWorkspaceSnapshot,
-  clearLocalCache,
   journalSnapshot,
   journalCommit,
   journalVersion,
   journalMark,
+  withLocalTransaction,
 } from "./localdb";
 
 import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
 import { pendingProfile, syncProfile } from "./profileSync";
 import { assertWorkspaceCurrent } from "./dataMode";
-
-const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
 // profiles, invitations…) is harmless — the local shim just stores them.
@@ -37,16 +34,6 @@ const TABLES = [
   "tool_jobs",
 ];
 
-async function localSet(key: string, value: string): Promise<void> {
-  if (hasTauri) await invoke("cache_set", { key, value });
-  else localStorage.setItem(key, value);
-}
-
-async function localGet(key: string): Promise<string | null> {
-  if (hasTauri) return (await invoke<string | null>("cache_get", { key })) ?? null;
-  return localStorage.getItem(key);
-}
-
 // Local store has no SQL migration path; this is the on-device equivalent of
 // supabase/2026-06-25-emirate-code-remap.sql.
 const EMIRATE_FIELDS: [string, string[]][] = [
@@ -58,36 +45,29 @@ const EMIRATE_FIELDS: [string, string[]][] = [
 /** Rewrite legacy ISO 3166-2 "AE-xx" emirate codes to the PINT-AE 3-letter codes
  *  across the local store. Idempotent. Returns the number of fields updated. */
 export async function normalizeLocalEmirates(): Promise<number> {
-  let changed = 0;
-  for (const [coll, fields] of EMIRATE_FIELDS) {
-    const raw = await localGet("localdb:" + coll);
-    if (!raw) continue;
-    let rows: any[];
-    try {
-      rows = JSON.parse(raw);
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(rows)) continue;
-    let dirty = false;
-    for (const r of rows) {
-      for (const f of fields) {
-        const v = r?.[f];
-        const n = normalizeEmirate(v);
-        if (v && n !== v) {
-          r[f] = n;
-          dirty = true;
-          changed++;
+  return withLocalTransaction(async client => {
+    let changed = 0;
+    for (const [coll, fields] of EMIRATE_FIELDS) {
+      const { data: rows, error } = await client.from(coll).select("*");
+      if (error) throw error;
+      for (const row of rows) {
+        const patch: Record<string, string> = {};
+        for (const field of fields) {
+          const value = row?.[field];
+          const normalized = normalizeEmirate(value);
+          if (value && normalized !== value) {
+            patch[field] = normalized;
+            changed++;
+          }
         }
+        if (!Object.keys(patch).length) continue;
+        if (row.id == null) throw new Error("A saved record is missing its ID. Repair its data before updating emirate codes.");
+        const { error: saveError } = await client.from(coll).update(patch).eq("id", row.id);
+        if (saveError) throw saveError;
       }
     }
-    if (dirty) await localSet("localdb:" + coll, JSON.stringify(rows));
-  }
-  // Written straight to the key, so anything already holding a parsed copy of
-  // these collections is now behind. Cheaper than routing a one-off repair
-  // through the query layer.
-  if (changed) clearLocalCache();
-  return changed;
+    return changed;
+  });
 }
 
 export interface MigrateResult {

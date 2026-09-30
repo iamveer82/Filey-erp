@@ -40,7 +40,7 @@ import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd } from "../lib/format";
+import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -177,11 +177,13 @@ export default function Inventory() {
     }
   };
 
-  const shareProduct = (kind: ShareKind, p: Product) => {
+  const shareProduct = async (kind: ShareKind, p: Product) => {
     const url = `${location.origin}${location.pathname}#/inventory`;
     const text = `${p.name} (${p.sku}) - In stock: ${p.quantity}, Unit price: ${aed(p.unit_price)}`;
-    shareVia(kind, { text, url });
-    if (kind === "copyLink") toast.success("Inventory link copied");
+    try {
+      await shareVia(kind, { text, url });
+      if (kind === "copyLink") toast.success("Inventory link copied");
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   const load = () => {

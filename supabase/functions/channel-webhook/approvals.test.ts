@@ -215,7 +215,7 @@ Deno.test("a code with no live matching row answers 'expired or already run'", a
 
 Deno.test("connect_channel approval scrubs parked credentials from the row", async () => {
   const origFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true, result: {message_id: 1}, ts: "1.0" }), { status: 200 }));
   try {
     const f = fakeClient({
       id: "pa-2",

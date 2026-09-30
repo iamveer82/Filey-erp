@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Plus, FileCheck2 } from "lucide-react";
 import { useUI } from "../lib/ui";
 import { nextLocalId } from "../lib/recordId";
-import { aed, fmtDate, money, numInput, plural, CURRENCIES } from "../lib/format";
+import { aed, fmtDate, money, numInput, plural, CURRENCIES, errMsg } from "../lib/format";
 import { bankFieldsFor } from "../lib/bankFields";
 import { companyCountry, companyCountryCurrency } from "../lib/companyCountry";
 import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
@@ -158,7 +158,7 @@ export default function BankAccounts() {
 
   // Bank details are meant to be shared (customers pay into these accounts);
   // shareVia just opens the channel with the details prefilled.
-  const shareAccount = (kind: ShareKind, a: BankAccount) => {
+  const shareAccount = async (kind: ShareKind, a: BankAccount) => {
     const text = [
       `Bank details - ${a.bank_name}`,
       `Account: ${a.account_name}`,
@@ -171,7 +171,8 @@ export default function BankAccounts() {
     ]
       .filter(Boolean)
       .join("\n");
-    shareVia(kind, { text, url: `Bank details - ${a.bank_name}` });
+    try { await shareVia(kind, { text, url: `Bank details - ${a.bank_name}` }); }
+    catch (e) { toast.error(errMsg(e)); }
   };
 
   const q = search.trim().toLowerCase();

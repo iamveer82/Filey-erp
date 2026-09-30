@@ -20,7 +20,7 @@ export interface StatementLine {
   description: string;
   /** Billed amount (sales invoice / purchase order). */
   debit: number;
-  /** Settled amount (payment / receipt / advance deposit). */
+  /** Ledger credit (credit note / payment / receipt / advance deposit). */
   credit: number;
   /** Running balance after this line (+ = owed, − = in advance/credit). */
   balance: number;
@@ -28,9 +28,9 @@ export interface StatementLine {
   sl?: number;
   /** True on the brought-forward opening row. */
   opening?: boolean;
-  /** Net amount (debit excluding VAT) — only on doc lines with VAT. */
+  /** Exact signed document net; absent when saved-line inputs are unavailable. */
   net?: number;
-  /** VAT amount — only on doc lines where tax_rate > 0. */
+  /** Exact signed document tax, including zero-rated lines and credit notes. */
   vat?: number;
 }
 
@@ -59,10 +59,9 @@ export interface StatementData {
   totalDebit: number;
   totalCredit: number;
   closingBalance: number;
-  /** Total VAT across all doc lines (0 when no VAT applies). */
-  totalVat: number;
-  /** Total net (debit excluding VAT) across all doc lines. */
-  totalNet: number;
+  /** Exact signed document totals; null when any document lacks its breakdown. */
+  totalVat: number | null;
+  totalNet: number | null;
   generatedOn: string;
   lines: StatementLine[];
 }
@@ -146,7 +145,10 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
   const lines = page ? page.lines : data.lines;
   const first = !page || page.page === 1;
   const last = !page || page.last;
-  const vat = data.totalVat > 0;
+  const vat = data.totalVat !== null && data.totalNet !== null && data.totalVat !== 0;
+  // Tax columns already include signed credit notes in the document gross.
+  // Count only settlements here so a note is not deducted a second time.
+  const payments = data.lines.reduce((sum, line) => sum + (line.net === undefined ? line.credit : 0), 0);
   return (
     <div
       className="bg-white text-neutral-900 p-6 text-[9.5px] leading-snug font-sans"
@@ -215,7 +217,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
             {vat && (
               <th className="px-1.5 py-1 text-right w-16">Total</th>
             )}
-            <th className="px-1.5 py-1 text-right w-16">{L.creditCol}</th>
+            <th className="px-1.5 py-1 text-right w-16">{vat ? "Payments" : L.creditCol}</th>
             <th className="px-1.5 py-1 text-right w-16">Balance</th>
           </tr>
         </thead>
@@ -229,13 +231,13 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
               {vat ? (
                 <>
                   <td className="px-1.5 py-0.5 text-right">
-                    {t.debit ? two(t.net ?? t.debit) : "—"}
+                    {t.net !== undefined ? two(t.net) : "—"}
                   </td>
                   <td className="px-1.5 py-0.5 text-right">
-                    {t.debit ? two(t.vat ?? 0) : "—"}
+                    {t.vat !== undefined ? two(t.vat) : "—"}
                   </td>
                   <td className="px-1.5 py-0.5 text-right">
-                    {t.debit ? two(t.debit) : "—"}
+                    {t.net !== undefined ? two(t.debit - t.credit) : "—"}
                   </td>
                 </>
               ) : (
@@ -243,7 +245,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
                   {t.debit ? two(t.debit) : "-"}
                 </td>
               )}
-              <td className="px-1.5 py-0.5 text-right">{t.credit ? two(t.credit) : "-"}</td>
+              <td className="px-1.5 py-0.5 text-right">{vat && t.net !== undefined ? "—" : t.credit ? two(t.credit) : "-"}</td>
               <td className="px-1.5 py-0.5 text-right">{two(t.balance)}</td>
             </tr>
           ))}
@@ -255,13 +257,13 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
               {vat ? (
                 <>
                   <td className="px-1.5 py-1.5 text-right">
-                    {two(data.totalNet)}
+                    {two(data.totalNet!)}
                   </td>
                   <td className="px-1.5 py-1.5 text-right">
-                    {two(data.totalVat)}
+                    {two(data.totalVat!)}
                   </td>
                   <td className="px-1.5 py-1.5 text-right">
-                    {two(data.totalDebit)}
+                    {two(data.totalNet! + data.totalVat!)}
                   </td>
                 </>
               ) : (
@@ -269,7 +271,7 @@ export function CompactJournalTemplate({ data, page }: StatementTemplateProps) {
                   {two(data.totalDebit)}
                 </td>
               )}
-              <td className="px-1.5 py-1.5 text-right">{two(data.totalCredit)}</td>
+              <td className="px-1.5 py-1.5 text-right">{two(vat ? payments : data.totalCredit)}</td>
               <td className="px-1.5 py-1.5 text-right">{two(data.closingBalance)}</td>
             </tr>
           )}
@@ -347,10 +349,10 @@ export function ExecutiveSummaryTemplate({ data }: StatementTemplateProps) {
         </div>
       </div>
 
-      <div className={`grid ${data.totalVat > 0 ? "grid-cols-4" : "grid-cols-3"} gap-3`}>
+      <div className={`grid ${data.totalVat !== null && data.totalVat !== 0 ? "grid-cols-4" : "grid-cols-3"} gap-3`}>
         <ExKpi label={L.debitTotal} value={m(data.totalDebit)} />
         <ExKpi label={L.creditTotal} value={m(data.totalCredit)} />
-        {data.totalVat > 0 && <ExKpi label={L.vatLabel} value={m(data.totalVat)} />}
+        {data.totalVat !== null && data.totalVat !== 0 && <ExKpi label={L.vatLabel} value={m(data.totalVat)} />}
         <ExKpi
           label={L.balance}
           value={m(data.closingBalance)}
@@ -464,7 +466,8 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
   const first = !page || page.page === 1;
   const last = !page || page.last;
   const tone = closingTone(data.closingBalance);
-  const vat = data.totalVat > 0;
+  const vat = data.totalVat !== null && data.totalNet !== null && data.totalVat !== 0;
+  const payments = data.lines.reduce((sum, line) => sum + (line.net === undefined ? line.credit : 0), 0);
   return (
     <div
       className="bg-white text-neutral-900 p-6 text-[10.5px] leading-snug font-sans"
@@ -542,7 +545,7 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
             {vat && (
               <th className="py-1.5 font-semibold text-right w-20">Total</th>
             )}
-            <th className="py-1.5 font-semibold text-right w-20">Credit</th>
+            <th className="py-1.5 font-semibold text-right w-20">{vat ? "Payments" : "Credit"}</th>
             <th className="py-1.5 font-semibold text-right w-24">Balance</th>
           </tr>
         </thead>
@@ -555,13 +558,13 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
               {vat ? (
                 <>
                   <td className="py-1.5 text-right">
-                    {t.debit ? two(t.net ?? t.debit) : "—"}
+                    {t.net !== undefined ? two(t.net) : "—"}
                   </td>
                   <td className="py-1.5 text-right">
-                    {t.debit ? two(t.vat ?? 0) : "—"}
+                    {t.vat !== undefined ? two(t.vat) : "—"}
                   </td>
                   <td className="py-1.5 text-right">
-                    {t.debit ? two(t.debit) : "—"}
+                    {t.net !== undefined ? two(t.debit - t.credit) : "—"}
                   </td>
                 </>
               ) : (
@@ -569,7 +572,7 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
                   {t.debit ? two(t.debit) : "—"}
                 </td>
               )}
-              <td className="py-1.5 text-right">{t.credit ? two(t.credit) : "—"}</td>
+              <td className="py-1.5 text-right">{vat && t.net !== undefined ? "—" : t.credit ? two(t.credit) : "—"}</td>
               <td
                 className={`py-1.5 text-right font-medium ${
                   t.balance < -0.005 ? "text-red-600" : ""
@@ -586,14 +589,14 @@ export function DetailedLedgerTemplate({ data, page }: StatementTemplateProps) {
               </td>
               {vat ? (
                 <>
-                  <td className="py-2 text-right">{two(data.totalNet)}</td>
-                  <td className="py-2 text-right">{two(data.totalVat)}</td>
-                  <td className="py-2 text-right">{two(data.totalDebit)}</td>
+                  <td className="py-2 text-right">{two(data.totalNet!)}</td>
+                  <td className="py-2 text-right">{two(data.totalVat!)}</td>
+                  <td className="py-2 text-right">{two(data.totalNet! + data.totalVat!)}</td>
                 </>
               ) : (
                 <td className="py-2 text-right">{two(data.totalDebit)}</td>
               )}
-              <td className="py-2 text-right">{two(data.totalCredit)}</td>
+              <td className="py-2 text-right">{two(vat ? payments : data.totalCredit)}</td>
               <td
                 className={`py-2 text-right ${
                   tone === "red"
@@ -674,10 +677,10 @@ export function ModernStatementTemplate({ data, page }: StatementTemplateProps) 
       )}
 
       {first && (
-        <div className={`px-8 grid ${data.totalVat > 0 ? "grid-cols-4" : "grid-cols-3"} gap-3 mt-2`}>
+        <div className={`px-8 grid ${data.totalVat !== null && data.totalVat !== 0 ? "grid-cols-4" : "grid-cols-3"} gap-3 mt-2`}>
           <MdCard label={L.debitTotal} value={m(data.totalDebit)} tone="neutral" />
           <MdCard label={L.creditTotal} value={m(data.totalCredit)} tone="blue" />
-          {data.totalVat > 0 && <MdCard label={L.vatLabel} value={m(data.totalVat)} tone="blue" />}
+          {data.totalVat !== null && data.totalVat !== 0 && <MdCard label={L.vatLabel} value={m(data.totalVat)} tone="blue" />}
           <MdCard
             label={L.balance}
             value={m(data.closingBalance)}
@@ -806,10 +809,10 @@ export function ElegantStatementTemplate({ data, page }: StatementTemplateProps)
             </div>
           </div>
 
-          <div className={`grid ${data.totalVat > 0 ? "grid-cols-4" : "grid-cols-3"} gap-3 my-4`}>
+          <div className={`grid ${data.totalVat !== null && data.totalVat !== 0 ? "grid-cols-4" : "grid-cols-3"} gap-3 my-4`}>
             <ElKpi label={L.debitTotal} value={m(data.totalDebit)} />
             <ElKpi label={L.creditTotal} value={m(data.totalCredit)} />
-            {data.totalVat > 0 && <ElKpi label={L.vatLabel} value={m(data.totalVat)} />}
+            {data.totalVat !== null && data.totalVat !== 0 && <ElKpi label={L.vatLabel} value={m(data.totalVat)} />}
             <ElKpi
               label={L.balance}
               value={m(data.closingBalance)}
@@ -973,10 +976,10 @@ export function CorporateStatementTemplate({ data, page }: StatementTemplateProp
       )}
 
       {first && (
-        <div className={`px-8 grid ${data.totalVat > 0 ? "grid-cols-4" : "grid-cols-3"} gap-2`}>
+        <div className={`px-8 grid ${data.totalVat !== null && data.totalVat !== 0 ? "grid-cols-4" : "grid-cols-3"} gap-2`}>
           <CoKpi label={L.debitTotal} value={m(data.totalDebit)} />
           <CoKpi label={L.creditTotal} value={m(data.totalCredit)} />
-          {data.totalVat > 0 && <CoKpi label={L.vatLabel} value={m(data.totalVat)} />}
+          {data.totalVat !== null && data.totalVat !== 0 && <CoKpi label={L.vatLabel} value={m(data.totalVat)} />}
           <CoKpi
             label={L.balance}
             value={m(data.closingBalance)}

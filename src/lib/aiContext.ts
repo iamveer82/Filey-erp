@@ -1,5 +1,6 @@
 import { crm, billing, erp, quotes } from "./api";
-import { money, getDisplayCurrency, todayYmd } from "./format";
+import { aed, money, getDisplayCurrency, todayYmd } from "./format";
+import { agentStorageScope } from "./agentStorage";
 
 /* Builds a compact, token-aware snapshot of the signed-in user's OWN business
  * data, injected into the copilot's system prompt so it can answer questions
@@ -25,11 +26,19 @@ let cached: { at: number; key: string; text: string } | null = null;
 const CACHE_MS = 60_000;
 
 export async function buildAiContext(companyName?: string): Promise<string> {
-  const key = companyName ?? "";
+  const scope = agentStorageScope();
+  if (!scope) return "CURRENT BUSINESS DATA: unavailable until the user signs in to their workspace.";
+  const currency = getDisplayCurrency();
+  const current = () => {
+    if (scope !== agentStorageScope() || currency !== getDisplayCurrency())
+      throw new DOMException("Workspace changed before preparing the business brief.", "AbortError");
+  };
+  const key = JSON.stringify([scope, currency, companyName ?? ""]);
   if (cached && cached.key === key && Date.now() - cached.at < CACHE_MS) {
     return cached.text;
   }
-  const text = await composeContext(companyName);
+  const text = await composeContext(companyName, currency, current);
+  current();
   cached = { at: Date.now(), key, text };
   return text;
 }
@@ -39,7 +48,7 @@ export function clearAiContextCache(): void {
   cached = null;
 }
 
-async function composeContext(companyName?: string): Promise<string> {
+async function composeContext(companyName: string | undefined, ccy: string, current: () => void): Promise<string> {
   const unreadable: string[] = [];
   const section = (label: string, p: Promise<unknown[]>): Promise<Row[]> =>
     p
@@ -56,12 +65,13 @@ async function composeContext(companyName?: string): Promise<string> {
     section("quotations", quotes.listDocs()),
     section("orders", erp.orders()),
   ]);
+  current();
   // Identity is worth its handful of tokens: without the VAT rate and currency
   // the agent guesses them, and a guessed tax rate on a tax invoice is the
   // expensive kind of wrong.
   const company = await billing.getCompany().catch(() => null);
+  current();
 
-  const ccy = getDisplayCurrency();
   const today = todayYmd();
   const lines: string[] = [];
 
@@ -97,11 +107,18 @@ async function composeContext(companyName?: string): Promise<string> {
   // Invoices + overdue
   if (invoices.length) {
     const inv = invoices as Row[];
-    const unpaid = inv.filter((d) => n(d.balance) > 0 && d.status !== "paid");
+    const unpaid = inv.filter((d) => n(d.balance) > 0 && !["draft", "paid", "cancelled"].includes(s(d.status).trim().toLowerCase()));
     const overdue = unpaid.filter((d) => d.due_date && s(d.due_date) < today);
-    const owed = unpaid.reduce((t, d) => t + n(d.balance), 0);
+    // Document balances are in their own currencies, not the display currency.
+    // Keep them separate rather than inventing a mixed-currency total.
+    const owed = new Map<string, number>();
+    for (const doc of unpaid) {
+      const currency = s(doc.currency).trim().toUpperCase() || "AED";
+      owed.set(currency, (owed.get(currency) ?? 0) + n(doc.balance));
+    }
+    const outstanding = [...owed].map(([currency, balance]) => money(balance, currency)).join(" + ") || money(0, "AED");
     lines.push(
-      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue · ${money(owed, ccy)} outstanding.`
+      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue · ${outstanding} outstanding${owed.size > 1 ? " (separate currencies; not a converted total)" : ""}.`
     );
     if (overdue.length) {
       const list = overdue
@@ -110,7 +127,7 @@ async function composeContext(companyName?: string): Promise<string> {
           (d) =>
             `${s(d.number)} — ${s(d.customer_name)} — ${money(
               n(d.balance),
-              s(d.currency) || ccy
+              s(d.currency) || "AED"
             )} due, due ${s(d.due_date)}`
         );
       lines.push(` Overdue: ${list.join("; ")}`);
@@ -127,7 +144,7 @@ async function composeContext(companyName?: string): Promise<string> {
       .slice(0, CAP)
       .map((x) => {
         const price = x.price ?? x.unit_price ?? x.sell_price;
-        return s(x.name) + (price != null ? ` (${money(n(price), ccy)})` : "");
+        return s(x.name) + (price != null ? ` (${aed(n(price))})` : "");
       })
       .filter(Boolean);
     lines.push(`- Products: ${p.length}. e.g. ${names.join("; ")}`);

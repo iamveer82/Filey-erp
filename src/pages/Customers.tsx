@@ -20,7 +20,7 @@ import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
-import { num, cn } from "../lib/format";
+import { num, cn, errMsg } from "../lib/format";
 import { Skeleton } from "../components/ui";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { inputTypeFor, validateCustomValue, type CustomFieldDef } from "../lib/customFields";
@@ -368,12 +368,12 @@ export default function Customers() {
                                   shareVia("whatsapp", {
                                     phone: c.phone_e164 || c.phone,
                                     text: `Hello ${c.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                                 sms: () =>
                                   shareVia("sms", {
                                     phone: c.phone_e164 || c.phone,
                                     text: `Hello ${c.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                               }
                             : {}),
                           ...(c.email
@@ -383,14 +383,16 @@ export default function Customers() {
                                     email: c.email,
                                     url: c.company || c.name,
                                     text: `Hello ${c.name},`,
-                                  }),
+                                  }).catch(e => toast.error(errMsg(e))),
                               }
                             : {}),
-                          copyLink: () => {
-                            shareVia("copyLink", {
-                              url: `${window.location.origin}/customers/${c.id}`,
-                            });
-                            toast.success("Customer link copied.");
+                          copyLink: async () => {
+                            try {
+                              await shareVia("copyLink", {
+                                url: `${window.location.origin}/customers/${c.id}`,
+                              });
+                              toast.success("Customer link copied.");
+                            } catch (e) { toast.error(errMsg(e)); }
                           },
                         }}
                         onDelete={async () => {

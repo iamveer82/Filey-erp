@@ -59,6 +59,7 @@ export async function deliverFile(f: {
   a.href = url;
   a.download = f.name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  // Chat history owns this URL until its message is removed or the account
+  // changes. Revoking after the initial download breaks the visible chip.
   return { name: f.name, url };
 }

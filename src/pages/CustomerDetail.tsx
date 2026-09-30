@@ -111,11 +111,15 @@ export default function CustomerDetail() {
   const [journalMode, setJournalMode] = useState(false);
   const [journalData, setJournalData] = useState<SalesJournal | null>(null);
   const [journalLoading, setJournalLoading] = useState(false);
+  const [journalError, setJournalError] = useState(false);
+  const [journalRetry, setJournalRetry] = useState(0);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [receiptRows, setReceiptRows] = useState<ReceiptSummary[]>([]);
   const [stmtPayments, setStmtPayments] = useState<StatementPaymentEntry[]>([]);
   const [stmtAdvances, setStmtAdvances] = useState<StatementAdvanceEntry[]>([]);
   const [stmtExtrasLoading, setStmtExtrasLoading] = useState(true);
+  const [stmtExtrasError, setStmtExtrasError] = useState(false);
+  const [stmtRetry, setStmtRetry] = useState(0);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -136,8 +140,8 @@ export default function CustomerDetail() {
       quotes.listDocs(),
       erp.orders(),
       crm.opportunities(),
-      receiptsApi.list().catch(() => [] as ReceiptSummary[]),
-      billing.getCompany().catch(() => null),
+      receiptsApi.list(),
+      billing.getCompany(),
     ])
       .then(([cs, inv, qs, ords, op, rcs, co]) => {
         if (!alive) return;
@@ -168,8 +172,8 @@ export default function CustomerDetail() {
       quotes.listDocs(),
       erp.orders(),
       crm.opportunities(),
-      receiptsApi.list().catch(() => [] as ReceiptSummary[]),
-      billing.getCompany().catch(() => null),
+      receiptsApi.list(),
+      billing.getCompany(),
     ])
       .then(([cs, inv, qs, ords, op, rcs, co]) => {
         setCustomers(cs);
@@ -206,10 +210,13 @@ export default function CustomerDetail() {
 
   // Fetch the itemised Sales & Collections Journal (DEMO parity) — loads
   // full invoice docs with line items, not just summaries.
-  const loadJournal = async () => {
-    if (!customer) return;
+  useEffect(() => {
+    if (!journalMode || !customer) return;
+    let alive = true;
+    setJournalData(null);
+    setJournalError(false);
     setJournalLoading(true);
-    try {
+    const loadJournal = async () => {
       const ids = myInvoices
         .filter((d) => d.status !== "draft")
         .map((d) => d.id);
@@ -223,20 +230,12 @@ export default function CustomerDetail() {
         invoiceIds: ids,
         receipts: allReceipts,
       });
-      setJournalData(data);
-    } catch (e) {
-      // console.error alone left an empty journal on screen with no hint why.
-      toast.error(`Could not build the sales journal: ${errMsg(e)}`);
-    } finally {
-      setJournalLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (journalMode && customer && !journalData && !journalLoading) {
-      loadJournal();
-    }
-  }, [journalMode, customer]);
+      if (alive) setJournalData(data);
+    };
+    loadJournal().catch(() => { if (alive) setJournalError(true); })
+      .finally(() => { if (alive) setJournalLoading(false); });
+    return () => { alive = false; };
+  }, [journalMode, customer, myInvoices, company, journalRetry]);
   const myQuotes = useMemo(
     () => quotations.filter((d) => names.has(d.customer_name)),
     [quotations, names]
@@ -267,23 +266,35 @@ export default function CustomerDetail() {
         currency: d.currency,
         status: d.status,
         tax_rate: d.tax_rate,
+        net_total: d.net_total,
+        tax_total: d.tax_total,
       })),
     [myInvoices]
   );
 
-  const outstanding = myInvoices.reduce(
-    (s, d) => s + (d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
-    0
-  );
   const opening = customer?.opening_balance || 0;
 
   /** Issued invoices only are statement debits (drafts never hit the
    *  account) — the same rule the StatementModal applies. */
-  const ledgerDocs = useMemo(
-    () => myInvoices.filter((d) => (d.status || "").toLowerCase() !== "draft"),
+  const issuedDocs = useMemo(
+    () => myInvoices.filter((d) => !["draft", "cancelled", "canceled", "void"].includes((d.status || "").toLowerCase())),
     [myInvoices]
   );
-  const docKey = ledgerDocs.map((d) => d.id).join(",");
+
+  /** Never add amounts in different currencies without an exchange rate. */
+  const currency = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const d of issuedDocs) {
+      const c = (d.currency || "").trim();
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+      || company?.currency || "AED";
+  }, [issuedDocs, company?.currency]);
+  const ledgerDocs = useMemo(
+    () => issuedDocs.filter((d) => !d.currency || d.currency === currency),
+    [issuedDocs, currency],
+  );
 
   /* Phase-2 statement data: dated invoice payments + advance deposits — the
    *  same fetches the StatementModal performs on open, keyed by the doc set. */
@@ -291,6 +302,7 @@ export default function CustomerDetail() {
     if (!customer) return;
     let alive = true;
     setStmtExtrasLoading(true);
+    setStmtExtrasError(false);
     const perDoc: Promise<StatementPaymentEntry[]> = Promise.all(
       ledgerDocs.map((d) =>
         billing
@@ -303,18 +315,17 @@ export default function CustomerDetail() {
               docNumber: d.number,
             }))
           )
-          .catch(() => [] as StatementPaymentEntry[])
       )
     ).then((all) => all.flat());
     Promise.all([
       perDoc,
-      advances.forParty("customer", customer.id).catch(() => []),
+      advances.forParty("customer", customer.id),
     ])
       .then(([pays, advs]) => {
         if (!alive) return;
         setStmtPayments(pays);
         setStmtAdvances(
-          advs
+          (currency === "AED" ? advs : [])
             // Negative `applied:inv#…` rows are internal allocations, not new money.
             .filter((a) => Number(a.amount) > 0)
             .map((a) => ({
@@ -324,7 +335,7 @@ export default function CustomerDetail() {
             }))
         );
       })
-      .catch(() => {})
+      .catch(() => { if (alive) setStmtExtrasError(true); })
       .finally(() => {
         if (alive) setStmtExtrasLoading(false);
       });
@@ -332,18 +343,8 @@ export default function CustomerDetail() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer?.id, docKey]);
-
-  /** Party currency: dominant across its invoices, else the company default. */
-  const currency = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const d of ledgerDocs) {
-      const c = (d.currency || "").trim();
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    return top || company?.currency || "AED";
-  }, [ledgerDocs, company]);
+  }, [customer?.id, ledgerDocs, currency, stmtRetry]);
+  const stmtReady = !loading && !stmtExtrasLoading && !stmtExtrasError;
 
   /** This customer's standalone payment receipts (non-draft). */
   const stmtReceipts = useMemo<StatementReceiptEntry[]>(
@@ -352,6 +353,7 @@ export default function CustomerDetail() {
         .filter(
           (r) =>
             (r.status || "").toLowerCase() !== "draft" &&
+            (r.currency || company?.currency || "AED") === currency &&
             names.has(r.customer_name)
         )
         .map((r) => ({
@@ -359,7 +361,7 @@ export default function CustomerDetail() {
           date: (r.payment_date || "").slice(0, 10),
           amount: Number(r.amount) || 0,
         })),
-    [receiptRows, names]
+    [receiptRows, names, company?.currency, currency]
   );
 
   /** The all-time statement — one derivation behind the KPI grid, the Sales
@@ -370,6 +372,8 @@ export default function CustomerDetail() {
       date: d.issue_date,
       total: d.total,
       taxRate: d.tax_rate ?? 0,
+      net: d.net_total,
+      tax: d.tax_total,
     }));
     return buildStatement({
       kind: "customer",
@@ -393,7 +397,7 @@ export default function CustomerDetail() {
         trn: customer?.trn,
         email: customer?.email,
         address: customer?.address,
-        openingBalance: customer?.opening_balance ?? 0,
+        openingBalance: currency === "AED" ? customer?.opening_balance ?? 0 : 0,
       },
       currency,
       period: { from: null, to: localYmd(new Date()) },
@@ -413,6 +417,9 @@ export default function CustomerDetail() {
     stmtAdvances,
   ]);
 
+  const exportReady = journalMode
+    ? !journalLoading && !!journalData
+    : stmtReady && built.hasContent;
   const stmt = built.data;
   /** + = the customer owes us, − = we hold an advance/credit for them. */
   const netBalance = stmt.closingBalance;
@@ -461,20 +468,24 @@ export default function CustomerDetail() {
     }));
   }, [stmt.lines, tplMeta.paginates]);
 
-  const copyStatementLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    toast.success("Link copied");
+  const copyStatementLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Link copied");
+    } catch (error) { toast.error(`Could not copy the link: ${errMsg(error)}`); }
   };
 
-  const emailStatement = () => {
-    shareVia("email", {
+  const emailStatement = async () => {
+    if (!stmtReady) return;
+    await shareVia("email", {
       email: customer?.email,
       text: `Statement of account for ${display} - balance ${money(netBalance, currency)}. View: ${window.location.href}`,
       url: `Statement of account - ${display}`,
-    });
+    }).catch((error) => toast.error(errMsg(error)));
   };
 
   const downloadStatementPdf = async () => {
+    if (!exportReady || exporting) return;
     const el = exportRef.current;
     if (!el) {
       window.print();
@@ -484,7 +495,7 @@ export default function CustomerDetail() {
     try {
       await downloadElementAsPdf(
         el,
-        `Statement-${(display || "customer").replace(/[^\w.-]+/g, "_").slice(0, 40)}-${localYmd(new Date())}`
+        `${journalMode ? "Sales-Journal" : "Statement"}-${(display || "customer").replace(/[^\w.-]+/g, "_").slice(0, 40)}-${localYmd(new Date())}`
       );
     } catch (e) {
       // The spinner used to just stop, leaving "nothing happened".
@@ -518,10 +529,10 @@ export default function CustomerDetail() {
         meta: [
           { label: "Issued", value: fmtDate(doc.issue_date) },
           { label: "Due", value: fmtDate(doc.due_date) },
-          { label: "Paid", value: aed(d.paid ?? 0) },
+          { label: "Paid", value: money(d.paid ?? 0, d.currency || "AED") },
           {
             label: "Balance",
-            value: aed(d.balance ?? Math.max(0, d.total - (d.paid ?? 0))),
+            value: money(d.balance ?? Math.max(0, d.total - (d.paid ?? 0)), d.currency || "AED"),
           },
           { label: "Template", value: doc.template },
           { label: "Currency", value: doc.currency || "AED" },
@@ -582,7 +593,7 @@ export default function CustomerDetail() {
     try {
       const token = await billing.publicLink(d.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Invoice ${d.number} - ${aed(d.total)}. View & pay online: ${url}`;
+      const text = `Invoice ${d.number} - ${money(d.total, d.currency || "AED")}. View online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
       if (kind === "email") {
@@ -591,7 +602,7 @@ export default function CustomerDetail() {
         reload();
         return;
       }
-      shareVia(kind, {
+      await shareVia(kind, {
         phone: customer?.phone_e164 || customer?.phone,
         email: customer?.email,
         text,
@@ -608,14 +619,14 @@ export default function CustomerDetail() {
     try {
       const token = await quotes.publicLink(q.id);
       const url = `${location.origin}${location.pathname}#/portal/${token}`;
-      const text = `Quotation ${q.number} - ${aed(q.total)}. View online: ${url}`;
+      const text = `Quotation ${q.number} - ${money(q.total, q.currency || "AED")}. View online: ${url}`;
       if (kind === "email") {
         await sendShareEmail(customer?.email || "", `Quotation ${q.number}`, text);
         toast.success(`Quotation emailed to ${customer?.email}`);
         reload();
         return;
       }
-      shareVia(kind, {
+      await shareVia(kind, {
         phone: customer?.phone_e164 || customer?.phone,
         email: customer?.email,
         text,
@@ -735,7 +746,7 @@ export default function CustomerDetail() {
           {customer?.email && (
             <button
               onClick={() =>
-                shareVia("email", { email: customer.email, url: display })
+                shareVia("email", { email: customer.email, url: display }).catch((error) => toast.error(errMsg(error)))
               }
               className="btn-ghost"
             >
@@ -798,16 +809,16 @@ export default function CustomerDetail() {
         <KpiCell
           className="border-b lg:border-b-0 lg:border-r border-border"
           label="Received"
-          value={money(stmt.totalCredit, currency)}
+          value={stmtReady ? money(stmt.totalCredit, currency) : "—"}
           hint={
-            paymentCount > 0
+            !stmtReady ? "Statement unavailable" : paymentCount > 0
               ? `Across ${paymentCount} payment${paymentCount === 1 ? "" : "s"}`
               : "No payments yet"
           }
         />
         <KpiCell
           label="Net balance"
-          value={money(netBalance, currency)}
+          value={stmtReady ? money(netBalance, currency) : "—"}
           valueClass={
             netBalance > 0.005
               ? "text-danger"
@@ -817,7 +828,7 @@ export default function CustomerDetail() {
           }
           hint={
             <span className="inline-flex items-center gap-1">
-              {netBalance > 0.005 ? (
+              {!stmtReady ? "Statement unavailable" : netBalance > 0.005 ? (
                 <>
                   <TrendingDown className="h-3 w-3" /> Customer owes
                 </>
@@ -896,7 +907,7 @@ export default function CustomerDetail() {
                 </tr>
               </thead>
               <tbody>
-                {stmtExtrasLoading && ledgerRows.length === 0 ? (
+                {stmtExtrasLoading ? (
                   Array.from({ length: 3 }).map((_, r) => (
                     <tr key={`lsk${r}`} className="border-b border-border last:border-0">
                       {Array.from({ length: 5 }).map((_, c) => (
@@ -906,6 +917,8 @@ export default function CustomerDetail() {
                       ))}
                     </tr>
                   ))
+                ) : stmtExtrasError ? (
+                  <tr><td colSpan={5} className="px-5 py-6 text-muted-foreground">Statement unavailable</td></tr>
                 ) : ledgerRows.length === 0 ? (
                   <tr>
                     <td
@@ -945,6 +958,19 @@ export default function CustomerDetail() {
         </div>
       </div>
 
+      {stmtExtrasError && (
+        <div role="alert" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+          <span>The statement could not be loaded. Retry before sharing it.</span>
+          <button className="btn-secondary" onClick={() => setStmtRetry((n) => n + 1)}>Retry statement</button>
+        </div>
+      )}
+      {(currency !== "AED" || issuedDocs.some((d) => d.currency && d.currency !== currency)) && (
+        <p role="status" className="mb-4 text-sm text-muted-foreground">
+          This statement contains {currency} transactions only. Documents in other currencies are excluded.
+          {currency !== "AED" && " AED opening balances and advances are excluded."}
+        </p>
+      )}
+
       {/* DEMO parity: download panel - template picker + selected-template
           summary. The header's amber button smooth-scrolls here. */}
       <div
@@ -964,6 +990,7 @@ export default function CustomerDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => window.print()}
+                disabled={!exportReady}
                 className="btn-ghost"
               >
                 <Printer className="h-3.5 w-3.5" /> Print
@@ -976,14 +1003,14 @@ export default function CustomerDetail() {
               </button>
               <button
                 onClick={emailStatement}
-                disabled={!customer}
+                disabled={!customer || !stmtReady}
                 className="btn-ghost"
               >
                 <Send className="h-3.5 w-3.5" /> Email
               </button>
               <button
                 onClick={downloadStatementPdf}
-                disabled={!customer || exporting || !built.hasContent}
+                disabled={!customer || exporting || !exportReady}
                 className="btn-primary"
               >
                 <FileDown className="h-3.5 w-3.5" />{" "}
@@ -1050,7 +1077,7 @@ export default function CustomerDetail() {
                 </div>
                 <div className="mt-3 text-[11.5px] text-muted-foreground">
                   Includes: {journalData?.transactions.length ?? 0} entries ·
-                  balance {money(journalData?.summary.netBalance ?? 0, currency)}
+                  balance {journalData ? money(journalData.summary.netBalance, journalData.currency) : "—"}
                 </div>
               </>
             ) : (
@@ -1063,7 +1090,7 @@ export default function CustomerDetail() {
                 </div>
                 <div className="mt-3 text-[11.5px] text-muted-foreground">
                   Includes: {stmt.lines.length} entries · balance{" "}
-                  {money(netBalance, currency)}
+                  {stmtReady ? money(netBalance, currency) : "—"}
                 </div>
               </>
             )}
@@ -1080,6 +1107,11 @@ export default function CustomerDetail() {
         {journalMode ? (
           journalLoading ? (
             <Skeleton className="h-[420px] w-full" />
+          ) : journalError ? (
+            <div role="alert" className="flex items-center justify-between gap-3 p-3">
+              <span>The sales journal could not be loaded.</span>
+              <button className="btn-secondary" onClick={() => setJournalRetry((n) => n + 1)}>Retry journal</button>
+            </div>
           ) : journalData ? (
             <FitPreview baseWidth={794} zoom={100} padding={0}>
               <SalesJournalTemplate data={journalData} />
@@ -1092,8 +1124,10 @@ export default function CustomerDetail() {
           )
         ) : (
         <>
-        {stmtExtrasLoading && !built.hasContent ? (
+        {stmtExtrasLoading ? (
           <Skeleton className="h-[420px] w-full" />
+        ) : stmtExtrasError ? (
+          <p className="py-8 text-center text-muted-foreground">Retry to load the complete statement.</p>
         ) : !built.hasContent ? (
           <div className="py-16 text-center text-[13px] text-muted-foreground">
             No statement activity yet - the preview appears once this customer
@@ -1110,14 +1144,14 @@ export default function CustomerDetail() {
 
       {/* Off-screen A4 stack captured for the PDF export - every slice a real
           page (same pattern as the StatementModal export). */}
-      {built.hasContent && (
+      {exportReady && (
         <div
           ref={exportRef}
           aria-hidden
           className="fixed left-[-99999px] top-0 pointer-events-none"
           style={{ width: 794, background: "#fff" }}
         >
-          {exportPages.map((pg) => (
+          {journalMode && journalData ? <SalesJournalTemplate data={journalData} /> : exportPages.map((pg) => (
             <div
               key={pg.page}
               className="bg-white"
@@ -1138,7 +1172,7 @@ export default function CustomerDetail() {
               Invoices
             </div>
             <div className="text-[12.5px] text-muted-foreground">
-              {num(myInvoices.length)} total · {aed(outstanding)} due
+              {num(myInvoices.length)} total
             </div>
           </div>
           {myInvoices.length > 10 && (
@@ -1213,7 +1247,7 @@ export default function CustomerDetail() {
                         <Badge tone={statusTone(d.status)}>{d.status}</Badge>
                       </td>
                       <td className="px-5 py-3 text-right text-foreground tabular-nums">
-                        {aed(d.total)}
+                        {money(d.total, d.currency || "AED")}
                       </td>
                       <td className="px-5 py-3 text-right tabular-nums">
                         <span
@@ -1223,7 +1257,7 @@ export default function CustomerDetail() {
                               : "text-muted-foreground"
                           }
                         >
-                          {aed(balance)}
+                          {money(balance, d.currency || "AED")}
                         </span>
                       </td>
                       <td className="px-5 py-3">
@@ -1253,7 +1287,6 @@ export default function CustomerDetail() {
             partyType="customer"
             partyId={customer.id}
             partyName={display}
-            outstanding={outstanding}
           />
         </div>
       )}
@@ -1336,7 +1369,7 @@ export default function CustomerDetail() {
               key: "total",
               label: "Total",
               sortValue: (q) => q.total,
-              render: (q) => aed(q.total),
+              render: (q) => money(q.total, q.currency || "AED"),
             },
             { actions: true,
               key: "act",

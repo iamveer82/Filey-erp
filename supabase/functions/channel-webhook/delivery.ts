@@ -38,7 +38,9 @@ export async function sendChannelText(
         signal: AbortSignal.timeout(15000),
       });
       const body = await res.json().catch(() => null);
-      const ok = channel === "whatsapp" ? !!body?.messages?.[0]?.id : body?.ok === true;
+      const ok = channel === "whatsapp" ? !!body?.messages?.[0]?.id
+        : channel === "telegram" ? body?.ok === true && Number.isSafeInteger(body?.result?.message_id)
+        : body?.ok === true && typeof body?.ts === "string" && body.ts.length>0;
       if (!res.ok || !ok) throw new Error(`Provider rejected message (HTTP ${res.status}).`);
       accepted++;
     }

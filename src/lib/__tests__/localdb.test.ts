@@ -1,8 +1,20 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { localClient as c } from "../localdb";
+import { localClient as c, journalMark, journalSnapshot } from "../localdb";
 
 // jsdom provides localStorage; localdb falls back to it when not under Tauri.
 beforeEach(() => localStorage.clear());
+
+it("preserves every pending table and row when seed marks run concurrently", async () => {
+  await Promise.all([
+    journalMark("products", { changed: [1] }),
+    journalMark("orders", { changed: [2] }),
+    journalMark("products", { changed: [3], deleted: [4], deletedRevisions: { "4": 7 } }),
+  ]);
+  expect(await journalSnapshot()).toEqual({ v: 3, tables: {
+    products: { changed: [1, 3], deleted: [4], deletedRevisions: { "4": 7 } },
+    orders: { changed: [2], deleted: [] },
+  } });
+});
 
 describe("localdb query shim", () => {
   it("inserts with an id and reads it back", async () => {
@@ -48,6 +60,16 @@ describe("localdb query shim", () => {
     const { data } = await c.from("widgets").select();
     expect(data).toHaveLength(1);
     expect(data[0].name).toBe("B");
+  });
+
+  it("confirms only rows actually removed when delete requests returned IDs", async () => {
+    await c.from("products").insert([{ id: "one", name: "A" }, { id: "two", name: "B" }]);
+    const { data, error } = await c.from("products").delete().eq("id", "one").select("id");
+    expect(error).toBeNull();
+    expect(data).toMatchObject([{ id: "one" }]);
+    expect((await c.from("products").delete().eq("id", "one").select("id")).data).toEqual([]);
+    expect((await c.from("products").select()).data).toMatchObject([{ id: "two" }]);
+    expect((await journalSnapshot()).tables.products.deleted).toContain("one");
   });
 
   it("orders and limits", async () => {

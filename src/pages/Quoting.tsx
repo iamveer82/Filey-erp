@@ -652,13 +652,15 @@ export default function Quoting() {
       }
       return;
     }
-    shareVia(kind, {
-      phone: cust?.phone || "",
-      email: cust?.email || "",
-      text,
-      url,
-    });
-    if (kind === "copyLink") toast.success("Public quotation link copied");
+    try {
+      await shareVia(kind, {
+        phone: cust?.phone || "",
+        email: cust?.email || "",
+        text,
+        url,
+      });
+      if (kind === "copyLink") toast.success("Public quotation link copied");
+    } catch (e) { toast.error(errMsg(e)); }
   };
 
   const convertRow = async (d: QuotationSummary) => {

@@ -1,5 +1,6 @@
 // Disposable PostgreSQL: no Supabase credentials or customer records.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -41,8 +42,102 @@ try {
   const checks = readFileSync(join(root, 'supabase/tests/channel-agent-hardening.sql'), 'utf8');
   const identity = readFileSync(join(root, 'supabase/2026-09-29-einvoice-identity.sql'), 'utf8');
   const identityChecks = readFileSync(join(root, 'supabase/tests/einvoice-identity.sql'), 'utf8');
-  console.log(run('psql', ['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','postgres','-X','-q','-v','ON_ERROR_STOP=1'], setup + identity + identity + identityChecks + migration + migration + checks).trim());
-  console.log('PASS: repeatable e-invoice identity, stale UUID protection; hosted draft scope, role gate, precision, field allowlist and atomic rollback.');
+  const scheduledSetup = `
+    create table licenses(id uuid primary key default gen_random_uuid(),user_id uuid,product text,status text,created_at timestamptz default now());
+    create table license_devices(id uuid primary key default gen_random_uuid(),license_id uuid references licenses,fingerprint text,device_name text,activated_at timestamptz default now(),deactivated_at timestamptz,unique(license_id,fingerprint));
+    alter table suppliers add column address text,add column email text,add column phone text,add column tax_id text;
+    create table products(id bigint generated always as identity primary key,org_id text,name text,quantity numeric(14,3),reorder_level numeric(14,3),cost_price numeric(14,2),supplier_id bigint,unit text);
+    alter table purchase_orders add column supplier_address text,add column supplier_email text,add column supplier_phone text,add column supplier_trn text,add column notes text;
+    alter table purchase_order_items add column product_id bigint,add column unit text;
+  `;
+  const scheduled = readFileSync(
+    join(root, "supabase/2026-09-30-scheduled-write-integrity.sql"),
+    "utf8"
+  );
+  const scheduledChecks = readFileSync(
+    join(root, "supabase/tests/scheduled-write-integrity.sql"),
+    "utf8"
+  );
+  console.log(
+    run(
+      "psql",
+      [
+        "-h",
+        "127.0.0.1",
+        "-p",
+        String(port),
+        "-U",
+        "postgres",
+        "-d",
+        "postgres",
+        "-X",
+        "-q",
+        "-v",
+        "ON_ERROR_STOP=1",
+      ],
+      setup +
+        identity +
+        identity +
+        identityChecks +
+        migration +
+        migration +
+        checks +
+        scheduledSetup +
+        scheduled +
+        scheduled +
+        scheduledChecks
+    ).trim()
+  );
+  const psqlArgs = [
+    "-h",
+    "127.0.0.1",
+    "-p",
+    String(port),
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-X",
+    "-q",
+    "-v",
+    "ON_ERROR_STOP=1",
+  ];
+  const sql = (statement) =>
+    promisify(execFile)(
+      join(bin, "psql" + (process.platform === "win32" ? ".exe" : "")),
+      [...psqlArgs, "-c", statement],
+      { encoding: "utf8", windowsHide: true }
+    );
+  const role = "set request.jwt.claim.role='service_role';";
+  const owner = "'10000000-0000-0000-0000-000000000001'";
+  const claims = await Promise.allSettled(
+    Array.from({ length: 8 }, (_, i) =>
+      sql(role + `select filey_claim_license_device(${owner},'race-${i}','test');`)
+    )
+  );
+  if (claims.filter((r) => r.status === "fulfilled").length !== 2)
+    throw new Error("Concurrent license claims did not preserve exactly two slots");
+  const drafts = await Promise.all(
+    Array.from({ length: 6 }, () =>
+      sql(role + `select filey_agent_lowstock_po(${owner},'ORG');`)
+    )
+  );
+  if (drafts.filter((r) => r.stdout.includes("Scheduled supplier")).length !== 1)
+    throw new Error("Concurrent scheduled drafts were duplicated");
+  run(
+    "psql",
+    psqlArgs,
+    `do $$ begin
+    if (select count(*) from license_devices where deactivated_at is null)<>2 then raise exception 'Concurrent device limit failed'; end if;
+    if (select count(*) from purchase_orders where notes='Auto-created from low stock (agent)')<>1 then raise exception 'Concurrent draft duplication'; end if;
+  end $$;`
+  );
+  console.log(
+    "PASS: eight concurrent license claims preserve two slots; six concurrent low-stock jobs create one complete draft."
+  );
+  console.log(
+    "PASS: repeatable e-invoice identity, stale UUID protection; hosted draft scope, role gate, precision, field allowlist and atomic rollback."
+  );
 } finally {
   if (started) run('pg_ctl', ['-D', temp, '-m', 'immediate', '-w', 'stop']);
   const resolvedTemp = resolve(temp);

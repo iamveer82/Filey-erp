@@ -389,6 +389,10 @@ export interface InvoiceDocSummary {
   status: string;
   template: string;
   total: number;
+  /** Computed from saved line metadata; signed for credit notes. Net includes
+   * round-off so net_total + tax_total equals total. Absent in legacy caches. */
+  net_total?: number;
+  tax_total?: number;
   currency?: string;
   paid?: number;
   balance?: number;
@@ -3895,7 +3899,9 @@ export const billing = {
           );
         return docs.map((d) => {
           const docLines = byDoc.get(d.id) ?? [];
-          const total = docTotal(d, docLines);
+          const computed = docTotals(d, docLines);
+          const sign = isCreditNote(d.invoice_type_code) ? -1 : 1;
+          const total = sign * computed.total || 0;
           const paid = paidByDoc.get(d.id) ?? 0;
           return {
             id: d.id,
@@ -3907,6 +3913,8 @@ export const billing = {
             status: d.status,
             template: d.template,
             total,
+            net_total: sign * computed.net || 0,
+            tax_total: sign * computed.tax || 0,
             currency: d.currency ?? "AED",
             // The rate frozen when this document was saved. Without it every
             // list total has to guess at today's rate, and last quarter's
@@ -5142,6 +5150,9 @@ export interface PoSummary {
   template?: string;
   currency?: string;
   total: number;
+  /** Exact breakdown computed from the saved PO lines; absent in legacy caches. */
+  net_total?: number;
+  tax_total?: number;
   /** Number of line items on the PO (from purchase_order_items). */
   items_count: number;
   order_date: string;
@@ -5285,23 +5296,28 @@ export const pos = {
           group.push(it);
           itemsByPo.set(k, group);
         }
-        return rows.map((r) => ({
-          id: r.id,
-          po_number: r.po_number,
-          supplier_id: r.supplier_id ?? undefined,
-          supplier_name: r.supplier_name ?? byId.get(r.supplier_id)?.name ?? "—",
-          status: r.status,
-          template: r.template ?? "uae",
-          currency: r.currency ?? "AED",
-          fx_rate: r.fx_rate,
-          total: purchaseTotals(r, itemsByPo.get(Number(r.id)) ?? []).total,
-          items_count: itemsByPo.get(Number(r.id))?.length ?? 0,
-          order_date: r.order_date,
-          expected_date: r.expected_date ?? undefined,
-          shared: r.shared ?? false,
-          updated_at: r.updated_at,
-          tax_rate: r.tax_rate ?? undefined,
-        })) as PoSummary[];
+        return rows.map((r) => {
+          const computed = purchaseTotals(r, itemsByPo.get(Number(r.id)) ?? []);
+          return {
+            id: r.id,
+            po_number: r.po_number,
+            supplier_id: r.supplier_id ?? undefined,
+            supplier_name: r.supplier_name ?? byId.get(r.supplier_id)?.name ?? "—",
+            status: r.status,
+            template: r.template ?? "uae",
+            currency: r.currency ?? "AED",
+            fx_rate: r.fx_rate,
+            total: computed.total,
+            net_total: r2(computed.total - computed.tax),
+            tax_total: computed.tax,
+            items_count: itemsByPo.get(Number(r.id))?.length ?? 0,
+            order_date: r.order_date,
+            expected_date: r.expected_date ?? undefined,
+            shared: r.shared ?? false,
+            updated_at: r.updated_at,
+            tax_rate: r.tax_rate ?? undefined,
+          };
+        }) as PoSummary[];
       },
       []
     ),
@@ -5479,11 +5495,12 @@ export const pos = {
     readCached<PoPayment[]>(
       `po_payments:${poId}`,
       async () => {
-        const { data } = await sb()
+        const { data, error } = await sb()
           .from("po_payments")
           .select("*")
           .eq("po_id", poId)
           .order("paid_at", { ascending: false });
+        if (error) throw error;
         return (
           (data ?? []) as {
             id: number;
@@ -5540,12 +5557,13 @@ export const advances = {
     readCached<Advance[]>(
       `advances:${partyType}:${partyId}`,
       async () => {
-        const { data } = await sb()
+        const { data, error } = await sb()
           .from("advances")
           .select("*")
           .eq("party_type", partyType)
           .eq("party_id", partyId)
           .order("paid_at", { ascending: false });
+        if (error) throw error;
         return (data ?? []) as Advance[];
       },
       []

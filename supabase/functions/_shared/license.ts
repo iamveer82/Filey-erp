@@ -43,14 +43,21 @@ export async function signLicense(payload: Record<string, unknown>): Promise<str
 
 /** Does this account own a licence? The app polls this after checkout so the
  *  plan flips on its own instead of asking the buyer to paste a code. */
-export async function licenseStatus(supa: SupabaseClient, userId: string): Promise<LicenseResult> {
-  const { data } = await supa
+export async function licenseStatus(
+  supa: SupabaseClient,
+  userId: string
+): Promise<LicenseResult> {
+  const { data, error } = await supa
     .from("licenses")
     .select("id, product, created_at")
     .eq("user_id", userId)
     .eq("status", "active")
+    .order("created_at")
+    .order("id")
     .limit(1)
     .maybeSingle();
+  if (error)
+    return { body: { error: "License status unavailable. Try again." }, status: 503 };
   return { body: { licensed: !!data, product: data?.product ?? null }, status: 200 };
 }
 
@@ -60,68 +67,36 @@ export async function licenseActivate(
   fingerprint: string,
   deviceName: string
 ): Promise<LicenseResult> {
-  if (!fingerprint) return { body: { error: "Missing device fingerprint" }, status: 400 };
-  const { data: lic } = await supa
-    .from("licenses")
-    .select("id, product, status")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .limit(1)
-    .maybeSingle();
-  if (!lic) return { body: { error: "No active license on this account" }, status: 404 };
-
-  const { data: devices } = await supa
-    .from("license_devices")
-    .select("id, fingerprint, deactivated_at")
-    .eq("license_id", lic.id);
-  const active = (devices ?? []).filter((d) => !d.deactivated_at);
-  const mine = (devices ?? []).find((d) => d.fingerprint === fingerprint);
-
-  // SECURITY: the count check below races concurrent activations (TOCTOU).
-  // After claiming a slot, recount; if we overflowed, release our claim.
-  const claimedOverLimit = async (rowId: unknown): Promise<boolean> => {
-    const { data: act } = await supa
-      .from("license_devices")
-      .select("id")
-      .eq("license_id", lic.id)
-      .is("deactivated_at", null);
-    if ((act ?? []).length <= LICENSE_DEVICE_SLOTS) return false;
-    await supa
-      .from("license_devices")
-      .update({ deactivated_at: new Date().toISOString() })
-      .eq("id", rowId);
-    return true;
-  };
-  const slotsFull: LicenseResult = {
-    body: { error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.` },
-    status: 409,
-  };
-
-  if (mine?.deactivated_at) {
-    // Re-activating a freed slot — only if a slot is open.
-    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
-    await supa
-      .from("license_devices")
-      .update({ deactivated_at: null, activated_at: new Date().toISOString(), device_name: deviceName || null })
-      .eq("id", mine.id);
-    if (await claimedOverLimit(mine.id)) return slotsFull;
-  } else if (!mine) {
-    if (active.length >= LICENSE_DEVICE_SLOTS) return slotsFull;
-    const { data: ins, error } = await supa
-      .from("license_devices")
-      .insert({ license_id: lic.id, fingerprint, device_name: deviceName || null })
-      .select("id")
-      .single();
-    if (error) return { body: { error: error.message }, status: 500 };
-    if (await claimedOverLimit(ins.id)) return slotsFull;
+  if (!fingerprint || fingerprint.length > 256 || deviceName.length > 200)
+    return { body: { error: "Invalid device fingerprint or name" }, status: 400 };
+  // The service-only RPC locks the license before counting or claiming. A
+  // client-side count/recount both oversubscribed and rejected valid races.
+  const { data: lic, error } = await supa.rpc("filey_claim_license_device", {
+    p_user: user.id,
+    p_fingerprint: fingerprint,
+    p_device_name: deviceName,
+  });
+  if (error) {
+    if (error.code === "PT404")
+      return { body: { error: "No active license on this account" }, status: 404 };
+    if (error.code === "PT409")
+      return {
+        body: {
+          error: `All ${LICENSE_DEVICE_SLOTS} device slots are in use. Deactivate another device first.`,
+        },
+        status: 409,
+      };
+    return { body: { error: "License activation unavailable. Try again." }, status: 503 };
   }
+  if (!lic?.license_id || !lic?.product)
+    return { body: { error: "License activation unavailable. Try again." }, status: 503 };
 
   const token = await signLicense({
     email: user.email ?? "",
     product: lic.product,
     issued: new Date().toISOString().slice(0, 10),
     device_id: fingerprint,
-    license_id: lic.id,
+    license_id: lic.license_id,
   });
   return { body: { token }, status: 200 };
 }
@@ -132,19 +107,28 @@ export async function licenseDeactivate(
   fingerprint: string
 ): Promise<LicenseResult> {
   if (!fingerprint) return { body: { error: "Missing device fingerprint" }, status: 400 };
-  const { data: lic } = await supa
+  const { data: lic, error: lookupError } = await supa
     .from("licenses")
     .select("id")
     .eq("user_id", userId)
     .eq("status", "active")
+    .order("created_at")
+    .order("id")
     .limit(1)
     .maybeSingle();
+  if (lookupError)
+    return { body: { error: "License status unavailable. Try again." }, status: 503 };
   if (!lic) return { body: { error: "No active license on this account" }, status: 404 };
-  await supa
+  const { error } = await supa
     .from("license_devices")
     .update({ deactivated_at: new Date().toISOString() })
     .eq("license_id", lic.id)
     .eq("fingerprint", fingerprint);
+  if (error)
+    return {
+      body: { error: "Device could not be deactivated. Try again." },
+      status: 503,
+    };
   return { body: { ok: true }, status: 200 };
 }
 
@@ -155,21 +139,23 @@ export async function grantLicense(
   userId: string,
   paymentId: string
 ): Promise<"granted" | "duplicate" | "already-licensed"> {
-  const { data: existingPayment } = await supa
+  const { data: existingPayment, error: paymentError } = await supa
     .from("licenses")
     .select("id")
     .eq("dodo_payment_id", paymentId)
     .limit(1)
     .maybeSingle();
+  if (paymentError) throw new Error("License payment lookup unavailable");
   if (existingPayment) return "duplicate";
 
-  const { data: existing } = await supa
+  const { data: existing, error: licenseError } = await supa
     .from("licenses")
     .select("id")
     .eq("user_id", userId)
     .eq("status", "active")
     .limit(1)
     .maybeSingle();
+  if (licenseError) throw new Error("License account lookup unavailable");
   if (existing) return "already-licensed";
 
   const { error } = await supa.from("licenses").insert({

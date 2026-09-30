@@ -1,13 +1,27 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAiContext, clearAiContextCache } from "../aiContext";
 import { setDataMode } from "../dataMode";
-import { billing, crm } from "../api";
+import { billing, crm, erp, quotes, setCacheOrg } from "../api";
+import { setDisplayCurrency } from "../format";
 
 beforeEach(async () => {
   localStorage.clear();
   clearAiContextCache();
   setDataMode("local");
+  setCacheOrg("brief-test", "fixture-user");
+  setDisplayCurrency("AED");
 });
+afterEach(() => { vi.restoreAllMocks(); clearAiContextCache(); setCacheOrg(null); setDisplayCurrency("AED"); });
+
+function mockBriefReads() {
+  const customers = vi.spyOn(crm, "customers").mockResolvedValue([]);
+  vi.spyOn(billing, "listDocs").mockResolvedValue([]);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(quotes, "listDocs").mockResolvedValue([]);
+  vi.spyOn(erp, "orders").mockResolvedValue([]);
+  const company = vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Fixture company" } as Awaited<ReturnType<typeof billing.getCompany>>);
+  return { customers, company };
+}
 
 describe("the business brief", () => {
   it("states identity the agent would otherwise guess", async () => {
@@ -76,5 +90,68 @@ describe("the business brief", () => {
     expect(await buildAiContext()).toBe(one); // within the window
     clearAiContextCache();
     expect(await buildAiContext()).not.toBe(one);
+  });
+
+  it("never reuses another account or store's brief and refreshes display currency", async () => {
+    const { customers } = mockBriefReads();
+    customers.mockResolvedValue([{ name: "Private Alpha customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    const first = await buildAiContext();
+    expect(await buildAiContext()).toBe(first);
+    expect(customers).toHaveBeenCalledTimes(1);
+    setCacheOrg("other-org", "other-user");
+    customers.mockResolvedValue([{ name: "Beta customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    const second = await buildAiContext();
+    expect(second).toContain("Beta customer");
+    expect(second).not.toContain("Private Alpha");
+    setDataMode("cloud");
+    await buildAiContext();
+    expect(customers).toHaveBeenCalledTimes(3);
+    setDisplayCurrency("INR");
+    expect(await buildAiContext()).toContain("display currency INR");
+    expect(customers).toHaveBeenCalledTimes(4);
+  });
+
+  it("discards a pending old-workspace read before loading another company's identity", async () => {
+    const { customers, company } = mockBriefReads();
+    let finish!: (value: Awaited<ReturnType<typeof crm.customers>>) => void;
+    customers.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = buildAiContext();
+    setCacheOrg("next-org", "next-user");
+    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    finish([{ name: "Private old customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    await rejection;
+    expect(company).not.toHaveBeenCalled();
+    customers.mockResolvedValue([{ name: "Current customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    const current = await buildAiContext();
+    expect(current).toContain("Current customer");
+    expect(current).not.toContain("Private old customer");
+  });
+
+  it("does not read business records without an attributed account", async () => {
+    const { customers, company } = mockBriefReads();
+    setCacheOrg(null);
+    expect(await buildAiContext()).toContain("unavailable until the user signs in");
+    expect(customers).not.toHaveBeenCalled();
+    expect(company).not.toHaveBeenCalled();
+  });
+
+  it("keeps invoice currencies separate and converts AED product prices instead of relabelling them", async () => {
+    mockBriefReads();
+    vi.mocked(billing.listDocs).mockResolvedValue([
+      { number: "AED-old", balance: 100, status: "sent", due_date: "2000-01-01" },
+      { number: "USD-1", currency: "USD", balance: 100, status: "sent", due_date: "2000-01-01" },
+      { number: "Draft-not-owed", currency: "USD", balance: 999, status: "draft", due_date: "2000-01-01" },
+      { number: "Cancelled-not-owed", currency: "USD", balance: 888, status: "cancelled", due_date: "2000-01-01" },
+    ] as Awaited<ReturnType<typeof billing.listDocs>>);
+    vi.mocked(erp.products).mockResolvedValue([{ name: "AED product", unit_price: 10 }] as Awaited<ReturnType<typeof erp.products>>);
+    setDisplayCurrency("USD", 3.6725);
+    const brief = (await buildAiContext()).replace(/\u00a0/g, " ");
+    expect(brief).toContain("AED 100.00 + $100.00 outstanding (separate currencies");
+    expect(brief).toContain("AED-old —  — AED 100.00 due");
+    expect(brief).toContain("AED product ($2.72)");
+    expect(brief).toContain("Invoices: 4 total · 2 unpaid · 2 overdue");
+    expect(brief).not.toContain("Draft-not-owed");
+    expect(brief).not.toContain("Cancelled-not-owed");
+    expect(brief).not.toContain("$200.00 outstanding");
   });
 });

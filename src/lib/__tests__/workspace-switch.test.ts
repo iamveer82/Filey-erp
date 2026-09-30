@@ -170,4 +170,6 @@ it.each(["local", "cloud"] as const)("cancels switching to %s if sign-out occurs
   expect(isLocalSignedIn()).toBe(false);
   expect(getLocalCredential()).toBeNull();
   expect(state.migrating).toBe(false);
+  expect(state.syncCalls).toBe(0);
+  expect(state.copies).toBe(0);
 });
