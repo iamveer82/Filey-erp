@@ -14,21 +14,25 @@ import type { Tool } from "./PdfToolbox";
 
 const RENDER_W = 900;
 
-/** Build a one-page PDF File from the first page of the source. */
-async function firstPageFile(file: File): Promise<File> {
+/** Keep only the source pages needed to preview the first output sheet. */
+async function previewFile(file: File, pageLimit: number): Promise<File> {
+  if (pageLimit === Infinity) return file;
   const src = await PDFDocument.load(await file.arrayBuffer(), {
     ignoreEncryption: true,
   });
+  if (src.isEncrypted) throw new Error("This PDF is locked. Use Remove PDF Password first.");
   const out = await PDFDocument.create();
-  const [pg] = await out.copyPages(src, [0]);
-  out.addPage(pg);
+  const pages = await out.copyPages(src, Array.from({ length: Math.min(pageLimit, src.getPageCount()) }, (_, i) => i));
+  pages.forEach(page => out.addPage(page));
   const bytes = await out.save();
   return new File([new Uint8Array(bytes)], file.name, { type: "application/pdf" });
 }
 
 /** Render the first page of PDF bytes to a PNG data URL. */
 async function renderFirstPage(bytes: Uint8Array): Promise<string> {
-  const pdf = await safePdf.getDocument({ data: bytes }).promise;
+  const task = safePdf.getDocument({ data: bytes });
+  try {
+  const pdf = await task.promise;
   const p = await pdf.getPage(1);
   const pt = p.getViewport({ scale: 1 });
   const scale = RENDER_W / pt.width;
@@ -37,9 +41,10 @@ async function renderFirstPage(bytes: Uint8Array): Promise<string> {
   canvas.width = vp.width;
   canvas.height = vp.height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
+  if (!ctx) throw new Error("The document preview could not be created.");
   await p.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
   return canvas.toDataURL("image/png");
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 export default function LivePreview({
@@ -54,18 +59,18 @@ export default function LivePreview({
   const [img, setImg] = useState("");
   const [busy, setBusy] = useState(true);
   const [note, setNote] = useState("");
-  // Cache the one-page copy so we only rebuild it when the file changes.
-  const trimmedRef = useRef<{ key: string; file: Promise<File> } | null>(null);
+  const trimmedRef = useRef<{ source: File; pageLimit: number; file: Promise<File> } | null>(null);
 
   useEffect(() => {
     let dead = false;
     setBusy(true);
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
-    if (trimmedRef.current?.key !== key)
-      trimmedRef.current = { key, file: firstPageFile(file) };
-
     const t = setTimeout(async () => {
       try {
+        // N-up needs 2/4 input pages to show a real first sheet. Page numbers
+        // need the original count for "1 of N"; their processing is vector-only.
+        const pageLimit = tool.id === "numbers" ? Infinity : tool.id === "nup" ? params.n === "4" ? 4 : 2 : 1;
+        if (trimmedRef.current?.source !== file || trimmedRef.current.pageLimit !== pageLimit)
+          trimmedRef.current = { source: file, pageLimit, file: previewFile(file, pageLimit) };
         const tr = trimmedRef.current;
         if (!tr) return;
         const trimmed = await tr.file;
@@ -88,7 +93,12 @@ export default function LivePreview({
         setImg(url);
         setNote(fellBack ? "Adjust the options to preview the effect." : "");
       } catch (e) {
-        if (!dead) setNote(e instanceof Error ? e.message : String(e));
+        if (!dead) {
+          setImg("");
+          setNote(/locked|password|encrypted/i.test(String(e))
+            ? "This PDF is locked. Use Remove PDF Password first."
+            : "This file could not be previewed. Check that it is a readable PDF, then try again.");
+        }
       } finally {
         if (!dead) setBusy(false);
       }
@@ -111,24 +121,24 @@ export default function LivePreview({
             draggable={false}
           />
         ) : (
-          <div className="grid h-72 place-items-center text-sm text-brand-400">
-            <Loader2 size={20} className="animate-spin" />
+          <div className="grid h-72 place-items-center p-6 text-center text-sm text-muted-foreground">
+            {busy ? <Loader2 size={20} className="animate-spin" /> : note || "Preview unavailable. Your file is still ready to process."}
           </div>
         )}
         {busy && img && (
           <div className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-white/90 dark:bg-card/90">
-            <Loader2 size={14} className="animate-spin text-primary-500" />
+            <Loader2 size={14} className="animate-spin text-foreground" />
           </div>
         )}
-        {!busy && (
-          <span className="absolute left-2 top-2 rounded-full bg-primary-500/90 px-2 py-0.5 text-[10px] font-medium text-[#0A0A0A]">
+        {!busy && img && (
+          <span className="absolute left-2 top-2 rounded-full bg-card/90 px-2 py-0.5 text-[10px] font-medium text-foreground">
             LIVE PREVIEW
           </span>
         )}
       </div>
       <p className="mt-2 text-center text-[11px] text-brand-400">
         {note ||
-          `Live preview of “${tool.name}” on page 1 — changes will be included in your download.`}
+          `Preview of the first ${tool.id === "nup" ? "output sheet" : "page"}. The complete file is included in your download.`}
       </p>
     </div>
   );

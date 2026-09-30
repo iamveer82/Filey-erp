@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { billing, erp, hr, quotes, pos, setCacheOrg, tools as settings } from "../api";
+import { billing, erp, hr, quotes, pos, crm, receipts, setCacheOrg, tools as settings } from "../api";
 import { runTool, TOOLS } from "../aiTools";
 import { setDataMode } from "../dataMode";
 import { setAgentMode } from "../agentMode";
@@ -212,11 +212,51 @@ it("does not report missing records when the lookup actually failed", async () =
   );
   vi.spyOn(erp, "products").mockRejectedValue(new Error("Inventory storage unavailable"));
   expect(await runTool("send_invoice", { invoice_number: "INV-1" }, () => true)).toEqual({
-    error: "Invoice storage unavailable",
+    error: "Invoice storage unavailable", retry_safe: false,
   });
   expect(
     await runTool("adjust_stock", { product: "BOLT-L", delta: 1 }, () => true)
-  ).toEqual({ error: "Inventory storage unavailable" });
+  ).toEqual({ error: "Inventory storage unavailable", retry_safe: false });
+});
+
+it.each(["workspace", "cancel"] as const)("prevents multi-step record mutations after a %s change", async reason => {
+  let controller = new AbortController();
+  const change = () => reason === "cancel" ? controller.abort() : setCacheOrg("other-org", "other-user");
+  vi.spyOn(crm, "customers").mockResolvedValue([]);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  const companyFixture = { name: "Fixture", default_accent: "#111111", default_template: "minimal" };
+  const company = vi.spyOn(billing, "getCompany").mockResolvedValue(companyFixture);
+  const invoices = vi.spyOn(billing, "listDocs").mockResolvedValue([]);
+  const quoteList = vi.spyOn(quotes, "listDocs").mockResolvedValue([]);
+  const poList = vi.spyOn(pos, "list").mockResolvedValue([]);
+  const receiptList = vi.spyOn(receipts, "list").mockResolvedValue([]);
+  const staff = vi.spyOn(hr, "employees").mockResolvedValue([]);
+  const register = vi.spyOn(settings, "settings").mockResolvedValue([]);
+  const saveInvoice = vi.spyOn(billing, "saveDoc").mockResolvedValue(1);
+  const saveQuote = vi.spyOn(quotes, "saveDoc").mockResolvedValue(1);
+  const savePo = vi.spyOn(pos, "save").mockResolvedValue(1);
+  const saveReceipt = vi.spyOn(receipts, "save").mockResolvedValue(1);
+  const payroll = vi.spyOn(hr, "runPayroll").mockResolvedValue(1);
+  const saveRegister = vi.spyOn(settings, "setSetting").mockResolvedValue();
+  const cases = [
+    { name: "create_invoice_draft", args: { customer_name: "Mark", items: [{ description: "Service", qty: 1, unit_price: 10 }] }, prepare: () => company.mockImplementationOnce(async () => { change(); return companyFixture; }), write: saveInvoice },
+    { name: "create_quote", args: { customer_name: "Mark", items: [{ description: "Service", qty: 1, rate: 10 }] }, prepare: () => quoteList.mockImplementationOnce(async () => { change(); return []; }), write: saveQuote },
+    { name: "create_purchase_order", args: { supplier_name: "Mark", items: [{ description: "Service", qty: 1, unit_price: 10 }] }, prepare: () => poList.mockImplementationOnce(async () => { change(); return []; }), write: savePo },
+    { name: "create_payment_receipt", args: { customer_name: "Mark", amount: 10 }, prepare: () => receiptList.mockImplementationOnce(async () => { change(); return []; }), write: saveReceipt },
+    { name: "run_payroll", args: { employee_name: "Mark", basic: 100, period: "2026-09" }, prepare: () => staff.mockImplementationOnce(async () => { change(); return [{ id: 1, name: "Mark" }] as never; }), write: payroll },
+    { name: "record_cheque", args: { cheque_no: "1", type: "received", party: "Mark", amount: 10 }, prepare: () => register.mockImplementationOnce(async () => { change(); return []; }), write: saveRegister },
+  ];
+  vi.spyOn((await import("../api")).suppliers, "list").mockResolvedValue([]);
+  for (const item of cases) {
+    setCacheOrg("test-org", "test-user");
+    // Each task owns a fresh controller; revoking an old task never affects a
+    // later legitimate turn, including another channel in this workspace.
+    controller = new AbortController();
+    item.prepare();
+    await expect(runTool(item.name, item.args, () => true, true, undefined, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(item.write, item.name).not.toHaveBeenCalled();
+  }
+  expect(invoices).toHaveBeenCalled();
 });
 
 it("reports bank balances by native currency without an invented combined total", async () => {

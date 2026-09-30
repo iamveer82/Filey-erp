@@ -412,7 +412,7 @@ export default function ESignStudio({
                 aria-label="Draw signature"
                 aria-pressed={drawTool === "pen"}
                 onClick={() => setDrawTool("pen")}
-                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
+                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-muted aria-pressed:border-foreground/30"
               >
                 <PenLine size={16} />
               </button>
@@ -420,7 +420,7 @@ export default function ESignStudio({
                 aria-label="Erase signature"
                 aria-pressed={drawTool === "eraser"}
                 onClick={() => setDrawTool("eraser")}
-                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
+                className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-muted aria-pressed:border-foreground/30"
               >
                 <Eraser size={16} />
               </button>
@@ -602,7 +602,7 @@ export default function ESignStudio({
                         aria-label="Draw signature"
                 aria-pressed={drawTool === "pen"}
                 onClick={() => setDrawTool("pen")}
-                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
+                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-muted aria-pressed:border-foreground/30"
                       >
                         <PenLine size={14} />
                       </button>
@@ -610,7 +610,7 @@ export default function ESignStudio({
                         aria-label="Erase signature"
                 aria-pressed={drawTool === "eraser"}
                 onClick={() => setDrawTool("eraser")}
-                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-primary-100 aria-pressed:border-primary-400"
+                        className="btn-ghost h-10 w-10 p-0 aria-pressed:bg-muted aria-pressed:border-foreground/30"
                       >
                         <Eraser size={14} />
                       </button>

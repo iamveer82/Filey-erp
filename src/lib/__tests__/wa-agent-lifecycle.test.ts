@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../agentStorage", () => ({
   agentStorageScope: () => state.scope,
   AGENT_STORAGE_EVENT: "test:scope",
+  readAgentStorage: (key: string) => localStorage.getItem(`${key}:${state.scope}`),
+  writeAgentStorage: (key: string, value: string | null) => value === null ? localStorage.removeItem(`${key}:${state.scope}`) : localStorage.setItem(`${key}:${state.scope}`, value),
 }));
 vi.mock("../agentRunState", () => ({ clearAgentProgress: mocks.clearProgress }));
 vi.mock("../ai", () => ({
@@ -65,6 +67,7 @@ vi.mock("../waBridge", () => ({
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
+  localStorage.clear();
   state.scope = "local:org:user:owner";
   mocks.agent.mockResolvedValue("Done");
   mocks.reply.mockResolvedValue(undefined);
@@ -401,4 +404,68 @@ it("does not forward raw provider failures or credentials to WhatsApp", async ()
   await answered("provider-error");
   expect(mocks.reply).toHaveBeenCalledWith("provider-error", expect.stringContaining("task could not finish"), "session-one");
   expect(JSON.stringify(mocks.reply.mock.calls)).not.toContain("secret-fixture");
+});
+
+const remoteTurn = (channel: "whatsapp" | "telegram", text: string) => ({
+  scope: state.scope!, channel, conversationId: "971500000001", text,
+  signal: new AbortController().signal, deadline: Date.now() + 200_000, isCurrent: () => true,
+});
+
+it("uses the same engine for Telegram while keeping channel approvals isolated", async () => {
+  const { runRemoteAgentTurn } = await import("../remoteAgentTurn");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { opts.confirm("email_invoice", { id: 5 }); return "Approve invoice 5?"; });
+  send("wa-channel-proposal", "Email invoice 5");
+  await answered("wa-channel-proposal");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => {
+    expect(opts.agentId).toBe("telegram:971500000001");
+    expect(opts.confirm("email_invoice", { id: 5 })).toBe(false);
+    return "No matching Telegram approval";
+  });
+  const telegram = await runRemoteAgentTurn(remoteTurn("telegram", "YES"));
+  telegram.delivered();
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { expect(opts.confirm("email_invoice", { id: 5 })).toBe(true); return "Done"; });
+  send("wa-channel-approval", "YES");
+  await answered("wa-channel-approval");
+});
+
+it("restores delivered remote conversation history without restoring runtime approvals", async () => {
+  const { runRemoteAgentTurn, clearRemoteAgentTurns, clearRemoteAgentConversation } = await import("../remoteAgentTurn");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { opts.confirm("email_invoice", { id: 5 }); return "Saved conversation result"; });
+  const first = await runRemoteAgentTurn(remoteTurn("telegram", "Review private invoice 5"));
+  first.delivered("Saved conversation result; delivery accepted");
+  clearRemoteAgentTurns(state.scope!, "telegram");
+  mocks.agent.mockImplementationOnce(async (messages, opts) => {
+    expect(JSON.stringify(messages)).toContain("delivery accepted");
+    expect(opts.confirm("email_invoice", { id: 5 })).toBe(false);
+    return "Approval expired after restart";
+  });
+  const second = await runRemoteAgentTurn(remoteTurn("telegram", "YES"));
+  second.delivered();
+  clearRemoteAgentConversation(state.scope!, "telegram", "971500000001");
+  const third = await runRemoteAgentTurn(remoteTurn("telegram", "Fresh context"));
+  third.delivered();
+  expect(JSON.stringify(mocks.agent.mock.calls[2][0])).not.toContain("Review private invoice 5");
+});
+
+it("never grants an oversized remote proposal or a proposal the transport did not accept", async () => {
+  const { runRemoteAgentTurn } = await import("../remoteAgentTurn");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { opts.confirm("email_invoice", { body: "x".repeat(3000) }); return "Review?"; });
+  const large = await runRemoteAgentTurn(remoteTurn("telegram", "Send an email"));
+  expect(large.text).toContain("too long to approve safely");
+  large.delivered();
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { expect(opts.confirm("email_invoice", { body: "x".repeat(3000) })).toBe(false); return "Needs Filey"; });
+  await runRemoteAgentTurn(remoteTurn("telegram", "YES"));
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { opts.confirm("email_invoice", { id: 9 }); return "Review invoice 9"; });
+  await runRemoteAgentTurn(remoteTurn("telegram", "Send invoice 9")); // no delivered(): transport failed
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => { expect(opts.confirm("email_invoice", { id: 9 })).toBe(false); return "Please review again"; });
+  await runRemoteAgentTurn(remoteTurn("telegram", "YES"));
+});
+
+it("rejects an already cancelled remote request before touching tool state", async () => {
+  const { runRemoteAgentTurn } = await import("../remoteAgentTurn");
+  const controller = new AbortController();
+  controller.abort();
+  await expect(runRemoteAgentTurn({ ...remoteTurn("telegram", "Export invoices"), signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+  expect(mocks.agent).not.toHaveBeenCalled();
+  expect(mocks.setFiles).not.toHaveBeenCalled();
 });

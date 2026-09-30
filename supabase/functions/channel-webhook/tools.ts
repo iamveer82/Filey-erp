@@ -119,8 +119,8 @@ export const TOOLS: ToolDef[] = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Period start YYYY-MM-DD (inclusive)." },
-        to: { type: "string", description: "Period end YYYY-MM-DD (inclusive)." },
+        from: { type: "string", format: "date", description: "Period start YYYY-MM-DD (inclusive)." },
+        to: { type: "string", format: "date", description: "Period end YYYY-MM-DD (inclusive)." },
       },
       additionalProperties: false,
     },
@@ -147,8 +147,8 @@ export const TOOLS: ToolDef[] = [
     input_schema: {
       type: "object",
       properties: {
-        from: { type: "string", description: "Period start YYYY-MM-DD (inclusive)." },
-        to: { type: "string", description: "Period end YYYY-MM-DD (inclusive)." },
+        from: { type: "string", format: "date", description: "Period start YYYY-MM-DD (inclusive)." },
+        to: { type: "string", format: "date", description: "Period end YYYY-MM-DD (inclusive)." },
       },
       additionalProperties: false,
     },
@@ -171,8 +171,8 @@ const LINE_ITEM_SCHEMA = {
     type: "object",
     properties: {
       description: { type: "string", description: "Line description." },
-      qty: { type: "number", description: "Quantity (default 1)." },
-      unit_price: { type: "number", description: "Unit price in the document currency." },
+      qty: { type: "number", minimum: 0.001, description: "Quantity (default 1)." },
+      unit_price: { type: "number", minimum: 0, description: "Unit price in the document currency." },
     },
     required: ["description", "unit_price"],
     additionalProperties: false,
@@ -230,8 +230,8 @@ export const WRITE_TOOLS: ToolDef[] = [
             type: "object",
             properties: {
               description: { type: "string" },
-              qty: { type: "number", description: "Quantity (default 1)." },
-              unit_cost: { type: "number", description: "Unit cost." },
+              qty: { type: "number", minimum: 0.001, description: "Quantity (default 1)." },
+              unit_cost: { type: "number", minimum: 0, description: "Unit cost." },
             },
             required: ["description", "unit_cost"],
             additionalProperties: false,
@@ -290,7 +290,7 @@ export const WRITE_TOOLS: ToolDef[] = [
         category: { type: "string", description: "Expense category, e.g. 'fuel', 'rent'." },
         amount: { type: "number", description: "Amount spent, greater than zero." },
         description: { type: "string", description: "Optional note." },
-        expense_date: { type: "string", description: "YYYY-MM-DD, defaults to today." },
+        expense_date: { type: "string", format: "date", description: "YYYY-MM-DD, defaults to today." },
       },
       required: ["category", "amount"],
       additionalProperties: false,
@@ -433,6 +433,48 @@ import type { InboundMsg } from "./parse.ts";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Keep model context bounded without passing broken, sliced JSON as facts. */
+export function boundedToolResult(result: unknown): string {
+  const text = JSON.stringify(result ?? { error: "No result was returned." });
+  return text.length <= 6000 ? text : JSON.stringify({
+    truncated: true, data_preview: text.slice(0, 2800),
+    note: "This is only a preview. Do not infer missing records or totals; narrow the lookup.",
+  });
+}
+
+/** The provider's JSON schema is guidance, not validation at this boundary. */
+export function validateToolInput(value: unknown, schema: Record<string, unknown>, path = "input"): string | null {
+  const invalid = (reason: string) => `Invalid tool input: ${path} ${reason}.`;
+  if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("must be an object");
+    const object = value as Record<string, unknown>;
+    const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+    for (const key of (schema.required ?? []) as string[]) {
+      if (object[key] === undefined || (typeof object[key] === "string" && !String(object[key]).trim())) return invalid(`requires ${key}`);
+    }
+    for (const [key, child] of Object.entries(object)) {
+      if (!Object.hasOwn(properties, key)) return invalid("contains an unsupported field");
+      const error = validateToolInput(child, properties[key], `${path}.${key}`);
+      if (error) return error;
+    }
+  } else if (schema.type === "array") {
+    if (!Array.isArray(value) || value.length < Number(schema.minItems ?? 0) || value.length > Number(schema.maxItems ?? 30)) return invalid("has an invalid number of items");
+    for (let i = 0; i < value.length; i++) {
+      const error = validateToolInput(value[i], schema.items as Record<string, unknown>, `${path}[${i}]`);
+      if (error) return error;
+    }
+  } else if (schema.type === "number" || schema.type === "integer") {
+    if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 1e9 || (schema.type === "integer" && !Number.isInteger(value))) return invalid("must be a finite number");
+    if (schema.minimum !== undefined && value < Number(schema.minimum)) return invalid("is below the allowed minimum");
+  } else if (schema.type === "string") {
+    if (typeof value !== "string" || value.length > 4096) return invalid("must be text within 4,096 characters");
+    if (path.endsWith(".currency") && !/^[A-Za-z]{3}$/.test(value)) return invalid("must be a 3-letter currency code");
+    if (schema.format === "date" && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) return invalid("must be a real calendar date");
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return invalid("has an unsupported value");
+  return null;
+}
+
 // deno-lint-ignore no-explicit-any
 export async function runTool(
   // deno-lint-ignore no-explicit-any
@@ -446,6 +488,11 @@ export async function runTool(
   source?: Pick<InboundMsg, "channel" | "externalId">,
 ): Promise<unknown> {
   const org = String(orgId);
+  if (!org.trim()) return { error: "Workspace is not configured." };
+  const definition = ALL_TOOLS.find((tool) => tool.name === name);
+  if (!definition) return { error: `unknown tool: ${name}` };
+  const invalid = validateToolInput(input, definition.input_schema);
+  if (invalid) return { error: invalid };
 
   // ---- draft-only writes ----
   if (WRITE_TOOLS.some((t) => t.name === name)) {
@@ -542,9 +589,10 @@ export async function runTool(
         const sales = (data ?? []).filter((d: any) => d.doc_type !== "purchase");
         // deno-lint-ignore no-explicit-any
         const ids = sales.map((d: any) => d.id);
-        const { data: items } = ids.length
-          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").in("invoice_id", ids)
-          : { data: [] };
+        const { data: items, error: itemError } = ids.length
+          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+          : { data: [], error: null };
+        if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
         const totalByDoc = new Map<number, number>();
         // deno-lint-ignore no-explicit-any
         for (const it of items ?? []) {
@@ -574,9 +622,10 @@ export async function runTool(
         const sales = (data ?? []).filter((d: any) => d.doc_type !== "purchase");
         // deno-lint-ignore no-explicit-any
         const ids = sales.map((d: any) => d.id);
-        const { data: items } = ids.length
-          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").in("invoice_id", ids)
-          : { data: [] };
+        const { data: items, error: itemError } = ids.length
+          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+          : { data: [], error: null };
+        if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
         const totalByDoc = new Map<number, number>();
         // deno-lint-ignore no-explicit-any
         for (const it of items ?? []) {
@@ -645,6 +694,7 @@ export async function runTool(
       const { data: items, error: ie } = await client
         .from("invoice_doc_items")
         .select("description,qty,unit_price")
+        .eq("org_id", org)
         .eq("invoice_id", inv.id)
         .order("position");
       if (ie) return { error: ie.message };
@@ -675,9 +725,10 @@ export async function runTool(
         .lte("issue_date", to);
       if (error) return { error: error.message };
       const ids = (docs ?? []).map((d: any) => d.id);
-      const { data: items } = ids.length
-        ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").in("invoice_id", ids)
-        : { data: [] };
+      const { data: items, error: itemError } = ids.length
+        ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+        : { data: [], error: null };
+      if (itemError) return { error: "Invoice line details could not be loaded. No VAT totals were calculated." };
       const netByDoc = new Map<number, number>();
       for (const it of items ?? []) {
         netByDoc.set(it.invoice_id, (netByDoc.get(it.invoice_id) ?? 0) + num(it.qty) * num(it.unit_price));

@@ -18,7 +18,7 @@ export function AgentAccessControl({ mode, disabled, onChange, onCapabilities }:
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} aria-label="Agent access" title={MODE_LABELS[mode]}
-        className={cn("composer-control composer-access max-w-[160px]", mode === "auto" && "text-amber-700 dark:text-amber-400")}>
+        className="composer-control composer-access max-w-[160px] text-foreground">
         <Icon size={18} className="shrink-0" /><span className="composer-detail truncate">{MODE_LABELS[mode]}</span>
       </button>
     </PopoverTrigger>
@@ -30,7 +30,7 @@ export function AgentAccessControl({ mode, disabled, onChange, onCapabilities }:
           return <button key={id} role="radio" aria-checked={mode === id} type="button"
             onClick={() => { onChange(id); setOpen(false); }}
             className={cn("flex w-full items-start gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring", mode === id && "bg-hover")}>
-            <ItemIcon size={16} className={cn("mt-0.5 shrink-0", id === "auto" && "text-amber-700 dark:text-amber-400")} />
+            <ItemIcon size={16} className="mt-0.5 shrink-0" />
             <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium">{MODE_LABELS[id]}</span>
               <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{AGENT_MODES.find(m => m.id === id)?.description}</span></span>
             {mode === id && <Check size={14} className="mt-1 shrink-0" />}
@@ -64,13 +64,13 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
     </PopoverTrigger>
     <PopoverContent side="top" align="end" collisionPadding={12} className="max-h-[var(--radix-popover-content-available-height)] w-[280px] overflow-y-auto p-4" data-browser-overlay>
       <div className="flex items-start justify-between gap-3">
-        <Zap key={selected} size={19} className="effort-change mt-1 text-amber-700 dark:text-primary-400" />
+        <Zap key={selected} size={19} className="effort-change mt-1 text-foreground" />
         <div className="min-w-0 flex-1 text-center"><p aria-live="polite" className="text-sm font-semibold">{EFFORT_LABELS[selected]}</p><p className="mt-0.5 truncate text-xs text-muted-foreground" title={model}>{model}</p></div>
         <button type="button" onClick={() => onChange("auto")} disabled={selected === "auto"} aria-label="Reset effort" title="Use the model default" className="rounded-full p-1 text-muted-foreground hover:bg-hover disabled:opacity-40"><RotateCcw size={15} /></button>
       </div>
       {levels.length > 1 ? <>
         <div className="effort-slider mt-5" style={{ "--effort-fill": `${percent}%` } as CSSProperties}>
-          <div className="effort-track" aria-hidden="true"><div className="effort-fill"><i /><i /><i /></div></div>
+          <div className="effort-track" aria-hidden="true"><div className="effort-fill" /></div>
           <input type="range" min={0} max={levels.length - 1} step={1} value={index} aria-label="Reasoning effort" aria-valuetext={EFFORT_LABELS[selected]} onChange={e => onChange(levels[Number(e.target.value)])} />
         </div>
         <div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>Default</span><span>{EFFORT_LABELS[levels[levels.length - 1]]}</span></div>

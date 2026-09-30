@@ -12,7 +12,7 @@ vi.mock("../../lib/pdfTools", async (original) => ({ ...await original<typeof im
 vi.mock("../../components/MergeStudio", () => ({ default: ({ onApply }: { onApply: (out: unknown) => void }) => <button onClick={() => boundary.edit(onApply)}>Process in editor</button> }));
 vi.mock("../../components/InlinePdfEditor", () => ({ default: function MockPdfEditor({ editorRef }: { editorRef: import("react").Ref<unknown> }) { useImperativeHandle(editorRef, () => ({ prepare: boundary.prepare })); return <div>Document editor</div>; } }));
 vi.mock("../../components/PdfToolbox", () => {
-  const tools = ["alpha", "beta", "gamma"].map(id => ({ id, name: id === "alpha" ? "Alpha tool" : id === "beta" ? "Beta tool" : "Gamma tool", interactive: id === "gamma" ? "merge" : undefined, cat: "Convert", desc: "Test local conversion", icon: () => null, accept: ".bin,.pdf", multi: id === "beta", run: boundary.run }));
+  const tools = ["alpha", "beta", "gamma", "decrypt"].map(id => ({ id, name: id === "alpha" ? "Alpha tool" : id === "beta" ? "Beta tool" : id === "decrypt" ? "Remove PDF Password" : "Gamma tool", interactive: id === "gamma" ? "merge" : undefined, cat: "Convert", desc: "Test local conversion", icon: () => null, accept: ".bin,.pdf", multi: id === "beta", run: boundary.run }));
   return { PDF_TOOLS: tools, toolById: (id: string) => tools.find(t => t.id === id), toolFlow: () => ({ from: "BIN", to: "PDF" }), defaultParams: () => ({ suffix: "default" }), ToolFields: ({ params, setParams }: { params: Record<string, string>; setParams: (next: Record<string, string>) => void }) => <input aria-label="Output suffix" value={params.suffix} onChange={e => setParams({ suffix: e.target.value })} /> };
 });
 
@@ -107,6 +107,7 @@ it("accepts dropped files, rejects the wrong format and keeps the uploaded file 
   boundary.run.mockRejectedValueOnce(new Error("Cannot read this file"));
   fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   expect(await view.findByRole("alert")).toHaveTextContent("Cannot read this file");
+  expect(view.queryByText("Preparing file…")).toBeNull();
   expect(view.getByRole("button", { name: "Remove source.bin" })).toBeEnabled();
   fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   expect(await view.findByRole("region", { name: "Your results" })).toHaveTextContent("output.pdf");
@@ -131,7 +132,7 @@ it("adds and reorders multiple files before processing and removes a file withou
 
 it("finds tools from the illustrated catalogue and recovers an empty search", async () => {
   const view = setup("/tools");
-  expect(view.getByRole("button", { name: "Open Alpha tool" }).querySelector("img")).toHaveAttribute("src", "/tool-covers/tools/alpha.webp");
+  expect(view.getByRole("button", { name: "Open Alpha tool" }).querySelector(".tool-cover-drawing")).toHaveAttribute("data-tool", "alpha");
   fireEvent.change(view.getByRole("textbox", { name: "Search tools by name or what they do…" }), { target: { value: "Beta" } });
   expect(view.queryByRole("button", { name: "Open Alpha tool" })).toBeNull();
   expect(view.getByRole("button", { name: "Open Beta tool" })).toBeEnabled();
@@ -178,8 +179,8 @@ it("passes output bytes to the next compatible tool without reuploading or cloud
   upload(view.container);
   fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
   await view.findByRole("region", { name: "Your results" });
-  fireEvent.click(view.getByRole("combobox", { name: "Next tool" }));
-  fireEvent.click(view.getByRole("option", { name: "Beta tool" }));
+  fireEvent.click(view.getByRole("button", { name: "Next tool" }));
+  fireEvent.click(view.getByRole("menuitem", { name: "Beta tool" }));
   fireEvent.click(view.getByRole("button", { name: "Continue" }));
   expect(await view.findByRole("button", { name: "Remove output.pdf" })).toBeEnabled();
   fireEvent.click(view.getByRole("button", { name: "Beta tool" }));
@@ -230,4 +231,28 @@ it("ignores an editor result from a file that has been replaced", async () => {
   await finishOldFile({ name: "stale.pdf", bytes: new Uint8Array([1]) });
   expect(view.queryByRole("region", { name: "Your results" })).toBeNull();
   expect(boundary.download).not.toHaveBeenCalled();
+});
+
+it("rejects empty output and keeps the source ready to retry", async () => {
+  const view = setup();
+  upload(view.container);
+  boundary.run.mockResolvedValueOnce([{ name: "empty.pdf", bytes: new Uint8Array() }]);
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
+  expect(await view.findByRole("alert")).toHaveTextContent("No usable output was generated");
+  expect(view.queryByRole("region", { name: "Your results" })).toBeNull();
+  expect(view.getByRole("button", { name: "Remove source.bin" })).toBeEnabled();
+  fireEvent.click(view.getByRole("button", { name: "Alpha tool" }));
+  expect(await view.findByRole("region", { name: "Your results" })).toHaveTextContent("output.pdf");
+});
+
+it("shows the password-removal workflow without mounting an editor that cannot open a locked file", async () => {
+  const view = setup("/tools?tool=decrypt");
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(["locked"], "locked.pdf", { type: "application/pdf" })] } });
+  expect(view.getByText("Create an unlocked copy")).toBeTruthy();
+  expect(view.getByText(/Enter the current PDF password/)).toBeTruthy();
+  expect(view.queryByText("Document editor")).toBeNull();
+  fireEvent.click(view.getByRole("button", { name: "Remove PDF Password" }));
+  expect(await view.findByRole("region", { name: "Your results" })).toBeTruthy();
+  expect(view.getByRole("button", { name: "Download results" })).toBeEnabled();
+  expect(boundary.prepare).not.toHaveBeenCalled();
 });

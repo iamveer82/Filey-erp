@@ -209,6 +209,7 @@ it("forwards owner documents with captions and refuses stranger downloads", asyn
   transport.download.mockImplementation(async () => Readable.from([Buffer.from("%PDF-test")]));
   const message = { key: { id: "pdf-1", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "../Invoice.pdf", mimetype: "application/pdf", caption: "Read this invoice" } } };
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [message] });
+  await vi.waitFor(() => expect(emitted("message")).toHaveLength(1));
   expect(emitted("message")[0]).toMatchObject({ from: "971500000001", text: "Read this invoice", attachment: { name: "Invoice.pdf", mimetype: "application/pdf", b64: Buffer.from("%PDF-test").toString("base64") } });
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ ...message, key: { id: "stranger-file", remoteJid: "971599999999@s.whatsapp.net" } }] });
   expect(transport.download).toHaveBeenCalledOnce();
@@ -218,9 +219,64 @@ it("stops oversized media streams even when the provider omits the file length",
   const stream = Readable.from([Buffer.alloc(13 * 1024 * 1024)]);
   transport.download.mockResolvedValueOnce(stream);
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "large-file", remoteJid: "971500000001@s.whatsapp.net" }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "huge.pdf" } } }] });
+  await vi.waitFor(() => expect(stream.destroyed).toBe(true));
   expect(emitted("message")).toHaveLength(0);
   expect(stream.destroyed).toBe(true);
   expect(transport.send).toHaveBeenCalledWith("971500000001@s.whatsapp.net", { text: expect.stringContaining("under 12 MB") }, expect.any(Object));
+});
+
+it("starts presence while receiving a file and lets /stop cancel it before execution", async () => {
+  let finish!: (stream: Readable) => void;
+  transport.download.mockImplementationOnce(() => new Promise<Readable>(resolve => { finish = resolve; }));
+  const jid = "971500000001@s.whatsapp.net";
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "slow-file", remoteJid: jid }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: "invoice.pdf" } },
+  }] });
+  await vi.waitFor(() => expect(transport.presence).toHaveBeenCalledWith("composing", jid));
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(transport.send).toHaveBeenCalledWith(jid, { text: expect.stringContaining("Receiving your attachment") }, expect.any(Object));
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "stop-download", remoteJid: jid }, message: { conversation: "/stop" },
+  }] });
+  expect(emitted("message")).toEqual([expect.objectContaining({ text: "/stop" })]);
+  expect(transport.download.mock.calls[0][2].options.signal.aborted).toBe(true);
+  const stream = Readable.from([Buffer.from("private file")]);
+  finish(stream);
+  await vi.waitFor(() => expect(stream.destroyed).toBe(true));
+  expect(emitted("message")).toHaveLength(1);
+});
+
+it("bounds simultaneous owner downloads and releases every stream on stop", async () => {
+  const streams = [0, 1, 2].map(() => new Readable({ read() {} }));
+  streams.forEach(stream => transport.download.mockResolvedValueOnce(stream));
+  const jid = "971500000001@s.whatsapp.net";
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [0, 1, 2, 3].map(id => ({
+    key: { id: `burst-file-${id}`, remoteJid: jid }, message: { documentMessage: { directPath: "/v/test-document.enc", fileName: `${id}.pdf` } },
+  })) });
+  await vi.waitFor(() => expect(transport.download).toHaveBeenCalledTimes(3));
+  expect(transport.send).toHaveBeenCalledWith(jid, { text: expect.stringContaining("receiving your earlier files") }, expect.any(Object));
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "stop-burst", remoteJid: jid }, message: { conversation: "/stop" },
+  }] });
+  await vi.waitFor(() => expect(streams.every(stream => stream.destroyed)).toBe(true));
+  expect(emitted("message")).toEqual([expect.objectContaining({ text: "/stop" })]);
+});
+
+it("forwards owner videos with their bytes instead of only passing their captions", async () => {
+  await transport.handlers["messages.upsert"]({ type: "notify", messages: [{
+    key: { id: "owner-video", remoteJid: "971500000001@s.whatsapp.net" },
+    message: { videoMessage: { directPath: "/v/test-video.enc", caption: "Inspect this video", mimetype: "video/mp4" } },
+  }] });
+  await vi.waitFor(() => expect(emitted("message")).toHaveLength(1));
+  expect(emitted("message")[0]).toMatchObject({ text: "Inspect this video", attachment: { name: "video.mp4", mimetype: "video/mp4" } });
+});
+
+it("never leaks provider session material through delivery failures", async () => {
+  transport.send.mockRejectedValueOnce(new Error("Authorization: fixture-secret; session key fixture-private"));
+  command({ type: "send", to: "971500000001", text: "Result", requestId: "secret-error" });
+  await vi.waitFor(() => expect(emitted("delivery")).toContainEqual(expect.objectContaining({ requestId: "secret-error", ok: false })));
+  expect(JSON.stringify(emitted("delivery"))).not.toContain("fixture-secret");
+  expect(JSON.stringify(emitted("delivery"))).not.toContain("fixture-private");
 });
 
 it("infers a generated PDF's media type and rejects oversized output before reading it", async () => {
@@ -241,6 +297,7 @@ it("forwards a downloaded voice note with its sender, then confirms the reply", 
     message: { audioMessage: { directPath: "/v/test-audio.enc", mimetype: "audio/ogg" } },
   };
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [message] });
+  await vi.waitFor(() => expect(emitted("voice_note")).toHaveLength(1));
   expect(transport.download).toHaveBeenCalledWith(message, "stream", { options: {
     timeout: 30_000, maxRedirects: 0, signal: expect.any(AbortSignal),
   } });

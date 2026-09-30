@@ -1,3 +1,4 @@
+import { loadXlsx } from "./spreadsheet";
 // Fully local PDF toolkit — runs entirely in the Tauri webview.
 // No network, no external service. pdf-lib (MIT) + pdfjs-dist (Apache-2.0).
 import {
@@ -77,7 +78,7 @@ function anchorXY(
 const loadDoc = async (f: File) => {
   const doc = await PDFDocument.load(await readBuf(f), { ignoreEncryption: true });
   if (doc.isEncrypted)
-    throw new Error("This PDF is encrypted. Use Decrypt PDF with its password first.");
+    throw new Error("This PDF is encrypted. Use Remove PDF Password with its password first.");
   return doc;
 };
 
@@ -1502,7 +1503,9 @@ export const invertColors = (file: File) => rasterTransform(file, "invert");
 /** Remove pages with effectively no text and near-blank pixel content. */
 export async function removeBlankPages(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const keep: number[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1541,6 +1544,7 @@ export async function removeBlankPages(file: File): Promise<OutFile> {
     name: `${base(file.name)}-trimmed.pdf`,
     bytes: await out.save(),
   };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** Reorder pages for saddle-stitch booklet (4-up imposition). */
@@ -1817,7 +1821,9 @@ export async function splitAtPages(
 
 async function extractText(file: File): Promise<string[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const pages: string[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -1833,6 +1839,7 @@ async function extractText(file: File): Promise<string[]> {
     );
   }
   return pages;
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** Line-level diff (longest-common-subsequence) of two PDFs' text → .txt report. */
@@ -1898,7 +1905,9 @@ export async function comparePdfsText(files: File[]): Promise<OutFile> {
 /** Extract embedded raster images from every page as PNG files. */
 export async function extractImages(file: File): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const { OPS } = pdfjs;
   const out: OutFile[] = [];
   const seen = new Set<string>();
@@ -1968,6 +1977,7 @@ export async function extractImages(file: File): Promise<OutFile[]> {
   if (!out.length)
     throw new Error("No extractable raster images found in this PDF.");
   return out;
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /* ───────────────────── PDFCraft-parity tools (local) ──────────────────── */
@@ -2033,7 +2043,9 @@ export async function addAttachments(files: File[]): Promise<OutFile> {
 /** Pull every embedded file out of a PDF. */
 export async function extractAttachments(file: File): Promise<OutFile[]> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const att = await pdf.getAttachments();
   if (!att) throw new Error("This PDF has no embedded attachments.");
   const out: OutFile[] = [];
@@ -2044,6 +2056,7 @@ export async function extractAttachments(file: File): Promise<OutFile[]> {
   }
   if (!out.length) throw new Error("This PDF has no embedded attachments.");
   return out;
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /** Lay source pages onto sheets in a cols×rows grid (configurable N-up). */
@@ -2215,7 +2228,7 @@ export async function repairPdf(file: File): Promise<OutFile> {
     updateMetadata: false,
   });
   if (doc.isEncrypted)
-    throw new Error("This PDF is encrypted. Use Decrypt PDF with its password first.");
+    throw new Error("This PDF is encrypted. Use Remove PDF Password with its password first.");
   return {
     name: `${base(file.name)}-repaired.pdf`,
     bytes: await doc.save({ useObjectStreams: false }),
@@ -2418,10 +2431,12 @@ async function ocrPages(
 ): Promise<{ width: number; height: number; words: OcrWord[]; text: string }[]> {
   const { createWorker } = await import("tesseract.js");
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
-  const worker = await createWorker("eng", 1, TESS_OPTS);
+  const task = safePdf.getDocument({ data });
+  let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
   const pages: { width: number; height: number; words: OcrWord[]; text: string }[] = [];
   try {
+    const pdf = await task.promise;
+    worker = await createWorker("eng", 1, TESS_OPTS);
     for (let n = 1; n <= pdf.numPages; n++) {
       onProgress?.(n, pdf.numPages);
       const page = await pdf.getPage(n);
@@ -2444,7 +2459,8 @@ async function ocrPages(
       });
     }
   } finally {
-    await worker.terminate();
+    try { await worker?.terminate(); }
+    finally { await task.destroy().catch(() => {}); }
   }
   return pages;
 }
@@ -2465,11 +2481,13 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
   const scale = 2;
   const { createWorker } = await import("tesseract.js");
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
   const out = await PDFDocument.create();
   const font = await out.embedFont(StandardFonts.Helvetica);
-  const worker = await createWorker("eng", 1, TESS_OPTS);
+  let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
   try {
+    const pdf = await task.promise;
+    worker = await createWorker("eng", 1, TESS_OPTS);
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n);
       const base1 = page.getViewport({ scale: 1 });
@@ -2505,7 +2523,8 @@ export async function ocrSearchablePdf(file: File): Promise<OutFile> {
       }
     }
   } finally {
-    await worker.terminate();
+    try { await worker?.terminate(); }
+    finally { await task.destroy().catch(() => {}); }
   }
   return { name: `${base(file.name)}-ocr.pdf`, bytes: await out.save() };
 }
@@ -2580,30 +2599,6 @@ export async function wordToPdf(file: File): Promise<OutFile> {
   if (!value.trim()) throw new Error("No readable text found in this document.");
   const stub = new File([value], `${nameStem(file.name)}.txt`, { type: "text/plain" });
   return textToPdf(stub);
-}
-
-/* SheetJS is vendored locally (src/vendor/xlsx.mjs, v0.20.3) rather than the
- * npm `xlsx` package — npm `xlsx` carries a known high-severity
- * prototype-pollution / ReDoS advisory and SheetJS ships fixes only through
- * their own distribution. Self-hosting (vs the CDN) means Excel tools work
- * OFFLINE and aren't blocked by the script-src CSP. Vite code-splits it into a
- * lazy chunk loaded on first use. */
-interface XlsxLib {
-  read(data: Uint8Array, opts: { type: string }): {
-    SheetNames: string[];
-    Sheets: Record<string, unknown>;
-  };
-  utils: {
-    sheet_to_csv(ws: unknown): string;
-    book_new(): unknown;
-    aoa_to_sheet(rows: unknown[][]): unknown;
-    book_append_sheet(wb: unknown, ws: unknown, name: string): void;
-  };
-  write(wb: unknown, opts: { type: string; bookType: string }): ArrayBuffer;
-}
-let xlsxPromise: Promise<XlsxLib> | null = null;
-function loadXlsx(): Promise<XlsxLib> {
-  return (xlsxPromise ??= import("../vendor/xlsx.mjs") as unknown as Promise<XlsxLib>);
 }
 
 /** Excel (.xlsx/.xls) → PDF table (one section per sheet). */
@@ -2766,7 +2761,9 @@ export async function tiffToPdf(file: File): Promise<OutFile> {
 export async function pdfToTiff(file: File): Promise<OutFile[]> {
   const UTIF = (await import("utif")).default;
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const out: OutFile[] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -2787,6 +2784,7 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
     });
   }
   return out;
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 export async function downloadFile(f: OutFile): Promise<boolean> {
@@ -3382,17 +3380,49 @@ async function imageBytesToPdf(
   return { name: outName, bytes: await doc.save() };
 }
 
-/** HEIC / HEIF → PDF (decodes the primary image via libheif-wasm). */
-export async function heicToPdf(file: File): Promise<OutFile> {
-  const { heicTo } = await import("heic-to");
-  let blob: Blob;
+/** HEIC / HEIF → PDF. A dedicated worker bounds unsupported decoder variants. */
+export async function heicToPdf(file: File, context: ConversionContext = {}): Promise<OutFile> {
+  context.signal?.throwIfAborted();
+  const worker = new Worker(new URL("./heicWorker.ts", import.meta.url), { type: "module" });
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  let abort: (() => void) | undefined;
+  let bitmap: ImageBitmap;
   try {
-    blob = await heicTo({ blob: file, type: "image/jpeg", quality: 0.92 });
-  } catch {
-    throw new Error("Could not decode this HEIC/HEIF image.");
+    context.onProgress?.("Decoding HEIC photo…");
+    context.signal?.throwIfAborted();
+    bitmap = await new Promise<ImageBitmap>((resolve, reject) => {
+      worker.onmessage = (event: MessageEvent<{ bitmap?: ImageBitmap; error?: string }>) => {
+        if (event.data.bitmap) resolve(event.data.bitmap);
+        else reject(new Error(event.data.error || "Could not decode this HEIC/HEIF image."));
+      };
+      worker.onerror = () => reject(new Error("Could not decode this HEIC/HEIF image. Try exporting it as JPEG or PNG."));
+      abort = () => reject(context.signal?.reason ?? new DOMException("Conversion cancelled.", "AbortError"));
+      context.signal?.addEventListener("abort", abort, { once: true });
+      deadline = setTimeout(() => reject(new Error("This HEIC/HEIF image could not be decoded in time. Try exporting it as JPEG or PNG.")), 30_000);
+      worker.postMessage({ file });
+    });
+  } finally {
+    clearTimeout(deadline);
+    if (abort) context.signal?.removeEventListener("abort", abort);
+    worker.terminate();
   }
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  return imageBytesToPdf(bytes, false, `${nameStem(file.name)}.pdf`);
+  const canvas = document.createElement("canvas");
+  try {
+    context.signal?.throwIfAborted();
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const graphics = canvas.getContext("2d");
+    if (!graphics) throw new Error("Canvas is unavailable. Try this conversion in another browser.");
+    graphics.fillStyle = "#fff";
+    graphics.fillRect(0, 0, canvas.width, canvas.height);
+    graphics.drawImage(bitmap, 0, 0);
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("Could not create an image from this HEIC/HEIF file.")), "image/jpeg", 0.92));
+    context.signal?.throwIfAborted();
+    return imageBytesToPdf(new Uint8Array(await blob.arrayBuffer()), false, `${nameStem(file.name)}.pdf`);
+  } finally {
+    bitmap.close();
+    canvas.width = canvas.height = 0;
+  }
 }
 
 /** Photoshop PSD/PSB → PDF (flattened composite image). */
@@ -3469,7 +3499,9 @@ function detectSkewDeg(source: HTMLCanvasElement): number {
 /** Auto-straighten every page of a scanned PDF. */
 export async function deskewPdf(file: File): Promise<OutFile> {
   const data = new Uint8Array(await readBuf(file));
-  const pdf = await safePdf.getDocument({ data }).promise;
+  const task = safePdf.getDocument({ data });
+  try {
+  const pdf = await task.promise;
   const out = await PDFDocument.create();
   for (let i = 1; i <= pdf.numPages; i++) {
     const p = await pdf.getPage(i);
@@ -3504,6 +3536,7 @@ export async function deskewPdf(file: File): Promise<OutFile> {
     page.drawImage(img, { x: 0, y: 0, width: base1.width, height: base1.height });
   }
   return { name: `${base(file.name)}-deskewed.pdf`, bytes: await out.save() };
+  } finally { await task.destroy().catch(() => {}); }
 }
 
 /* ═══════════════════════════════ PDF/A ═════════════════════════════════════

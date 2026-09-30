@@ -11,6 +11,8 @@ const sharedDoc = {
   doc: {
     number: "INV-1",
     currency: "AED",
+    tax_country_code: "AE",
+    transaction_type: "10000001",
     template: "minimal",
     tax_rate: 5,
     discount: 0,
@@ -56,5 +58,7 @@ describe("public portal totals", () => {
     expect(text).toContain("284.00");
     // The pre-discount, pre-round figure must not be what the customer sees.
     expect(text).not.toContain("315.00");
+    expect(container.querySelector("[data-invoice-transactions]")?.textContent)
+      .toBe("Transaction details: Free Trade zone · Exports");
   });
 });

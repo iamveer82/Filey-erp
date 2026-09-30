@@ -204,7 +204,7 @@ export default function InlinePdfEditor({
         if (!dead)
           setError(
             /password|encrypted/i.test(String(failure))
-              ? "This PDF is locked. Use Unlock PDF first, then open the unlocked copy here."
+              ? "This PDF is locked. Use Remove PDF Password first, then open the unlocked copy here."
               : "Could not preview this PDF. Try another file."
           );
       } finally {

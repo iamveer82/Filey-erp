@@ -376,6 +376,46 @@
     </gc:Row>
     <gc:Row>
       <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0242</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>OpenPeppol Service Provider Identification Scheme (SPIS)</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0244</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Tax Identification (Tax ID), Nigeria</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0245</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Tax identification number (DIČ, Slovakia)</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0246</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>German Electronic Business Address</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0248</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Oman Value Added Tax Identification Number (VATIN)</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
         <gc:SimpleValue>9910</gc:SimpleValue>
       </gc:Value>
       <gc:Value ColumnRef="name">

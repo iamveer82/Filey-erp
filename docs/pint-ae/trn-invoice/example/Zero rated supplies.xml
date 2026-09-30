@@ -9,7 +9,7 @@
 	<cbc:ID>AE-001-ZeroRated-TEST</cbc:ID>
 	<cbc:UUID>65a5426a-b9ee-4190-9db7-1ada969b3eb2</cbc:UUID>
 	<cbc:IssueDate>2025-02-07</cbc:IssueDate>
-	<cbc:IssueTime>17:31:00</cbc:IssueTime>
+	<cbc:IssueTime>17:31:00+04:00</cbc:IssueTime>
 	<cbc:DueDate>2025-02-22</cbc:DueDate>
 	<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
 	<cbc:Note>Tax invoice</cbc:Note>	

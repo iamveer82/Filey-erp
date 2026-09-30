@@ -73,6 +73,7 @@ const MIME: Record<string, string> = {
   jpeg: "image/jpeg",
   txt: "text/plain",
   csv: "text/csv",
+  xml: "application/xml",
   tiff: "image/tiff",
   zip: "application/zip",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

@@ -6,14 +6,23 @@ import {
   buildInvoiceXml,
   type EInvoiceDoc,
 } from "../einvoiceXml";
+import { buyerEndpoint, isCreditNote } from "../einvoice";
 
 const sample = (): EInvoiceDoc => ({
+  einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408",
+    seller: { corporate_trn: "100123456700003", legal_authority: "Dubai Economy" },
+    payment_account_id: "AE070331234567890123456",
+    buyer: { tin: "1007774567" }, credit_reason: "DL8.61.1.D" },
+  customer_address: "Office 2",
   number: "INV-2026-001",
   issue_date: "2026-06-24",
+  date_of_supply: "2026-06-23",
+  notes: "Synthetic validation document",
+  terms: "Pay within thirty days",
   due_date: "2026-07-24",
   currency: "AED",
   invoice_type_code: "380",
-  transaction_type: "00000001",
+  transaction_type: "00000000",
   payment_means_code: "30",
   tax_rate: 5,
   discount: 0,
@@ -33,6 +42,92 @@ const sample = (): EInvoiceDoc => ({
     { description: "Widget", qty: 2, unit_price: 100, tax_category: "S" }, // 200 net, 10 VAT
     { description: "Export item", qty: 1, unit_price: 50, tax_category: "Z" }, // 50 net, 0 VAT
   ],
+});
+
+const extendedSamples = (): Record<string, EInvoiceDoc> => {
+  const doc = sample();
+  const commercial: EInvoiceDoc = { ...doc, invoice_type_code: "480", seller_trn: "", customer_trn: "", tax_rate: 0,
+    einvoice: { ...doc.einvoice, buyer: { tin: "1007774567", legal_id: "BUYER-LICENCE", legal_id_type: "TL", legal_authority: "Sharjah Economic Development" } },
+    items: [{ description: "Out-of-scope service", qty: 1, unit_price: 100, tax_category: "O" }] };
+  return {
+    exempt: { ...doc, discount: 7, items: [doc.items[0], { description: "Residential lease", qty: 1, unit_price: 50, tax_category: "E", custom: { einvoice_exemption_code: "DL8.46.2" } }] },
+    outOfScope: { ...doc, discount: 7, items: [doc.items[0], { description: "Out-of-scope supply", qty: 1, unit_price: 50, tax_category: "O" }] },
+    reverse: { ...doc, items: [{ description: "Electronic device", qty: 1, unit_price: 100, tax_category: "AE",
+      custom: { einvoice_nature: "DL8.48.8.2", einvoice_gtin: "4006381333931" } }] },
+    export: { ...doc, transaction_type: "00000001", buyer_country_code: "IN", buyer_country_subdivision: "Maharashtra", buyer_city: "Mumbai", customer_trn: "",
+      einvoice: { ...doc.einvoice, buyer: {}, buyer_delivery_mode: "export-unregistered",
+        delivery: { address: "Demo export destination", city: "Mumbai", region: "Maharashtra", country_code: "IN" } },
+      items: [{ description: "Export goods", qty: 1, unit_price: 100, tax_category: "Z" }] },
+    freezone: { ...doc, transaction_type: "10000000", einvoice: { ...doc.einvoice, beneficiary_id: "1001234567" } },
+    commercial,
+    commercialCredit: { ...commercial, invoice_type_code: "81", original_invoice_number: "COMMERCIAL-OLD", original_invoice_date: "2026-06-01" },
+  };
+};
+
+test("conditional UAE scenarios validate and preserve the supplied identities in XML", () => {
+  const cases = extendedSamples();
+  for (const doc of Object.values(cases)) expect(validateEInvoice(doc).errors).toEqual([]);
+  expect(buildInvoiceXml(cases.export)).toContain('<cbc:EndpointID schemeID="0235">9900000099</cbc:EndpointID>');
+  expect(buildInvoiceXml(cases.export)).toContain("<cbc:StreetName>Demo export destination</cbc:StreetName>");
+  expect(buildInvoiceXml(cases.freezone)).toContain("<cac:BuyerCustomerParty>");
+  const commercial = buildInvoiceXml(cases.commercial);
+  expect(commercial).toContain("<cbc:InvoiceTypeCode>480</cbc:InvoiceTypeCode>");
+  expect(commercial).toContain("<cbc:ID>TIN</cbc:ID>");
+  expect(commercial).not.toContain("<cbc:CompanyID></cbc:CompanyID>");
+  expect(buildInvoiceXml(cases.commercialCredit)).toContain("<cbc:CreditNoteTypeCode>81</cbc:CreditNoteTypeCode>");
+  expect(isCreditNote("81")).toBe(true);
+});
+
+test("required due date, export address and free-zone beneficiary cannot be omitted", () => {
+  expect(validateEInvoice({ ...sample(), due_date: "" }).errors.join()).toContain("Payment due date");
+  expect(validateEInvoice({ ...sample(), due_date: "", advance_applied: 260 }).errors).toEqual([]);
+  expect(validateEInvoice({ ...sample(), transaction_type: "10000000" }).errors.join()).toContain("Beneficiary");
+  expect(validateEInvoice({ ...sample(), transaction_type: "00000001" }).errors.join()).toContain("Export delivery");
+  expect(buyerEndpoint({ buyer_delivery_mode: "outside-uae-scope" })).toEqual({ id: "9900000098", scheme: "0235" });
+  expect(validateEInvoice({ ...sample(), einvoice: { ...sample().einvoice, buyer_delivery_mode: "export-unregistered" } }).errors.join()).toContain("Select Exports");
+});
+
+test("exempt and out-of-scope categories omit rates; exemptions require a selected code", () => {
+  const cases = extendedSamples();
+  const exempt = new DOMParser().parseFromString(buildInvoiceXml(cases.exempt), "application/xml");
+  for (const category of Array.from(exempt.getElementsByTagName("cac:TaxCategory"))) {
+    if (category.getElementsByTagName("cbc:ID")[0]?.textContent === "E") {
+      if (category.parentElement?.tagName === "cac:TaxSubtotal") expect(category.getElementsByTagName("cbc:Percent")).toHaveLength(0);
+      else expect(category.getElementsByTagName("cbc:Percent")[0]?.textContent).toBe("0");
+    }
+  }
+  const lines = Array.from(exempt.getElementsByTagName("cac:InvoiceLine"));
+  expect(lines[1].getElementsByTagName("cbc:TaxExemptionReasonCode")[0]?.textContent).toBe("DL8.46.2");
+  expect(lines[1].getElementsByTagName("cbc:Percent")).toHaveLength(0);
+  expect(lines[1].getElementsByTagName("cac:TaxTotal")).toHaveLength(0);
+  expect(buildInvoiceXml(cases.exempt)).toContain("<cbc:AllowanceChargeReasonCode>100</cbc:AllowanceChargeReasonCode>");
+  expect(validateEInvoice({ ...cases.exempt, items: [{ ...cases.exempt.items[1], custom: {} }] }).errors.join()).toContain("VAT exemption reason");
+  const out = new DOMParser().parseFromString(buildInvoiceXml(cases.outOfScope), "application/xml");
+  for (const category of Array.from(out.getElementsByTagName("cac:TaxCategory"))) {
+    if (category.getElementsByTagName("cbc:ID")[0]?.textContent === "O") expect(category.getElementsByTagName("cbc:Percent")).toHaveLength(0);
+  }
+});
+
+test("reverse-charge classification and standard identifier come from saved item custom metadata", () => {
+  const doc = extendedSamples().reverse;
+  const xml = buildInvoiceXml(doc);
+  expect(xml).toContain("<cbc:NatureCode>DL8.48.8.2</cbc:NatureCode>");
+  expect(xml).toContain('<cbc:ID schemeID="0160">4006381333931</cbc:ID>');
+  expect(xml).toContain('<cbc:TaxAmount currencyID="AED">0.00</cbc:TaxAmount>');
+  expect(validateEInvoice({ ...doc, items: [{ ...doc.items[0], custom: {} }], customer_trn: "" }).errors.join()).toMatch(/reverse-charge.*GTIN.*Buyer VAT TRN/);
+});
+
+test("commercial categories, unsupported legacy types, VAT format and exchange-rate precision are checked", () => {
+  const doc = sample();
+  expect(validateEInvoice({ ...doc, invoice_type_code: "480" }).errors.join()).toContain("commercial invoices");
+  expect(validateEInvoice({ ...doc, items: [{ description: "Lease", qty: 1, unit_price: 10, tax_category: "E", custom: { einvoice_exemption_code: "DL8.46.2" } }] }).errors.join()).toContain("Use a commercial invoice");
+  for (const type of ["383", "386"]) {
+    expect(validateEInvoice({ ...doc, invoice_type_code: type }).errors.join()).toContain("Choose a UAE");
+    expect(() => buildInvoiceXml({ ...doc, invoice_type_code: type })).toThrow("not supported");
+  }
+  expect(validateEInvoice({ ...doc, seller_trn: "999123456700999" }).errors.join()).toContain("start with 1 and end with 03");
+  expect(validateEInvoice({ ...doc, currency: "USD", aed_exchange_rate: 3.672512345 }).errors.join()).toContain("six decimal places");
+  expect(validateEInvoice({ ...doc, invoice_type_code: "381", einvoice: { ...doc.einvoice, credit_reason: "VD" } }).errors).toEqual([]);
 });
 
 test("computeTotals: VAT only on standard lines", () => {
@@ -74,11 +169,11 @@ test("validate: corrective note needs original ref; foreign currency needs AED r
 
 test("validate: missing seller TRN/emirate now block (mandatory)", () => {
   expect(validateEInvoice({ ...sample(), seller_trn: "" }).errors).toContain(
-    "Seller TRN / TIN (Company settings)"
+    "Seller VAT TRN (Company settings)"
   );
   expect(
     validateEInvoice({ ...sample(), seller_country_subdivision: "" }).errors
-  ).toContain("Seller emirate (Company settings)");
+  ).toContain("Seller emirate / region");
 });
 
 test("buildInvoiceXml: exemption reason on non-standard line, no AE endpoint for foreign buyer", () => {
@@ -135,7 +230,7 @@ test("buildInvoiceXml: legacy AE-xx emirate is normalized to 3-letter on export"
   expect(xml).not.toContain("AE-SH");
 });
 
-test("buildInvoiceXml: PINT-AE mandatory fields (2025-Q2 conformance)", () => {
+test("buildInvoiceXml: PINT-AE mandatory fields (1.0.4 structure)", () => {
   const xml = buildInvoiceXml({ ...sample(), transaction_type: "00000001" });
   // UUID (BTAE-07) — fatal mandatory.
   expect(xml).toMatch(/<cbc:UUID>[0-9a-f-]{36}<\/cbc:UUID>/);
@@ -144,7 +239,7 @@ test("buildInvoiceXml: PINT-AE mandatory fields (2025-Q2 conformance)", () => {
   expect(xml).not.toContain("TRANSACTION-TYPE:");
   // Legal ID uses schemeAgencyID + schemeAgencyName, not schemeID.
   expect(xml).toContain('schemeAgencyID="TL"');
-  expect(xml).toContain('schemeAgencyName="Trade License issuing Authority"');
+  expect(xml).toContain('schemeAgencyName="Dubai Economy"');
   expect(xml).not.toMatch(/CompanyID schemeID=/);
   // 3-letter emirate code, not ISO 3166-2.
   expect(xml).toContain("<cbc:CountrySubentity>DXB</cbc:CountrySubentity>");
@@ -168,4 +263,58 @@ test("buildInvoiceXml: well-formed UBL with key fields", () => {
   expect(xml).toContain('<cbc:PayableAmount currencyID="AED">260.00</cbc:PayableAmount>');
   // Seller endpoint = TIN (first 10 of TRN) under scheme 0235.
   expect(xml).toContain('<cbc:EndpointID schemeID="0235">1001234567</cbc:EndpointID>');
+});
+
+// Generate only synthetic samples for the separate official Schematron check.
+if (process.env.FILEY_PINT_OUTPUT) {
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  mkdirSync(process.env.FILEY_PINT_OUTPUT, { recursive: true });
+  for (const [name, doc] of Object.entries({
+    invoice: sample(),
+    discounted: { ...sample(), discount: 13.37, advance_applied: 10, round_off: true },
+    foreign: { ...sample(), currency: "USD", aed_exchange_rate: 3.6725 },
+    credit: { ...sample(), invoice_type_code: "381", original_invoice_number: "INV-ORIGINAL", original_invoice_date: "2026-06-01" },
+    foreignCredit: { ...sample(), invoice_type_code: "381", original_invoice_number: "INV-USD", original_invoice_date: "2026-06-01", currency: "USD", aed_exchange_rate: 3.6725, discount: 13.37 },
+    volumeCredit: { ...sample(), invoice_type_code: "381", original_invoice_number: "INV-OLD", einvoice: { ...sample().einvoice, credit_reason: "VD" } },
+    ...extendedSamples(),
+  })) writeFileSync(join(process.env.FILEY_PINT_OUTPUT, `${name}.xml`), buildInvoiceXml(doc));
+}
+
+test("stable identity, canonical credit-note root and explicit TIN", () => {
+  const doc = sample();
+  expect(buildInvoiceXml(doc)).toBe(buildInvoiceXml(doc));
+  const xml = buildInvoiceXml({ ...doc, invoice_type_code: "381", original_invoice_number: "INV-OLD" });
+  expect(xml).toContain("<CreditNote xmlns=");
+  expect(xml).toContain("<cbc:CreditedQuantity");
+  expect(xml).not.toContain("<cac:InvoiceLine>");
+  expect(xml).not.toContain("<cbc:TaxPointDate>");
+  expect(buildInvoiceXml({ ...doc, date_of_supply: doc.issue_date })).not.toContain("<cbc:TaxPointDate>");
+  const noTin = buildInvoiceXml({ ...doc, einvoice: { uuid: doc.einvoice!.uuid } });
+  expect(noTin).not.toContain("<cbc:EndpointID");
+  expect(() => buildInvoiceXml({ ...doc, einvoice: undefined })).toThrow("Save this invoice");
+});
+
+test("discounts reconcile in cents across categories and preserve payable adjustments", () => {
+  const doc = { ...sample(), discount: 13.37, advance_applied: 10, round_off: true };
+  const total = computeTotals(doc);
+  expect(total.rows.reduce((sum, row) => Math.round(sum * 100 + row.taxable * 100) / 100, 0)).toBe(total.taxExclusive);
+  expect(total.payable).toBe(Math.round(total.taxInclusive) - 10);
+  const xml = buildInvoiceXml(doc);
+  expect(xml).toContain('<cbc:PrepaidAmount currencyID="AED">10.00</cbc:PrepaidAmount>');
+  expect(xml).toContain('<cbc:PayableRoundingAmount');
+  expect(xml).toContain('<cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>');
+});
+
+test("invalid values and unknown units cannot pass readiness checks", () => {
+  const doc = sample();
+  doc.items[0] = { description: "Bad", qty: NaN, unit_price: -1, unit: "made-up" };
+  doc.issue_date = "2026-02-30";
+  const result = validateEInvoice(doc).errors.join(" ");
+  expect(result).toContain("quantity");
+  expect(result).toContain("unit code");
+  expect(result).toContain("Valid invoice date");
+  expect(validateEInvoice({ ...sample(), tax_rate: 10 }).errors.join()).toContain("5% VAT");
+  expect(validateEInvoice({ ...sample(), transaction_type: "00100000" }).errors.join()).toContain("does not support");
+  expect(() => buildInvoiceXml(doc)).toThrow("unit code");
 });

@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import WorkspaceNavigation from "../WorkspaceNavigation";
+import { MODULES } from "../../modules/registry";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 vi.mock("../../lib/i18n", () => ({ useLang: () => ({ t: (text: string) => text }) }));
-vi.mock("../../modules/registry", () => ({ prefetchModule: vi.fn() }));
+vi.mock("../../modules/registry", async original => ({ ...(await original<typeof import("../../modules/registry")>()), prefetchModule: vi.fn() }));
 vi.mock("../BloubBot", () => ({ default: () => <span data-testid="animated-assistant" /> }));
 
 const modules = [
@@ -15,6 +16,12 @@ const modules = [
   { id: "orders", to: "/orders", label: "Orders", icon: "orders", desc: "Sales orders" },
   { id: "settings", to: "/settings", label: "Settings", icon: "settings", desc: "Workspace preferences" },
 ];
+
+it("keeps every permitted module reachable, including the browser panel", () => {
+  render(<MemoryRouter><WorkspaceNavigation modules={MODULES} isDesktop mobileOpen={false} onNavigate={() => {}} /></MemoryRouter>);
+  for (const module of MODULES) expect(screen.getByRole("link", { name: module.label })).toHaveAttribute("href", module.to);
+  expect(screen.getByRole("navigation", { name: "Tools" })).toContainElement(screen.getByRole("link", { name: "Browser" }));
+});
 
 it("opens the current mobile section, preserves the assistant, and closes after selecting the same page", () => {
   const close = vi.fn();

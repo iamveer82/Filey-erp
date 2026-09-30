@@ -35,7 +35,7 @@ export default function MentionInput({
   small?: boolean;
 }) {
   const listId = useId();
-  const ref = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -72,7 +72,7 @@ export default function MentionInput({
     setTimeout(() => { el?.focus(); const position = before.length + handle(member.name).length + 2; el?.setSelectionRange(position, position); }, 0);
   };
 
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Escape" && open) { e.preventDefault(); setOpen(false); return; }
     if (open && matches.length) {
@@ -86,7 +86,7 @@ export default function MentionInput({
         setActive((a) => (a - 1 + matches.length) % matches.length);
         return;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
         e.preventDefault();
         pick(matches[activeIndex]);
         return;
@@ -96,7 +96,7 @@ export default function MentionInput({
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches)) {
       e.preventDefault();
       onEnter?.();
     }
@@ -104,9 +104,10 @@ export default function MentionInput({
 
   return (
     <div className="relative min-w-0 flex-1">
-      <input
+      <textarea
         ref={ref}
-        className={small ? "input !py-1.5 text-sm" : "input"}
+        rows={small ? 1 : 2}
+        className="textarea min-h-11 max-h-40 resize-y !border-0 !bg-transparent !px-2 !py-1.5 text-base leading-relaxed focus:!ring-0 sm:text-sm"
         aria-label={label}
         role="combobox"
         aria-autocomplete="list"
@@ -146,10 +147,10 @@ export default function MentionInput({
             >
               <UserAvatar src={m.avatar} name={m.name} className="h-7 w-7 text-[11px]" />
               <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-ink">
+                <span className="block truncate text-sm font-medium text-foreground">
                   {m.name}
                 </span>
-                <span className="block truncate text-[11px] text-brand-400">
+                <span className="block truncate text-[11px] text-muted-foreground">
                   @{handle(m.name)}
                 </span>
               </span>

@@ -1,5 +1,6 @@
 import { work } from "./api";
 import { validateToolArgs } from "./agentToolSchema";
+import { toolFailure } from "./agentGuard";
 import { newWorkItem, type WorkKind } from "./workItems";
 import {
   crm,
@@ -178,6 +179,16 @@ const lc = (v: unknown) => str(v).toLowerCase();
 const numOf = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 const today = () => todayYmd();
 
+/** Async record lookups can finish after the user changes workspace or presses
+ * Stop. Check the captured workspace immediately before a later mutation. */
+function toolExecutionCheck(signal?: AbortSignal): () => void {
+  const scope = agentStorageScope();
+  return () => {
+    signal?.throwIfAborted();
+    if (scope !== agentStorageScope()) throw new DOMException("Workspace changed before saving.", "AbortError");
+  };
+}
+
 /* ── Per-turn working state for the file toolbox ────────────────────────────
  * The attached file (in) and produced files (out) belong to ONE chat turn.
  * They used to be two module globals shared by every surface — but the popover
@@ -202,6 +213,7 @@ export interface FileOutput {
   whatsappRecipients?: string[];
 }
 interface TurnSlot {
+  scope: string | null;
   /** Every file attached to this turn, in attachment order — merge combines
    *  them in exactly this order. */
   files: File[];
@@ -211,9 +223,10 @@ const turnSlots = new Map<string, TurnSlot>();
 const slotFor = (id: string): TurnSlot => {
   let s = turnSlots.get(id);
   if (!s) {
-    s = { files: [], outputs: [] };
+    s = { scope: agentStorageScope(), files: [], outputs: [] };
     turnSlots.set(id, s);
   }
+  if (s.scope !== agentStorageScope()) throw new DOMException("Workspace changed before accessing this turn's files.", "AbortError");
   return s;
 };
 
@@ -235,7 +248,8 @@ export function setTurnFiles(turnId: string, files: File[], outputs?: FileOutput
  *  once when the reply lands — on success AND on failure — or outputs sit in
  *  the map until something else drains them. */
 export function endTurn(turnId: string): FileOutput[] {
-  const out = turnSlots.get(turnId)?.outputs ?? [];
+  const slot = turnSlots.get(turnId);
+  const out = slot?.scope === agentStorageScope() ? slot.outputs : [];
   turnSlots.delete(turnId);
   return out;
 }
@@ -243,9 +257,15 @@ export function endTurn(turnId: string): FileOutput[] {
 /** Set by runTool around each tool.run; captured at tool entry before any
  *  await, which is what makes concurrent runs safe. */
 let activeTurnId = "";
-const turnFiles = (tid: string): File[] => turnSlots.get(tid)?.files ?? [];
+const turnFiles = (tid: string): File[] => {
+  const slot = turnSlots.get(tid);
+  if (slot && slot.scope !== agentStorageScope()) throw new DOMException("Workspace changed before reading this turn's files.", "AbortError");
+  return slot?.files ?? [];
+};
 const turnFile = (tid: string): File | null => turnFiles(tid)[0] ?? null;
 const pushTurnOutput = (tid: string, o: FileOutput): void => {
+  // A stopped/ended turn must not recreate an orphan output slot on late completion.
+  if (tid && !turnSlots.has(tid)) return;
   if (o.videoJobId && slotFor(tid).outputs.some(f => f.videoJobId === o.videoJobId)) return;
   if (o.mediaJobId && slotFor(tid).outputs.some(f => f.mediaJobId === o.mediaJobId)) return;
   slotFor(tid).outputs.push(o);
@@ -597,8 +617,10 @@ async function readSettingList(key: string): Promise<Record<string, unknown>[]> 
   }
 }
 
-async function writeSettingList(key: string, list: unknown[]): Promise<void> {
+async function writeSettingList(key: string, list: unknown[], signal?: AbortSignal): Promise<void> {
+  const assertCurrent = toolExecutionCheck(signal);
   const { tools } = await import("./api");
+  assertCurrent();
   await tools.setSetting(key, JSON.stringify(list));
 }
 
@@ -685,7 +707,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["kind", "values"],
     },
-    run: async (args) => {
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       if (
         !["project", "ticket"].includes(str(args.kind)) ||
         !args.values ||
@@ -707,11 +730,11 @@ export const TOOLS: ToolDef[] = [
         kind: args.kind as WorkKind,
         updates: existing?.updates || [],
       };
-      const id = await work.save(
+      const id = await (assertCurrent(), work.save(
         next,
         existing?.id,
         args.revision == null ? undefined : Number(args.revision)
-      );
+      ));
       return { ok: true, id, kind: args.kind };
     },
   },
@@ -1090,15 +1113,16 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["name"],
     },
-    run: async (a) => {
-      await crm.createCustomer({
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      await (assertCurrent(), crm.createCustomer({
         name: str(a.name),
         company: str(a.company) || undefined,
         email: str(a.email) || undefined,
         phone: str(a.phone) || undefined,
         trn: str(a.trn) || undefined,
         address: str(a.address) || undefined,
-      });
+      }));
       return { ok: true, message: `Customer "${str(a.name)}" created.` };
     },
   },
@@ -1118,9 +1142,10 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const name = str(a.name);
-      await erp.createProduct({
+      await (assertCurrent(), erp.createProduct({
         sku:
           str(a.sku) ||
           name
@@ -1133,7 +1158,7 @@ export const TOOLS: ToolDef[] = [
         cost_price: numOf(a.cost_price),
         quantity: numOf(a.quantity),
         reorder_level: numOf(a.reorder_level),
-      });
+      }));
       return { ok: true, message: `Product "${name}" added.` };
     },
   },
@@ -1151,7 +1176,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["product"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const hasSet = Object.prototype.hasOwnProperty.call(a, "set");
       const hasDelta = Object.prototype.hasOwnProperty.call(a, "delta");
       const amount = hasSet ? a.set : a.delta;
@@ -1185,7 +1211,7 @@ export const TOOLS: ToolDef[] = [
           changed: false,
           message: `${p.name}: stock is already ${current}; no adjustment was recorded.`,
         };
-      await erp.updateStock(Number(p.id), delta);
+      await (assertCurrent(), erp.updateStock(Number(p.id), delta));
       return {
         ok: true,
         changed: true,
@@ -1208,14 +1234,15 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["amount"],
     },
-    run: async (a) => {
-      await fin.createExpense(
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      await (assertCurrent(), fin.createExpense(
         str(a.category) || "Other",
         str(a.description) || null,
         numOf(a.amount),
         str(a.date) || today(),
         null
-      );
+      ));
       return { ok: true, message: `Logged ${numOf(a.amount)} expense.` };
     },
   },
@@ -1300,7 +1327,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["customer_name", "items"],
     },
-    run: async (args) => {
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       args = await documentContext(args, "customer");
       // Not swallowed: these details carry the company's TRN onto the document,
       // and a UAE tax invoice issued without one is a compliance problem. Fail
@@ -1376,7 +1404,7 @@ export const TOOLS: ToolDef[] = [
         // indistinguishable from a hand-made one.
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       };
-      await billing.saveDoc(input);
+      await (assertCurrent(), billing.saveDoc(input));
       const unknownParty = await partyCheck("customer", args.customer_name);
       // Hand back what each line actually came to. The agent then states the
       // real figure instead of re-deriving it and reporting a total the
@@ -1439,7 +1467,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["invoice_number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const found = await findInvoice(a.invoice_number);
       if (!found) return { error: `No invoice matching "${str(a.invoice_number)}"` };
       const doc = (await billing.getDoc(Number(found.id))) as unknown as InvoiceDocInput;
@@ -1491,7 +1520,7 @@ export const TOOLS: ToolDef[] = [
         custom_columns: cols,
         unit_price_formula: priceBy ? { a: priceBy, b: "unit_price" } : null,
       };
-      await billing.saveDoc(next);
+      await (assertCurrent(), billing.saveDoc(next));
 
       const formula = priceBy ? { a: priceBy } : undefined;
       const lines = items.map((it) => ({
@@ -1517,10 +1546,11 @@ export const TOOLS: ToolDef[] = [
       properties: { invoice_number: { type: "string" } },
       required: ["invoice_number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
-      await billing.setStatus(Number(d.id), "sent");
+      await (assertCurrent(), billing.setStatus(Number(d.id), "sent"));
       return { ok: true, message: `${d.number} marked sent.` };
     },
   },
@@ -1650,10 +1680,11 @@ export const TOOLS: ToolDef[] = [
       properties: { invoice_number: { type: "string" } },
       required: ["invoice_number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
-      await billing.setStatus(Number(d.id), "paid");
+      await (assertCurrent(), billing.setStatus(Number(d.id), "paid"));
       return { ok: true, message: `${d.number} marked paid.` };
     },
   },
@@ -1670,13 +1701,14 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["invoice_number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
       const interval = ["weekly", "monthly", "yearly"].includes(str(a.interval))
         ? (str(a.interval) as "weekly" | "monthly" | "yearly")
         : "monthly";
-      await recurrences.create(Number(d.id), interval);
+      await (assertCurrent(), recurrences.create(Number(d.id), interval));
       return { ok: true, message: `${d.number} now repeats ${interval}.` };
     },
   },
@@ -1696,7 +1728,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["customer_name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const number =
         str(a.order_number) ||
         pickDocNumber(
@@ -1704,7 +1737,7 @@ export const TOOLS: ToolDef[] = [
           ((await erp.orders()) as { order_number: string }[]).map((o) => o.order_number),
           await loadDocFormats()
         );
-      await erp.createOrder(number, str(a.customer_name), numOf(a.total));
+      await (assertCurrent(), erp.createOrder(number, str(a.customer_name), numOf(a.total)));
       return {
         ok: true,
         message: `Order ${number} created for ${str(a.customer_name)}.`,
@@ -1724,12 +1757,13 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["title"],
     },
-    run: async (a) => {
-      await followups.create({
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      await (assertCurrent(), followups.create({
         title: str(a.title),
         due_date: str(a.due_date) || today(),
         customer_name: str(a.customer_name) || undefined,
-      });
+      }));
       return { ok: true, message: `Reminder added: ${str(a.title)}` };
     },
   },
@@ -1781,12 +1815,12 @@ export const TOOLS: ToolDef[] = [
   {
     name: "run_file_tool",
     description:
-      "Run one of the document tools on the file(s) the user attached to this chat — and deliver the result right here as downloadable chips. `tool_id` comes from list_file_tools (e.g. 'compress', 'pdf2txt', 'merge', 'ocr-pdf', 'word2pdf', 'encrypt'). ALL attachments this turn are passed to the tool in attachment order, so 'merge' combines them first-to-last — ask the user to attach in that order. Pass the tool's options as `options`, keyed exactly as list_file_tools reports them.",
+      "Run a document tool and return downloadable chat files. tool_id comes from list_file_tools (compress, pdf2txt, merge, ocr-pdf, word2pdf, encrypt, decrypt). Multi-file tools such as merge use all attachments in order. Single-file tools process each attachment separately. Pass options with the exact keys listed by the tool. Report partial failures and My Files save warnings accurately.",
     parameters: {
       type: "object",
       properties: {
         tool_id: { type: "string" },
-        options: { type: "object" },
+        options: { type: "object", additionalProperties: { type: ["string", "number", "boolean", "null"] } },
         /** Also file the result in My Files, so it lives in the app and not
          *  only on this one computer. */
         save_to_app: { type: "boolean" },
@@ -1833,30 +1867,43 @@ export const TOOLS: ToolDef[] = [
         if (fld.default != null) params[fld.key] = fld.default;
       Object.assign(params, legacy?.params ?? {});
       const given = (a.options ?? {}) as Record<string, unknown>;
-      for (const [k, v] of Object.entries(given))
-        if (v !== null && v !== undefined) params[k] = String(v);
+      for (const [k, v] of Object.entries(given)) {
+        const field = tool.fields.find(f => f.key === k);
+        if (!field) return { error: `Unknown option "${k}" for ${tool.name}. Use the exact keys from list_file_tools.` };
+        if (v !== null && v !== undefined) {
+          const value = String(v);
+          if (field.options && !field.options.some(option => option.value === value)) return { error: `Choose a listed value for ${field.label}.` };
+          if (["number", "range"].includes(field.type) && (!value.trim() || !Number.isFinite(Number(value)) || field.min != null && Number(value) < field.min || field.max != null && Number(value) > field.max)) return { error: `${field.label} is outside its allowed range.` };
+          if (field.type === "toggle" && !["true", "false"].includes(value)) return { error: `${field.label} must be true or false.` };
+          params[k] = value;
+        }
+      }
       if (a.degrees !== undefined && params.degrees === undefined)
         params.degrees = String(numOf(a.degrees));
 
-      let out: { name: string; bytes: Uint8Array }[];
-      try {
-        out = await tool.run(files, params);
-      } catch (e) {
-        // Interactive tools throw on purpose, and a real failure reads the same
-        // way to the agent: report it, don't dress it up as success.
-        return {
-          error: e instanceof Error ? e.message : String(e),
-          ...(tool.interactive
-            ? { hint: `"${tool.name}" needs its workspace — use open_page with "tools".` }
-            : {}),
-        };
+      if (tool.interactive && !tool.headlessOk) return { error: `"${tool.name}" needs its workspace.`, hint: "Use open_page with tools; do not claim this interactive edit was performed." };
+      const out: { name: string; bytes: Uint8Array }[] = [];
+      const failures: { file: string; error: string }[] = [];
+      for (const batch of tool.multi ? [files] : files.map(file => [file])) {
+        assertCurrent();
+        try {
+          const result = await tool.run(batch, params, { signal });
+          assertCurrent();
+          if (!result?.length || result.some(output => !output.name?.trim() || !output.bytes?.byteLength)) throw new Error(`"${tool.name}" produced no usable output.`);
+          out.push(...result);
+        } catch (e) {
+          assertCurrent();
+          if ((e as Error)?.name === "AbortError") throw e;
+          failures.push({ file: batch.map(file => file.name).join(", "), error: e instanceof Error ? e.message : String(e) });
+        }
       }
       assertCurrent();
-      if (!out?.length) return { error: `"${tool.name}" produced no output.` };
+      if (!out.length) return { error: failures[0]?.error ?? `"${tool.name}" produced no output.`, failed_files: failures };
 
       const { deliverFile, outputDir } = await import("./agentFiles");
       const saved = [];
       let filedInApp = 0;
+      const warnings: string[] = [];
       for (const o of out) {
         assertCurrent();
         const d = await deliverFile(o);
@@ -1870,8 +1917,10 @@ export const TOOLS: ToolDef[] = [
             assertCurrent();
             await saveOutput(o, tool.name);
             filedInApp++;
-          } catch {
-            /* the file is already on disk — failing to also file it is not fatal */
+          } catch (e) {
+            assertCurrent();
+            if ((e as Error)?.name === "AbortError") throw e;
+            warnings.push(`${d.name} is available in chat but was not saved in My Files.`);
           }
           assertCurrent();
         }
@@ -1880,7 +1929,9 @@ export const TOOLS: ToolDef[] = [
       const paths = saved.map((s) => s.path).filter(Boolean);
       const multi = files.length > 1;
       return {
-        ok: true,
+        ok: failures.length === 0,
+        ...(failures.length ? { partial: true, error: `${failures.length} input(s) could not be processed. The completed files are available in chat.`, failed_files: failures } : {}),
+        ...(warnings.length ? { warnings } : {}),
         tool: tool.name,
         files: saved.map((s) => s.name),
         inputs: multi ? files.map((f) => f.name) : undefined,
@@ -1890,7 +1941,7 @@ export const TOOLS: ToolDef[] = [
           : undefined,
         filed_in_my_files: a.save_to_app ? filedInApp : undefined,
         message: multi
-          ? `${tool.name} combined ${files.length} files (in attachment order) — ${saved.length} result(s) delivered in the chat.`
+          ? `${tool.name} created ${saved.length} result(s) available in chat.`
           : paths.length
             ? `Saved ${saved.length} file(s) to ${where?.dir ?? "disk"}.`
             : `${saved.length} file(s) ready in the chat.`,
@@ -1931,21 +1982,25 @@ export const TOOLS: ToolDef[] = [
       properties: { name: { type: "string" } },
       required: ["name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
       const tid = activeTurnId;
+      const scope = agentStorageScope();
       const { listFiles, fileBytes } = await import("./files");
       const q = lc(a.name);
       if (!q) return { error: "Which file? Give me its name." };
       const files = await listFiles();
-      const hit =
-        files.find((f) => f.name.toLowerCase() === q) ??
-        files.find((f) => f.name.toLowerCase().includes(q));
+      const exact = files.filter(f => f.name.toLowerCase() === q);
+      const matches = exact.length ? exact : files.filter(f => f.name.toLowerCase().includes(q));
+      if (matches.length > 1) return { error: "Several saved files match. Choose an exact, unique name from list_my_files." };
+      const hit = matches[0];
       if (!hit)
         return {
           error: `No saved file matching "${str(a.name)}".`,
           hint: "Call list_my_files to see what is there.",
         };
       const bytes = await fileBytes(hit);
+      signal?.throwIfAborted();
+      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed before selecting this file.", "AbortError");
       if (!bytes) return { error: `Could not read "${hit.name}" back out of storage.` };
       // A File, not a Blob: the tools read .name for the output filename and
       // .type to decide whether they are looking at a PDF or an image. Filed
@@ -2049,7 +2104,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["employee_name", "status"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const emp = await findEmployee(a.employee_name);
       if (!emp) return { error: `No employee matching "${str(a.employee_name)}"` };
       const date = str(a.date).trim() || today();
@@ -2063,7 +2119,7 @@ export const TOOLS: ToolDef[] = [
         return {
           error: "Choose a valid attendance status and calendar date (YYYY-MM-DD).",
         };
-      await hr.markAttendance(Number(emp.id), date, status);
+      await (assertCurrent(), hr.markAttendance(Number(emp.id), date, status));
       return {
         ok: true,
         employee_id: emp.id,
@@ -2143,7 +2199,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["customer_name", "items"],
     },
-    run: async (args) => {
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       args = await documentContext(args, "customer");
       const quoteApi = (await import("./api")).quotes;
       const items = Array.isArray(args.items)
@@ -2185,7 +2242,7 @@ export const TOOLS: ToolDef[] = [
             }
           : {}),
       }));
-      await quoteApi.saveDoc({
+      await (assertCurrent(), quoteApi.saveDoc({
         number: qtNo,
         status: "draft",
         template: "minimal",
@@ -2200,7 +2257,7 @@ export const TOOLS: ToolDef[] = [
         items: lineItems,
         ...(cols.length ? { custom_columns: cols } : {}),
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
-      });
+      }));
       // Quote lines price off `rate`; invoiceLineAmount reads `unit_price`, so
       // the value is handed over under the name it expects.
       const formula = priceBy ? { a: priceBy } : undefined;
@@ -2296,7 +2353,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["items"],
     },
-    run: async (args) => {
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       args = await documentContext(args, "supplier");
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
@@ -2344,7 +2402,7 @@ export const TOOLS: ToolDef[] = [
         ),
       }));
       const total = r2(lines.reduce((s, l) => s + l.amount, 0));
-      await pos.save({
+      await (assertCurrent(), pos.save({
         po_number: poNumber,
         status: "draft",
         template: "uae",
@@ -2363,7 +2421,7 @@ export const TOOLS: ToolDef[] = [
         items: lineItems,
         ...(cols.length ? { custom_columns: cols } : {}),
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
-      });
+      }));
       const unknownParty = str(args.supplier_name)
         ? await partyCheck("supplier", args.supplier_name)
         : { warning: "No supplier named — the PO cannot be sent until one is set." };
@@ -2419,7 +2477,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["section", "values"],
     },
-    run: async (args) => {
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       if (!OBJECT_KEYS.includes(args.section as CrmObject))
         throw new Error("Unknown CRM section.");
       if (!args.values || typeof args.values !== "object" || Array.isArray(args.values))
@@ -2438,12 +2497,12 @@ export const TOOLS: ToolDef[] = [
           value == null ? "" : String(value),
         ])
       );
-      const id = await saveCrmRecord(
+      const id = await (assertCurrent(), saveCrmRecord(
         section,
         { ...recordDraft(section, existing), ...values },
         data,
         existing
-      );
+      ));
       return { ok: true, id, section };
     },
   },
@@ -2557,13 +2616,14 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["title", "customer_name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const data = await loadCrmData();
       const company = namedCrmTarget(data, str(a.customer_name).trim(), ["companies"]);
       if (!company.startsWith("company:"))
         throw new Error("Choose an existing company for this deal.");
       const stage = lc(a.stage).trim() || "qualification";
-      const id = await saveCrmRecord(
+      const id = await (assertCurrent(), saveCrmRecord(
         "deals",
         {
           ...recordDraft("deals"),
@@ -2576,7 +2636,7 @@ export const TOOLS: ToolDef[] = [
           owner: str(a.owner),
         },
         data
-      );
+      ));
       return { ok: true, id, message: `Deal "${str(a.title)}" opened at ${stage}.` };
     },
   },
@@ -2593,13 +2653,14 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["deal_id", "stage"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const stage = lc(a.stage);
       const valid = ["qualification", "proposal", "negotiation", "won", "lost"];
       if (!valid.includes(stage))
         return { error: `Stage must be one of: ${valid.join(", ")}.` };
       try {
-        await crm.setOppStage(numOf(a.deal_id), stage, { reason: str(a.reason) });
+        await (assertCurrent(), crm.setOppStage(numOf(a.deal_id), stage, { reason: str(a.reason) }));
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };
       }
@@ -2654,19 +2715,20 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["deal_id", "person_id", "role"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const dealId = numOf(a.deal_id);
       const personId = numOf(a.person_id);
       const exists = (await crm.opportunities()).some((o) => o.id === dealId);
       if (!exists) return { error: `No deal with id ${dealId}.` };
       const role = str(a.role).trim();
       if (!role) {
-        await removeDealContact(dealId, personId);
+        await (assertCurrent(), removeDealContact(dealId, personId));
         return { ok: true, message: "Contact removed from the deal." };
       }
       if (!(await crm.people()).some((p) => p.id === personId))
         return { error: `No contact with id ${personId}.` };
-      const row = await setDealContact(dealId, personId, role);
+      const row = await (assertCurrent(), setDealContact(dealId, personId, role));
       return { ok: true, id: row.id, message: `${role} linked to the deal.` };
     },
   },
@@ -2685,7 +2747,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["kind", "subject"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const data = await loadCrmData();
       const related = str(a.related_to).trim();
       if (a.deal_id != null && related)
@@ -2698,7 +2761,7 @@ export const TOOLS: ToolDef[] = [
           : related
             ? namedCrmTarget(data, related, ["companies", "contacts", "deals", "leads"])
             : "";
-      const id = await saveCrmRecord(
+      const id = await (assertCurrent(), saveCrmRecord(
         "activities",
         {
           ...recordDraft("activities"),
@@ -2708,7 +2771,7 @@ export const TOOLS: ToolDef[] = [
           due_date: str(a.due_date),
         },
         data
-      );
+      ));
       return { ok: true, id, message: "Logged." };
     },
   },
@@ -2786,17 +2849,18 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const name = str(a.name).trim();
       if (!name) return { error: "A lead needs a name." };
-      const id = await crm.createLead({
+      const id = await (assertCurrent(), crm.createLead({
         name,
         company: str(a.company) || undefined,
         email: str(a.email) || undefined,
         phone: str(a.phone) || undefined,
         source: str(a.source) || undefined,
         est_value: numOf(a.est_value),
-      } as never);
+      } as never));
       return { ok: true, id, message: `Lead ${name} added.` };
     },
   },
@@ -2840,11 +2904,12 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["name"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const name = str(a.name).trim();
       if (!name) return { error: "A supplier needs a name." };
       const { suppliers } = await import("./api");
-      const id = await suppliers.create({
+      const id = await (assertCurrent(), suppliers.create({
         name,
         contact_person: str(a.contact_person) || undefined,
         email: str(a.email) || undefined,
@@ -2852,7 +2917,7 @@ export const TOOLS: ToolDef[] = [
         address: str(a.address) || undefined,
         tax_id: str(a.tax_id) || undefined,
         notes: str(a.notes) || undefined,
-      } as never);
+      } as never));
       return { ok: true, id, name, message: `Added ${name} to Suppliers.` };
     },
   },
@@ -2934,7 +2999,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["supplier_name", "items"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       a = await documentContext(a, "supplier");
       const co = await billing.getCompany();
       const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
@@ -2971,7 +3037,7 @@ export const TOOLS: ToolDef[] = [
           unit_price: numOf(it.unit_price),
         })),
       } as unknown as InvoiceDocInput;
-      await billing.saveDoc(input);
+      await (assertCurrent(), billing.saveDoc(input));
       const unknownParty = await partyCheck("supplier", a.supplier_name);
       return {
         ok: true,
@@ -3104,7 +3170,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["customer_name", "amount"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const amount = numOf(a.amount);
       if (amount <= 0) return { error: "A receipt needs an amount greater than zero." };
       const [co, { receipts }] = await Promise.all([
@@ -3117,7 +3184,7 @@ export const TOOLS: ToolDef[] = [
         (await receipts.list()).map((r) => r.number),
         await loadDocFormats()
       );
-      await receipts.save({
+      await (assertCurrent(), receipts.save({
         number,
         status: "issued",
         template: co?.default_template || "minimal",
@@ -3132,7 +3199,7 @@ export const TOOLS: ToolDef[] = [
         payment_method: str(a.payment_method) || undefined,
         ref_number: str(a.ref_number) || undefined,
         for_description: str(a.for_description) || undefined,
-      } as never);
+      } as never));
       return {
         ok: true,
         number,
@@ -3215,7 +3282,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["party_name", "items"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const party = str(a.party_name);
       if (!party) return { error: "Name the party the challan is for." };
       const lines = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
@@ -3252,7 +3320,7 @@ export const TOOLS: ToolDef[] = [
         notes: str(a.notes),
         items,
       };
-      await saveChallans([...existing, challanRecord(form)]);
+      await (assertCurrent(), saveChallans([...existing, challanRecord(form)]));
       return {
         ok: true,
         number,
@@ -3317,7 +3385,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["employee_name", "period", "basic"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const who = await findEmployee(a.employee_name);
       if (!who) return { error: `No employee matching "${str(a.employee_name)}".` };
       const basic = a.basic;
@@ -3332,13 +3401,13 @@ export const TOOLS: ToolDef[] = [
           error:
             "Basic pay, allowances and deductions must be finite non-negative numbers.",
         };
-      await hr.runPayroll(
+      await (assertCurrent(), hr.runPayroll(
         numOf(who.id),
         str(a.period),
         basic as number,
         allow as number,
         ded as number
-      );
+      ));
       return {
         ok: true,
         employee: who.name,
@@ -3359,7 +3428,8 @@ export const TOOLS: ToolDef[] = [
       properties: { from: { type: "string" }, to: { type: "string" } },
       required: ["from", "to"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const tid = activeTurnId;
       const [{ buildSif, validateWps }, company, staff] = await Promise.all([
         import("./wps"),
@@ -3402,7 +3472,7 @@ export const TOOLS: ToolDef[] = [
       const file = buildSif(input as never);
       const { deliverFile, outputDir } = await import("./agentFiles");
       const bytes = new TextEncoder().encode(file.content);
-      const saved = await deliverFile({ name: file.filename, bytes });
+      const saved = await (assertCurrent(), deliverFile({ name: file.filename, bytes }));
       pushTurnOutput(tid, { name: saved.name, path: saved.path, url: saved.url });
       const where = await outputDir();
       return {
@@ -3449,13 +3519,14 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["name", "subject", "body"],
     },
-    run: async (a) => {
-      const id = await crm.createCampaign({
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      const id = await (assertCurrent(), crm.createCampaign({
         name: str(a.name),
         subject: str(a.subject),
         body: str(a.body),
         status: "draft",
-      } as never);
+      } as never));
       return {
         ok: true,
         id,
@@ -3513,7 +3584,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["cheque_no", "type", "party", "amount"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const kind = lc(a.type);
       if (kind !== "issued" && kind !== "received")
         return { error: "type must be 'issued' or 'received'." };
@@ -3531,7 +3603,7 @@ export const TOOLS: ToolDef[] = [
         notes: str(a.notes),
         created_at: new Date().toISOString(),
       };
-      await writeSettingList("cheque_register", [row, ...list]);
+      await (assertCurrent(), writeSettingList("cheque_register", [row, ...list], signal));
       return { ok: true, cheque_no: row.cheque_no, message: "Cheque recorded." };
     },
   },
@@ -3605,7 +3677,8 @@ export const TOOLS: ToolDef[] = [
       properties: { invoice_number: { type: "string" } },
       required: ["invoice_number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
       // Fetch full doc to get customer_email. Keep the summary as a fallback,
@@ -3634,7 +3707,7 @@ export const TOOLS: ToolDef[] = [
       let attachments: { filename: string; content: string }[] | undefined;
       let portalUrl = "";
       try {
-        portalUrl = await documentLink("invoice", Number(d.id));
+        portalUrl = await (assertCurrent(), documentLink("invoice", Number(d.id)));
       } catch {
         /* the link is a bonus; the attachment is the point */
       }
@@ -3646,12 +3719,12 @@ export const TOOLS: ToolDef[] = [
       const body =
         `<p>Your invoice <strong>${esc(d.number)}</strong> for ${esc(d.currency || "AED")} ${numOf(d.total)} is ready.</p>` +
         (portalUrl ? `<p><a href="${portalUrl}">View &amp; pay online</a></p>` : "");
-      await sendEmail({
+      await (assertCurrent(), sendEmail({
         to: email,
         subject: `Invoice ${d.number} from Filey`,
         html: emailShell(`Invoice ${d.number}`, body),
         attachments,
-      });
+      }));
       return {
         ok: true,
         attached: !!attachments,
@@ -3770,25 +3843,26 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["kind", "number"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const kind = lc(a.kind).replace(/[\s-]+/g, "_") as ShareableDoc;
       if (kind === "invoice") {
         const d = await findInvoice(a.number);
         if (!d) return { error: `No invoice matching "${str(a.number)}"` };
-        return { url: await documentLink("invoice", Number(d.id)), number: d.number };
+        return { url: await (assertCurrent(), documentLink("invoice", Number(d.id))), number: d.number };
       }
       if (kind === "quotation") {
         const all = (await quotes.listDocs()) as unknown as Record<string, unknown>[];
         const d = findNumberedDocument(all, a.number, "number", "quotation");
         if (!d) return { error: `No quotation matching "${str(a.number)}"` };
-        return { url: await documentLink("quotation", Number(d.id)), number: d.number };
+        return { url: await (assertCurrent(), documentLink("quotation", Number(d.id))), number: d.number };
       }
       if (kind === "purchase_order") {
         const all = (await pos.list()) as unknown as Record<string, unknown>[];
         const d = findNumberedDocument(all, a.number, "po_number", "purchase order");
         if (!d) return { error: `No purchase order matching "${str(a.number)}"` };
         return {
-          url: await documentLink("purchase_order", Number(d.id)),
+          url: await (assertCurrent(), documentLink("purchase_order", Number(d.id))),
           number: d.po_number,
         };
       }
@@ -4265,18 +4339,26 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["command"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
       const hasDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
       if (!hasDesktop) return { error: "Shell runs in the desktop app only." };
       const { invoke } = await import("@tauri-apps/api/core");
+      assertCurrent();
       const r = (await invoke("shell_exec", {
         cmd: str(a.command),
         timeout: a.timeout ? Number(a.timeout) : null,
         cwd: a.cwd ? str(a.cwd) : null,
       })) as { stdout: string; stderr: string; exit_code: number; cwd: string };
+      assertCurrent();
       const clip = (s: string) =>
         s.length > 8000 ? `${s.slice(0, 8000)}\n…[truncated]` : s;
       return {
+        ok: r.exit_code === 0,
+        ...(r.exit_code !== 0 ? {
+          error: `Command exited with status ${Number.isInteger(r.exit_code) ? r.exit_code : "unknown"}. Some effects may already have occurred; inspect the output before retrying.`,
+          retry_safe: false,
+        } : {}),
         exit_code: r.exit_code,
         stdout: clip(r.stdout || ""),
         stderr: clip(r.stderr || ""),
@@ -5168,13 +5250,19 @@ export const TOOLS: ToolDef[] = [
  *  save_secret's value outright, plus any key that reads like it carries a
  *  secret — including nested ones like http_fetch headers. */
 const SECRET_KEY_RE = /secret|passwo?rd|token|api_?key|authorization|credential/i;
+export const isRemoteAgentRun = (agentId?: string): boolean => /^(whatsapp|telegram):/.test(agentId ?? "");
 export function redactArgs(
   name: string,
   args: Record<string, unknown>
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    if (v && typeof v === "object" && !Array.isArray(v)) {
+    if (SECRET_KEY_RE.test(k) || name === "save_secret" && k === "value") {
+      out[k] = "********";
+    } else if (Array.isArray(v)) {
+      const redactItems = (value: unknown): unknown => Array.isArray(value) ? value.map(redactItems) : value && typeof value === "object" ? redactArgs(name, value as Record<string, unknown>) : value;
+      out[k] = v.map(redactItems);
+    } else if (v && typeof v === "object") {
       out[k] = redactArgs(name, v as Record<string, unknown>);
     } else if (
       (name === "save_secret" && k === "value") ||
@@ -5182,8 +5270,6 @@ export function redactArgs(
       ((name === "workspace_browser" || name === "agent_computer") && k === "url") ||
       (name === "browser" && k === "value")
     ) {
-      out[k] = "********";
-    } else if (typeof v === "string" && SECRET_KEY_RE.test(k)) {
       out[k] = "********";
     } else {
       out[k] = v;
@@ -5238,8 +5324,11 @@ export async function runTool(
   try { await requireToolModuleAccess(name, args); }
   catch (error) { return { error: errMsg(error) }; }
   const browserAction = ["computer_use", "workspace_browser", "agent_computer"].includes(name) && !(name === "agent_computer" && args.action === "stop");
-  if (name === "computer_use" && !computerSession)
+  const remote = isRemoteAgentRun(agentId);
+  if ((name === "computer_use" || name === "browser") && (remote || name === "computer_use" && !computerSession))
     return { error: "Computer access starts automatically for tasks in Filey AI. Remote and scheduled tasks cannot control this computer." };
+  if (name === "workspace_browser" && remote && !isToolAllowed("agent_computer"))
+    return { error: "Remote tasks can only use an enabled, approved agent-computer browser workspace. The owner's personal browser is unavailable.", retry_safe: false };
   if (browserAction && getBrowserPanelState().paused)
     return { error: "The user has taken control of the browser. Wait for them to resume the agent.", retry_safe: false };
   if (!isToolAllowed(name)) {
@@ -5292,6 +5381,11 @@ export async function runTool(
     signal?.throwIfAborted();
     if (agentStorageScope() !== scope)
       throw new DOMException("Workspace changed before execution.", "AbortError");
+    if (!isToolAllowed(name) || name === "workspace_browser" && remote && !isToolAllowed("agent_computer"))
+      return { error: "This capability was turned off before execution. Nothing was run.", retry_safe: false };
+    const currentGate = gateFor(name, tool.sensitive);
+    if (currentGate === "block" || currentGate === "ask" && !mustAsk)
+      return { error: "The agent access mode changed before execution. Start this action again under the current mode.", retry_safe: false };
     if (browserAction && getBrowserPanelState().paused)
       throw new DOMException("Browser control changed before execution.", "AbortError");
     if (!isToolAllowed(name) || gateFor(name, tool.sensitive) === "block")
@@ -5299,6 +5393,7 @@ export async function runTool(
     log.info("agent", `${name} running`, redactArgs(name, args));
     // Stamped immediately before the call and captured as each tool's first
     // statement — synchronous, so interleaved runs resolve their own turn.
+    if (turnId) slotFor(turnId);
     activeTurnId = turnId ?? "";
     const out = name === "computer_use" && computerSession
       ? await runComputerUse(args, signal, await computerSession())
@@ -5307,13 +5402,19 @@ export async function runTool(
         : name === "workspace_browser" && agentId && isToolAllowed("agent_computer")
           ? await desktopBrowserCommand(args, signal, agentId)
           : await tool.run(args, signal);
-    if (out && typeof out === "object" && "error" in out) {
-      log.warn("agent", `${name} returned an error`, (out as { error: unknown }).error);
+    signal?.throwIfAborted();
+    if (agentStorageScope() !== scope) throw new DOMException("Workspace changed during execution.", "AbortError");
+    const failure = toolFailure(out);
+    if (failure && out && typeof out === "object") {
+      log.warn("agent", `${name} returned an error`, failure);
+      return { ...out, error: failure, ...(tool.sensitive && !("retry_safe" in out) ? { retry_safe: false } : {}) };
     }
     return out;
   } catch (e) {
     if ((e as Error)?.name === "AbortError") throw e;
     log.error("agent", `${name} threw`, e);
-    return { error: errMsg(e), ...(["agent_computer", "send_whatsapp", "send_whatsapp_file"].includes(name) ? { retry_safe: false } : {}) };
+    // A timeout after dispatch cannot prove that an outbound/payment action
+    // failed. Never coach the model to repeat it through another transport.
+    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" ? { retry_safe: false } : {}) };
   }
 }

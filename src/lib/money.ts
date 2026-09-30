@@ -10,6 +10,32 @@ export interface Totals {
 
 export const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+/** Allocate discounts in cents, then round VAT once per category/rate.
+ * The largest-remainder allocation keeps mixed-tax totals exactly reconciled. */
+export function taxBreakdown(lines: { category: string; net: number; rate: number }[], discount: number) {
+  const groups = new Map<string, { category: string; rate: number; net: number }>();
+  for (const line of lines) {
+    const key = `${line.category}:${line.rate}`;
+    const group = groups.get(key) ?? { category: line.category, rate: line.rate, net: 0 };
+    group.net += Math.round(line.net * 100);
+    groups.set(key, group);
+  }
+  const rows = [...groups.values()];
+  const total = rows.reduce((sum, row) => sum + row.net, 0);
+  const cents = Math.min(Math.max(0, Math.round(discount * 100)), total);
+  const shares = rows.map(row => total > 0 ? cents * row.net / total : 0);
+  const allocated = shares.map(Math.floor);
+  const order = shares.map((share, index) => ({ index, remainder: share - allocated[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  const remaining = cents - allocated.reduce((sum, value) => sum + value, 0);
+  for (let i = 0; i < remaining; i++) allocated[order[i].index]++;
+  return rows.map((row, index) => {
+    const taxable = (row.net - allocated[index]) / 100;
+    return { category: row.category, rate: row.rate, net: row.net / 100,
+      discount: allocated[index] / 100, taxable, tax: r2(taxable * row.rate / 100) };
+  });
+}
+
 const num = (v: string) => {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
@@ -70,15 +96,9 @@ export function invoiceTotals(
   // zero-rated / exempt / out-of-scope / reverse-charge contribute no VAT. The
   // document discount is allocated across lines pro-rata by net. With every line
   // standard (or no category set) this equals net × rate — the prior flat result.
-  const rate = (taxRatePct || 0) / 100;
-  let tax = 0;
-  if (subtotal > 0) {
-    for (const i of items) {
-      if ((i.tax_category ?? "S") !== "S") continue;
-      const lineNet = invoiceLineAmount(i, formula);
-      tax += (lineNet / subtotal) * net * rate;
-    }
-  }
+  const tax = taxBreakdown(items.map(i => ({ category: i.tax_category || "S",
+    net: invoiceLineAmount(i, formula), rate: (i.tax_category ?? "S") === "S" ? taxRatePct || 0 : 0,
+  })), disc).reduce((sum, row) => sum + row.tax, 0);
   return {
     subtotal: r2(subtotal),
     discount: r2(disc),

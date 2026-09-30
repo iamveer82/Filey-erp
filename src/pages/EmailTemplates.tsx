@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Plus } from "lucide-react";
 import { useUI } from "../lib/ui";
-import { PageHeader, MetricCard, DataTable, Modal, Field, Badge } from "../components/ui";
+import { PageHeader, MetricCard, DataTable, Modal, Field, Badge, ErrorBanner } from "../components/ui";
 import { RowActions } from "../components/RowActions";
 import { tools, getCacheScope } from "../lib/api";
 import { assertWorkspaceCurrent, effectiveDataMode } from "../lib/dataMode";
 import { useLiveSync } from "../lib/realtime";
 import { SelectMenu } from "../components/ui-menu";
+import { nextLocalId } from "../lib/recordId";
 
 const TMPL_KEY = "filey_email_templates";
 /** Mirror key in Supabase (app_settings) for cross-device sync. */
+// ponytail: one setting holds this small list; use per-template rows with revisions if concurrent editing is needed.
 const SETTING_KEY = "email_templates";
 const cacheKey = () => {
   try { assertWorkspaceCurrent(); } catch { return null; }
@@ -39,39 +41,40 @@ interface EmailTemplate {
 
 function load(key: string | null): EmailTemplate[] {
   try {
-    return key ? JSON.parse(localStorage.getItem(key) || "[]") : [];
+    return key ? parseTemplates(localStorage.getItem(key) || "[]") : [];
   } catch (e) {
     console.warn("Failed to load email templates", e);
     return [];
   }
 }
-function save(t: EmailTemplate[], key: string | null): boolean {
-  if (!key || cacheKey() !== key) return false;
-  try {
-    localStorage.setItem(key, JSON.stringify(t));
-  } catch (e) {
-    console.warn("Failed to save email templates", e);
-  }
-  // Write-through to Supabase so templates follow the user across devices.
-  void tools.setSetting(SETTING_KEY, JSON.stringify(t)).catch((e) => console.warn("Failed to sync email templates to server", e));
-  return true;
+function parseTemplates(value: string): EmailTemplate[] {
+  const rows: unknown = JSON.parse(value);
+  if (!Array.isArray(rows) || !rows.every(row => row && Number.isSafeInteger(row.id) && row.id > 0
+    && [row.name, row.subject, row.body, row.category].every(field => typeof field === "string")))
+    throw new Error("Saved templates could not be read. Try again before editing.");
+  return rows as EmailTemplate[];
+}
+async function save(t: EmailTemplate[], key: string | null): Promise<void> {
+  if (!key || cacheKey() !== key) throw new Error("Workspace changed. Reopen this section before saving.");
+  await tools.setSetting(SETTING_KEY, JSON.stringify(t));
+  if (cacheKey() !== key) throw new Error("Workspace changed while saving. Reopen this section to review the result.");
+  // app_settings is authoritative; its disposable mirror can be rebuilt.
+  try { localStorage.setItem(key, JSON.stringify(t)); }
+  catch { /* The durable save succeeded. */ }
 }
 
 /** Pull email templates saved on other devices; remote wins when present. */
-async function syncEmailTemplates(key: string | null): Promise<EmailTemplate[] | null> {
+async function syncEmailTemplates(key: string | null, isCurrent: () => boolean): Promise<EmailTemplate[] | null> {
   if (!key || cacheKey() !== key) return null;
-  try {
-    const settings = await tools.settings();
-    if (cacheKey() !== key) return null;
-    const row = settings.find((s) => s.key === SETTING_KEY);
-    if (row?.value) {
-      const remote: EmailTemplate[] = JSON.parse(row.value);
-      localStorage.setItem(key, JSON.stringify(remote));
-      return remote;
-    }
-  } catch (e) {
-    console.warn("Failed to sync email templates from server", e);
-    /* offline / not configured — fall back to local */
+  const settings = await tools.settings();
+  if (cacheKey() !== key || !isCurrent()) return null;
+  const row = settings.find((s) => s.key === SETTING_KEY);
+  if (row?.value) {
+    const remote = parseTemplates(row.value);
+    // A stale response must not overwrite a newer save's mirror.
+    try { localStorage.setItem(key, JSON.stringify(remote)); }
+    catch { /* Render the authoritative records even when the cache is full. */ }
+    return remote;
   }
   return cacheKey() === key ? load(key) : null;
 }
@@ -116,25 +119,55 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
   const { toast, confirm } = useUI();
   const [templates, setTemplates] = useState<EmailTemplate[]>(() => load(scope));
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const active = useRef(true);
+  const writing = useRef(false);
+  const request = useRef(0);
+  const latest = useRef({ templates, loading, error });
+  latest.current = { templates, loading, error };
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<EmailTemplate | null>(null);
   const reload = useCallback(() => {
-    return syncEmailTemplates(scope)
-      .then((t) => { if (t !== null) setTemplates(t); })
-      .finally(() => setLoading(false));
+    if (writing.current || !active.current) return Promise.resolve();
+    const version = ++request.current;
+    return syncEmailTemplates(scope, () => active.current && version === request.current)
+      .then((t) => {
+        if (!scope || t === null || !active.current || version !== request.current || cacheKey() !== scope) return;
+        setTemplates(t); setError("");
+      })
+      .catch(() => { if (active.current && version === request.current && cacheKey() === scope) setError("Couldn't load saved templates. Your current records are preserved."); })
+      .finally(() => { if (active.current && version === request.current) setLoading(false); });
   }, [scope]);
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    active.current = true;
+    void reload();
+    return () => { active.current = false; };
+  }, [reload]);
   useLiveSync(reload);
 
+  const persist = async (next: EmailTemplate[], message: string): Promise<boolean> => {
+    if (!active.current || cacheKey() !== scope || writing.current || latest.current.loading || latest.current.error) return false;
+    writing.current = true; setSaving(true); ++request.current;
+    try {
+      await save(next, scope);
+      if (!active.current) return false;
+      setTemplates(next); toast.success(message); return true;
+    } catch (failure) {
+      if (active.current && cacheKey() === scope) toast.error(failure instanceof Error ? failure.message : String(failure));
+      return false;
+    }
+    finally { writing.current = false; if (active.current) setSaving(false); }
+  };
+
   const addStarters = () => {
-    const seeded = DEFAULT_TEMPLATES.map((t, i) => ({
+    const seeded: EmailTemplate[] = [];
+    DEFAULT_TEMPLATES.forEach(t => seeded.push({
       ...t,
-      id: Date.now() + i + 1,
+      id: nextLocalId(seeded),
       created_at: new Date().toISOString(),
     }));
-    if (!save(seeded, scope)) return;
-    setTemplates(seeded);
-    toast.success("Starter templates added.");
+    void persist(seeded, "Starter templates added.");
   };
 
   const del = async (t: EmailTemplate) => {
@@ -145,26 +178,23 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
       danger: true,
     });
     if (!ok) return;
-    const next = templates.filter((x) => x.id !== t.id);
-    if (!save(next, scope)) return;
-    setTemplates(next);
-    toast.success("Deleted.");
+    const next = latest.current.templates.filter((x) => x.id !== t.id);
+    await persist(next, "Deleted.");
   };
 
   const duplicate = (t: EmailTemplate) => {
     const copy = {
       ...t,
-      id: Date.now(),
+      id: nextLocalId(templates),
       name: `${t.name} (copy)`,
       created_at: new Date().toISOString(),
     };
     const next = [...templates, copy];
-    if (!save(next, scope)) return;
-    setTemplates(next);
-    toast.success("Duplicated.");
+    void persist(next, "Duplicated.");
   };
 
   const categories = new Set(templates.map((t) => t.category)).size;
+  const retry = () => { setLoading(true); void reload(); };
 
   return (
     <div className="">
@@ -174,11 +204,11 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
         action={
           <div className="flex flex-wrap gap-2">
           {!loading && templates.length === 0 && (
-            <button className="btn-ghost" disabled={!scope} onClick={addStarters}>Use starter templates</button>
+            <button className="btn-ghost" disabled={!scope || saving || !!error} onClick={addStarters}>Use starter templates</button>
           )}
           <button
             className="btn-primary"
-            disabled={!scope || loading}
+            disabled={!scope || loading || saving || !!error}
             onClick={() => {
               setEdit(null);
               setOpen(true);
@@ -189,6 +219,7 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
           </div>
         }
       />
+      {error && <div className="mb-4"><ErrorBanner message={error} /><button className="btn-ghost mt-2" disabled={loading || saving} onClick={retry}>Try again</button></div>}
       <div className="grid grid-cols-1 sm:grid-cols-2 joined-kpis mb-6">
         <MetricCard
           label="Templates"
@@ -207,7 +238,7 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
         pageSize={10}
         rows={templates}
         loading={loading}
-        empty="No templates yet"
+        empty={error ? "Saved templates are unavailable. Try again to reload them." : "No templates yet"}
         columns={[
           { summary: true, truncate: true,
             key: "name",
@@ -235,12 +266,12 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
             label: "Actions",
             render: (t) => (
               <RowActions
-                onEdit={() => {
+                onEdit={saving || error ? undefined : () => {
                   setEdit(t);
                   setOpen(true);
                 }}
-                onCopy={() => duplicate(t)}
-                onDelete={() => del(t)}
+                onCopy={saving || error ? undefined : () => duplicate(t)}
+                onDelete={saving || error ? undefined : () => void del(t)}
               />
             ),
           },
@@ -250,18 +281,19 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
         <TemplateModal
           open={open}
           edit={edit}
-          onClose={() => setOpen(false)}
-          onSaved={(t) => {
+          busy={saving}
+          error={error}
+          loading={loading}
+          onRetry={retry}
+          onClose={() => { if (!writing.current) setOpen(false); }}
+          onSaved={async (t) => {
             const next = edit
               ? templates.map((x) => (x.id === t.id ? t : x))
               : [
                   ...templates,
-                  { ...t, id: Date.now(), created_at: new Date().toISOString() },
+                  { ...t, id: nextLocalId(templates), created_at: new Date().toISOString() },
                 ];
-            if (!save(next, scope)) return;
-            setTemplates(next);
-            setOpen(false);
-            toast.success(edit ? "Updated." : "Template added.");
+            if (await persist(next, edit ? "Updated." : "Template added.")) setOpen(false);
           }}
         />
       )}
@@ -272,13 +304,21 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
 function TemplateModal({
   open,
   edit,
+  busy,
+  error,
+  loading,
+  onRetry,
   onClose,
   onSaved,
 }: {
   open: boolean;
   edit: EmailTemplate | null;
+  busy: boolean;
+  error: string;
+  loading: boolean;
+  onRetry: () => void;
   onClose: () => void;
-  onSaved: (t: EmailTemplate) => void;
+  onSaved: (t: EmailTemplate) => Promise<void>;
 }) {
   const [f, setF] = useState(
     edit ||
@@ -295,11 +335,13 @@ function TemplateModal({
       title={edit ? "Edit Template" : "New template"}
       size="lg"
     >
+      {error && <div className="mb-4"><ErrorBanner message={error} /><button className="btn-ghost mt-2" disabled={loading || busy} onClick={onRetry}>Try again</button></div>}
       <div className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Template Name *">
             <input
               className="input"
+              disabled={busy}
               value={f.name}
               onChange={(e) => setF({ ...f, name: e.target.value })}
               placeholder="Payment Reminder"
@@ -308,6 +350,7 @@ function TemplateModal({
           <Field label="Category">
             <SelectMenu
               ariaLabel="Category"
+              disabled={busy}
               value={f.category}
               onChange={(category) => setF({ ...f, category })}
               options={CATEGORIES.map((c) => ({ value: c, label: c }))}
@@ -317,6 +360,7 @@ function TemplateModal({
         <Field label="Subject *">
           <input
             className="input"
+            disabled={busy}
             value={f.subject}
             onChange={(e) => setF({ ...f, subject: e.target.value })}
             placeholder="Invoice {{number}} from {{company}}"
@@ -325,6 +369,7 @@ function TemplateModal({
         <Field label="Body">
           <textarea
             className="textarea"
+            disabled={busy}
             rows={10}
             value={f.body}
             onChange={(e) => setF({ ...f, body: e.target.value })}
@@ -337,15 +382,15 @@ function TemplateModal({
         </div>
       </div>
       <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
-        <button className="btn-ghost" onClick={onClose}>
+        <button className="btn-ghost" disabled={busy} onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn-primary"
-          disabled={!valid}
-          onClick={() => onSaved(f as EmailTemplate)}
+          disabled={!valid || busy || loading || !!error}
+          onClick={() => void onSaved(f as EmailTemplate)}
         >
-          {edit ? "Save changes" : "Create template"}
+          {busy ? "Saving…" : edit ? "Save changes" : "Create template"}
         </button>
       </div>
     </Modal>

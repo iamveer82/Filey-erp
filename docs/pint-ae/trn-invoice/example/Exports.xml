@@ -26,7 +26,7 @@
 	<cbc:ID>AE-001-Exports-TEST</cbc:ID>
 	<cbc:UUID>42fd81e6-27cd-422e-b93e-760f6c47c82d</cbc:UUID>
 	<cbc:IssueDate>2025-02-07</cbc:IssueDate>
-	<cbc:IssueTime>17:31:00</cbc:IssueTime>
+	<cbc:IssueTime>17:31:00+04:00</cbc:IssueTime>
 	<cbc:DueDate>2025-02-22</cbc:DueDate>
 	<cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
 	<cbc:Note>Tax invoice</cbc:Note>	
@@ -41,7 +41,7 @@
 		<cbc:ID>EXP010101234</cbc:ID>  <!--  BTAE-21 -->
 	</cac:StatementDocumentReference>
 	<cac:AdditionalDocumentReference>
-		<cbc:ID>AED></cbc:ID>
+		<cbc:ID>AED</cbc:ID>
 		<cbc:DocumentTypeCode>aedtotal-incl-vat</cbc:DocumentTypeCode>
 		<cbc:DocumentDescription>AED 913621.44</cbc:DocumentDescription> <!--  BTAE-20 -->
 	</cac:AdditionalDocumentReference>	
@@ -124,11 +124,11 @@
 	<cac:PaymentTerms>
 		<cbc:Note>within 1 month</cbc:Note>
 	</cac:PaymentTerms>
-	<cac:PricingExchangeRate>
+	<cac:TaxExchangeRate>
 		<cbc:SourceCurrencyCode>USD</cbc:SourceCurrencyCode>
 		<cbc:TargetCurrencyCode>AED</cbc:TargetCurrencyCode>
 		<cbc:CalculationRate>3.67285</cbc:CalculationRate>
-	</cac:PricingExchangeRate>
+	</cac:TaxExchangeRate>
 	<cac:TaxTotal>
 		<cbc:TaxAmount currencyID="USD">0</cbc:TaxAmount>
 		<cbc:TaxIncludedIndicator>false</cbc:TaxIncludedIndicator>

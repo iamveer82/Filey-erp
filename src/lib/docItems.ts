@@ -3,7 +3,7 @@
 // place so every module behaves the same way.
 
 import {
-  invoiceTotals,
+  taxBreakdown,
   invoiceLineAmount,
   r2,
   type CalcMode,
@@ -251,21 +251,19 @@ export function netByTaxCategory(
   discount: number,
   formula?: { a: string; b?: string } | null
 ): Record<string, number> {
-  const lineNet = (i: DocItem) =>
-    docLineGross(i, formula) * (1 - (i.discount || 0) / 100);
-  const subtotal = items.reduce((s, i) => s + docLineGross(i, formula), 0);
-  const netAfterLineDisc = items.reduce((s, i) => s + lineNet(i), 0);
-  const disc = Math.min(
-    Math.max(0, discount || 0) + (subtotal - netAfterLineDisc),
-    subtotal
-  );
-  const scale = netAfterLineDisc > 0 ? (subtotal - disc) / netAfterLineDisc : 0;
+  const rows = docTaxBreakdown(items, discount, 0, formula);
   const out: Record<string, number> = {};
-  for (const i of items) {
-    const cat = i.tax_category ?? "S";
-    out[cat] = r2((out[cat] ?? 0) + lineNet(i) * scale);
-  }
+  for (const row of rows) out[row.category] = r2((out[row.category] || 0) + row.taxable);
   return out;
+}
+
+export function docTaxBreakdown(items: DocItem[], discount: number, taxRatePct: number,
+  formula?: { a: string; b?: string } | null) {
+  return taxBreakdown(items.map(item => ({
+    category: item.tax_category || "S",
+    net: docLineAmount(item, formula),
+    rate: (item.tax_category ?? "S") === "S" ? (item.tax || taxRatePct || 0) : 0,
+  })), discount);
 }
 
 /** Totals that respect either doc-level discount/tax or per-line discount/tax. */
@@ -275,50 +273,9 @@ export function docTotals(
   taxRatePct: number,
   formula?: { a: string; b?: string } | null
 ) {
-  const hasLineLevel = items.some((i) => (i.discount || 0) > 0 || (i.tax || 0) > 0);
-  if (!hasLineLevel) {
-    return invoiceTotals(items, discount, taxRatePct, formula);
-  }
-  // Net of each line after its OWN discount %, before the document discount.
-  const lineNet = (i: DocItem) =>
-    docLineGross(i, formula) * (1 - (i.discount || 0) / 100);
-  // Only standard-rated lines carry VAT — zero-rated, exempt, out-of-scope and
-  // reverse-charge do not. invoiceTotals() has always honoured this, but this
-  // branch (taken as soon as any line has a per-line discount or tax) taxed
-  // every line flat, so adding a line discount to an invoice silently charged
-  // 5% on its zero-rated lines and disagreed with the VAT breakdown printed
-  // beside it.
-  const isStandard = (i: DocItem) => (i.tax_category ?? "S") === "S";
-
-  const subtotal = items.reduce((s, i) => s + docLineGross(i, formula), 0);
-  const lineDiscount = items.reduce(
-    (s, i) => s + docLineGross(i, formula) * ((i.discount || 0) / 100),
-    0
-  );
-  const disc = Math.min(Math.max(0, discount || 0) + lineDiscount, subtotal);
-  const net = subtotal - disc;
-  const lineTax = items.reduce(
-    (s, i) => (isStandard(i) ? s + lineNet(i) * ((i.tax || 0) / 100) : s),
-    0
-  );
-  // The document-level discount is allocated across lines pro-rata by net, so
-  // the standard-rated share of `net` is what the document rate applies to. A
-  // line carrying its OWN tax % is excluded: it has been rated explicitly, and
-  // adding the document rate on top of it taxed that line twice.
-  const netAfterLineDisc = items.reduce((s, i) => s + lineNet(i), 0);
-  const docRatedNet = items.reduce(
-    (s, i) => (isStandard(i) && !((i.tax || 0) > 0) ? s + lineNet(i) : s),
-    0
-  );
-  const taxableNet =
-    netAfterLineDisc > 0 ? net * (docRatedNet / netAfterLineDisc) : 0;
-  // Document discounts reduce the taxable base of explicit line rates too.
-  const lineTaxAfterDiscount = netAfterLineDisc > 0 ? lineTax * net / netAfterLineDisc : 0;
-  const tax = taxableNet * ((taxRatePct || 0) / 100) + lineTaxAfterDiscount;
-  return {
-    subtotal: r2(subtotal),
-    discount: r2(disc),
-    tax: r2(tax),
-    total: r2(net + tax),
-  };
+  const rows = docTaxBreakdown(items, discount, taxRatePct, formula);
+  const subtotal = r2(items.reduce((sum, item) => sum + r2(docLineGross(item, formula)), 0));
+  const net = r2(rows.reduce((sum, row) => sum + row.taxable, 0));
+  const tax = r2(rows.reduce((sum, row) => sum + row.tax, 0));
+  return { subtotal, discount: r2(subtotal - net), tax, total: r2(net + tax) };
 }

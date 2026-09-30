@@ -50,14 +50,14 @@ export function TeamAttachmentPicker({
         />
         <button
           type="button"
-          className="btn-ghost"
+          className="btn-ghost h-9 px-2 text-xs [@media(pointer:coarse)]:min-h-11"
           onClick={() => input.current?.click()}
           aria-label={label}
         >
           <Paperclip size={15} /> Attach files
         </button>
-        <span className="text-xs text-muted-foreground">
-          Images and documents · 10 MB each · up to 5
+        <span className="text-[11px] text-muted-foreground" title="Images and documents · up to 5 files">
+          {files.length ? `${files.length}/5 attached` : "Photos & documents"} · 10 MB each
         </span>
       </div>
       {!!files.length && (

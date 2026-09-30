@@ -56,14 +56,6 @@
     </gc:Row>
     <gc:Row>
       <gc:Value ColumnRef="id">
-        <gc:SimpleValue>ANG</gc:SimpleValue>
-      </gc:Value>
-      <gc:Value ColumnRef="name">
-        <gc:SimpleValue>Netherlands Antillean Guilder</gc:SimpleValue>
-      </gc:Value>
-    </gc:Row>
-    <gc:Row>
-      <gc:Value ColumnRef="id">
         <gc:SimpleValue>AOA</gc:SimpleValue>
       </gc:Value>
       <gc:Value ColumnRef="name">
@@ -124,14 +116,6 @@
       </gc:Value>
       <gc:Value ColumnRef="name">
         <gc:SimpleValue>Taka</gc:SimpleValue>
-      </gc:Value>
-    </gc:Row>
-    <gc:Row>
-      <gc:Value ColumnRef="id">
-        <gc:SimpleValue>BGN</gc:SimpleValue>
-      </gc:Value>
-      <gc:Value ColumnRef="name">
-        <gc:SimpleValue>Bulgarian Lev</gc:SimpleValue>
       </gc:Value>
     </gc:Row>
     <gc:Row>
@@ -288,6 +272,14 @@
     </gc:Row>
     <gc:Row>
       <gc:Value ColumnRef="id">
+        <gc:SimpleValue>CNH</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Renminbi (offshore)</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
         <gc:SimpleValue>CNY</gc:SimpleValue>
       </gc:Value>
       <gc:Value ColumnRef="name">
@@ -316,14 +308,6 @@
       </gc:Value>
       <gc:Value ColumnRef="name">
         <gc:SimpleValue>Costa Rican Colon</gc:SimpleValue>
-      </gc:Value>
-    </gc:Row>
-    <gc:Row>
-      <gc:Value ColumnRef="id">
-        <gc:SimpleValue>CUC</gc:SimpleValue>
-      </gc:Value>
-      <gc:Value ColumnRef="name">
-        <gc:SimpleValue>Peso Convertible</gc:SimpleValue>
       </gc:Value>
     </gc:Row>
     <gc:Row>
@@ -1348,6 +1332,14 @@
       </gc:Value>
       <gc:Value ColumnRef="name">
         <gc:SimpleValue>East Caribbean Dollar</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>XCG</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Caribbean guilder</gc:SimpleValue>
       </gc:Value>
     </gc:Row>
     <gc:Row>

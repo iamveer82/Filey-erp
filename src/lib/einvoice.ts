@@ -6,8 +6,7 @@
 // UN/ECE 5305, ISO 3166) plus the UAE-specific fixed values from the spec.
 //
 // This module is the single source of truth for those codes so the invoice
-// forms and the (future) PINT-AE XML serializer stay consistent. Capture only
-// for now — serialization/validation land when the phased mandate date hits.
+// forms and the PINT-AE 1.0.4 XML serializer stay consistent.
 
 // --- Fixed UAE values (spec §4.1) ------------------------------------------
 
@@ -19,17 +18,68 @@ export const UAE_COUNTRY_CODE = "AE";
 export const DEFAULT_TAX_SCHEME = "VAT";
 
 // Constants the PINT-AE XML carries as fixed values (spec fields 7 & 8).
-// ponytail: needed by the serializer, not by capture — kept here so it has one
-// home. Verify the exact literals against the published PINT-AE Data Dictionary
-// before emitting XML.
 export const PINT_AE_SPEC_IDENTIFIER = "urn:peppol:pint:billing-1@ae-1";
 export const PINT_AE_PROCESS_ID = "urn:peppol:bis:billing";
 
-/** TIN = first 10 digits of a 15-digit TRN (spec highlights & field 11). */
-export function tinFromTrn(trn?: string | null): string {
-  const digits = (trn ?? "").replace(/\D/g, "");
-  return digits.slice(0, 10);
+/** Only a Corporate Tax TRN can supply a UAE TIN. Never pass a VAT TRN here. */
+export function tinFromCorporateTrn(trn?: string | null): string {
+  const value = (trn ?? "").trim();
+  return /^\d{15}$/.test(value) ? value.slice(0, 10) : "";
 }
+
+export interface EInvoiceParty {
+  corporate_trn?: string;
+  tin?: string;
+  endpoint_id?: string;
+  endpoint_scheme?: string;
+  legal_id?: string;
+  legal_id_type?: string;
+  legal_authority?: string;
+  identifier?: string;
+}
+
+/** Stored with the document, so identities survive offline saves and sync. */
+export interface EInvoiceDetails {
+  uuid?: string;
+  seller?: EInvoiceParty;
+  buyer?: EInvoiceParty;
+  credit_reason?: string;
+  payment_account_id?: string;
+  payment_account_name?: string;
+  beneficiary_id?: string;
+  buyer_delivery_mode?: "peppol" | "export-unregistered" | "outside-uae-scope";
+  delivery?: { address?: string; city?: string; region?: string; country_code?: string };
+}
+
+/** Recipient routing is an explicit choice, never inferred from an address. */
+export function buyerEndpoint(details: EInvoiceDetails | undefined, country = UAE_COUNTRY_CODE) {
+  const predefined = details?.buyer_delivery_mode === "export-unregistered" ? "9900000099"
+    : details?.buyer_delivery_mode === "outside-uae-scope" ? "9900000098" : "";
+  return { id: predefined || details?.buyer?.endpoint_id?.trim() || (country === UAE_COUNTRY_CODE ? partyTin(details?.buyer) : ""),
+    scheme: predefined ? UAE_EAS_SCHEME : details?.buyer?.endpoint_scheme || (country === UAE_COUNTRY_CODE ? UAE_EAS_SCHEME : "") };
+}
+
+export function partyTin(party?: EInvoiceParty): string {
+  return party?.tin?.trim() || tinFromCorporateTrn(party?.corporate_trn);
+}
+
+export function readEInvoiceParty(value?: string): EInvoiceParty {
+  try {
+    const parsed: unknown = JSON.parse(value || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([key, entry]) =>
+      ["corporate_trn", "tin", "endpoint_id", "endpoint_scheme", "legal_id", "legal_id_type", "legal_authority", "identifier"].includes(key) && typeof entry === "string"));
+  } catch { return {}; }
+}
+
+export const CREDIT_REASONS: Code[] = [
+  { code: "DL8.61.1.A", label: "Supply cancelled" },
+  { code: "DL8.61.1.B", label: "Nature of supply changed" },
+  { code: "DL8.61.1.C", label: "Agreed price changed" },
+  { code: "DL8.61.1.D", label: "Goods or services returned" },
+  { code: "DL8.61.1.E", label: "Tax charged in error" },
+  { code: "VD", label: "Volume discount" },
+];
 
 // --- Code lists -------------------------------------------------------------
 
@@ -43,6 +93,14 @@ export const INVOICE_TYPE_CODES: Code[] = [
   { code: "386", label: "Prepayment invoice" },
 ];
 export const DEFAULT_INVOICE_TYPE_CODE = "380";
+export const PINT_AE_INVOICE_TYPE_CODES: Code[] = [
+  { code: "380", label: "Tax invoice" },
+  { code: "480", label: "Commercial invoice (out of scope of VAT)" },
+  { code: "381", label: "Tax credit note" },
+  { code: "81", label: "Commercial credit note" },
+];
+export const isCreditNote = (type?: string | null) => type === "381" || type === "81";
+export const isCommercialInvoice = (type?: string | null) => type === "480" || type === "81";
 
 /** Payment means type code — UN/ECE 4461 subset (spec field 9). */
 export const PAYMENT_MEANS_CODES: Code[] = [
@@ -67,11 +125,7 @@ export const TAX_CATEGORY_CODES: Code[] = [
 ];
 export const DEFAULT_TAX_CATEGORY = "S";
 
-/** Default tax-exemption reason text for non-standard VAT categories (BT-120).
- *  Peppol BR-E / BR-Z / BR-O / BR-AE require a reason when a line/subtotal isn't
- *  standard-rated. ponytail: the text satisfies the rule; a VATEX reason *code*
- *  (BT-121) needs the PINT-AE Data Dictionary value list — add per category
- *  once that list is confirmed. */
+/** Human-readable explanations complement the mandatory UAE exemption codes. */
 export const TAX_EXEMPTION_REASONS: Record<string, string> = {
   Z: "Zero-rated supply",
   E: "Exempt supply",
@@ -79,8 +133,23 @@ export const TAX_EXEMPTION_REASONS: Record<string, string> = {
   AE: "Reverse charge — VAT to be accounted for by the recipient",
 };
 
+/** PINT-AE 1.0.4 Aligned-TaxExemptionCodes and GoodsType codelists. */
+export const TAX_EXEMPTION_CODES: Code[] = [
+  { code: "DL8.46.1", label: "Certain financial services" },
+  { code: "DL8.46.2", label: "Residential units (lease or sale)" },
+  { code: "DL8.46.3", label: "Bare land" },
+  { code: "DL8.46.4", label: "Local passenger transport" },
+];
+export const REVERSE_CHARGE_TYPES: Code[] = [
+  { code: "DL8.48.8.2", label: "Electronic devices" },
+  { code: "DL8.48.8.1", label: "Gold and diamonds" },
+  { code: "DL8.48.3.1", label: "Crude or refined oil" },
+  { code: "DL8.48.3.2", label: "Natural gas" },
+  { code: "DL8.48.3.3", label: "Pure hydrocarbons" },
+];
+
 /** Invoice-type codes that reference a prior invoice (need BillingReference). */
-export const CORRECTIVE_TYPE_CODES = ["381", "383"];
+export const CORRECTIVE_TYPE_CODES = ["381", "81", "383"];
 
 /** Seller/Buyer legal-registration identifier type — spec fields 14 & 25. */
 export const LEGAL_ID_TYPES: Code[] = [
@@ -159,7 +228,7 @@ if (typeof process !== "undefined" && process.env.EINVOICE_SELFTEST) {
     encodeTransactionType(flags) === "10000001",
     "encode round-trips"
   );
-  console.assert(tinFromTrn("100123456700003") === "1001234567", "tin = first 10");
+  console.assert(tinFromCorporateTrn("100123456700003") === "1001234567", "corporate TIN = first 10");
   console.assert(encodeTransactionType({}) === DEFAULT_TRANSACTION_TYPE, "empty = zeros");
   console.log("einvoice self-check passed");
 }

@@ -8,7 +8,7 @@
 	<cbc:ID>AE001-CN-TEST</cbc:ID>
 	<cbc:UUID>9330196c-74e7-4da2-bb72-b290e3b86556</cbc:UUID>
 	<cbc:IssueDate>2025-02-07</cbc:IssueDate>
-	<cbc:IssueTime>15:55:00</cbc:IssueTime>
+	<cbc:IssueTime>15:55:00+04:00</cbc:IssueTime>
 	<cbc:CreditNoteTypeCode>381</cbc:CreditNoteTypeCode>
 	<cbc:Note>Tax Credit invoice</cbc:Note>	
 	<cbc:DocumentCurrencyCode>AED</cbc:DocumentCurrencyCode>

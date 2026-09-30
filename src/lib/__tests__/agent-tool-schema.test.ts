@@ -20,4 +20,13 @@ describe("tool argument boundary", () => {
     expect(validateToolArgs({}, deep)).toContain("deeply nested");
     expect(validateToolArgs({}, { amount: Infinity })).toBeTruthy();
   });
+  it("rejects non-JSON values and oversized strings before dispatch", () => {
+    for (const value of [undefined, { value: () => "unsafe" }, { value: BigInt(1) }, { value: new Date() }])
+      expect(validateToolArgs({}, value)).toContain("JSON values");
+    expect(validateToolArgs({}, { text: "x".repeat(1_000_001) })).toContain("too much text");
+    expect(validateToolArgs({}, { rows: Array(20_001).fill(0) })).toContain("too many items");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(validateToolArgs({ enum: ["valid"] }, circular)).toContain("JSON values");
+  });
 });

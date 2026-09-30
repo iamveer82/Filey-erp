@@ -56,6 +56,7 @@ pub fn run() {
                 // AI provider proxy (bypasses webview CORS for any provider)
                 modules::ai::ai_proxy,
                 modules::ai::ai_download_media,
+                modules::telegram::telegram_request,
                 // Email (SMTP)
                 modules::email::send_email,
                 // Composio (managed integrations: Gmail/Slack/Telegram…)

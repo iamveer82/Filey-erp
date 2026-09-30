@@ -110,7 +110,7 @@ export function MenuPopover({
         // itself: the cap turns a 160-currency list into a scrollable panel,
         // overscroll-contain stops the scroll chaining to the page behind
         // (which used to close closeOnScroll menus at the end of the list).
-        "z-50 max-h-[min(60vh,26rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1 shadow-lg outline-none",
+        "z-50 max-h-[min(60vh,26rem,var(--radix-popover-content-available-height))] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-1.5 shadow-sm outline-none",
         className
       )}
     >
@@ -149,18 +149,18 @@ export function MenuItemRow({
         danger ? "text-danger hover:bg-danger/10" : "text-foreground"
       )}
     >
-      <span
+      {icon && <span
         className={cn(
           "grid w-4 shrink-0 place-items-center",
           danger ? "text-danger" : "text-muted-foreground"
         )}
       >
         {icon}
-      </span>
-      <span className="flex-1 truncate text-left">{label}</span>
+      </span>}
+      <span className="flex-1 truncate text-left" title={label}>{label}</span>
       {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
       {chevron && <ChevronRight size={13} className="text-muted-foreground" />}
-      {checked && <Check size={14} className="text-primary-600 dark:text-primary-400" />}
+      {checked && <Check size={14} className="text-foreground" />}
     </button>
   );
 }
@@ -249,7 +249,7 @@ export function SelectMenu({
           }
         }}
         className={cn(
-          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-[8px] border border-border bg-card px-3 text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "inline-flex w-full min-w-0 items-center justify-between gap-1.5 rounded-xl border border-transparent bg-muted/60 px-3 text-[13px] text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/20 focus-visible:border-muted-foreground",
           size === "sm" ? "h-8 px-2 text-xs" : "h-10 [@media(pointer:coarse)]:min-h-11",
           disabled ? "cursor-not-allowed opacity-40" : "hover:bg-hover",
           className

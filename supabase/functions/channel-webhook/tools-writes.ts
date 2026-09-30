@@ -17,10 +17,6 @@ export const num = (v: unknown, d = 0): number => {
   return Number.isFinite(n) ? n : d;
 };
 
-/** Suffix marks agent-created drafts; the owner renumbers on finalize if needed. */
-export const draftNumber = (prefix: string) =>
-  `${prefix}-${new Date().getFullYear()}-A${randomCode(4)}`;
-
 const MAX_CODE_ATTEMPTS = 5;
 
 /** Insert a pending action under a fresh CSPRNG approval code, retrying when
@@ -214,120 +210,18 @@ export async function runWriteTool(
 
   switch (name) {
     case "create_draft_invoice":
-    case "create_draft_quote": {
-      const isInvoice = name === "create_draft_invoice";
-      // deno-lint-ignore no-explicit-any
-      const items = (Array.isArray(input?.items) ? input.items : []).map((it: any) => ({
-        description: String(it?.description ?? "").slice(0, 300),
-        qty: Math.max(num(it?.qty, 1), 0.001),
-        unit_price: Math.max(num(it?.unit_price), 0),
-      }));
-      if (!items.length) return { error: "at least one line item is required" };
-      const number = draftNumber(isInvoice ? "INV" : "Q");
-      const taxRate = isInvoice ? Math.min(Math.max(num(input?.tax_rate, 5), 0), 100) : 0;
-      const head = {
-        ...owned,
-        number,
-        status: "draft",
-        currency: String(input?.currency ?? "AED").toUpperCase().slice(0, 3),
-        customer_name: String(input?.customer_name ?? "").slice(0, 200),
-        customer_email: input?.customer_email ? String(input.customer_email).slice(0, 200) : null,
-        ...(isInvoice
-          ? { doc_type: "invoice", tax_rate: taxRate, issue_date: new Date().toISOString().slice(0, 10) }
-          : { quote_date: new Date().toISOString().slice(0, 10) }),
-      };
-      const table = isInvoice ? "invoice_docs" : "quotations";
-      const { data: doc, error } = await client.from(table).insert(head).select("id").single();
-      if (error) return { error: error.message };
-      const itemTable = isInvoice ? "invoice_doc_items" : "quotation_items";
-      const fk = isInvoice ? "invoice_id" : "quotation_id";
-      const { error: ie } = await client.from(itemTable).insert(
-        // deno-lint-ignore no-explicit-any
-        items.map((it: any, i: number) => ({
-          ...owned,
-          [fk]: doc.id,
-          description: it.description,
-          qty: it.qty,
-          unit_price: it.unit_price,
-          position: i,
-        })),
-      );
-      if (ie) return { error: ie.message };
-      // deno-lint-ignore no-explicit-any
-      const subtotal = items.reduce((s: number, it: any) => s + it.qty * it.unit_price, 0);
-      const total = Math.round(subtotal * (1 + taxRate / 100) * 100) / 100;
-      await logAgentAction(
-        client,
-        ownerId,
-        name,
-        `${table}:${doc.id}`,
-        `${number} for ${head.customer_name} — ${head.currency} ${total}`,
-      );
-      return {
-        created: "draft",
-        number,
-        total,
-        currency: head.currency,
-        note: "Draft saved in Filey — the owner reviews and finalizes it there.",
-      };
-    }
-
+    case "create_draft_quote":
     case "create_draft_po": {
-      // deno-lint-ignore no-explicit-any
-      const items = (Array.isArray(input?.items) ? input.items : []).map((it: any) => ({
-        description: String(it?.description ?? "").slice(0, 300),
-        quantity: Math.max(num(it?.qty, 1), 0.001),
-        unit_cost: Math.max(num(it?.unit_cost), 0),
-      }));
-      if (!items.length) return { error: "at least one line item is required" };
-      const supplierName = String(input?.supplier_name ?? "").slice(0, 200);
-      // Link the supplier when one matches by name (optional).
-      let supplierId: number | null = null;
-      try {
-        const { data: sup } = await client
-          .from("suppliers")
-          .select("id")
-          .eq("org_id", org)
-          .ilike("name", `%${supplierName.replace(/[%,().]/g, " ")}%`)
-          .limit(1)
-          .maybeSingle();
-        supplierId = sup?.id ?? null;
-      } catch {
-        /* optional linkage only */
+      const kind = name === "create_draft_invoice" ? "invoice" : name === "create_draft_quote" ? "quote" : "po";
+      const { data, error } = await client.rpc("filey_channel_create_draft", {
+        p_owner: ownerId, p_org: org, p_kind: kind, p_input: input,
+      });
+      if (error || data?.created !== "draft" || !data?.id || !data?.number) {
+        console.error("channel draft save", error?.code ?? "invalid_result");
+        return { error: "I couldn't save that draft. Retry or create it in Filey. No partial draft was saved." };
       }
-      const po_number = draftNumber("PO");
-      // deno-lint-ignore no-explicit-any
-      const total = items.reduce((s: number, it: any) => s + it.quantity * it.unit_cost, 0);
-      const { data: po, error } = await client
-        .from("purchase_orders")
-        .insert({
-          ...owned,
-          po_number,
-          status: "draft",
-          supplier_id: supplierId,
-          supplier_name: supplierName,
-          currency: String(input?.currency ?? "AED").toUpperCase().slice(0, 3),
-          total: Math.round(total * 100) / 100,
-          order_date: new Date().toISOString().slice(0, 10),
-        })
-        .select("id")
-        .single();
-      if (error) return { error: error.message };
-      const { error: ie } = await client.from("purchase_order_items").insert(
-        // deno-lint-ignore no-explicit-any
-        items.map((it: any, i: number) => ({ ...owned, po_id: po.id, ...it, position: i })),
-      );
-      if (ie) return { error: ie.message };
-      await logAgentAction(
-        client,
-        ownerId,
-        name,
-        `purchase_orders:${po.id}`,
-        `${po_number} to ${supplierName} — ${total}`,
-      );
-      return { created: "draft", number: po_number, total, note: "Draft PO saved in Filey." };
+      return data;
     }
-
     case "add_customer": {
       const row = {
         ...owned,

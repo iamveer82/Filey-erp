@@ -69,6 +69,7 @@ import type { LucideIcon } from "lucide-react";
 import * as pdf from "../lib/pdfTools";
 import type { OutFile } from "../lib/pdfTools";
 import { SelectMenu } from "./ui-menu";
+import { Switch } from "./ui";
 
 /* ── Typed option schema ───────────────────────────────────────────────────
  Each tool declares its options as `fields`. A single <ToolFields> renderer
@@ -1159,7 +1160,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "remove-restrictions",
     name: "Remove Restrictions",
-    desc: "Strip owner-password permission limits",
+    desc: "Remove printing and copying restrictions from a PDF that opens without a password",
     icon: Unlock,
     cat: "Secure",
     accept: "application/pdf",
@@ -1170,7 +1171,7 @@ export const PDF_TOOLS: Tool[] = [
   {
     id: "word2pdf",
     name: "Word → PDF",
-    desc: "Convert a .docx document to PDF (text & structure)",
+    desc: "Export Word text to a clean PDF; images and original page layout are not retained",
     icon: FileType2,
     cat: "To PDF",
     accept:
@@ -1324,17 +1325,18 @@ export const PDF_TOOLS: Tool[] = [
   },
   {
     id: "decrypt",
-    name: "Decrypt PDF",
-    desc: "Unlock a password-protected PDF (supply the password)",
+    name: "Remove PDF Password",
+    desc: "Enter the current password and download an unlocked copy with its content preserved",
     icon: KeyRound,
     cat: "Secure",
     accept: "application/pdf",
     fields: [
       {
         key: "password",
-        label: "Password",
+        label: "Current PDF password",
         type: "password",
         placeholder: "current password",
+        hint: "Use the password that opens this file. The downloaded copy will open without it.",
       },
     ],
     run: async (f, p) => [await pdf.decryptPdf(f[0], p.password || "")],
@@ -1512,7 +1514,7 @@ export const PDF_TOOLS: Tool[] = [
     cat: "To PDF",
     accept: "image/heic,image/heif,.heic,.heif",
     fields: [],
-    run: async (f) => [await pdf.heicToPdf(f[0])],
+    run: async (f, _p, context) => [await pdf.heicToPdf(f[0], context)],
   },
   {
     id: "psd-to-pdf",
@@ -1609,7 +1611,7 @@ function FieldControl({
           aria-label={f.label}
           value={value || "#000000"}
           onChange={(e) => onChange(e.target.value)}
-          className="h-9 w-12 cursor-pointer rounded-xl border border-brand-200 bg-white p-0.5"
+          className="h-9 w-12 cursor-pointer rounded-xl border border-border bg-card p-0.5"
         />
         <input
           className="input flex-1"
@@ -1632,7 +1634,7 @@ function FieldControl({
           step={f.step}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="flex-1 accent-primary-500 cursor-pointer"
+          className="flex-1 accent-foreground cursor-pointer"
         />
         <span className="w-12 shrink-0 text-right text-xs font-medium tabular-nums text-brand-500">
           {(f.max ?? 1) <= 1 ? `${Math.round(parseFloat(value || "0") * 100)}%` : value}
@@ -1643,21 +1645,7 @@ function FieldControl({
   if (f.type === "toggle") {
     const on = value === "yes" || value === "true";
     return (
-      <button
-        type="button"
-        onClick={() => onChange(on ? "no" : "yes")}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-          on ? "bg-primary-500" : "bg-brand-300"
-        }`}
-        aria-pressed={on}
-        aria-label={f.label}
-      >
-        <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-            on ? "translate-x-[22px]" : "translate-x-0.5"
-          }`}
-        />
-      </button>
+      <Switch checked={on} label={f.label} onChange={next => onChange(next ? "yes" : "no")} />
     );
   }
   if (f.type === "password") {
@@ -1668,7 +1656,7 @@ function FieldControl({
         className="input"
         value={value}
         placeholder={f.placeholder}
-        autoComplete="new-password"
+        autoComplete={f.key === "password" ? "off" : "new-password"}
         onChange={(e) => onChange(e.target.value)}
       />
     );

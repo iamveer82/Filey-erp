@@ -1,5 +1,5 @@
 import { FileySpinner as Loader2 } from "../components/FileySpinner";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Hash, Plus, MessageCircle, Search, ArrowLeft } from "lucide-react";
 
 import { channels, messages, org, type OrgChannel, type OrgMember } from "../lib/api";
@@ -37,6 +37,7 @@ export default function Team() {
   const [params, setParams] = useSearchParams();
   const active = params.get("channel") || GENERAL;
   const recipient = params.get("person") || undefined;
+  const mobileConversation = !!recipient || params.has("channel");
   const view = recipient
     ? "chats"
     : params.get("view") || (params.has("channel") || local ? "channels" : "chats");
@@ -47,6 +48,9 @@ export default function Team() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  // Keep unsent messages and attachments while browsing conversations; never upload drafts.
+  const drafts = useRef<Record<string, { text: string; files: File[] }>>({});
+  const draftKey = recipient ? `person:${recipient}` : `channel:${active}`;
 
   const load = async () => {
     try {
@@ -149,7 +153,7 @@ export default function Team() {
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         {/* Channel rail */}
-        <aside className={person ? "hidden lg:block" : undefined}>
+        <aside className={mobileConversation ? "hidden lg:block" : undefined}>
           <div className="card p-3">
             <div
               className="mb-3 flex gap-1 rounded-full bg-muted p-1"
@@ -220,7 +224,7 @@ export default function Team() {
                               className={cn(
                                 "flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
                                 recipient === p.user_id
-                                  ? "bg-primary-500/10"
+                                  ? "bg-muted"
                                   : "hover:bg-muted"
                               )}
                             >
@@ -320,7 +324,7 @@ export default function Team() {
                 )}
 
                 {loading ? (
-                  <p className="flex items-center gap-2 px-1 py-2 text-[12.5px] text-brand-400">
+                  <p className="flex items-center gap-2 px-1 py-2 text-[12.5px] text-muted-foreground">
                     <Loader2 size={13} className="animate-spin" /> Loading…
                   </p>
                 ) : (
@@ -333,8 +337,8 @@ export default function Team() {
                         className={cn(
                           "flex min-h-10 w-full items-center gap-2 rounded-full px-3 py-2 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           c.name === active
-                            ? "bg-primary-500/10 font-medium text-ink"
-                            : "text-brand-500 hover:bg-muted hover:text-ink"
+                            ? "bg-muted font-medium text-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
                         )}
                       >
                         <Hash size={12} className="shrink-0 opacity-70" />
@@ -358,17 +362,17 @@ export default function Team() {
 
         {/* Feed for the selected channel. Keyed so switching channels remounts
             rather than showing the previous room's messages for a beat. */}
-        <section className="min-w-0">
-          {person && (
+        <section className={cn("min-w-0", !mobileConversation && "hidden lg:block")}>
+          {mobileConversation && (
             <button
               className="btn-ghost mb-3 lg:hidden"
-              onClick={() => setParams({ view: "chats" })}
+              onClick={() => setParams({ view: recipient ? "chats" : "channels" })}
             >
-              <ArrowLeft size={16} /> All chats
+              <ArrowLeft size={16} /> {recipient ? "All chats" : "All channels"}
             </button>
           )}
           {view === "channels" && activeChannel?.purpose && (
-            <p className="mb-2 text-[12.5px] text-brand-400">{activeChannel.purpose}</p>
+            <p className="mb-2 text-[12.5px] text-muted-foreground">{activeChannel.purpose}</p>
           )}
           {view === "channels" || (person && !local) ? (
             <CompanyMessages
@@ -376,6 +380,9 @@ export default function Team() {
               channel={recipient ? "general" : active}
               recipient={recipient}
               recipientName={person?.name || person?.email}
+              draft={drafts.current[draftKey]}
+              onDraftChange={(draft) => { drafts.current[draftKey] = draft; }}
+              active={mobileConversation}
               focusMessage={focusMessage}
               onRead={refreshUnread}
             />

@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
@@ -33,9 +33,39 @@ vi.mock("../../lib/api", () => ({
     thread: async () => [],
   },
 }));
+beforeEach(() => mock.page.mockResolvedValue({ rows: [], next: null }));
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+it("keeps channel messages chronological and the composer below the feed", async () => {
+  mock.page.mockResolvedValue({ rows: [
+    { id: 2, user_id: "peer", author: "Alex", body: "Later update", channel: "general", created_at: "2026-09-30T09:10:00Z" },
+    { id: 1, user_id: "peer", author: "Alex", body: "Earlier update", channel: "general", created_at: "2026-09-30T09:00:00Z" },
+  ], next: null });
+  render(<MemoryRouter initialEntries={["/team?channel=general"]}><UIProvider><Team/></UIProvider></MemoryRouter>);
+  const feed = await screen.findByRole("list", { name: "Channel conversations" });
+  await screen.findByText("Earlier update");
+  expect(feed.textContent!.indexOf("Earlier update")).toBeLessThan(feed.textContent!.indexOf("Later update"));
+  const composer = screen.getByRole("combobox", { name: "Team update" }).closest("fieldset")!;
+  expect(composer).toHaveClass("order-2");
+  fireEvent.click(screen.getAllByRole("button", { name: "Reply" })[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+  expect(screen.queryByRole("button", { name: "Post reply" })).not.toBeInTheDocument();
+});
+
+it("focuses the whole conversation when a notification points at a reply", async () => {
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  mock.page.mockResolvedValue({ rows: [
+    { id: 1, user_id: "peer", author: "Alex", body: "Original update", channel: "general", created_at: "2026-09-30T09:00:00Z" },
+    { id: 2, parent_id: 1, user_id: "peer", author: "Alex", body: "Reply to open", channel: "general", created_at: "2026-09-30T09:10:00Z" },
+  ], next: null });
+  render(<MemoryRouter initialEntries={["/team?channel=general&message=2"]}><UIProvider><Team/></UIProvider></MemoryRouter>);
+  await screen.findByText("Reply to open");
+  expect(scroll).toHaveBeenCalledWith({ block: "nearest" });
+  expect(scroll.mock.contexts[scroll.mock.contexts.length - 1]).toHaveTextContent("Original update");
+  expect(scroll.mock.contexts[scroll.mock.contexts.length - 1]).toHaveTextContent("Reply to open");
+  scroll.mockRestore();
 });
 it("switches between a private chat and a channel, retaining failed attachment sends for retry", async () => {
   render(
@@ -62,7 +92,11 @@ it("switches between a private chat and a channel, retaining failed attachment s
   fireEvent.click(screen.getByRole("button", { name: "Post message" }));
   await waitFor(() => expect(screen.queryByText("invoice.pdf")).not.toBeInTheDocument());
   expect(mock.post).toHaveBeenLastCalledWith("", null, "general", [file], "peer");
+  fireEvent.change(screen.getByRole("combobox", { name: "Team update" }), { target: { value: "Unsent draft" } });
   fireEvent.click(screen.getByRole("button", { name: "Channels" }));
   await screen.findByText("#general");
   expect(mock.page).toHaveBeenLastCalledWith("general", undefined, undefined);
+  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Alex staff/ }));
+  expect(await screen.findByRole("combobox", { name: "Team update" })).toHaveValue("Unsent draft");
 });

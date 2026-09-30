@@ -15,6 +15,9 @@ const server = await createServer({server:{host:'127.0.0.1',port:0,open:false},p
     server.middlewares.use((req,res,next)=>{
       if(req.url === '/__filey_fixture') {
         res.setHeader('Content-Type','text/html');
+        // Match desktop's ban on unsafe-eval. Inline is needed only for Vite's
+        // development preamble; WASM is intentionally allowed in both runtimes.
+        res.setHeader('Content-Security-Policy', "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; worker-src 'self' blob:");
         void server.transformIndexHtml(req.url, '<!doctype html><html><head><title>Filey file-tool fixtures</title></head><body><h1>File tool checks</h1><pre id="result">Running generated fixtures…</pre><script type="module" src="/scripts/fixtures/browser-tools.ts"></script></body></html>').then(html=>res.end(html)).catch(next);
       } else if(req.url === '/__filey_fixture_result' && req.method === 'POST' && req.headers.origin === origin) {
         let body='';

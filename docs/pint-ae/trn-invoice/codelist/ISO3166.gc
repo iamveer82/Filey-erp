@@ -293,7 +293,7 @@
         <gc:SimpleValue>BS</gc:SimpleValue>
       </gc:Value>
       <gc:Value ColumnRef="name">
-        <gc:SimpleValue>Bahamas</gc:SimpleValue>
+        <gc:SimpleValue>Bahamas (The)</gc:SimpleValue>
       </gc:Value>
     </gc:Row>
     <gc:Row>

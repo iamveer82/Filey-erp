@@ -1,13 +1,13 @@
 # Filey — Design System (design.md)
 
 > **This document is the source of truth for all UI work in this project.**
-> Updated 7 September 2026 against `src/index.css`, `tailwind.config.js`,
+> Updated 30 September 2026 against `src/index.css`, `tailwind.config.js`,
 > `src/components/Button.tsx` and `src/components/ui.tsx`. These shared
 > primitives define the current desktop workspace. If a value is not specified
 > here, reuse the closest shared component before adding a page-specific style.
 >
-> **Direction: minimal.** Warm white and charcoal surfaces, Filey yellow as the
-> default accent, 13px working density, no decorative effects. The UI reads like a
+> **Direction: neutral and minimal.** White and charcoal surfaces, monochrome
+> controls, 13px working density, no decorative effects. The UI reads like a
 > well-set ledger — nothing competes with the user's data.
 
 ---
@@ -24,7 +24,7 @@ Taste's current scope emphasizes landing pages and explicitly excludes dense das
 2. **Always** use design tokens / shared primitives instead of hard-coded values.
 3. **Typefaces:** Inter (`font-sans`, self-hosted variable font) everywhere. IBM Plex Mono (`font-mono`) for document numbers/code only. Lora (`font-serif`) only inside print document templates.
 4. **Icons:** Lucide React only, 1.75px stroke (set globally in index.css), sizes 18px (sidebar/header), 16px (table actions and sorting), 16–20px elsewhere. Reuse AppIcon module mappings in navigation, search and Settings. File types use outline document icons; service logos remain confined to integration/authentication identity. Icons never shrink in flex layouts. Preserve the Filey logo, animated AI mascot, custom loading indicator and tool-cover artwork.
-5. **Filey yellow** is the default accent (`amber` remains its saved key). Use the `primary-*` ramp for primary CTAs and small key highlights. Never use bright accent colors for body text on light surfaces or large decorative fills. A user's selected accent replaces the default across shared controls and charts.
+5. **Neutral controls** are the default: primary actions use foreground/background contrast; secondary actions and sent messages use muted gray. Filey yellow and the saved `primary-*` palette remain available for branding and charts. Keep chat bubbles, composer controls, selection checks and focus rings neutral, as requested on 30 September 2026.
 6. **No decorative effects.** Banned: gradients (background or text), glows, shimmer, spotlight/tilt cards, parallax, glassmorphism. The only gradient allowed is inside recharts (accent bar/area fills) and the neutral avatar disc.
 7. **Motion budget:** color transitions ≤200ms; route enter = `.fade-in` (opacity + 4px rise, 250ms); overlay enter = `.materialize-*` (opacity + ≤3% scale + ≤6px translate, ≤200ms, one-shot). No hover movement (no scale/lift), no springs, no decorative loops. `prefers-reduced-motion` collapses transforms to fades. Exceptions: buttons may press to `scale(0.97)` on `:active`; the shared `FileySpinner` rotates only while loading and stops under reduced motion; preserve the requested sidebar AI mascot.
 8. Dark mode is supported (`.dark` class); every surface needs a working dark variant — use token classes and you get it for free.
@@ -38,27 +38,27 @@ class. **Use token classes, never raw hex/gray utilities:**
 
 | Class | Token | Role |
 | --- | --- | --- |
-| `bg-page` | `--page` | Warm white / charcoal ground behind page content |
+| `bg-page` | `--page` | Neutral white / charcoal ground behind page content |
 | `bg-background` / `text-foreground` | `--background` / `--foreground` | Base surface / primary text |
 | `bg-card` | `--card` | Cards, tables, modals, popovers |
 | `bg-sidebar` | `--sidebar` | App sidebar surface |
 | `bg-hover` | `--hover` | Hover film, active nav, quiet fills |
 | `bg-muted` / `text-muted-foreground` | `--muted` / `--muted-foreground` | Quiet fills / secondary text |
 | `border-border` / `border-input` / `ring-ring` | `--border` / `--input` / `--ring` | Hairlines / field borders / focus |
-| `primary-50…900` | `--primary-50…900` | Selected accent CTA + tints |
+| `primary-50…900` | `--primary-50…900` | Saved branding and chart accent palette |
 | `success`, `warning`, `danger`, `info` | Theme-specific HSL variables | Status only: badges, measured deltas and semantic icons |
 
 Current surface values are HSL triples, consumed as `hsl(var(--token))`:
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| `--page` | `45 15% 97%` | `0 0% 4%` |
-| `--background` / `--card` | `0 0% 100%` / `0 0% 100%` | `0 0% 4%` / `0 0% 6%` |
-| `--sidebar` | `45 12% 98%` | `0 0% 5%` |
-| `--foreground` | `240 10% 3.9%` | `0 0% 93%` |
-| `--muted-foreground` | `240 4% 42%` | `0 0% 62%` |
-| `--border` / `--input` | `240 5.9% 90%` | `0 0% 15%` |
-| `--hover` / `--muted` | `240 4.8% 95.9%` | `0 0% 10%` |
+| `--page` | `0 0% 98%` | `0 0% 4%` |
+| `--background` / `--card` | `0 0% 100%` / `0 0% 100%` | `0 0% 4%` / `0 0% 8%` |
+| `--sidebar` | `0 0% 98%` | `0 0% 5%` |
+| `--foreground` | `0 0% 9%` | `0 0% 93%` |
+| `--muted-foreground` | `0 0% 42%` | `0 0% 67%` |
+| `--border` / `--input` | `0 0% 90%` | `0 0% 15%` |
+| `--hover` / `--muted` | `0 0% 94%` / `0 0% 95%` | `0 0% 14%` |
 
 The default CSS accent uses `--p-h: 45`, `--p-s: 96%` and
 `--p-l400: 54%`; `--primary-400` combines those values. The Filey yellow
@@ -80,7 +80,7 @@ the same tokens and keep working; prefer token classes in new code.
 - Settings uses horizontally scrollable section tabs with keyboard navigation, URL state and preserved unsaved panel drafts. The user prefers this to a second vertical sidebar. Appearance uses aligned, divided rows.
 - Keep the existing 48px animated BloubBot beside Filey AI in the sidebar. This requested brand detail is an exception to standard Lucide navigation icons; preserve its reduced-motion and hidden-view behavior.
 - Mobile navigation slides from the left using only transform: 260ms entering, 220ms exiting, with a gentle easing curve and a 220ms backdrop fade. Keep outgoing contents still during dismissal. Reduced motion disables the slide and fade.
-- Radii: `rounded-full` for buttons, filter chips and avatars; explicit `rounded-[8px]` for shared inputs/selects/textareas; `rounded-xl` (12px) for cards/modals. Do not substitute `rounded-lg` for an 8px field: the current Tailwind configuration maps `lg` to 10px. Pill buttons are the user's explicit preference; square icon buttons become circles, and joined calendar ranges keep flat inner edges.
+- Radii: `rounded-full` for buttons, filter chips and avatars; `rounded-xl` (12px) for shared inputs/selects/textareas; `rounded-2xl` (16px) for cards. Modals retain their existing radius. Square icon buttons become circles, and joined calendar ranges keep flat inner edges.
 
 ## 3. Theme & accent system
 
@@ -90,13 +90,13 @@ the same tokens and keep working; prefer token classes in new code.
 
 ## 4. Component classes (index.css) & primitives (components/ui.tsx)
 
-- `Button`/`buttonVariants` delegate to the same `.btn-*` classes as native buttons; `outline` and `ghost` both use the bordered card treatment. Keep actions pill-shaped, and use `.chip` for filters and selection.
-- Standard action buttons are 40px high (`h-10`), pill-shaped, with 13px medium text: `.btn-primary` (selected accent, neutral-900 text), `.btn-secondary` (foreground), `.btn-ghost` (card + hairline), `.btn-danger` (semantic destructive color). `Button` defaults to `md` (40px); its icon size is 40×40px, `lg` is 44px and the explicit compact `sm` variant is 28px. Keep compact controls contextual; do not shrink ordinary form and toolbar actions. Authentication actions keep their 44px height and pill shape. Press feedback is `scale(0.97)` over 140ms, disabled opacity is 50%, and reduced motion removes the press transform.
+- `Button`/`buttonVariants` delegate to the same `.btn-*` classes as native buttons; `outline` uses a hairline and `ghost` is transparent. Keep actions pill-shaped, and use `.chip` for filters and selection.
+- Standard action buttons are 40px high (`h-10`), pill-shaped, with 13px medium text: `.btn-primary` (foreground fill, background text), `.btn-secondary` (muted fill), `.btn-outline` (background + hairline), `.btn-ghost` (transparent), `.btn-danger` (semantic destructive color). `Button` defaults to `md` (40px); its icon size is 40×40px, `lg` is 44px and the explicit compact `sm` variant is 28px. Keep compact controls contextual; do not shrink ordinary form and toolbar actions. Authentication actions keep their 44px height and pill shape. Press feedback is `scale(0.97)` over 140ms, disabled opacity is 50%, and reduced motion removes the press transform.
 - Calendars inherit the app font, root theme and selected accent. No independent OS-theme observer, gradients, glass or hover lift. Popovers fit the viewport.
-- Forms: `.input` / `.select` are 40px high (`h-10`) with 8px corners, card fill, 13px text and 12px horizontal padding. `.textarea` shares the 8px radius and has an 88px minimum height; `.label` is 12px muted. Use `.help` and `.error-text`; focus darkens the border while visible keyboard focus remains available.
+- Forms: `.input` / `.select` are 40px high (`h-10`) with 12px corners, muted fill, 13px text and 12px horizontal padding. `.textarea` shares the 12px radius and has an 88px minimum height; `.label` is 12px muted. Use `.help` and `.error-text`; focus darkens the border while visible keyboard focus remains available.
 - On phones, fields use 16px text to prevent focus zoom and common actions use 44px touch targets. Keep safe-area padding and keyboard-aware dialog height; never disable pinch zoom. Heading actions wrap and tables scroll horizontally without a pinned action column covering the data.
 - Busy actions use `FileySpinner`, inline statuses use `Spinner`/`InlineSpinner`, and route/startup loading uses `FileyLoader` with the existing folder mascot. Give status containers a readable loading label; decorative spinner SVGs stay hidden from screen readers.
-- Surfaces: `.card` (12px radius, card fill, 20px padding) has a 1px edge matching the card fill. The tinted page ground separates cards; `.card-hover` reveals the border on hover without movement.
+- Surfaces: `.card` (16px radius, card fill, 20px padding) has a visible 1px token border. Neutral page ground separates cards; hover states remain still.
 - Tables: `.th` (12px, muted, px-5 py-2.5, hairline bottom) / `.td` (13px, px-5 py-3, hairline top) / `.row-hover` (bg-hover film).
 - KPI grids: the legacy `.joined-kpis` name now supplies a 12px gap (`gap-3`) between cards. Preserve that separated layout instead of rebuilding a zero-gap shared-border strip.
 - Chips/filters: `.chip` / `.chip-active` use neutral selection, pill corners and keyboard focus rings. `FilterChip` shares these classes; `.pill` is reserved for badges. `SearchInput` shares `.input` and has an accessible name.
@@ -108,7 +108,7 @@ the same tokens and keep working; prefer token classes in new code.
 
 Every index/list page composes the same anatomy:
 
-1. `PageHeader` — title + 13px subtitle + right-aligned actions (ghost utilities + one amber primary CTA).
+1. `PageHeader` — title + 13px subtitle + right-aligned actions (ghost utilities + one neutral primary CTA).
 2. Optional KPI grid (`.joined-kpis` + `MetricCard`, with 12px gaps).
 3. Toolbar: `SearchInput` + `FilterChip`s with live counts.
 4. `DataTable` with an **Actions** column: page-specific primary action(s) + `RowActions` (quick view → `QuickViewModal`, edit → the page's real editor, duplicate via the real create flow, send menu with real portal link/contact data, delete behind `confirm({ danger: true })`).
@@ -123,7 +123,7 @@ Settings use `SettingsPanel` and `SettingsSection`: one divided surface per tab,
 ## 6. Accessibility
 
 - Text contrast ≥ 4.5:1. Amber is never small text on light surfaces.
-- `:focus-visible` ring 2px `ring-primary-400` + 2px offset — never removed.
+- `:focus-visible` ring 2px `ring-ring` + 2px offset — never removed.
 - Icon-only buttons require `aria-label`; ordinary action targets are at least 40×40px. Explicit compact row controls must remain keyboard-operable and have a sufficiently spaced clickable area; a clickable row alone does not replace access to its individual actions.
 - Label every input, including each control in a combined field. Repeated invoice/quotation fields use meaningful names with the line number; placeholders alone are not labels. `SearchInput` provides an accessible name.
 - All interactives are real `<button>`/`<a>`; Esc closes overlays; overlays trap focus (use `Modal`).

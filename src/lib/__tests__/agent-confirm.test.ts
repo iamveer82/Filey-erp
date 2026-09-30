@@ -28,11 +28,16 @@ describe("runTool confirm override", () => {
       };
       expect(approvalArgs(name, args)).toEqual({
         ...args,
-        credentials: { api_key: "********" },
+        credentials: "********",
       });
       expect(redactArgs(name, args)[field]).toBe("********");
       expect(args.credentials.api_key).toBe("private");
     }
+  });
+  it("masks credentials in arrays and nested arrays without changing their shape", () => {
+    const input = { rows: [[{ api_key: "private" }]], tokens: ["first-private", "second-private"] };
+    expect(redactArgs("http_fetch", input)).toEqual({ rows: [[{ api_key: "********" }]], tokens: "********" });
+    expect(input.rows[0][0].api_key).toBe("private");
   });
   it("cancels while waiting for approval and never performs the late-approved action", async () => {
     const controller = new AbortController();

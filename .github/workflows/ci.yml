@@ -24,6 +24,7 @@ jobs:
       - run: npm test
       - run: npm run test:rls:local
       - run: node scripts/test-mfa-local.mjs
+      - run: node scripts/test-channel-agent-local.mjs
       - run: node --test worker/paths.test.js
       - run: npm run test:browser:tools
       - run: node tools/wa-bridge/check-media.mjs

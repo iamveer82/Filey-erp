@@ -12,6 +12,7 @@ import {
   Trash2,
   ShieldAlert,
   ArrowUp,
+  ArrowDown,
   FileText,
   History,
   PanelLeftClose,
@@ -144,6 +145,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [files, setFiles] = useState<File[]>([]);
   /** Object URL per attached image ("" for non-images), revoked on replace. */
   const [previews, setPreviews] = useState<string[]>([]);
+  const previewUrlsRef = useRef<string[]>([]);
+  const draftsRef = useRef(new Map<string, { text: string; files: File[] }>());
   const [pendingConfirm, setPendingConfirm] = useState<{
     name: string;
     args: Record<string, unknown>;
@@ -189,6 +192,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // ── Voice dictation (Web Speech API — Chromium, free, no key) ──────────
   const [listening, setListening] = useState(false);
   const dictationRef = useRef<ReturnType<typeof startDictation> | null>(null);
+  const dictationTokenRef = useRef(0);
   const micSupported = useMemo(() => speechRecognitionSupported(), []);
 
   const toggleMic = () => {
@@ -198,18 +202,20 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       setListening(false);
       return;
     }
-    const base = input;
+    const token = ++dictationTokenRef.current;
     dictationRef.current = startDictation({
-      onFinal: (chunk) =>
-        setInput(
-          (cur) => (cur === base ? "" : cur) + (cur && cur !== base ? " " : "") + chunk
-        ),
+      onFinal: (chunk) => {
+        if (token !== dictationTokenRef.current) return;
+        setInput(cur => `${cur}${cur ? " " : ""}${chunk}`);
+      },
       onInterim: (draft) => {
+        if (token !== dictationTokenRef.current) return;
         // Live draft shows in the placeholder so the words appear as spoken
         // without churning the real value on every partial result.
         if (textareaRef.current) textareaRef.current.placeholder = draft || "Listening…";
       },
       onEnd: () => {
+        if (token !== dictationTokenRef.current) return;
         setListening(false);
         dictationRef.current = null;
         if (textareaRef.current)
@@ -217,6 +223,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
             textareaRef.current.dataset.ph || "Message Filey AI…";
       },
       onError: (e) => {
+        if (token !== dictationTokenRef.current) return;
         setListening(false);
         dictationRef.current = null;
         if (e !== "no-speech" && e !== "aborted") setErr(`Dictation failed: ${e}`);
@@ -250,6 +257,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
    *  would get the value from the render that started the run, not the latest. */
   const streamedRef = useRef("");
   const conversationRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+  const scrolledChatRef = useRef<string | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -280,10 +290,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
    *  the merge right here. */
   const attach = (list: File[] | null) => {
     const next = (list ?? []).filter(Boolean);
-    setPreviews((prev) => {
-      prev.filter(Boolean).forEach((u) => URL.revokeObjectURL(u));
-      return next.map((f) => (f.type.startsWith("image/") ? URL.createObjectURL(f) : ""));
-    });
+    previewUrlsRef.current.filter(Boolean).forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current = next.map((file) => file.type.startsWith("image/") ? URL.createObjectURL(file) : "");
+    setPreviews(previewUrlsRef.current);
     setFiles(next);
   };
 
@@ -313,6 +322,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     );
     return () => {
       abortRef.current?.abort();
+      dictationTokenRef.current++;
+      dictationRef.current?.stop();
+      dictationRef.current = null;
+      previewUrlsRef.current.filter(Boolean).forEach((url) => URL.revokeObjectURL(url));
+      previewUrlsRef.current = [];
+      draftsRef.current.clear();
       void disableComputerUse().catch(() => {});
       pendingRef.current?.resolve(false); // deny rather than hang
       pendingRef.current = null;
@@ -365,35 +380,41 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     if (videosOpen) conversationRef.current?.scrollTo({ top: 0 });
   }, [videosOpen]);
 
-  // Scroll only the messages. scrollIntoView also moves hidden ancestors and
-  // the page itself, pulling the composer away while a phone keyboard is open.
-  const mounted = useRef(false);
+  // Remember the reader's position before new content changes scrollHeight.
+  // Checking after a large streamed chunk can mistake a pinned reader for one
+  // who scrolled up; finishing a reply must respect the same choice.
+  const trackScroll = () => {
+    const scroller = conversationRef.current;
+    if (!scroller || videosOpen) return;
+    const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48;
+    followLatestRef.current = atBottom;
+    setShowJumpToLatest(!atBottom);
+  };
+  const jumpToLatest = () => {
+    followLatestRef.current = true;
+    setShowJumpToLatest(false);
+    const scroller = conversationRef.current;
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
+  };
+
+  // Scroll only the messages; keep every streamed update and completion on the
+  // same path so neither the page nor a reader reviewing earlier text jumps.
   useEffect(() => {
     const scroller = conversationRef.current;
     if (!scroller || videosOpen) return;
-    const jump = !mounted.current || !chat.turns.length ||
-      (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
-    mounted.current = true;
-    scroller.scrollTo({ top: chat.turns.length ? scroller.scrollHeight : 0, behavior: jump ? "instant" : "smooth" });
-    // Only real turns animate. `streaming` used to be in here too, which
-    // restarted a *smooth* scroll on every streamed step — a fresh easing
-    // animation several times a second, which WebView2 renders as the whole
-    // app locking up while the agent is answering.
-  }, [chat.turns, busy, videosOpen]);
-
-  // Following the stream is a separate, much cheaper job: jump (no easing) and
-  // only while the reader is already at the bottom, so scrolling up to re-read
-  // something isn't yanked back on the next step.
-  useEffect(() => {
-    if (!streaming || !mounted.current || videosOpen) return;
-    const scroller = conversationRef.current;
-    if (!scroller || scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 120) return;
+    if (scrolledChatRef.current !== chat.id) {
+      scrolledChatRef.current = chat.id;
+      followLatestRef.current = true;
+      setShowJumpToLatest(false);
+    }
+    if (!followLatestRef.current) return;
     // rAF coalesces bursts into one scroll per frame instead of one per step.
     const id = requestAnimationFrame(() => {
+      if (!followLatestRef.current) return;
       scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
     });
     return () => cancelAnimationFrame(id);
-  }, [streaming, videosOpen]);
+  }, [chat.id, chat.turns, busy, streaming, runProgress, videosOpen]);
 
   /** Stop the run. The catch in send() turns the abort into a kept partial
    *  reply rather than an error banner. */
@@ -405,14 +426,24 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     void disableComputerUse().catch(() => {});
   };
 
-  const startNew = () => {
-    if (busy) return;
-    const c = newChat();
+  const changeChat = (c: Chat) => {
+    if (chat.turns.length && (input || files.length)) draftsRef.current.set(chat.id, { text: input, files });
+    else draftsRef.current.delete(chat.id);
+    const draft = draftsRef.current.get(c.id);
+    dictationTokenRef.current++;
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setListening(false);
+    setInput(draft?.text ?? "");
+    attach(draft?.files ?? []);
     setChat(c);
     setActiveId(c.id);
     setErr(null);
     setStreaming("");
     setRunProgress(undefined);
+  };
+  const startNew = () => {
+    if (!busy) changeChat(newChat());
   };
 
   const send = async (raw: string) => {
@@ -426,6 +457,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       return;
     }
     setErr(null);
+    dictationTokenRef.current++;
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setListening(false);
     setInput("");
     attach(null); // clears the files AND revokes the preview object URL
 
@@ -447,6 +482,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       ...chat,
       turns: [...chat.turns, { role: "user", text: shownText }],
     };
+    followLatestRef.current = true;
+    setShowJumpToLatest(false);
     setChat(withUser);
     setBusy(true);
     setRunProgress(undefined);
@@ -590,6 +627,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       } else {
         const failedFiles = endTurn(turnId);
         setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
+        setInput(raw);
+        attach(attached);
         if (trace.actions.length || streamedRef.current || failedFiles.length)
           setChat((c) => ({
             ...c,
@@ -638,10 +677,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const closeHistory = () => { setHistOpen(false); requestAnimationFrame(() => historyToggleRef.current?.focus()); };
   const switchChat = (c: Chat) => {
     if (busy) return;
-    setChat(c);
-    setActiveId(c.id);
-    setErr(null);
-    setStreaming("");
+    changeChat(c);
     if ((workspaceRef.current?.clientWidth ?? 0) < 720) closeHistory();
   };
   const deleteChat = (id: string) => {
@@ -650,6 +686,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     saveChats(next);
     setChatList(next.sort((a, b) => b.updatedAt - a.updatedAt));
     if (id === chat.id) startNew();
+    draftsRef.current.delete(id);
   };
 
   const empty = chat.turns.length === 0;
@@ -670,7 +707,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         e.preventDefault();
         setDragging(false);
         const dropped = Array.from(e.dataTransfer.files ?? []);
-        if (dropped.length && !busy) attach(dropped);
+        if (dropped.length && !busy) attach([...files, ...dropped]);
       }}
     >
       {histOpen && <aside id="filey-chat-history" aria-label="Chat history" className="filey-chat-history sticky top-0 flex shrink-0 flex-col self-start border-r border-border pr-3"
@@ -715,9 +752,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="filey-chat-icon"><History size={20} /></button>
-              <h1 className="truncate text-sm font-medium leading-tight text-foreground" title={chat.title || "Filey AI"}>
-                {empty ? "New chat" : chat.title || "Conversation"}
-              </h1>
+              <div className="min-w-0">
+                <h1 className="truncate text-sm font-semibold leading-tight text-foreground" title={chat.title || "Filey AI"}>
+                  {empty ? "New chat" : chat.title || "Conversation"}
+                </h1>
+                {empty && <p className="mt-1 text-[13px] text-muted-foreground">How can I help you today?</p>}
+              </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
               <Link to="/settings?section=credits" className="filey-chat-wallet composer-control" aria-label="Add Coin to AI wallet" title="Coin wallet and top-ups">
@@ -753,7 +793,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
 
         {/* The conversation and composer share one readable measure. */}
-        <div ref={conversationRef} className="filey-conversation-scroll">
+        <div className="filey-conversation-viewport">
+        <div ref={conversationRef} className="filey-conversation-scroll" onScroll={trackScroll}>
         {videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
           setChat(current => ({ ...current, turns: [...current.turns,
             { role: "assistant", text: job.state === "draft" ? `Review your ${job.kind}, then choose Generate to use your own provider key.` : `Here is your ${job.kind} request.`, files: [{ name: `Generated ${job.kind}`, mediaJobId: job.id }] }], updatedAt: Date.now() }));
@@ -803,6 +844,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           <WhatsAppPairingCard />
 
         </div>
+        </div>
+        {showJumpToLatest && !videosOpen && <button type="button" onClick={jumpToLatest} className="filey-chat-icon filey-chat-jump" aria-label="Jump to latest message" title="Jump to latest message"><ArrowDown size={18} /></button>}
         </div>
 
         {/* Only the conversation scrolls; the composer stays above the keyboard. */}
@@ -889,15 +932,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   );
                   if (img) {
                     e.preventDefault();
-                    attach([img]);
+                    attach([...files, img]);
                   }
                 }}
-                /*
-                 * No focus ring on the composer: the global :focus-visible rule
-                 * paints an amber ring, and a textarea matches it on every
-                 * click - a yellow box around the thing you type in. Focus is
-                 * still shown, by the wrapper's border darkening.
-                 */
+                /* The wrapper's border shows focus for the whole composer. */
                 className="filey-composer-input w-full resize-none bg-transparent text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
                 autoFocus={!videosOpen && typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
               />
@@ -1000,7 +1038,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   accept="application/pdf,image/*"
                   className="hidden"
                   onChange={(e) => {
-                    attach(Array.from(e.target.files ?? []));
+                    attach([...files, ...Array.from(e.target.files ?? [])]);
                     e.target.value = ""; // allow re-selecting the same file
                   }}
                 />
@@ -1189,12 +1227,9 @@ function CopyButton({ text }: { text: string }) {
 
 function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   if (turn.role === "user") {
-    // A quiet right-aligned film, not a filled balloon: the user's words stay
-    // readable ink on a tint, so the assistant's plain prose remains the page's
-    // dominant voice.
     return (
       <div className="flex justify-end">
-        <div className="filey-user-message max-w-[85%] whitespace-pre-wrap rounded-2xl bg-hover px-4 py-2.5 leading-relaxed text-foreground">
+        <div className="filey-user-message max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-3 leading-relaxed text-foreground">
           {turn.text}
         </div>
       </div>

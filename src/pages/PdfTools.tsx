@@ -1,10 +1,9 @@
-import { SelectMenu } from "../components/ui-menu";
 import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   CheckCircle2, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
-  FileText, Upload, FolderPlus, Download, X, Plus, ShieldCheck, RotateCcw, FileArchive,
+  FileText, Upload, FolderPlus, Download, X, Plus, ShieldCheck, RotateCcw, FileArchive, KeyRound,
 } from "lucide-react";
 import ToolsCatalogue from "../components/ToolsCatalogue";
 import { plural } from "../lib/format";
@@ -26,6 +25,7 @@ import RotateStudio from "../components/RotateStudio";
 import { useAuth } from "../lib/auth";
 import { saveOutput } from "../lib/files";
 import { isConfigured } from "../lib/supabase";
+import { SelectMenu } from "../components/ui-menu";
 import "./PdfTools.css";
 
 const LIVE_PREVIEW_TOOLS = new Set([
@@ -136,6 +136,7 @@ function PdfToolWorkspace({
   const first = files[0];
   const firstIsPdf =
     !!first && (first.type === "application/pdf" || /\.pdf$/i.test(first.name));
+  const unlocking = tool.id === "decrypt" || tool.id === "remove-restrictions";
   const updateFiles = (next: File[]) => {
     setFiles(next);
     inputRevision.current += 1;
@@ -182,7 +183,7 @@ function PdfToolWorkspace({
         setProgress("This PDF is already optimized. The original size and quality have been preserved.");
     } catch (e) {
       if(controller.signal.aborted) setProgress("Conversion cancelled. Original files are unchanged.");
-      else setError(e instanceof Error ? e.message : String(e));
+      else { setProgress(""); setError(e instanceof Error ? e.message : String(e)); }
     } finally {
       operation.current = null;
       setRunning(false);
@@ -215,7 +216,8 @@ function PdfToolWorkspace({
     }
   };
   const finishOutputs = async (outputs: OutFile[]) => {
-    if (!outputs.length) throw new Error("No output was generated. Check the file and tool options.");
+    if (!outputs.length || outputs.some(output => !output.bytes?.byteLength || !output.name?.trim()))
+      throw new Error("No usable output was generated. Check the file and tool options, then try again.");
     checkScope();
     setOuts(outputs);
     setNextTool("");
@@ -294,19 +296,7 @@ function PdfToolWorkspace({
           <button type="button" className="btn-primary" disabled={locked} onClick={() => void downloadOutputs(outs, outs.length > 1)}>{downloading ? <Loader2 size={16} className="animate-spin" /> : outs.length > 1 ? <FileArchive size={16} /> : <Download size={16} />}{outs.length > 1 ? "Download all as ZIP" : "Download results"}</button>
         </div>
         <div className="tool-result-files">{outs.map((output, index) => <div key={index} className="flex items-center gap-3 py-3"><FileText size={18} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{output.name}</p><p className="text-xs text-muted-foreground">{fileSize(output.bytes.byteLength)}</p></div><button type="button" className="btn-ghost" disabled={locked} aria-label={"Download " + output.name} onClick={() => void downloadOutputs([output])}><Download size={15} /><span className="hidden sm:inline">Download</span></button></div>)}</div>
-        {compatible.length > 0 && <div className="tool-continue"><div><h3>Keep working on these files</h3><p>Pass your results straight to the next tool.</p></div><label className="sr-only" htmlFor="next-file-tool">Next tool</label><SelectMenu
-          value={String(nextTool)}
-          onChange={(nextValue) => setNextTool(nextValue)}
-          options={[
-            { value: "", label: "Choose next tool…" },
-            ...compatible.map((candidate) => ({
-              value: String(candidate.id),
-              label: String(candidate.name),
-            })),
-          ]}
-          id={"next-file-tool"}
-          disabled={locked}
-        /><button type="button" className="btn-ghost" disabled={locked || !nextTool} onClick={() => { const next = compatible.find(candidate => candidate.id === nextTool); if (next) onContinue(next, outputFiles); }}>Continue <ArrowRight size={15} /></button></div>}
+        {compatible.length > 0 && <div className="tool-continue"><div><h3>Keep working on these files</h3><p>Pass your results straight to the next tool.</p></div><SelectMenu id="next-file-tool" ariaLabel="Next tool" className="tool-next-menu" value={nextTool} disabled={locked} onChange={setNextTool} placeholder="Choose next tool…" searchPlaceholder="Find a tool…" options={compatible.map(candidate => ({ value: candidate.id, label: candidate.name }))} /><button type="button" className="btn-ghost" disabled={locked || !nextTool} onClick={() => { const next = compatible.find(candidate => candidate.id === nextTool); if (next) onContinue(next, outputFiles); }}>Continue <ArrowRight size={15} /></button></div>}
         <div className="tool-result-actions"><button type="button" className="btn-ghost" disabled={locked} onClick={() => { setOuts([]); setProgress(""); }}>Adjust again</button><button type="button" className="btn-ghost" disabled={locked} onClick={() => updateFiles([])}><RotateCcw size={15} />Start again</button>{canSave && <button type="button" className="btn-ghost" disabled={locked} onClick={saveToMyFiles}>{savingFiles ? <Loader2 size={15} className="animate-spin" /> : <FolderPlus size={15} />}Save to My Files</button>}<span>{canSave ? "Save to My Files uploads a copy to your cloud workspace." : "Results stay here until you leave this tool."}</span></div>
       </section>}
       {!outs.length && !!files.length && tool.interactive !== "merge" && <div className="tool-file-list" aria-label="Selected files">
@@ -402,7 +392,7 @@ function PdfToolWorkspace({
           <div className="tool-studio">
             <div className="tool-preview-heading">
               <p className="text-sm font-semibold text-foreground">
-                {firstIsPdf
+                {unlocking ? "Unlock your document" : firstIsPdf
                   ? LIVE_PREVIEW_TOOLS.has(tool.id)
                     ? "Document preview"
                     : "Edit document"
@@ -414,7 +404,16 @@ function PdfToolWorkspace({
                 </span>
               )}
             </div>
-            {LIVE_PREVIEW_TOOLS.has(tool.id) && firstIsPdf ? (
+            {unlocking ? (
+              <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+                <KeyRound size={28} className="text-muted-foreground" />
+                <h3 className="text-sm font-medium">Create an unlocked copy</h3>
+                <p className="max-w-sm text-sm text-muted-foreground">{tool.id === "decrypt"
+                  ? "Enter the current PDF password in Tool settings, then choose Remove PDF Password. Your pages, text and images are preserved."
+                  : "For PDFs that already open without a password. Remove printing and copying limits, then download the new copy."}</p>
+                <p className="text-xs text-muted-foreground">Your original stays unchanged. Passwords are processed on this device.</p>
+              </div>
+            ) : LIVE_PREVIEW_TOOLS.has(tool.id) && firstIsPdf ? (
               <LivePreview tool={tool} file={files[0]} params={params} />
             ) : firstIsPdf ? (
               <InlinePdfEditor

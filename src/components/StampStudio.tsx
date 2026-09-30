@@ -512,7 +512,7 @@ export default function StampStudio({
           aria-label="Stamp opacity"
           value={opacity}
           onChange={(e) => setOpacity(Number(e.target.value))}
-          className="w-24 accent-primary-500"
+          className="w-24 accent-foreground"
           title={`${Math.round(opacity * 100)}%`}
         />
         <span className="w-9 text-right text-xs tabular-nums text-brand-500">
@@ -524,7 +524,7 @@ export default function StampStudio({
             type="checkbox"
             checked={allPages}
             onChange={(e) => setAllPages(e.target.checked)}
-            className="accent-primary-500"
+            className="accent-foreground"
           />
           All pages
         </label>
@@ -572,7 +572,7 @@ export default function StampStudio({
                 onClick={() => setPenMode("draw")}
                 title="Pen"
                 aria-label="Pen tool"
-                className={`grid h-10 w-10 place-items-center rounded-full ${penMode === "draw" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+                className={`grid h-10 w-10 place-items-center rounded-full ${penMode === "draw" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-hover"}`}
               >
                 <PenLine size={13} />
               </button>
@@ -580,7 +580,7 @@ export default function StampStudio({
                 onClick={() => setPenMode("erase")}
                 title="Eraser"
                 aria-label="Eraser tool"
-                className={`grid h-7 w-8 place-items-center ${penMode === "erase" ? "bg-primary-400 text-[#0A0A0A]" : "text-brand-500 hover:bg-brand-50 dark:hover:bg-white/5"}`}
+                className={`grid h-7 w-8 place-items-center ${penMode === "erase" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-hover"}`}
               >
                 <Eraser size={13} />
               </button>
@@ -606,7 +606,7 @@ export default function StampStudio({
               aria-label="Brush size"
               value={penWidth}
               onChange={(e) => setPenWidth(Number(e.target.value))}
-              className="w-24 accent-primary-500"
+              className="w-24 accent-foreground"
               title={`${penWidth}px`}
             />
             <span className="ml-auto flex gap-1.5">
@@ -726,7 +726,7 @@ export default function StampStudio({
               width: `${wFrac * 100}%`,
               opacity,
             }}
-            className="absolute cursor-move ring-1 ring-primary-500/70 ring-offset-1"
+            className="absolute cursor-move ring-1 ring-neutral-900/70 ring-offset-1"
           >
             <img
               src={stamp.src}
@@ -743,14 +743,14 @@ export default function StampStudio({
                 }}
                 title="Edit signature"
                 aria-label="Edit signature"
-                className="absolute -left-2 -top-2 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-primary-500 text-[#0A0A0A] shadow"
+                className="absolute -left-2 -top-2 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-neutral-900 text-white shadow"
               >
                 <PenLine size={12} />
               </button>
             )}
             <span
               onPointerDown={startResize}
-              className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-white bg-primary-500 shadow"
+              className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize rounded-full border-2 border-white bg-neutral-900 shadow"
               title="Drag to resize"
             />
           </div>

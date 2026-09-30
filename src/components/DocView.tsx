@@ -1,6 +1,6 @@
 import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
-import { docTotals, docLineAmount } from "../lib/docItems";
+import { docTotals, docLineAmount, docTaxBreakdown } from "../lib/docItems";
 import { ENFORCE_LICENSING, currentTier } from "../lib/license";
 import { applyRoundOff, type CalcMode } from "../lib/money";
 import { DRAGGABLE_SECTIONS, type CustomTemplate } from "./TemplateDesigner";
@@ -9,17 +9,16 @@ import TemplateBackground from "./TemplateBackground";
 import { resolveTemplateId } from "./DocTemplates";
 import UaePackDoc from "./UaePackDoc";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
+import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
 import { BankDetailsBlock, type BankInfo } from "./BankDetails";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   INVOICE_TYPE_CODES,
   PAYMENT_MEANS_CODES,
   TAX_CATEGORY_CODES,
-  TRANSACTION_TYPE_FLAGS,
   EMIRATES,
   LEGAL_ID_TYPES,
-  decodeTransactionType,
-  tinFromTrn,
+  partyTin,
   type Code,
 } from "../lib/einvoice";
 
@@ -61,6 +60,7 @@ export interface DocViewCustomColumn {
 }
 
 export interface DocViewForm {
+  einvoice?: import("../lib/einvoice").EInvoiceDetails;
   tax_country_code?: string | null;
   template?: string | null;
   accent?: string | null;
@@ -87,7 +87,7 @@ export interface DocViewForm {
   buyer_city?: string | null;
   buyer_country_subdivision?: string | null;
   buyer_country_code?: string | null;
-  // Per-document UAE e-invoice codes (rendered as readable labels in the FTA template).
+  // UAE transaction flags are printed on every invoice layout and exported to XML.
   invoice_type_code?: string | null;
   transaction_type?: string | null;
   payment_means_code?: string | null;
@@ -297,6 +297,7 @@ export default function DocView({
 
   const Footer = () => showFooter ? (
     <>
+      <InvoiceTransactionSummary form={form} />
       {(form.notes || form.terms || freeWatermark) && (
         <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
           {form.notes && <p dir="auto" className="whitespace-pre-line">{form.notes}</p>}
@@ -448,6 +449,7 @@ export default function DocView({
         <Section k="items"><Items headerBg={ac} compact /></Section>
         <Section k="totals"><Totals compact /></Section>
         {showFooter && <Section k="footer">
+          <InvoiceTransactionSummary form={form} />
           {form.notes && <p dir="auto" className="whitespace-pre-line text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p dir="auto" className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
           {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
@@ -926,28 +928,17 @@ export default function DocView({
     const sellerEmirate = codeLabel(EMIRATES, form.seller_country_subdivision);
     const buyerEmirate = codeLabel(EMIRATES, form.buyer_country_subdivision);
     const sellerLegalType = codeLabel(LEGAL_ID_TYPES, form.seller_legal_id_type);
-    const sellerTin = tinFromTrn(form.seller_trn);
-    const buyerTin = tinFromTrn(form.customer_trn);
-    const txFlags = decodeTransactionType(form.transaction_type);
-    const activeTx = TRANSACTION_TYPE_FLAGS.filter((f) => txFlags[f.key]);
+    const sellerTin = partyTin(form.einvoice?.seller);
+    const buyerTin = partyTin(form.einvoice?.buyer);
 
     // Category-aware tax math: VAT only on standard-rated lines, document
     // discount allocated pro-rata by line net so the breakdown reconciles with
     // the total. ponytail: refine if per-line VAT rates are ever introduced.
-    const lineNets = form.items.map((it) => ({
-      cat: it.tax_category || "S",
-      net: docLineAmount(it, form.unit_price_formula),
-    }));
-    const grossNet = lineNets.reduce((s, l) => s + l.net, 0);
-    const discount = t.discount || 0;
+    const breakdown = docTaxBreakdown(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula)
+      .map(row => ({ ...row, cat: row.category }));
+    const grossNet = t.subtotal;
+    const discount = t.discount;
     const netAfterDisc = grossNet - discount;
-    const byCat: Record<string, number> = {};
-    for (const l of lineNets) byCat[l.cat] = (byCat[l.cat] || 0) + l.net;
-    const breakdown = Object.entries(byCat).map(([cat, net]) => {
-      const taxable = grossNet > 0 ? netAfterDisc * (net / grossNet) : 0;
-      const rate = cat === "S" ? form.tax_rate || 0 : 0;
-      return { cat, taxable, rate, tax: (taxable * rate) / 100 };
-    });
     const vat = breakdown.reduce((s, b) => s + b.tax, 0);
     const grandTotal = form.round_off
       ? Math.round(netAfterDisc + vat)
@@ -1052,19 +1043,6 @@ export default function DocView({
           <p className="text-[10px] text-neutral-500 mt-1.5">
             PO Reference: {form.po_number}
           </p>
-        )}
-        {activeTx.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {activeTx.map((f) => (
-              <span
-                key={f.key}
-                className="text-[9px] px-2 py-0.5 rounded-full"
-                style={{ background: a, color: accentText }}
-              >
-                {f.label}
-              </span>
-            ))}
-          </div>
         )}
 
         {/* Items */}

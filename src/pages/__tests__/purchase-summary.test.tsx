@@ -18,8 +18,8 @@ it("counts every expense category while showing only the six largest in the brea
   } as Expense)));
   render(<MemoryRouter><UIProvider><Purchase /></UIProvider></MemoryRouter>);
   await screen.findByText("Expense 8");
-  expect(within(screen.getByText("Categories").parentElement!).getByText("8")).toBeInTheDocument();
-  expect(within(screen.getByText("This month").parentElement!).getByText(aed(360).replace(/\s/g, " "))).toBeInTheDocument();
+  expect(screen.getByTitle("8")).toHaveTextContent("8");
+  expect(screen.getAllByTitle(aed(360).replace(/\s/g, " "))).toHaveLength(2); // Total expenses and this month.
   const chart = within(screen.getByText("By category").parentElement!);
   expect(chart.getAllByText(/^Category /)).toHaveLength(6);
   expect(chart.queryByText("Category 1")).toBeNull();

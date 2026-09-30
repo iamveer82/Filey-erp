@@ -358,7 +358,7 @@ export default function OrganizeStudio({
                       : "",
                     action === "extract" ? "cursor-pointer" : "",
                     overIdx === i ? "border-primary-400 ring-2 ring-primary-400/40" : "",
-                    isSel ? "border-primary-500 ring-2 ring-primary-500/50" : "",
+                    isSel ? "border-foreground ring-2 ring-foreground/30" : "",
                     isDel
                       ? "opacity-40 ring-2 ring-danger/30"
                       : "border-brand-200"
@@ -367,7 +367,7 @@ export default function OrganizeStudio({
                   <span
                     className={cn(
                       "absolute left-1 top-1 z-10 grid h-5 min-w-5 place-items-center rounded-full px-1 text-[10px] font-bold",
-                      isDel ? "bg-danger text-white" : "bg-primary-500 text-[#0A0A0A]"
+                      isDel ? "bg-danger text-white" : "bg-neutral-900 text-white"
                     )}
                   >
                     {action === "organize" ? pos + 1 : i + 1}
@@ -430,7 +430,7 @@ export default function OrganizeStudio({
                     aria-label="Split at page"
                     className={`flex h-6 w-full items-center justify-center gap-1 rounded text-[10px] font-semibold ${
                       cuts.has(i)
-                        ? "bg-primary-500 text-[#0A0A0A]"
+                        ? "bg-foreground text-background"
                         : "text-brand-400 hover:bg-brand-100 dark:hover:bg-white/10"
                     }`}
                   >

@@ -2607,5 +2607,93 @@
         <gc:SimpleValue>Unique identifier for legal persons in general and more specifically in the domain of electronic invoicing.</gc:SimpleValue>
       </gc:Value>
     </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0241</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Hitachi Rail</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Participant identifier scheme linked to Hitachi Rail within the Peppol network</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0242</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>OpenPeppol Service Provider Identification Scheme (SPIS)</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>The OpenPeppol Service Provider Identification Scheme (SPIS) is a standard for uniquely identifying and managing service providers within the Peppol network. It allows for a unique identifier (SPID) to be used for various functions, including identifying service providers in X.509 certificates, reporting to OpenPeppol, and routing messages between service providers via the network. Previously, a unique 6-digit number was used, but SPIS is the newer, more structured system.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0243</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Business Partner Number (Catena-X)</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Identifier scheme for Business Partner Numbers (BPN) used in the Catena-X ecosystem for identifying business partners.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0244</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Tax Identification (Tax ID), Nigeria</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>In Nigeria, a Tax Identification Number (TIN) is a unique, system-generated number that identifies an individual or a registered entity for tax purposes. A recent law, the Nigeria Tax Administration Act 2025, mandates that all taxable persons obtain a Tax ID to access various financial services, effective January 1, 2026.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0245</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Tax identification number (DIČ, Slovakia)</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Identifier scheme for the Slovak Tax Identification Number (DIČ), used for identifying taxpayers in Slovakia.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0246</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>German Electronic Business Address</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Identifier scheme for the German Electronic Business Address, used for electronic communication and participant identification within Germany.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0247</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Name unknown</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Description not known</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
+    <gc:Row>
+      <gc:Value ColumnRef="id">
+        <gc:SimpleValue>0248</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="name">
+        <gc:SimpleValue>Oman Value Added Tax Identification Number (VATIN)</gc:SimpleValue>
+      </gc:Value>
+      <gc:Value ColumnRef="description">
+        <gc:SimpleValue>Identifier scheme for the Oman Value Added Tax Identification Number (VATIN), used for identifying VAT-registered entities in Oman.</gc:SimpleValue>
+      </gc:Value>
+    </gc:Row>
   </gc:SimpleCodeList>
 </gc:Codelist>

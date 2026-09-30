@@ -248,7 +248,7 @@ it("round-trips encryption and owner restrictions without losing selectable text
   const tools = await import("../pdfTools");
   const input = await sample();
   const encrypted = asFile(await tools.encryptPdf(input, { userPassword: "open-test", ownerPassword: "owner-test", copying: false }));
-  await expect(tools.reversePdf(encrypted)).rejects.toThrow("Decrypt PDF");
+  await expect(tools.reversePdf(encrypted)).rejects.toThrow("Remove PDF Password");
   await expect(tools.decryptPdf(encrypted, "wrong-test")).rejects.toThrow(/password/i);
   const opened = asFile(await tools.decryptPdf(encrypted, "open-test"));
   const doc = await PDFDocument.load(await opened.arrayBuffer());
@@ -258,6 +258,36 @@ it("round-trips encryption and owner restrictions without losing selectable text
   const restricted = asFile(await tools.encryptPdf(input, { ownerPassword: "owner-test", printing: false }));
   const unrestricted = asFile(await tools.removeRestrictions(restricted));
   expect(new TextDecoder().decode((await tools.pdfToText(unrestricted)).bytes)).toContain("Filey invoice 42");
+}, 15_000);
+
+it("releases PDF workers after text, image, attachment, scan and OCR tools, including failures", async () => {
+  const tools = await import("../pdfTools");
+  const safePdf = await import("../pdfjsSafe");
+  const original = safePdf.getDocument;
+  const destroys: ReturnType<typeof vi.fn>[] = [];
+  const loader = vi.spyOn(safePdf, "getDocument").mockImplementation(options => {
+    const task = original(options);
+    destroys.push(vi.spyOn(task, "destroy"));
+    return task;
+  });
+  const input = await sample();
+  try {
+    await tools.removeBlankPages(input);
+    await tools.pdfToDocx(input);
+    await tools.comparePdfsText([input, input]);
+    await expect(tools.extractImages(input)).rejects.toThrow("No extractable raster images");
+    await expect(tools.extractAttachments(input)).rejects.toThrow("no embedded attachments");
+    await tools.pdfToTiff(input);
+    await tools.deskewPdf(input);
+    await tools.ocrToText(input);
+    await tools.ocrSearchablePdf(input);
+    const ocr = await import("tesseract.js");
+    const worker = vi.spyOn(ocr, "createWorker").mockRejectedValueOnce(new Error("OCR initialization failed"));
+    try { await expect(tools.ocrToText(input)).rejects.toThrow("OCR initialization failed"); }
+    finally { worker.mockRestore(); }
+    expect(destroys.length).toBe(11);
+    destroys.forEach(destroy => expect(destroy).toHaveBeenCalled());
+  } finally { loader.mockRestore(); }
 }, 15_000);
 
 it("exports every level of bookmarks and survives a malformed cyclic outline", async () => {

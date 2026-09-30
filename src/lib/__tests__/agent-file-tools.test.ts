@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { TOOLS, LEGACY_OPS, runTool, setTurnFile, endTurn } from "../aiTools";
+import { TOOLS, LEGACY_OPS, runTool, setTurnFile, setTurnFiles, endTurn } from "../aiTools";
 import { PDF_TOOLS } from "../../components/PdfToolbox";
 import { setCacheOrg } from "../api";
 import { setDataMode } from "../dataMode";
@@ -18,10 +18,53 @@ const tool = (name: string) => {
 };
 
 describe("the agent's view of the document toolbox", () => {
+  it("processes every single-file attachment and keeps concurrent channel outputs separate", async () => {
+    setDataMode("local"); setCacheOrg("file-tool-concurrent", "fixture-user");
+    vi.mocked(deliverFile).mockReset().mockImplementation(async output => ({ name: output.name, url: `blob:${output.name}` }));
+    const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementation(async files => {
+      await Promise.resolve();
+      return [{ name: `${files[0].name}-result.pdf`, bytes: new Uint8Array([1, 2]) }];
+    });
+    const turns = ["in-app-files", "whatsapp-files", "telegram-files"];
+    try {
+      turns.forEach(turn => setTurnFiles(turn, [new File(["first"], `${turn}-first.pdf`), new File(["second"], `${turn}-second.pdf`)]));
+      const results = await Promise.all(turns.map(turn => runTool("run_file_tool", { tool_id: "compress" }, () => true, true, turn)));
+      results.forEach(result => expect(result).toMatchObject({ ok: true, files: expect.any(Array) }));
+      expect(transform).toHaveBeenCalledTimes(6);
+      turns.forEach(turn => expect(endTurn(turn).map(file => file.name)).toEqual([`${turn}-first.pdf-result.pdf`, `${turn}-second.pdf-result.pdf`]));
+    } finally { transform.mockRestore(); turns.forEach(endTurn); setCacheOrg(null); }
+  });
+  it("forwards cancellation into the converter and never saves its late result", async () => {
+    setDataMode("local"); setCacheOrg("file-tool-abort", "fixture-user");
+    const controller = new AbortController();
+    setTurnFile("file-tool-abort", new File(["fixture"], "source.pdf"));
+    vi.mocked(deliverFile).mockClear();
+    const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementationOnce(async (_files, _params, context) => {
+      expect(context?.signal).toBe(controller.signal);
+      controller.abort();
+      return [{ name: "late.pdf", bytes: new Uint8Array([1]) }];
+    });
+    try {
+      await expect(runTool("run_file_tool", { tool_id: "compress" }, () => true, true, "file-tool-abort", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+      expect(deliverFile).not.toHaveBeenCalled();
+      expect(endTurn("file-tool-abort")).toEqual([]);
+    } finally { transform.mockRestore(); endTurn("file-tool-abort"); setCacheOrg(null); }
+  });
+  it("reports partial batch failures and refuses empty files rather than claiming success", async () => {
+    setDataMode("local"); setCacheOrg("file-tool-partial", "fixture-user");
+    setTurnFiles("file-tool-partial", [new File(["good"], "good.pdf"), new File(["bad"], "bad.pdf")]);
+    vi.mocked(deliverFile).mockReset().mockImplementation(async output => ({ name: output.name, url: `blob:${output.name}` }));
+    const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementation(async files => [{ name: `${files[0].name}-result.pdf`, bytes: new Uint8Array(files[0].name === "good.pdf" ? [1] : []) }]);
+    try {
+      expect(await runTool("run_file_tool", { tool_id: "compress" }, () => true, true, "file-tool-partial")).toMatchObject({ ok: false, partial: true, files: ["good.pdf-result.pdf"], failed_files: [{ file: "bad.pdf", error: expect.stringContaining("no usable output") }] });
+      expect(endTurn("file-tool-partial").map(file => file.name)).toEqual(["good.pdf-result.pdf"]);
+    } finally { transform.mockRestore(); endTurn("file-tool-partial"); setCacheOrg(null); }
+  });
   it("does not save a finished tool output into a changed workspace", async () => {
     setDataMode("local");
     setCacheOrg("file-tool-original", "fixture-user");
     setTurnFile("file-tool-scope", new File(["fixture"], "source.pdf"));
+    vi.mocked(deliverFile).mockClear();
     const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementationOnce(async () => {
       setCacheOrg("file-tool-other", "fixture-user");
       return [{ name: "compressed.pdf", bytes: new Uint8Array([1]) }];

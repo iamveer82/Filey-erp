@@ -69,7 +69,7 @@ export default function ToolsCatalogue({ category, query, onFilter, onOpen }: {
         <div className="tools-assurances"><span><ShieldCheck size={15} /> On-device processing</span><span><CheckCircle2 size={15} /> Free · No API key</span></div>
       </div>
       <div className="tools-intro-art" aria-hidden="true">
-        {["img2pdf", "merge", "esign"].map(id => <img key={id} src={`/tool-covers/tools/${id}.webp`} alt="" width="160" height="112" />)}
+        {["img2pdf", "merge", "esign"].map(toolById).filter((tool): tool is Tool => !!tool).map(tool => <ToolCover key={tool.id} tool={tool} />)}
       </div>
     </section>
     <div className="tools-toolbar">

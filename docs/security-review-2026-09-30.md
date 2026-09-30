@@ -21,7 +21,9 @@ versions before merging the web rollout.
 Limits: live WhatsApp pairing/delivery, a packaged desktop sidecar and physical
 iPhone testing are not covered by these unit checks. Existing historical payment
 duplicates are not modified. Hosted channels retain their configured single-owner
-model; legacy draft creation remains non-atomic. Linux GTK's upstream glib 0.18
+model. The follow-up web batch replaces hosted document draft creation with
+an atomic, service-only RPC; apply its migration before deploying the function.
+Linux GTK's upstream glib 0.18
 advisory requires an upstream-compatible dependency upgrade and does not affect
 the Windows or browser build. This review is not a guarantee against undiscovered
 vulnerabilities.

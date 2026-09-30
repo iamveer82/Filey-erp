@@ -31,7 +31,7 @@
 			</cac:PartyTaxScheme>
 			<cac:PartyLegalEntity>
 				<cbc:RegistrationName>Supplier Legal Name</cbc:RegistrationName>
-				<cbc:CompanyID schemeAgencyID="PAS" schemeAgencyName="ES">112345678900003</cbc:CompanyID>				</cac:PartyLegalEntity> <!--  IBT-030 , BTAE-15, BTAE-12 -->
+				<cbc:CompanyID schemeAgencyID="TL" schemeAgencyName="Trade License issuing Authority">112345678900003</cbc:CompanyID>				</cac:PartyLegalEntity> <!--  IBT-030 , BTAE-15, BTAE-12 -->
 		</cac:Party>
 	</cac:AccountingSupplierParty>
 	<cac:AccountingCustomerParty>
