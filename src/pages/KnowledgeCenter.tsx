@@ -320,7 +320,7 @@ export const GUIDES = [
     to: "/browser",
     summary: "Open Instagram, WhatsApp and other websites in the Windows app.",
     steps: [
-      "Open Browser under Tools, or use the browser icon in Filey AI. It opens a collapsible browser panel beside the conversation. Use its address bar, website shortcuts and tabs in the Windows desktop app.",
+      "Use the browser icon in Filey AI. It opens a collapsible browser panel beside the conversation. Use its address bar, website shortcuts and tabs in the Windows desktop app.",
       "Interactive browsing requires the installed Windows app. The web and mobile versions show the browser panel's availability message; they cannot control another browser tab.",
       "Sign in to the website yourself. Site logins stay on this device with your Filey account and company, including across local/cloud switching. Changing workspace closes the windows without deleting that profile's cookies.",
       "In Filey AI, enable temporary Computer access and describe the task. The model needs vision and tool support. It can open windows, inspect screenshots and interact with the visible page while access is active.",

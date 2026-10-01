@@ -17,10 +17,10 @@ const modules = [
   { id: "settings", to: "/settings", label: "Settings", icon: "settings", desc: "Workspace preferences" },
 ];
 
-it("keeps every permitted module reachable, including the browser panel", () => {
+it("keeps permitted pages reachable without a Browser shortcut in Tools", () => {
   render(<MemoryRouter><WorkspaceNavigation modules={MODULES} isDesktop mobileOpen={false} onNavigate={() => {}} /></MemoryRouter>);
-  for (const module of MODULES) expect(screen.getByRole("link", { name: module.label })).toHaveAttribute("href", module.to);
-  expect(screen.getByRole("navigation", { name: "Tools" })).toContainElement(screen.getByRole("link", { name: "Browser" }));
+  for (const module of MODULES.filter(module => module.id !== "browser")) expect(screen.getByRole("link", { name: module.label })).toHaveAttribute("href", module.to);
+  expect(screen.queryByRole("link", { name: "Browser" })).not.toBeInTheDocument();
 });
 
 it("opens the current mobile section, preserves the assistant, and closes after selecting the same page", () => {
