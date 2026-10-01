@@ -5,6 +5,18 @@ root. The desktop, web and phone apps use the same React routes and business
 logic. Run every command below from the repository root; there is one npm
 manifest and lockfile.
 
+## Supported devices
+
+- iPhone and iPad: iOS 17.4 or newer.
+- Android phones and tablets: Android 7.0 (API 24) or newer, with an active
+  Android System WebView or Chrome WebView provider at version 119 or newer.
+  Update the active WebView provider before using Filey.
+
+The shared PDF engine requires `Promise.withResolvers()`, available from
+Safari/iOS 17.4 and Chromium 119. The shared UI also targets Safari/iOS 16.4
+and Chromium 111 or newer. The OS minimum and Android WebView requirement
+cover these runtime dependencies.
+
 ## Android
 
 Install Node 22.13 or newer, JDK 21 and Android Studio 2024.2.1 or newer.
