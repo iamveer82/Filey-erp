@@ -1,20 +1,22 @@
 import { useRef, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
+import { Link, MemoryRouter, useLocation } from 'react-router-dom';
 import { useSidebarSwipe } from '../useSidebarSwipe';
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 function Drawer({ enabled = true }: { enabled?: boolean }) {
   const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
   useSidebarSwipe(root, panel, enabled, open, setOpen);
-  return <div ref={root} data-testid="root" data-sidebar-open={open}><div className="workspace-drawer-backdrop" /><aside ref={panel} data-testid="drawer" data-open={open}><button>Destination</button><input aria-label="Search pages" /></aside><div className="workspace-main"><button onClick={() => setOpen(true)}>Menu</button></div></div>;
+  return <div ref={root} data-testid="root" data-sidebar-open={open}><div className="workspace-drawer-backdrop" /><aside ref={panel} data-testid="drawer" data-open={open}><Link to="/overview">Filey home</Link><button>Destination</button><input aria-label="Search pages" /></aside><div className="workspace-main"><button onClick={() => setOpen(true)}>Menu</button><output aria-label="Current page">{pathname}</output></div></div>;
 }
 const point = (x: number, y = 200) => ({ identifier: 1, clientX: x, clientY: y });
-function start(target: Element, x: number, y = 200) { fireEvent.touchStart(target, { touches: [point(x, y)] }); }
+function start(target: Element, x: number, y = 200) { return fireEvent.touchStart(target, { touches: [point(x, y)], cancelable: true }); }
 function move(target: Element, x: number, y = 200) { return fireEvent.touchMove(target, { touches: [point(x, y)], cancelable: true }); }
 function setup(enabled = true) {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 336 } as DOMRect);
-  const view = render(<Drawer enabled={enabled} />);
+  const view = render(<MemoryRouter initialEntries={['/invoicing']}><Drawer enabled={enabled} /></MemoryRouter>);
   return { ...view, root: view.getByTestId('root'), panel: view.getByTestId('drawer'), main: view.container.querySelector<HTMLElement>('.workspace-main')! };
 }
 it('follows an edge swipe, opens on release, and closes with a left swipe without activating links', () => {
@@ -55,7 +57,7 @@ it('cancels interrupted and multi-finger gestures and disables swipes on desktop
   expect(root.dataset.sidebarDragging).toBeUndefined();
   start(root, 20); move(root, 200); fireEvent.touchStart(root, {touches: [point(200), {...point(250), identifier: 2}]}); fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('false');
-  rerender(<Drawer enabled={false} />);
+  rerender(<MemoryRouter><Drawer enabled={false} /></MemoryRouter>);
   start(root, 20); move(root, 250); fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('false');
 });
@@ -164,4 +166,52 @@ it('keeps small diagonal and vertical movements with the scroller and excludes t
   fireEvent.touchEnd(root);
   expect(panel.dataset.open).toBe('false');
   expect(root.dataset.sidebarDragging).toBeUndefined();
+});
+
+it.each([0, 8, 15])('reserves the outer edge at x=%i before browser history can claim it', (x) => {
+  const { root, panel, getByLabelText } = setup();
+  expect(start(root, x)).toBe(false);
+  expect(move(root, x + 3)).toBe(false);
+  expect(fireEvent.touchEnd(root, { changedTouches: [point(x + 220)], cancelable: true })).toBe(false);
+  expect(panel.dataset.open).toBe('true');
+  expect(getByLabelText('Current page').textContent).toBe('/invoicing');
+});
+
+it('consumes rightward drawer swipes without following the home link, while real taps still navigate', () => {
+  const { panel, getByText, getByLabelText } = setup();
+  fireEvent.click(getByText('Menu'));
+  const home = getByText('Filey home');
+  start(home, 24);
+  expect(move(home, 80)).toBe(false);
+  expect(fireEvent.touchEnd(home, { changedTouches: [point(100)], cancelable: true })).toBe(false);
+  fireEvent.click(home);
+  expect(panel.dataset.open).toBe('true');
+  expect(getByLabelText('Current page').textContent).toBe('/invoicing');
+  start(home, 24);
+  expect(move(home, 26)).toBe(true);
+  fireEvent.touchEnd(home, { changedTouches: [point(26)], cancelable: true });
+  fireEvent.click(home);
+  expect(getByLabelText('Current page').textContent).toBe('/overview');
+});
+
+it('reserves only the outer strip and keeps fields, tables, dialogs and inner-edge scrolling native', () => {
+  const { root, panel, getByLabelText } = setup();
+  // A vertical touch starting in the reserved 16px strip has its native defaults
+  // canceled at start; ordinary page scrolling remains available outside it.
+  expect(start(root, 8)).toBe(false);
+  expect(move(root, 8, 250)).toBe(true);
+  fireEvent.touchEnd(root);
+  expect(start(root, 16)).toBe(true);
+  expect(move(root, 16, 250)).toBe(true);
+  fireEvent.touchEnd(root);
+  expect(start(getByLabelText('Search pages'), 8)).toBe(true);
+  const table = document.createElement('div');
+  table.className = 'filey-table-scroll';
+  root.append(table);
+  expect(start(table, 8)).toBe(true);
+  const dialog = document.createElement('div');
+  dialog.setAttribute('aria-modal', 'true');
+  root.append(dialog);
+  expect(start(root, 8)).toBe(true);
+  expect(panel.dataset.open).toBe('false');
 });
