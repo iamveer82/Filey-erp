@@ -37,6 +37,7 @@ import { useUI } from "../lib/ui";
 import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { isLocalMode } from "../lib/dataMode";
 import { useSidebarSwipe } from "../lib/useSidebarSwipe";
+import { isNativeApp } from "../lib/nativePlatform";
 
 const GROUP_ORDER = ["Pages", "Products", "Orders", "Invoices", "Customers"] as const;
 
@@ -449,7 +450,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             />
 
             <div className="workspace-sidebar-footer">
-              {!("__TAURI_INTERNALS__" in window) && (
+              {!("__TAURI_INTERNALS__" in window) && !isNativeApp() && (
                 <a href="https://gofiley.com/" className="workspace-nav-link mb-1">
                   <SidebarIcon name="back" />
                   <span>{t("Back to GoFiley")}</span>

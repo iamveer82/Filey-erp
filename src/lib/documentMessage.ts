@@ -2,6 +2,7 @@ import { billing } from "./api";
 import { isLocalMode } from "./dataMode";
 import { requireAgentStorageScope } from "./agentStorage";
 import { deliverFile, type DeliveredFile } from "./agentFiles";
+import { isNativeApp, openNativeMessage } from "./nativePlatform";
 
 export type MessageChannel = "whatsapp" | "sms";
 
@@ -21,7 +22,7 @@ export function messageUrl(channel: MessageChannel, phone: string, text: string,
 }
 
 /** A recipient cannot open a localhost/Tauri/device-only portal. */
-export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || `${location.origin}${location.pathname}`): string | null {
+export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || (isNativeApp() ? "https://app.gofiley.com/" : `${location.origin}${location.pathname}`)): string | null {
   try {
     const url = new URL(raw);
     const host = url.hostname.toLowerCase();
@@ -61,7 +62,9 @@ export async function openMessageDraft(channel: MessageChannel, phone: string, t
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const url = messageUrl(channel, phone, text, ios);
-  if ("__TAURI_INTERNALS__" in window) {
+  if (isNativeApp()) {
+    await openNativeMessage(url);
+  } else if ("__TAURI_INTERNALS__" in window) {
     if (channel === "whatsapp") {
       const { desktopBrowserSupported, desktopBrowserCommand } = await import("./desktopBrowser");
       assertCurrent(context);
@@ -99,7 +102,7 @@ export async function saveDocumentPdf(file: File, context: DocumentMessageContex
     throw new Error("The invoice export is not a valid PDF. Generate it again before sharing.");
   const saved = await deliverFile({ name: file.name, bytes });
   assertCurrent(context);
-  if ("__TAURI_INTERNALS__" in window && !saved.path)
+  if ((isNativeApp() || "__TAURI_INTERNALS__" in window) && !saved.path)
     throw new Error("PDF save cancelled. Nothing was sent or opened.");
   return saved;
 }

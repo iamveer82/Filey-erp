@@ -64,7 +64,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
-import { hasTauri, saveBytes } from "../lib/localPaths";
+import { saveBytes } from "../lib/localPaths";
 import {
   aed,
   fmtDate,
@@ -2000,14 +2000,7 @@ function Editor({
       setForm({ ...form, id, einvoice: saved.einvoice });
       const xml = buildInvoiceXml({ ...form, einvoice: saved.einvoice });
       const name = `${form.number || "invoice"}.xml`;
-      if (hasTauri) {
-        if (!(await saveBytes(name, new TextEncoder().encode(xml)))) return;
-      } else {
-        const url = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
-        const a = document.createElement("a");
-        a.href = url; a.download = name; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
-      }
+      if (!(await saveBytes(name, new TextEncoder().encode(xml), "application/xml"))) return;
       const bytes = new TextEncoder().encode(xml);
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
       const archiveName = `${safeName(form.number)}-${saved.einvoice.uuid}-${hash}.xml`;

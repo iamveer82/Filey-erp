@@ -1,0 +1,213 @@
+name: Mobile builds
+
+on:
+  push:
+    branches: [codex/mobile-apps, main]
+    paths:
+      - package.json
+      - package-lock.json
+      - capacitor.config.ts
+      - vite.config.ts
+      - tsconfig*.json
+      - postcss.config.js
+      - tailwind.config.js
+      - index.html
+      - src/**
+      - public/**
+      - mobile/**
+      - scripts/build-mobile-android.mjs
+      - scripts/fix-mobile-ios-paths.mjs
+      - .github/workflows/mobile.yml
+  pull_request:
+    paths:
+      - package.json
+      - package-lock.json
+      - capacitor.config.ts
+      - vite.config.ts
+      - tsconfig*.json
+      - postcss.config.js
+      - tailwind.config.js
+      - index.html
+      - src/**
+      - public/**
+      - mobile/**
+      - scripts/build-mobile-android.mjs
+      - scripts/fix-mobile-ios-paths.mjs
+      - .github/workflows/mobile.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_SERIAL: emulator-5554
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools" \
+            "emulator" "system-images;android-35;google_apis;x86_64"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build debug APK
+        run: node scripts/build-mobile-android.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filey-android-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Launch and relaunch Android app
+        timeout-minutes: 12
+        run: |
+          mkdir -p mobile-smoke/android
+          sudo chmod a+rw /dev/kvm
+          echo no | avdmanager create avd --force --name filey-ci \
+            --package "system-images;android-35;google_apis;x86_64" --device pixel_7
+          nohup "$ANDROID_HOME/emulator/emulator" -avd filey-ci -port 5554 \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader \
+            > mobile-smoke/android/emulator.log 2>&1 &
+          timeout 180 adb wait-for-device
+          for attempt in {1..60}; do
+            if [ "$(timeout 5 adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(timeout 5 adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          adb shell input keyevent 82
+          timeout 60 adb install mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          for phase in initial relaunch; do
+            if [ "$phase" = relaunch ]; then
+              adb shell am force-stop com.filey.app
+            fi
+            timeout 30 adb shell am start -W -n com.filey.app/.MainActivity \
+              > "mobile-smoke/android/$phase-launch.txt"
+            grep -q 'Status: ok' "mobile-smoke/android/$phase-launch.txt"
+            adb shell rm -f /sdcard/filey-ui.xml
+            for attempt in {1..20}; do
+              timeout 15 adb shell uiautomator dump /sdcard/filey-ui.xml > /dev/null || true
+              timeout 5 adb exec-out cat /sdcard/filey-ui.xml \
+                > "mobile-smoke/android/$phase-ui.xml" || true
+              if grep -q 'Choose how your business data is stored.' \
+                "mobile-smoke/android/$phase-ui.xml"; then
+                break
+              fi
+              sleep 2
+            done
+            grep -q 'Choose how your business data is stored.' "mobile-smoke/android/$phase-ui.xml"
+            sleep 3
+            timeout 5 adb shell pidof com.filey.app > "mobile-smoke/android/$phase-pid.txt"
+            test -s "mobile-smoke/android/$phase-pid.txt"
+            timeout 10 adb exec-out screencap -p > "mobile-smoke/android/$phase.png"
+          done
+      - name: Collect Android diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p mobile-smoke/android
+          timeout 20 adb logcat -d > mobile-smoke/android/logcat.txt 2>&1 || true
+          timeout 10 adb shell dumpsys activity activities > mobile-smoke/android/activities.txt 2>&1 || true
+          timeout 10 adb exec-out screencap -p > mobile-smoke/android/final.png || true
+          timeout 5 adb emu kill || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filey-android-smoke
+          path: mobile-smoke/android
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Select Xcode 16.4
+        run: sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npx cap sync ios
+      - name: Build unsigned simulator app
+        run: |
+          xcodebuild \
+            -project mobile/ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath mobile/ios/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          ditto -c -k --sequesterRsrc --keepParent \
+            mobile/ios/DerivedData/Build/Products/Debug-iphonesimulator/App.app \
+            mobile/ios/filey-ios-simulator.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: filey-ios-simulator-app
+          path: mobile/ios/filey-ios-simulator.zip
+          if-no-files-found: error
+      - name: Launch and relaunch iOS app
+        timeout-minutes: 8
+        run: |
+          mkdir -p mobile-smoke/ios
+          SIMULATOR_ID=$(xcrun simctl create Filey-CI \
+            com.apple.CoreSimulator.SimDeviceType.iPhone-16 \
+            com.apple.CoreSimulator.SimRuntime.iOS-18-5)
+          export SIMULATOR_ID
+          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          node -e 'require("node:child_process").execFileSync("xcrun", ["simctl", "bootstatus", process.env.SIMULATOR_ID, "-b"], {timeout: 240000, stdio: "inherit"})'
+          xcrun simctl install "$SIMULATOR_ID" \
+            mobile/ios/DerivedData/Build/Products/Debug-iphonesimulator/App.app
+          for phase in initial relaunch; do
+            if [ "$phase" = relaunch ]; then
+              xcrun simctl terminate "$SIMULATOR_ID" com.filey.app
+            fi
+            SIMCTL_CHILD_NSUnbufferedIO=YES xcrun simctl launch \
+              --stdout="$PWD/mobile-smoke/ios/$phase-stdout.log" \
+              --stderr="$PWD/mobile-smoke/ios/$phase-stderr.log" \
+              "$SIMULATOR_ID" com.filey.app > "mobile-smoke/ios/$phase-launch.txt"
+            for attempt in {1..30}; do
+              if grep -q 'WebView loaded' "mobile-smoke/ios/$phase-stdout.log"; then
+                break
+              fi
+              sleep 2
+            done
+            grep -q 'WebView loaded' "mobile-smoke/ios/$phase-stdout.log"
+            sleep 3
+            xcrun simctl spawn "$SIMULATOR_ID" launchctl list > "mobile-smoke/ios/$phase-processes.txt"
+            grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[-0-9]+[[:space:]]+UIKitApplication:com\.filey\.app' \
+              "mobile-smoke/ios/$phase-processes.txt"
+            xcrun simctl io "$SIMULATOR_ID" screenshot "mobile-smoke/ios/$phase.png"
+          done
+      - name: Collect iOS diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p mobile-smoke/ios
+          xcrun simctl list > mobile-smoke/ios/simulators.txt 2>&1 || true
+          if [ -n "${SIMULATOR_ID:-}" ]; then
+            xcrun simctl spawn "$SIMULATOR_ID" log show --style compact --last 5m \
+              --predicate 'process == "App"' > mobile-smoke/ios/system.log 2>&1 || true
+            xcrun simctl io "$SIMULATOR_ID" screenshot mobile-smoke/ios/final.png || true
+            xcrun simctl shutdown "$SIMULATOR_ID" || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filey-ios-smoke
+          path: mobile-smoke/ios
+          if-no-files-found: error

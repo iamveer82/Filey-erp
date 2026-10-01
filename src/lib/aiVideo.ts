@@ -93,7 +93,9 @@ export async function openVideoFile(url: string) {
   const value = new URL(url);
   if (value.protocol !== "https:" || value.username || value.password)
     throw new Error("Invalid video file link.");
-  if ("__TAURI_INTERNALS__" in window) {
+  const { isNativeApp, openNativeExternal } = await import("./nativePlatform");
+  if (isNativeApp()) await openNativeExternal(value.href);
+  else if ("__TAURI_INTERNALS__" in window) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(value.href);
   } else window.open(value.href, "_blank", "noopener,noreferrer");

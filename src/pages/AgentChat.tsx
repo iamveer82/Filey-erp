@@ -47,6 +47,7 @@ import { GitBranch, Globe } from "lucide-react";
 import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
 import { openFolder } from "../lib/localPaths";
+import { isNativeApp, shareNativeFile } from "../lib/nativePlatform";
 import { ErrorBanner, Modal } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
@@ -1226,6 +1227,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
+  const [fileError, setFileError] = useState("");
   if (turn.role === "user") {
     return (
       <div className="flex justify-end">
@@ -1283,7 +1285,12 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
                   key={i}
                   type="button"
                   title={f.path}
-                  onClick={() => void openFolder(f.path!)}
+                  onClick={() => {
+                    setFileError("");
+                    void (isNativeApp() ? shareNativeFile(f.path!, f.name) : openFolder(f.path!)).catch(error => {
+                      if ((error as Error).name !== "AbortError") setFileError((error as Error).message || "Could not open this file.");
+                    });
+                  }}
                   className="btn-ghost max-w-full"
                 >
                   <FolderOpen size={12} />
@@ -1303,6 +1310,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             )}
           </div>
         )}
+        {fileError && <ErrorBanner message={fileError} />}
       </div>
     </div>
   );

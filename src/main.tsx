@@ -24,6 +24,8 @@ import { startAutoSync } from "./lib/sync";
 import { seedDefaultSkills } from "./lib/defaultSkills";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./lib/agentStorage";
 import { quarantineLegacyCredentials } from "./lib/credentialStore";
+import { isNativeApp } from "./lib/nativePlatform";
+import { restoreNativeOwnership } from "./lib/deviceStorage";
 
 applyTheme();
 applyAccent();
@@ -33,7 +35,7 @@ const stopViewport = watchViewport();
 import.meta.hot?.dispose(stopViewport);
 installExtensionBannerGuard();
 // Recovery links contain a credential; do not initialize telemetry on this page.
-if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
+if (!isNativeApp() && !window.location.hash.startsWith("#/reset-password")) initMonitoring();
 const stopAutoSync = startAutoSync();
 import.meta.hot?.dispose(stopAutoSync);
 // These services need the native sidecar. Web sign-in must not download their
@@ -54,8 +56,14 @@ const seedWorkspaceSkills = () => {
 window.addEventListener(AGENT_STORAGE_EVENT, seedWorkspaceSkills);
 import.meta.hot?.dispose(() => window.removeEventListener(AGENT_STORAGE_EVENT, seedWorkspaceSkills));
 void quarantineLegacyCredentials().catch(() => console.warn("Legacy credential migration is pending; open AI settings to retry."));
+if (isNativeApp()) {
+  void import("./lib/nativeLifecycle").then(({ startNativeLifecycle }) => startNativeLifecycle())
+    .then(stop => import.meta.hot?.dispose(stop))
+    .catch(() => console.warn("Phone navigation could not start. Restart Filey to retry."));
+}
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
+const renderApp = () => root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <MotionConfig reducedMotion="user">
@@ -64,6 +72,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </ErrorBoundary>
   </React.StrictMode>
 );
+if (isNativeApp()) {
+  void restoreNativeOwnership().then(renderApp).catch(() => root.render(
+    <div className="min-h-dvh grid place-items-center p-6"><div className="card max-w-sm space-y-3" role="alert">
+      <h1 className="text-lg font-semibold">Couldn't open your saved workspace</h1>
+      <p>Your records are preserved. Restart Filey and try again.</p>
+      <button className="btn-primary" onClick={() => window.location.reload()}>Try again</button>
+    </div></div>
+  ));
+} else renderApp();
 
 // Service worker: the network-first PWA cache is for the hosted web build only.
 // The Tauri desktop app serves its assets from the embedded bundle, so a SW adds
@@ -74,7 +91,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-if (isTauri) {
+if (isTauri || isNativeApp()) {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
       .getRegistrations()

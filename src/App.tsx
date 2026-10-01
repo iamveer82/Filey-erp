@@ -22,6 +22,7 @@ import { Monitor, Smartphone, LogOut } from "lucide-react";
 import { fmtDate } from "./lib/format";
 import Logo from "./components/Logo";
 import { maybePromptDesktopShortcut } from "./lib/shortcut";
+import { isNativeApp } from "./lib/nativePlatform";
 
 const Workspace = lazy(() => import("./components/Workspace"));
 const PortalView = lazy(() => import("./pages/PortalView"));
@@ -154,7 +155,7 @@ function Gate() {
   // First run: let the user pick where data lives — local (offline) or cloud.
   // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
   // straight in so existing users aren't prompted.
-  if (!getDataMode() && (hasTauri || !cloudConfigured)) return <SetupNotice />;
+  if (!getDataMode() && (hasTauri || isNativeApp() || !cloudConfigured)) return <SetupNotice />;
   if (loading) return <Splash />;
   if (!configured) return <SetupNotice />;
   // Marketing lives on the separate website. Every ERP runtime returns to

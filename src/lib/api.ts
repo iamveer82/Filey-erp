@@ -1,4 +1,5 @@
 import { clearLog } from "./log";
+import { readDeviceValue, writeDeviceValue } from "./deviceStorage";
 import { defaultTaxRate, validateCountry, taxIdError } from "./taxRegimes";
 import { validateWorkItem, type WorkInput, type WorkItem } from "./workItems";
 import { invoke } from "@tauri-apps/api/core";
@@ -561,7 +562,7 @@ async function cacheGet<T>(key: string): Promise<T | null> {
       const v = await invoke<string | null>("cache_get", { key });
       return v ? (JSON.parse(v) as T) : null;
     }
-    const v = localStorage.getItem("cache:" + key);
+    const v = await readDeviceValue("cache:" + key);
     return v ? (JSON.parse(v) as T) : null;
   } catch {
     return null;
@@ -572,7 +573,7 @@ async function cacheSet(key: string, value: unknown): Promise<void> {
   const json = JSON.stringify(value);
   try {
     if (hasTauri) await invoke("cache_set", { key, value: json });
-    else localStorage.setItem("cache:" + key, json);
+    else await writeDeviceValue("cache:" + key, json);
   } catch {
     /* cache is best-effort */
   }
@@ -664,7 +665,7 @@ export async function pendingCloudWrites(): Promise<{ id: number; op: string }[]
   try {
     if (hasTauri)
       return await invoke<{ id: number; op: string }[]>("outbox_list");
-    return JSON.parse(localStorage.getItem("outbox") || "[]");
+    return JSON.parse((await readDeviceValue("outbox")) || "[]");
   } catch {
     return [];
   }
@@ -675,8 +676,8 @@ async function outboxRemove(id: number): Promise<void> {
     if (hasTauri) {
       await invoke("outbox_remove", { entryId: id });
     } else {
-      const a = JSON.parse(localStorage.getItem("outbox") || "[]");
-      localStorage.setItem(
+      const a = JSON.parse((await readDeviceValue("outbox")) || "[]");
+      await writeDeviceValue(
         "outbox",
         JSON.stringify(a.filter((e: { id: number }) => e.id !== id))
       );

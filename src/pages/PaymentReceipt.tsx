@@ -35,6 +35,7 @@ import {
 } from "../lib/numberFormat";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
+import { publicAppBase } from "../lib/documentMessage";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import { startingTemplate } from "../components/DocPresetBar";
 import CompanyModal from "../components/CompanyModal";
@@ -364,8 +365,10 @@ export default function PaymentReceipt() {
       return;
     }
     try {
+      const base = publicAppBase();
+      if (!base) throw new Error("Public receipt links need a hosted cloud address.");
       const token = await receipts.publicLink(form.id);
-      const url = `${window.location.origin}/#/portal/${token}`;
+      const url = `${base}#/portal/${encodeURIComponent(token)}`;
       await navigator.clipboard.writeText(url);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2000);

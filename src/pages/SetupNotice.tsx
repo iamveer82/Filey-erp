@@ -50,13 +50,13 @@ export default function SetupNotice() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-semibold text-ink">Use on this computer</h2>
+                    <h2 className="text-base font-semibold text-ink">Use on this device</h2>
                     <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-[#1c1917]">
                       Basic · Free
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-brand-500">
-                    Create your free account, then everything runs on this machine.
+                    Create your free account, then keep your records on this device.
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
@@ -132,7 +132,7 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-ink">Use offline</h2>
                   <p className="text-[13px] text-brand-500">
-                    Free core ERP and CRM on this computer. Sign in once online to link your device.
+                    Free core ERP and CRM on this device. Sign in once online to link your device.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

@@ -20,6 +20,7 @@ import { isLocalMode } from "../lib/dataMode";
 import { getLocalCredential, hasLocalCredential } from "../lib/localAuth";
 import { checkPassword, strengthLabel } from "../lib/password";
 import { cn } from "../lib/format";
+import { isNativeApp } from "../lib/nativePlatform";
 
 /** Supabase answers in its own vocabulary, and two of its replies actively
  *  mislead: a missing account reads as a wrong password, and a code request for
@@ -92,7 +93,7 @@ export default function Login() {
     resendOtp,
   } = useAuth();
   // Google blocks OAuth inside embedded webviews — web build only.
-  const hasTauriShell = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const hasTauriShell = (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) || isNativeApp();
   // ponytail: providers are off in Supabase (phone_provider_disabled, google
   // disabled), so offering them only produces errors. Flip the env var once
   // the provider is actually enabled in the dashboard.

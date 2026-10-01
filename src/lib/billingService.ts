@@ -1,5 +1,6 @@
 import { supabase, invokeFn } from "./supabase";
 import { serviceError } from "./serviceError";
+import { isNativeApp, openNativeExternal } from "./nativePlatform";
 
 export const BILLING_UNAVAILABLE =
   "Payments are temporarily unavailable. Please try again shortly or contact Filey support.";
@@ -47,9 +48,13 @@ export function paymentUrl(value: unknown): string {
   throw new Error(BILLING_UNAVAILABLE);
 }
 
-/** Mobile uses same-tab navigation; desktop keeps the app open. */
+/** Packaged apps keep checkout outside their trusted WebView. */
 export async function openBilling(value: unknown): Promise<"browser" | "redirected"> {
   const url = paymentUrl(value);
+  if (isNativeApp()) {
+    await openNativeExternal(url);
+    return "browser";
+  }
   if ("__TAURI_INTERNALS__" in window) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
