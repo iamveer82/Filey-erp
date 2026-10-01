@@ -24,7 +24,7 @@ import * as safePdf from "./pdfjsSafe";
 import { pdfjs } from "./pdfjsSafe";
 import { parseRanges } from "./ranges";
 import { parseCsvMatrix as parseCsv } from "./csv";
-import { hasTauri, saveBytes } from "./localPaths";
+import { saveBytes } from "./localPaths";
 
 export { parseRanges };
 
@@ -2789,23 +2789,7 @@ export async function pdfToTiff(file: File): Promise<OutFile[]> {
 
 export async function downloadFile(f: OutFile): Promise<boolean> {
   const ext = f.name.split(".").pop()?.toLowerCase() ?? "";
-  // Copy into a fresh ArrayBuffer so Blob/Rust gets a clean buffer.
-  const buf = f.bytes.slice();
-  // Desktop (Tauri WebView2): a blob `<a download>` click silently fails to
-  // save — route through a native save dialog + Rust file write instead.
-  if (hasTauri) {
-    return (await saveBytes(f.name, buf)) !== null;
-  }
-  const blob = new Blob([buf], {
-    type: MIME[ext] ?? "application/octet-stream",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = f.name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-  return true;
+  return (await saveBytes(f.name, f.bytes.slice(), MIME[ext] ?? "application/octet-stream")) !== null;
 }
 
 /** Capture a DOM element as a PDF and download it.

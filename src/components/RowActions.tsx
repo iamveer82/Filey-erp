@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { MenuPopover, MenuItemRow, MenuSep } from "./ui-menu";
 import { cn } from "../lib/format";
+import { isNativeApp, openNativeMessage } from "../lib/nativePlatform";
 
 /**
  * RowActions — reusable action bar for table rows (Filey-DEMO parity).
@@ -300,15 +301,21 @@ export async function shareVia(
     const link = num
       ? `https://wa.me/${num}?text=${body}`
       : `https://wa.me/?text=${body}`;
-    window.open(link, "_blank");
+    if (isNativeApp()) await openNativeMessage(link);
+    else window.open(link, "_blank");
   } else if (kind === "email") {
     const link = `mailto:${email || ""}?subject=${encodeURIComponent(
       url || "Document"
     )}&body=${body}`;
-    window.location.href = link;
+    if (isNativeApp()) await openNativeMessage(link);
+    else window.location.href = link;
   } else if (kind === "sms") {
-    const link = `sms:${phone || ""}?body=${body}`;
-    window.location.href = link;
+    if (isNativeApp()) {
+      const { internationalPhone } = await import("../lib/documentMessage");
+      const raw = phone?.trim() || "";
+      const recipient = raw ? internationalPhone(/^[1-9]/.test(raw) ? `+${raw}` : raw) : "";
+      await openNativeMessage(`sms:${recipient}?body=${body}`);
+    } else window.location.href = `sms:${phone || ""}?body=${body}`;
   } else if (kind === "copyLink") {
     if (!navigator.clipboard?.writeText) throw new Error("Clipboard is unavailable. Try again in a supported browser.");
     await navigator.clipboard.writeText(url || window.location.href);

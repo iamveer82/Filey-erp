@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { isNativeApp, saveNativeBytes } from "./nativePlatform";
 
 export const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -34,14 +35,22 @@ export const clearExportDir = () => localStorage.removeItem(EXPORT_DIR_KEY);
 export const writeDocFile = (dir: string, filename: string, bytes: Uint8Array) =>
   invoke<string>("write_doc_file", { dir, filename, bytes: Array.from(bytes) });
 
-/** Desktop "download": prompt for a save location and write the bytes there via
- *  Rust. A browser `<a download>` blob click does NOT save in the Tauri WebView2
- *  webview, so anything user-facing must go through here. Returns the saved path,
- *  or null if the user cancelled the dialog. */
+/** Export bytes through the runtime's file handoff. Null means the user cancelled. */
 export async function saveBytes(
   filename: string,
-  bytes: Uint8Array
+  bytes: Uint8Array,
+  mime = "application/octet-stream"
 ): Promise<string | null> {
+  if (isNativeApp()) return saveNativeBytes(filename, bytes);
+  if (!hasTauri) {
+    const url = URL.createObjectURL(new Blob([bytes.slice()], { type: mime }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return filename;
+  }
   const dest = await saveDialog({ defaultPath: filename });
   if (!dest) return null;
   const sep = Math.max(dest.lastIndexOf("/"), dest.lastIndexOf("\\"));
@@ -54,14 +63,7 @@ export const openFolder = (path: string) => openPath(path);
 
 /** Small text exports do not need to load the PDF/image conversion toolchain. */
 export async function downloadText(filename: string, text: string, mime = "text/plain;charset=utf-8"): Promise<void> {
-  const bytes = new TextEncoder().encode(text);
-  if (hasTauri) { await saveBytes(filename, bytes); return; }
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  await saveBytes(filename, new TextEncoder().encode(text), mime);
 }
 
 // ---- backup / restore ----

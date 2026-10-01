@@ -3,14 +3,15 @@
 // call site works unchanged and no data ever leaves the machine.
 //
 // ponytail: one JSON array per collection, loaded/saved whole, stored in the
-// existing SQLite kv_cache table (Tauri) or localStorage (browser dev). Single-user
-// desktop → collections are small and writes are serial, so whole-array
+// SQLite kv_cache (desktop), IndexedDB (native phones), or localStorage (web).
+// Collections are small and writes are serial, so whole-array
 // read-modify-write is fine. Move to row-level SQL only if a table grows big
 // enough to lag.
 
 import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
 import { nextLocalId } from "./recordId";
+import { readDeviceValue, writeDeviceValue, writeDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -47,7 +48,7 @@ function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
  *  away: mutating a returned row never reached storage before either — only
  *  saveColl writes — so any code doing it was already a no-op bug.
  *
- *  DESKTOP ONLY. Under Tauri this process owns the SQLite store, so a parsed
+ *  PACKAGED APPS ONLY. This process owns the desktop/phone store, so a parsed
  *  collection stays true until we write it. In a browser a second tab writes
  *  the same localStorage key behind our back and a stale memo would serve rows
  *  another tab deleted. Browser mode re-reads; localStorage is synchronous and
@@ -111,8 +112,7 @@ function hashString(s: string): string {
 }
 
 async function putBlob(key: string, value: string): Promise<void> {
-  if (hasTauri) await invoke("cache_set", { key, value });
-  else localStorage.setItem(key, value);
+  await writeDeviceValue(key, value);
 }
 
 /** Never throws, and tells the two failure cases apart.
@@ -129,9 +129,7 @@ async function getBlob(h: string): Promise<string | null | undefined> {
   if (hit != null) return hit;
   try {
     const key = BLOB_KEY(h);
-    const v = hasTauri
-      ? await invoke<string | null>("cache_get", { key })
-      : localStorage.getItem(key);
+    const v = await readDeviceValue(key);
     if (v != null) {
       blobs.set(h, v);
       hashOf.set(v, h); // so re-saving these rows doesn't re-hash the payload
@@ -223,20 +221,18 @@ async function hydrate(rows: Row[]): Promise<Row[]> {
 // ever stops being true.
 
 export async function loadColl(coll: string): Promise<Row[]> {
-  const hit = hasTauri ? memo.get(coll) : undefined;
+  const hit = transactionalDeviceStorage ? memo.get(coll) : undefined;
   if (hit) return hit.rows;
   const key = "localdb:" + coll;
   try {
-    const v = hasTauri
-      ? await invoke<string | null>("cache_get", { key })
-      : localStorage.getItem(key);
+    const v = await readDeviceValue(key);
     const parsed: unknown = v ? JSON.parse(v) : [];
     if (!Array.isArray(parsed) || parsed.some((row) => !row || typeof row !== "object" || Array.isArray(row)))
       throw new Error("Stored records are not a valid collection");
     const rows = await hydrate(parsed as Row[]);
     // json stays the STORED form (markers, not payloads) so replaceColl keeps
     // comparing like with like.
-    if (hasTauri) memo.set(coll, { rows, json: v ?? "[]" });
+    if (transactionalDeviceStorage) memo.set(coll, { rows, json: v ?? "[]" });
     return rows;
   } catch (error) {
     // Don't memo a failed read — the next call should try again.
@@ -247,14 +243,14 @@ export async function loadColl(coll: string): Promise<Row[]> {
 async function saveColl(coll: string, rows: Row[]): Promise<void> {
   const key = "localdb:" + coll;
   const json = await dehydrate(rows);
-  if (!hasTauri) {
-    localStorage.setItem(key, json);
+  if (!transactionalDeviceStorage) {
+    await writeDeviceValue(key, json);
     return;
   }
   try {
     // Cache only what actually reached storage. A write that fails (disk full,
     // DB locked) must not leave the UI reading rows nobody saved.
-    await invoke("cache_set", { key, value: json });
+    await writeDeviceValue(key, json);
     memo.set(coll, { rows, json });
   } catch (e) {
     memo.delete(coll);
@@ -277,17 +273,17 @@ export function replaceColl(
     // Compare against the stored JSON rather than re-serialising what's already
     // there: a pull that changes nothing used to parse AND stringify every table.
     await loadColl(coll); // fills memo.json; free once warm
-    const current = hasTauri
+    const current = transactionalDeviceStorage
       ? memo.get(coll)?.json
-      : (localStorage.getItem("localdb:" + coll) ?? "[]");
+      : ((await readDeviceValue("localdb:" + coll)) ?? "[]");
     if (current === next) return false;
     const key = "localdb:" + coll;
-    if (!hasTauri) {
-      localStorage.setItem(key, next);
+    if (!transactionalDeviceStorage) {
+      await writeDeviceValue(key, next);
       return true;
     }
     try {
-      await invoke("cache_set", { key, value: next });
+      await writeDeviceValue(key, next);
       memo.set(coll, { rows, json: next });
     } catch (e) {
       memo.delete(coll);
@@ -319,11 +315,9 @@ const JOURNAL_KEY = "syncjournal";
 let journalMemo: SyncJournal | null = null;
 
 async function journalLoad(): Promise<SyncJournal> {
-  if (hasTauri && journalMemo) return journalMemo;
+  if (transactionalDeviceStorage && journalMemo) return journalMemo;
   try {
-    const raw = hasTauri
-      ? await invoke<string | null>("cache_get", { key: JOURNAL_KEY })
-      : localStorage.getItem(JOURNAL_KEY);
+    const raw = await readDeviceValue(JOURNAL_KEY);
     const j = raw ? JSON.parse(raw) : null;
     if (j && Number.isFinite(j.v) && j.v >= 0 && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
       for (const t of Object.keys(j.tables)) {
@@ -349,13 +343,13 @@ async function journalLoad(): Promise<SyncJournal> {
 
 async function journalSave(j: SyncJournal): Promise<void> {
   const json = JSON.stringify(j);
-  if (!hasTauri) {
-    localStorage.setItem(JOURNAL_KEY, json);
+  if (!transactionalDeviceStorage) {
+    await writeDeviceValue(JOURNAL_KEY, json);
     return;
   }
   journalMemo = j;
   try {
-    await invoke("cache_set", { key: JOURNAL_KEY, value: json });
+    await writeDeviceValue(JOURNAL_KEY, json);
   } catch (e) {
     // journalCommit clears pushed tables before saving. Keeping an unpersisted
     // clear in memory would drop rows that never reached the cloud, so fall
@@ -452,27 +446,7 @@ export function replaceWorkspaceSnapshot(tables: Map<string, Row[]>, expectedVer
     }
     journal.v++;
     entries.push([JOURNAL_KEY, JSON.stringify(journal)]);
-    if (hasTauri) {
-      // Existing native command wraps every entry in one SQLite transaction.
-      await invoke("cache_set_many", { entries });
-    } else {
-      // ponytail: localStorage has no crash-atomic transactions; use IndexedDB
-      // if browser-local workspaces need the desktop's crash guarantees.
-      const originals = entries.map(([key]) => [key, localStorage.getItem(key)] as const);
-      try {
-        for (const [key, value] of entries) localStorage.setItem(key, value);
-      } catch (error) {
-        let restored = true;
-        for (const [key, value] of originals) {
-          try {
-            if (value === null) localStorage.removeItem(key);
-            else localStorage.setItem(key, value);
-          } catch { restored = false; }
-        }
-        if (!restored) throw new Error("Device storage is unavailable. Keep using Filey Cloud until storage has been repaired.");
-        throw error;
-      }
-    }
+    await writeDeviceValues(entries);
     clearLocalCache();
   });
 }
@@ -545,10 +519,10 @@ export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[
     if (!changed.size && !deleted.size) delete journal.tables[coll];
     journal.v++;
     const next = [...byId.values()];
-    if (hasTauri) {
+    if (transactionalDeviceStorage) {
       const json = await dehydrate(next);
       // The chosen versions and their upload queue must survive together.
-      await invoke("cache_set_many", { entries: [["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]] });
+      await writeDeviceValues([["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]]);
       memo.set(coll, { rows: next, json });
       journalMemo = journal;
       window.dispatchEvent(new Event("filey:remote-update"));
@@ -861,14 +835,14 @@ export function withLocalTransaction<T>(
     const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
     if (!staged.size) return result;
     const journal = await journalSnapshot();
-    if (hasTauri) {
+    if (transactionalDeviceStorage) {
       const nextJournal = structuredClone(journal);
       for (const [coll, opts] of changes) markJournal(nextJournal, coll, opts);
       const entries: [string, string][] = [];
       for (const [coll, rows] of staged) entries.push(["localdb:" + coll, await dehydrate(rows)]);
       entries.push([JOURNAL_KEY, JSON.stringify(nextJournal)]);
       try {
-        await invoke("cache_set_many", { entries });
+        await writeDeviceValues(entries);
         for (const [coll, rows] of staged) memo.set(coll, { rows, json: entries.find(([key]) => key === "localdb:" + coll)![1] });
         journalMemo = nextJournal;
       } catch (error) {
@@ -1027,9 +1001,7 @@ const mimeFromPath = (p: string) =>
 async function blobGet(path: string): Promise<Blob64 | null> {
   const key = "fileblob:" + path;
   try {
-    const raw = hasTauri
-      ? await invoke<string | null>("cache_get", { key })
-      : localStorage.getItem(key);
+    const raw = await readDeviceValue(key);
     return raw ? (JSON.parse(raw) as Blob64) : null;
   } catch {
     return null;
@@ -1039,9 +1011,7 @@ async function blobGet(path: string): Promise<Blob64 | null> {
 async function blobSet(path: string, val: Blob64 | null): Promise<void> {
   const key = "fileblob:" + path;
   const json = val ? JSON.stringify(val) : ""; // "" = tombstone (no kv delete cmd)
-  if (hasTauri) await invoke("cache_set", { key, value: json });
-  else if (val) localStorage.setItem(key, json);
-  else localStorage.removeItem(key);
+  await writeDeviceValue(key, val ? json : null);
 }
 
 // Real files-on-disk via Tauri. ponytail: bytes sent as a number[] (JSON) — fine

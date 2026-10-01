@@ -18,12 +18,5 @@ export async function downloadMedia(
   return fetch(url, { signal, credentials: "omit", referrerPolicy: "no-referrer" });
 }
 export async function saveMediaFile(blob: Blob, name: string) {
-  if (hasTauri) return saveBytes(name, new Uint8Array(await blob.arrayBuffer()));
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-  return name;
+  return saveBytes(name, new Uint8Array(await blob.arrayBuffer()), blob.type);
 }

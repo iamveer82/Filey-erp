@@ -2,7 +2,7 @@
 // RFC-4180-ish: quotes fields containing comma/quote/newline, doubles
 // embedded quotes.
 
-import { hasTauri, saveBytes } from "./localPaths";
+import { saveBytes } from "./localPaths";
 
 // Excel and Google Sheets EXECUTE a cell that opens with one of these, so an
 // exported customer name of =HYPERLINK("http://…","Click") runs the moment the
@@ -50,19 +50,7 @@ export async function downloadCsv(
   const csv = toCsv(rows, columns);
   const name = filename.endsWith(".csv") ? filename : `${filename}.csv`;
   const bytes = new TextEncoder().encode("﻿" + csv);
-  if (hasTauri) {
-    await saveBytes(name, bytes);
-    return;
-  }
-  const blob = new Blob([bytes], {
-    type: "text/csv;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  await saveBytes(name, bytes, "text/csv;charset=utf-8");
 }
 
 /** Parse CSV text into a matrix of string cells. */

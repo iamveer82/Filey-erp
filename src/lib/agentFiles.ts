@@ -8,10 +8,11 @@
 // path back in the chat.
 
 import { hasTauri, getExportDir, writeDocFile } from "./localPaths";
+import { isNativeApp, nativeFileUrl, saveNativeBytes } from "./nativePlatform";
 
 export interface DeliveredFile {
   name: string;
-  /** Absolute path on disk (desktop). */
+  /** Absolute desktop path or private native file URI. */
   path?: string;
   /** Object URL (browser build, where there is no disk to write to). */
   url?: string;
@@ -41,6 +42,12 @@ export async function deliverFile(f: {
   // A fresh buffer: the caller's view may be a slice of a larger allocation,
   // which Rust and Blob both mis-read.
   const bytes = f.bytes.slice();
+  if (isNativeApp()) {
+    try {
+      const path = await saveNativeBytes(f.name, bytes, false);
+      return path ? { name: f.name, path, url: nativeFileUrl(path) } : { name: f.name };
+    } catch { return { name: f.name }; }
+  }
   if (hasTauri) {
     const target = await outputDir();
     if (target) {

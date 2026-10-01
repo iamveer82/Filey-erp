@@ -28,6 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { isNativeApp, openNativeExternal } from "../lib/nativePlatform";
 import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
 import AppIcon from "../components/AppIcon";
@@ -233,7 +234,8 @@ export default function Integrations() {
         throw new Error("Composio did not return a connection link.");
       // OAuth consent opens in the real browser on desktop; in a browser build
       // there is no opener plugin, and a new tab is the same thing.
-      if (hasDesktop) await openUrl(link.redirect_url);
+      if (isNativeApp()) await openNativeExternal(link.redirect_url);
+      else if (hasDesktop) await openUrl(link.redirect_url);
       else window.open(link.redirect_url, "_blank", "noopener");
       setMsg(
         `Authorize ${slug} in the browser window - this flips to Connected when you're done.`

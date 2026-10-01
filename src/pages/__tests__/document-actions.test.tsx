@@ -231,7 +231,7 @@ describe("invoice editor actions", () => {
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
     fireEvent.click(await view.findByRole("button", { name: "Check e-invoice" }));
     fireEvent.click(await view.findByRole("button", { name: "Save & export XML" }));
-    await waitFor(() => expect(write).toHaveBeenCalledWith("INV-AUDIT.xml", new TextEncoder().encode("<Invoice />")));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("INV-AUDIT.xml", new TextEncoder().encode("<Invoice />"), "application/xml"));
     if (outcome === "failed") expect(await view.findByText("Folder is read-only")).toBeTruthy();
     expect(view.queryByText("e-Invoice XML exported (PINT-AE).")).toBeNull();
     expect(view.queryByText(/XML exported\. Recommended/)).toBeNull();

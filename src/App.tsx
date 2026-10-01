@@ -1,6 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { HashRouter } from "react-router-dom";
-import { cloudConfigured } from "./lib/supabase";
 import { getDataMode } from "./lib/dataMode";
 import { AuthProvider, useAuth } from "./lib/auth";
 import {
@@ -26,9 +25,6 @@ import { maybePromptDesktopShortcut } from "./lib/shortcut";
 const Workspace = lazy(() => import("./components/Workspace"));
 const PortalView = lazy(() => import("./pages/PortalView"));
 function Splash() { return <FileyLoader />; }
-
-const hasTauri =
-  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 function recoveryLink(): { token: string; email: string } | null {
   if (typeof window === "undefined") return null;
@@ -151,11 +147,10 @@ function Gate() {
     const t = setTimeout(() => void maybePromptDesktopShortcut(), 2000);
     return () => clearTimeout(t);
   }, [user]);
-  // First run: let the user pick where data lives — local (offline) or cloud.
-  // Desktop always asks; the hosted web SaaS (cloud pre-configured) goes
-  // straight in so existing users aren't prompted.
-  if (!getDataMode() && (hasTauri || !cloudConfigured)) return <SetupNotice />;
   if (loading) return <Splash />;
+  // Ask once on first launch across all platforms. Existing signed-in accounts
+  // keep their established workspace; a saved choice is never reset.
+  if (!getDataMode() && !user) return <SetupNotice />;
   if (!configured) return <SetupNotice />;
   // Marketing lives on the separate website. Every ERP runtime returns to
   // authentication after sign-out, including browser previews and local mode.

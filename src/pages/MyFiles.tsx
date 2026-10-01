@@ -35,6 +35,7 @@ import PdfCanvas from "../components/PdfCanvas";
 import {
   useFiles,
   fileObjectUrl,
+  fileBytes,
   downloadUrl,
   shareFileLink,
   FILE_FOLDERS,
@@ -43,6 +44,8 @@ import {
 } from "../lib/files";
 import { isConfigured } from "../lib/supabase";
 import { isLocalMode } from "../lib/dataMode";
+import { isNativeApp } from "../lib/nativePlatform";
+import { saveBytes } from "../lib/localPaths";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import {
@@ -329,6 +332,12 @@ export default function MyFiles() {
   const download = async (f: SavedFile) => {
     setBusyId(f.id);
     try {
+      if (isNativeApp()) {
+        const bytes = await fileBytes(f);
+        if (!bytes) throw new Error("Could not read this file.");
+        await saveBytes(f.name, bytes, f.mime);
+        return;
+      }
       const url = await downloadUrl(f);
       if (!url) throw new Error("Could not create a download link.");
       const a = document.createElement("a");

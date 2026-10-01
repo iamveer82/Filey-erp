@@ -4,7 +4,7 @@ import { Download } from "lucide-react";
 import { billing, erp, crm, fin, hr, quotes } from "../../lib/api";
 import { useSettings } from "./PreferencesPanel";
 import { errMsg, todayYmd } from "../../lib/format";
-import { hasTauri, saveBytes } from "../../lib/localPaths";
+import { saveBytes } from "../../lib/localPaths";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
 export default function BackupPanel() {
@@ -83,19 +83,7 @@ export default function BackupPanel() {
         2
       );
       const name = `filey-backup-${todayYmd()}.json`;
-      // Desktop: a blob `<a download>` click silently fails in the Tauri
-      // WebView2 — the backup must go through the native save dialog.
-      if (hasTauri) {
-        const saved = await saveBytes(name, new TextEncoder().encode(json));
-        if (!saved) return; // user cancelled the dialog
-      } else {
-        const blob = new Blob([json], { type: "application/json" });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      }
+      if (!(await saveBytes(name, new TextEncoder().encode(json), "application/json"))) return;
       setDone(true);
       set("backup.last_export_at", new Date().toISOString());
     } catch (e) {

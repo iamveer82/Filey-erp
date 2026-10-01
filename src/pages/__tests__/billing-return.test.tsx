@@ -52,7 +52,7 @@ it("shows unlimited local usage from the first render without fetching a monthly
 
 it("advertises free unlimited local invoices on the startup screen", () => {
   render(<SetupNotice />);
-  const localChoice = screen.getByRole("button", { name: /Use on this computer/ });
+  const localChoice = screen.getByRole("button", { name: /Use on this device/ });
   expect(localChoice).toHaveTextContent("Unlimited local invoices and edits");
   expect(localChoice).not.toHaveTextContent(/5 invoices|5 new invoices|five invoices/i);
 });

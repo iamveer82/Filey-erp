@@ -81,11 +81,29 @@ jobs:
         with:
           ref: ${{ inputs.intel_recovery_tag || github.ref }}
 
-      - name: Check recovery version
-        if: inputs.intel_recovery_tag != ''
+      - name: Check release version
+        if: github.ref_type == 'tag' || inputs.intel_recovery_tag != ''
         env:
-          TAG: ${{ inputs.intel_recovery_tag }}
-        run: node -e 'if("v"+require("./src-tauri/tauri.conf.json").version!==process.env.TAG) process.exit(1)'
+          TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
+        run: |
+          node -e '
+          const fs=require("node:fs"), read=path=>fs.readFileSync(path,"utf8"), json=path=>JSON.parse(read(path));
+          const lock=json("package-lock.json");
+          const versions=[json("package.json").version,lock.version,lock.packages[""].version,json("src-tauri/tauri.conf.json").version,
+            read("src-tauri/Cargo.toml").match(/^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m)?.[1],
+            read("src-tauri/Cargo.lock").match(/^name = "filey-erp"\r?\nversion = "([^"]+)"/m)?.[1]];
+          if(versions.some(version=>"v"+version!==process.env.TAG)) throw new Error("Release tag does not match package/Tauri/Cargo versions");'
+
+      - name: Check release draft state
+        if: github.ref_type == 'tag' || inputs.intel_recovery_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases" > release-list.json
+          node -e 'if(require("./release-list.json").flat().some(release=>release.tag_name===process.env.TAG&&!release.draft)) throw new Error("Published releases must not be rebuilt")'
 
       - name: Linux build deps
         if: matrix.os == 'ubuntu-22.04'
@@ -195,6 +213,7 @@ jobs:
           path: |
             src-tauri/target/**/release/bundle/**/*.dmg
             src-tauri/target/**/release/bundle/**/*.app
+            src-tauri/target/**/release/bundle/**/*.app.tar.gz
             src-tauri/target/**/release/bundle/**/*.AppImage
             src-tauri/target/**/release/bundle/**/*.deb
             src-tauri/target/**/release/bundle/**/*.rpm
@@ -216,6 +235,29 @@ jobs:
     if: github.ref_type == 'tag' || inputs.intel_recovery_tag != ''
     runs-on: ubuntu-latest
     steps:
+      - name: Protect legacy Linux updaters
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > release.json
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir updater
+          # The DEB/RPM-only matrix has no AppImage. Its generic Linux fallback
+          # can make old AppImage clients overwrite their executable with DEB bytes.
+          node -e '
+          const fs=require("node:fs");
+          if(!JSON.parse(fs.readFileSync("release.json","utf8")).isDraft) throw new Error("Published release assets must not be replaced");
+          const path="updater/latest.json", manifest=JSON.parse(fs.readFileSync(path,"utf8"));
+          if(Object.hasOwn(manifest.platforms,"linux-x86_64")) {
+            delete manifest.platforms["linux-x86_64"];
+            fs.writeFileSync(path,JSON.stringify(manifest,null,2)+"\n");
+            fs.writeFileSync("updater/changed","");
+          }'
+          if [ -f updater/changed ]; then
+            gh release upload "$TAG" updater/latest.json --repo "$GITHUB_REPOSITORY" --clobber
+          fi
+
       - name: Assert every platform uploaded its installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

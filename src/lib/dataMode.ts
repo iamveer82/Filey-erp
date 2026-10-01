@@ -39,9 +39,8 @@ export function getDataMode(): DataMode | null {
   return v === "local" || v === "cloud" ? v : null;
 }
 
-// The hosted web build skips the storage picker (App.tsx only shows SetupNotice
-// on desktop / unconfigured builds), so on web `filey_data_mode` is normally
-// ABSENT. The data layer treats an absent mode as whichever store this build
+// Older hosted web sessions may have no saved choice. Before first-run selection,
+// and for those existing sessions, the data layer uses whichever store this build
 // actually talks to, and anything that keys data or gates a read has to agree
 // with it — otherwise a scope built here is the string "null" and a signed-in
 // web user gets told to "sign in to this workspace" by features that only ever

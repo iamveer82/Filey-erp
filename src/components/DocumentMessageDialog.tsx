@@ -7,6 +7,8 @@ import { bridgeState, hasDesktop, onBridgeState } from "../lib/waBridge";
 import { internationalPhone, openMessageDraft, prepareWhatsAppDocument, saveDocumentPdf, type MessageChannel } from "../lib/documentMessage";
 import { agentStorageScope, AGENT_STORAGE_EVENT, requireAgentStorageScope } from "../lib/agentStorage";
 import { computerUseSupported } from "../lib/computerUse";
+import { isNativeApp, shareNativeFile } from "../lib/nativePlatform";
+import { saveBytes } from "../lib/localPaths";
 import { beginMessage, finishMessage, sendPairedDocument, messageJobs, blocksMessage, OUTBOX_EVENT, type MessageJob } from "../lib/messageOutbox";
 import { waLogAdd, waLogList, type WaLogEntry } from "../lib/waLog";
 const PdfCanvas = lazy(() => import("./PdfCanvas"));
@@ -123,7 +125,7 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
     finally { busyRef.current = false; if (mounted.current) setBusy(false); }
   };
   let nativeShare = false;
-  try { nativeShare = !!file && !!navigator.canShare?.({ files: [file] }) && !!navigator.share; } catch { /* File sharing is unavailable on this device. */ }
+  try { nativeShare = !!file && (isNativeApp() || !!navigator.canShare?.({ files: [file] }) && !!navigator.share); } catch { /* File sharing is unavailable on this device. */ }
   const pairedSend = channel === "whatsapp" && hasDesktop && connected;
   const computerSupported = computerUseSupported();
   let accepted = false;
@@ -249,11 +251,21 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
         {savedPath && <div className="text-xs leading-relaxed"><p className="font-medium">Saved PDF</p><p className="mt-1 break-all select-all text-muted-foreground">{savedPath}</p></div>}
         <div className="flex flex-wrap gap-2 border-t border-border pt-4">
           <button className={channel === "sms" && !nativeShare ? "btn-primary" : "btn-ghost"} disabled={busy || stale || !file} onClick={() => void run(async () => {
+            if (isNativeApp()) {
+              const saved = await saveBytes(file!.name, new Uint8Array(await file!.arrayBuffer()), file!.type);
+              assertCurrent();
+              if (saved) setNotice("PDF handed to the selected app. Check that app for delivery.");
+              return;
+            }
             const saved = await savePdf();
             setNotice(hasDesktop ? (saved.path ? "PDF saved. Attach it in your messaging app." : "Save cancelled.") : "PDF downloaded. Attach it in your messaging app.");
           })}><Download size={14} /> Download PDF</button>
           {nativeShare && <button className={pairedSend ? "btn-ghost" : "btn-primary"} disabled={busy || stale} onClick={() => void run(async () => {
-            await navigator.share({ files: [file!], title, text: body });
+            if (isNativeApp()) {
+              const saved = await savePdf();
+              if (!saved.path) throw new Error("The PDF could not be saved. Try again.");
+              await shareNativeFile(saved.path, title, body);
+            } else await navigator.share({ files: [file!], title, text: body });
             assertCurrent();
             setNotice("PDF handed to the selected app. Check that app for delivery.");
             remember("handed_off", "Chosen in share sheet");

@@ -3,6 +3,8 @@ import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { localClient } from "./localdb";
 import { localWorkspaceOwner, isLocalSignedIn } from "./localAuth";
 import { sessionFetch } from "./cloudSession";
+import { isNativeApp } from "./nativePlatform";
+import { nativeAuthStorage } from "./deviceStorage";
 import { supabaseUrl as url, supabaseAnonKey as anonKey, cloudConfigured } from "./supabaseConfig";
 
 // Re-exported: this module is where the rest of the app has always imported it.
@@ -16,6 +18,7 @@ export const supabase: SupabaseClient | null = cloudConfigured
   ? createClient(url!, anonKey!, {
       global: { fetch: sessionFetch(url, () => supabase) },
       auth: {
+        ...(isNativeApp() ? { storage: nativeAuthStorage } : {}),
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: false,

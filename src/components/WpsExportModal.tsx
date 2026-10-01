@@ -5,7 +5,7 @@ import { AlertTriangle, Download } from "lucide-react";
 import { Modal, Field, Badge } from "./ui";
 import { billing, type CompanyProfile, type Employee } from "../lib/api";
 import { buildSif, validateWps, WpsError, type WpsInput } from "../lib/wps";
-import { hasTauri, saveBytes } from "../lib/localPaths";
+import { saveBytes } from "../lib/localPaths";
 import { aed, errMsg, todayYmd } from "../lib/format";
 import { useUI } from "../lib/ui";
 
@@ -90,19 +90,8 @@ export default function WpsExportModal({
     try {
       const file = buildSif(input);
       const bytes = new TextEncoder().encode(file.content);
-      if (hasTauri) {
-        const path = await saveBytes(file.filename, bytes);
-        if (path) toast.success(`Saved ${file.filename}`);
-      } else {
-        const url = URL.createObjectURL(
-          new Blob([bytes], { type: "text/plain;charset=utf-8" })
-        );
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      if (!(await saveBytes(file.filename, bytes, "text/plain;charset=utf-8"))) return;
+      toast.success(`Exported ${file.filename}`);
       onClose();
     } catch (e) {
       toast.error(e instanceof WpsError ? e.problems[0] : errMsg(e));
