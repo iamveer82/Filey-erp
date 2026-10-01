@@ -102,8 +102,8 @@ Sign up with any email/password and you're in.
 npm run tauri build  # outputs to src-tauri/target/release/bundle/
 ```
 
-Or push a `filey-erp-v*` tag to build macOS/Windows/Linux installers via
-the GitHub Actions release workflow.
+Or push a `vMAJOR.MINOR.PATCH` tag matching the application version to build
+macOS/Windows/Linux installers as a draft in the GitHub Actions release workflow.
 
 ### 5. Build & deploy the web app
 

@@ -26,4 +26,71 @@ assert.equal(matrices[0].length, 1, "Recovery must build one platform only");
 assert.equal(matrices[0][0].rust_target, "x86_64-apple-darwin");
 assert.equal(matrices[1].length, 4, "Normal releases must retain all platforms");
 assert.equal(workflow.jobs.build.steps.find(step => step.uses === "actions/checkout@v4").with.ref, "${{ inputs.intel_recovery_tag || github.ref }}");
-console.log("Release recovery preserves existing assets and builds Intel from the original tag.");
+const versionGuard = workflow.jobs.build.steps.find(step => step.name === "Check release version");
+assert.equal(versionGuard.if, "github.ref_type == 'tag' || inputs.intel_recovery_tag != ''");
+assert.equal(versionGuard.env.TAG, "${{ inputs.intel_recovery_tag || github.ref_name }}");
+function checkVersion(tag, versions = {}) {
+  const version = "3.0.10";
+  const files = new Map([
+    ["package.json", JSON.stringify({ version: versions.package ?? version })],
+    ["package-lock.json", JSON.stringify({ version: versions.lock ?? version, packages: { "": { version: versions.lockRoot ?? version } } })],
+    ["src-tauri/tauri.conf.json", JSON.stringify({ version: versions.tauri ?? version })],
+    ["src-tauri/Cargo.toml", `[package]\nname = "filey-erp"\nversion = "${versions.cargo ?? version}"\n`],
+    ["src-tauri/Cargo.lock", `[[package]]\nname = "filey-erp"\nversion = "${versions.cargoLock ?? version}"\n`],
+  ]);
+  runInNewContext(versionGuard.run.match(/node -e '([^']+)'/)[1], {
+    require: () => ({ readFileSync: path => files.get(path) }),
+    process: { env: { TAG: tag } },
+  });
+}
+assert.doesNotThrow(() => checkVersion("v3.0.10"));
+for (const field of ["package", "lock", "lockRoot", "tauri", "cargo", "cargoLock"]) {
+  assert.throws(() => checkVersion("v3.0.10", { [field]: "3.0.9" }), /Release tag does not match/, `Reject stale ${field} version metadata`);
+}
+assert.throws(() => checkVersion("v3.00.01"), /Release tag does not match/);
+
+const draftGuard = workflow.jobs.build.steps.find(step => step.name === "Check release draft state");
+assert.equal(draftGuard.if, versionGuard.if);
+assert.match(draftGuard.run, /set -euo pipefail[\s\S]*gh api --paginate --slurp/, "Unexpected API errors must stop before packaging");
+function checkDraftState(releases) {
+  runInNewContext(draftGuard.run.match(/node -e '([^']+)'/)[1], {
+    require: () => releases,
+    process: { env: { TAG: "v3.0.10" } },
+  });
+}
+assert.doesNotThrow(() => checkDraftState([[]]));
+assert.doesNotThrow(() => checkDraftState([[{ tag_name: "v3.0.9", draft: false }], [{ tag_name: "v3.0.10", draft: true }]]));
+assert.throws(() => checkDraftState([[], [{ tag_name: "v3.0.10", draft: false }]]), /Published releases must not be rebuilt/);
+
+const verifyJob = workflow.jobs["verify-release-assets"];
+assert.equal(verifyJob.needs, "build", "Sanitize only after every platform finishes merging latest.json");
+const protect = verifyJob.steps.find(step => step.name === "Protect legacy Linux updaters");
+const manifestGuard = protect.run.match(/node -e '([^']+)'/)[1];
+function sanitizeManifest(manifest, isDraft = true) {
+  const files = new Map([
+    ["release.json", JSON.stringify({ isDraft })],
+    ["updater/latest.json", JSON.stringify(manifest)],
+  ]);
+  runInNewContext(manifestGuard, {
+    require: () => ({ readFileSync: path => files.get(path), writeFileSync: (path, content) => files.set(path, content) }),
+  });
+  return { manifest: JSON.parse(files.get("updater/latest.json")), changed: files.has("updater/changed") };
+}
+const manifest = {
+  version: "3.0.10", notes: "Release notes", platforms: {
+    "linux-x86_64": { url: "https://example.com/filey.deb", signature: "deb-signature" },
+    "linux-x86_64-deb": { url: "https://example.com/filey.deb", signature: "deb-signature" },
+    "linux-x86_64-rpm": { url: "https://example.com/filey.rpm", signature: "rpm-signature" },
+    "darwin-aarch64": { url: "https://example.com/filey.app.tar.gz", signature: "mac-signature" },
+  },
+};
+const safe = sanitizeManifest(manifest);
+const expected = structuredClone(manifest);
+delete expected.platforms["linux-x86_64"];
+assert.deepEqual(safe.manifest, expected, "Remove the AppImage fallback while preserving every explicit package target and signature");
+assert.equal(safe.changed, true);
+assert.equal(sanitizeManifest(safe.manifest).changed, false, "Do not replace an unchanged manifest");
+assert.throws(() => sanitizeManifest(manifest, false), /Published release assets must not be replaced/);
+assert.match(protect.run, /if \[ -f updater\/changed \]; then/, "Only changed drafts should be uploaded");
+assert.match(workflow.jobs.build.steps.find(step => step.name === "Upload installers as workflow artifacts").with.path, /\*\*\/\*\.app\.tar\.gz/);
+console.log("Release guards reject version mismatches and unsafe Linux fallback while preserving recovery and platform assets.");
