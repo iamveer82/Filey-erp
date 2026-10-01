@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useMemo,
   useState,
@@ -68,7 +69,7 @@ const Ctx = createContext<UIValue | null>(null);
 let nextId = 1;
 
 export function UIProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<(Toast & { expiresAt: number })[]>([]);
   const [confirmState, setConfirmState] = useState<
     (ConfirmOpts & { resolve: (v: boolean) => void; returnFocus: Element | null }) | null
   >(null);
@@ -81,13 +82,18 @@ export function UIProvider({ children }: { children: ReactNode }) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
+  useEffect(() => {
+    const timers = toasts.map(({ id, expiresAt }) => setTimeout(() => dismiss(id), Math.max(0, expiresAt - Date.now())));
+    return () => timers.forEach(timer => clearTimeout(timer));
+  }, [toasts, dismiss]);
+
   const add = useCallback(
     (toast: Omit<Toast, "id">, ttl = 4000) => {
       const id = nextId++;
-      setToasts((t) => [...t, { ...toast, id }]);
-      setTimeout(() => dismiss(id), ttl);
+      const expiresAt = Date.now() + ttl;
+      setToasts((t) => [...t, { ...toast, id, expiresAt }]);
     },
-    [dismiss]
+    []
   );
 
   const toast = useMemo(() => ({
