@@ -72,10 +72,18 @@ jobs:
       - name: Launch and relaunch Android app
         timeout-minutes: 12
         run: |
-          mkdir -p mobile-smoke/android
+          export ANDROID_USER_HOME="$RUNNER_TEMP/filey-android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME" mobile-smoke/android
           sudo chmod a+rw /dev/kvm
           echo no | avdmanager create avd --force --name filey-ci \
-            --package "system-images;android-35;google_apis;x86_64" --device pixel_7
+            --package "system-images;android-35;google_apis;x86_64" --device pixel_7 \
+            --path "$ANDROID_AVD_HOME/filey-ci.avd"
+          test -s "$ANDROID_AVD_HOME/filey-ci.ini"
+          test -s "$ANDROID_AVD_HOME/filey-ci.avd/config.ini"
+          avdmanager list avd
+          "$ANDROID_HOME/emulator/emulator" -list-avds > mobile-smoke/android/avds.txt
+          grep -Fxq filey-ci mobile-smoke/android/avds.txt
           nohup "$ANDROID_HOME/emulator/emulator" -avd filey-ci -port 5554 \
             -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader \
             > mobile-smoke/android/emulator.log 2>&1 &
