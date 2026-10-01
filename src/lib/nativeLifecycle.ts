@@ -75,4 +75,3 @@ export async function startNativeLifecycle(): Promise<() => void> {
   if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
   return () => handles.forEach(handle => void handle.remove());
 }
-

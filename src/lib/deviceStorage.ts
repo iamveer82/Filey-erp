@@ -129,9 +129,13 @@ export async function writeDeviceValues(entries: readonly (readonly [string, str
   }
 }
 
-export const writeDeviceValue = (key: string, value: string | null): Promise<void> => hasTauri
-  ? invoke("cache_set", { key, value: value ?? "" })
-  : writeDeviceValues([[key, value]]);
+export async function writeDeviceValue(key: string, value: string | null): Promise<void> {
+  if (hasTauri) await invoke("cache_set", { key, value: value ?? "" });
+  else if (isNativeApp()) await writeDeviceValues([[key, value]]);
+  // Browser setItem is already atomic for one key; a failed save needs no undo.
+  else if (value === null) localStorage.removeItem(key);
+  else localStorage.setItem(key, value);
+}
 
 // Only the Supabase session uses preferences. Provider API keys stay in memory.
 export const nativeAuthStorage = {

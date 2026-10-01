@@ -26,6 +26,8 @@ import { peekCredential, readCredential, saveCredential, hasCredential } from ".
 import { creditChoice, createCreditFetch } from "./aiCredits";
 import { agentProgressRecorder, priorAgentProgress } from "./agentRunState";
 import { botAppearance } from "./botAppearance";
+import { CapacitorHttp } from "@capacitor/core";
+import { isNativeApp } from "./nativePlatform";
 
 export type AiProvider = "openai" | "anthropic";
 
@@ -507,8 +509,8 @@ function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
   ]);
 }
 
-/** One request. In the browser this is plain fetch (CORS applies — only
- *  providers that allow browser calls work). Under Tauri it goes through the
+/** One request. Browser fetch requires provider CORS; mobile uses native HTTPS.
+ *  Under Tauri it goes through the
  *  native `ai_proxy` command, which has no CORS, so any OpenAI-compatible /
  *  Anthropic endpoint (Ollama Cloud, Groq, Mistral, xAI, …) works on desktop.
  *
@@ -520,6 +522,31 @@ function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
  *  needs a request id and a cancel command; add it if that waste ever shows up
  *  on a bill. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
+  if (isNativeApp()) {
+    const url = aiEndpoint(input);
+    if (!url || url.protocol !== "https:")
+      throw new AiError("Mobile AI providers require a valid HTTPS endpoint without embedded credentials.");
+    if (init.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (init.body != null && typeof init.body !== "string")
+      throw new AiError("Mobile AI requests require a JSON string body.");
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, key) => { headers[key] = value; });
+    const r = await withAbort(CapacitorHttp.request({
+      url: url.href,
+      method: (init.method ?? "GET").toUpperCase(),
+      headers,
+      data: init.body ?? undefined,
+      responseType: "text",
+      // Never forward provider credentials to a redirected host or HTTP URL.
+      disableRedirects: true,
+      connectTimeout: REQUEST_TIMEOUT_MS,
+      readTimeout: REQUEST_TIMEOUT_MS,
+    }), init.signal);
+    // Capacitor parses application/json even when responseType is text.
+    const body = [204, 205, 304].includes(r.status) ? null
+      : typeof r.data === "string" ? r.data : JSON.stringify(r.data);
+    return new Response(body, { status: r.status, headers: r.headers });
+  }
   if (!isTauri) {
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
       const url = aiEndpoint(input);
@@ -583,7 +610,7 @@ export async function aiFetch(
     }
   }
   throw new AiError(
-    redactAiError(`${lastErr instanceof Error ? lastErr.message : typeof lastErr === "string" ? lastErr : "AI request failed after retries"}. ${isTauri ? "Check the API URL and your network connection." : "Check the API URL and network. Some providers block browser requests; use the Filey desktop app for those providers."}`, init.headers)
+    redactAiError(`${lastErr instanceof Error ? lastErr.message : typeof lastErr === "string" ? lastErr : "AI request failed after retries"}. ${isTauri || isNativeApp() ? "Check the API URL and your network connection." : "Check the API URL and network. Some providers block browser requests; use the Filey desktop app for those providers."}`, init.headers)
   );
 }
 

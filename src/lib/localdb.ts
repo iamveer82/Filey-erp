@@ -3,8 +3,8 @@
 // call site works unchanged and no data ever leaves the machine.
 //
 // ponytail: one JSON array per collection, loaded/saved whole, stored in the
-// existing SQLite kv_cache table (Tauri) or localStorage (browser dev). Single-user
-// desktop → collections are small and writes are serial, so whole-array
+// SQLite kv_cache (desktop), IndexedDB (native phones), or localStorage (web).
+// Collections are small and writes are serial, so whole-array
 // read-modify-write is fine. Move to row-level SQL only if a table grows big
 // enough to lag.
 
@@ -48,7 +48,7 @@ function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
  *  away: mutating a returned row never reached storage before either — only
  *  saveColl writes — so any code doing it was already a no-op bug.
  *
- *  DESKTOP ONLY. Under Tauri this process owns the SQLite store, so a parsed
+ *  PACKAGED APPS ONLY. This process owns the desktop/phone store, so a parsed
  *  collection stays true until we write it. In a browser a second tab writes
  *  the same localStorage key behind our back and a stale memo would serve rows
  *  another tab deleted. Browser mode re-reads; localStorage is synchronous and

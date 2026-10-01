@@ -62,3 +62,21 @@ The native projects register `filey://app/...` for validated app deep links.
 HTTPS association for `app.gofiley.com` is not configured. iOS includes the
 Preferences and Filesystem privacy reasons. Launcher and splash art use
 `public/icons/filey-ios-v2.png` and `src-tauri/icons/icon.png`.
+
+## Phone behavior
+
+Email/password, typed verification codes, MFA and workspace access use the
+same gates as the main app. Native sessions use Preferences. Device records,
+file data, sync journals and cloud caches use IndexedDB; multi-table workspace
+copies and edits commit transactionally. Stored books retain their owning
+account independently of WebView settings. Export backups before uninstalling.
+
+PDFs, CSVs, XML and other exports open the phone's save/share sheet. AI outputs
+are saved privately and can be shared from chat. Payment links open outside
+Filey's WebView, with account and Coin checks resumed on return. Provider API
+keys remain in the existing in-memory vault; they are not saved in Preferences.
+
+Desktop computer control and the linked-device WhatsApp sidecar still require
+the desktop app. Native push notifications and App Store/Google Play billing
+are not configured in these test builds. No store upload or desktop updater
+release is performed by the mobile workflow.

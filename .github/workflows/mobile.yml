@@ -56,7 +56,8 @@ jobs:
           java-version: 21
       - name: Install Android SDK packages
         run: |
-          sdkmanager "platforms;android-35" "build-tools;34.0.0" "platform-tools" \
+          printf '%s\n' "$ANDROID_HOME/cmdline-tools/latest/bin" "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;34.0.0" "platform-tools" \
             "emulator" "system-images;android-35;google_apis;x86_64"
       - run: npm ci --no-audit --no-fund
       - run: npm run build
