@@ -1,7 +1,7 @@
 // Which Supabase project this build talks to, and whether cloud is usable at
 // all. A leaf module on purpose: dataMode.ts needs this to resolve the mode a
-// build actually uses (the hosted web app never shows the storage picker, so
-// nothing writes filey_data_mode there), and it must be able to read it without
+// build actually uses (older web sessions may have no filey_data_mode choice),
+// and it must be able to read it without
 // importing supabase.ts — that would be a cycle, because supabase.ts asks
 // dataMode.ts whether it is in local mode.
 //

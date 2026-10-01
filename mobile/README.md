@@ -67,6 +67,7 @@ and web directory to the root `dist`. Native sources, manifests and icons
 are tracked; generated web assets, build output, SDK paths and signing files
 are ignored. Run `npm run cap:sync` after web or plugin changes. The mobile
 version is 3.0.9 with build number 1; desktop release versioning is separate.
+Native bridge logging is disabled in debug and release builds to keep session data and provider credentials out of device logs.
 The update hook keeps generated Swift package paths portable when syncing on
 Windows.
 
@@ -76,6 +77,8 @@ Preferences and Filesystem privacy reasons. Launcher and splash art use
 `public/icons/filey-ios-v2.png` and `src-tauri/icons/icon.png`.
 
 ## Phone behavior
+
+First launch asks you to choose Local or Cloud, remembers your choice and lets you switch in Settings; existing signed-in accounts and workspaces are preserved.
 
 Email/password, typed verification codes, MFA and workspace access use the
 same gates as the main app. Native sessions use Preferences. Device records,

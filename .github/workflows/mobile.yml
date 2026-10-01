@@ -17,6 +17,7 @@ on:
       - mobile/**
       - scripts/build-mobile-android.mjs
       - scripts/fix-mobile-ios-paths.mjs
+      - scripts/check-mobile-screenshot.swift
       - .github/workflows/mobile.yml
   pull_request:
     paths:
@@ -33,6 +34,7 @@ on:
       - mobile/**
       - scripts/build-mobile-android.mjs
       - scripts/fix-mobile-ios-paths.mjs
+      - scripts/check-mobile-screenshot.swift
       - .github/workflows/mobile.yml
   workflow_dispatch:
 
@@ -175,6 +177,7 @@ jobs:
         timeout-minutes: 8
         run: |
           mkdir -p mobile-smoke/ios
+          xcrun swiftc scripts/check-mobile-screenshot.swift -o "$RUNNER_TEMP/check-mobile-screenshot"
           SIMULATOR_ID=$(xcrun simctl create Filey-CI \
             com.apple.CoreSimulator.SimDeviceType.iPhone-16 \
             com.apple.CoreSimulator.SimRuntime.iOS-18-5)
@@ -191,13 +194,17 @@ jobs:
               --stdout="$PWD/mobile-smoke/ios/$phase-stdout.log" \
               --stderr="$PWD/mobile-smoke/ios/$phase-stderr.log" \
               "$SIMULATOR_ID" com.filey.app > "mobile-smoke/ios/$phase-launch.txt"
+            screen_visible=0
             for attempt in {1..30}; do
-              if grep -q 'WebView loaded' "mobile-smoke/ios/$phase-stdout.log"; then
+              xcrun simctl io "$SIMULATOR_ID" screenshot "mobile-smoke/ios/$phase.png"
+              if "$RUNNER_TEMP/check-mobile-screenshot" "mobile-smoke/ios/$phase.png" \
+                > "mobile-smoke/ios/$phase-ui.txt" 2>&1; then
+                screen_visible=1
                 break
               fi
               sleep 2
             done
-            grep -q 'WebView loaded' "mobile-smoke/ios/$phase-stdout.log"
+            test "$screen_visible" = 1
             sleep 3
             xcrun simctl spawn "$SIMULATOR_ID" launchctl list > "mobile-smoke/ios/$phase-processes.txt"
             grep -Eq '^[[:space:]]*[0-9]+[[:space:]]+[-0-9]+[[:space:]]+UIKitApplication:com\.filey\.app' \
