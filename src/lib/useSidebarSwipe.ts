@@ -30,11 +30,13 @@ export function useSidebarSwipe(
       if (!(target instanceof Element) || target.closest('input,textarea,select,canvas,[contenteditable="true"],[role="slider"],.filey-table-scroll')) return;
       if (document.querySelector('[aria-modal="true"]:not(#workspace-sidebar)')) return;
       const touch = event.touches[0];
-      // Leave Safari's outer edge and ordinary buttons/links to native gestures.
-      if (!open && (touch.clientX < 16 || touch.clientX > 48 || target.closest('button,a,[role="button"]'))) return;
+      if (!open && (touch.clientX > 48 || target.closest('button,a,[role="button"]'))) return;
       if (open && !panel.contains(target) && target !== backdrop) return;
       gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY, time: event.timeStamp,
         width: panel.getBoundingClientRect().width, distance: 0, dragging: false };
+      // Reserve the outer 16px for the drawer before Safari can start history
+      // navigation. Native page scrolling stays available outside this strip.
+      if (!open && touch.clientX < 16 && event.cancelable) event.preventDefault();
     };
     const move = (event: TouchEvent) => {
       if (!gesture) return;
@@ -51,7 +53,7 @@ export function useSidebarSwipe(
         // distance at the closed page edge lets mobile scrolling own the touch.
         // Ambiguous/diagonal movement still belongs to the native scroller.
         if (dx === 0 || Math.abs(dx) < Math.abs(dy) * 2) return;
-        if ((open && dx > 0) || (!open && dx < 0)) { reset(); return; }
+        if (!open && dx < 0) { reset(); return; }
         gesture.dragging = true;
         host.dataset.sidebarDragging = "true";
       }
@@ -73,6 +75,7 @@ export function useSidebarSwipe(
       const elapsed = Math.max(1, event.timeStamp - gesture.time);
       const commit = gesture.distance > gesture.width * 0.35
         || (gesture.distance > 40 && gesture.distance / elapsed > 0.45);
+      if (event.cancelable) event.preventDefault();
       suppressClickUntil.current = Date.now() + 400;
       reset();
       if (commit) setOpen(!open);
@@ -84,9 +87,9 @@ export function useSidebarSwipe(
     const click = (event: MouseEvent) => {
       if (Date.now() < suppressClickUntil.current) { event.preventDefault(); event.stopPropagation(); }
     };
-    host.addEventListener("touchstart", start, { passive: true });
+    host.addEventListener("touchstart", start, { passive: false });
     host.addEventListener("touchmove", move, { passive: false });
-    host.addEventListener("touchend", end);
+    host.addEventListener("touchend", end, { passive: false });
     host.addEventListener("touchcancel", cancel);
     host.addEventListener("click", click, true);
     window.addEventListener("blur", cancel);
