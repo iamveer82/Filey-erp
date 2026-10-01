@@ -4,7 +4,7 @@ import PackageDescription
 // DO NOT MODIFY THIS FILE - managed by Capacitor CLI commands
 let package = Package(
     name: "CapApp-SPM",
-    platforms: [.iOS(.v14)],
+    platforms: [.iOS(.v17)],
     products: [
         .library(
             name: "CapApp-SPM",
@@ -17,7 +17,8 @@ let package = Package(
         .package(name: "CapacitorBrowser", path: "../../../../node_modules/@capacitor/browser"),
         .package(name: "CapacitorFilesystem", path: "../../../../node_modules/@capacitor/filesystem"),
         .package(name: "CapacitorPreferences", path: "../../../../node_modules/@capacitor/preferences"),
-        .package(name: "CapacitorShare", path: "../../../../node_modules/@capacitor/share")
+        .package(name: "CapacitorShare", path: "../../../../node_modules/@capacitor/share"),
+        .package(name: "CapacitorStatusBar", path: "../../../../node_modules/@capacitor/status-bar")
     ],
     targets: [
         .target(
@@ -30,7 +31,8 @@ let package = Package(
                 .product(name: "CapacitorBrowser", package: "CapacitorBrowser"),
                 .product(name: "CapacitorFilesystem", package: "CapacitorFilesystem"),
                 .product(name: "CapacitorPreferences", package: "CapacitorPreferences"),
-                .product(name: "CapacitorShare", package: "CapacitorShare")
+                .product(name: "CapacitorShare", package: "CapacitorShare"),
+                .product(name: "CapacitorStatusBar", package: "CapacitorStatusBar")
             ]
         )
     ]

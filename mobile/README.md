@@ -61,6 +61,7 @@ artifacts. The iOS artifact is a simulator `.app` ZIP, not an iPhone IPA.
 The `filey-android-smoke` and `filey-ios-smoke` artifacts contain launch and
 relaunch screenshots plus diagnostics from fresh emulators; no account or
 customer actions run during those checks.
+Both platforms launch in light appearance and relaunch in dark appearance to validate the app theme and status-bar contrast.
 
 `capacitor.config.ts` sets the bundle ID to `com.filey.app`, app name to Filey
 and web directory to the root `dist`. Native sources, manifests and icons

@@ -1,5 +1,7 @@
 import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
+import { StatusBar, Style } from "@capacitor/status-bar";
+import { Capacitor } from "@capacitor/core";
 import { isNativeApp } from "./nativePlatform";
 import { supabase } from "./supabase";
 import { initMonitoring } from "./monitoring";
@@ -29,6 +31,15 @@ export function nativeAppRoute(value: string): string | null {
 
 export async function startNativeLifecycle(): Promise<() => void> {
   if (!isNativeApp()) return () => {};
+  const android = Capacitor.getPlatform() === "android";
+  const syncStatusBar = () => {
+    const dark = document.documentElement.classList.contains("dark");
+    void Promise.all([
+      StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }),
+      ...(android ? [StatusBar.setBackgroundColor({ color: dark ? "#0a0a0a" : "#ffffff" })] : []),
+    ])
+      .catch(() => { /* Cosmetic failure must not interrupt startup or auth. */ });
+  };
   const routeLink = (url: string) => {
     const route = nativeAppRoute(url);
     if (!route || window.location.hash === `#${route}`) return;
@@ -52,7 +63,7 @@ export async function startNativeLifecycle(): Promise<() => void> {
   const handles = await Promise.all([
     App.addListener("appUrlOpen", ({ url }) => routeLink(url)),
     App.addListener("appStateChange", ({ isActive }) => {
-      if (isActive) { supabase?.auth.startAutoRefresh(); void resume(); }
+      if (isActive) { syncStatusBar(); supabase?.auth.startAutoRefresh(); void resume(); }
       else supabase?.auth.stopAutoRefresh();
     }),
     Browser.addListener("browserFinished", () => void resume()),
@@ -73,5 +84,12 @@ export async function startNativeLifecycle(): Promise<() => void> {
   const launch = await App.getLaunchUrl();
   if (launch) routeLink(launch.url);
   if (!window.location.hash.startsWith("#/reset-password")) initMonitoring();
-  return () => handles.forEach(handle => void handle.remove());
+  // Restore Android <=34's original layout; Android 35 still enforces edge-to-edge.
+  if (android) void StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+  syncStatusBar();
+  window.addEventListener("filey-ui", syncStatusBar);
+  return () => {
+    window.removeEventListener("filey-ui", syncStatusBar);
+    handles.forEach(handle => void handle.remove());
+  };
 }
