@@ -34,6 +34,7 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
   let providerStatus = 200, walletError = "";
   const events: string[] = [];
   const walletArgs: Record<string, unknown>[] = [];
+  const providerRequests: Record<string, unknown>[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url === "https://fixture.supabase.co/auth/v1/user") {
@@ -65,14 +66,12 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
       providers++;
       events.push("provider");
       const request = JSON.parse(String(init?.body));
+      providerRequests.push(request);
       assert(
         request.user_id === id,
         "Provider isolation must override forged request identity",
       );
-      assert(
-        request.model === "deepseek-flash" &&
-          request.reasoning_effort === "low",
-      );
+      assert(request.model === "deepseek-flash");
       assert(
         !request.provider && !request.usage && !request.baseURL &&
           !request.api_key,
@@ -184,6 +183,11 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
     const response = await call();
     const body = await response.json();
     assert(
+      (providerRequests[0].thinking as { type: string }).type === "disabled" &&
+        !("reasoning_effort" in providerRequests[0]),
+      "Hosted Filey AI must explicitly default thinking off without a positive effort override",
+    );
+    assert(
       response.status === 200 && body.charged_micros === 41 &&
         body.completion.model === "filey-ai",
     );
@@ -217,10 +221,33 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
         events.join(",") === "reserve,provider,release" &&
         Number(providers) === 2,
     );
+    providerStatus = 200;
+    const reasoningResponse = await call({ request: {
+      model: "filey-ai",
+      messages: [{ role: "user", content: "Think through this fixture" }],
+      reasoning_enabled: true,
+      reasoning_effort: "high",
+      tools: [{ type: "function", function: { name: "list_invoices", parameters: { type: "object", properties: {} } } }],
+    } });
+    const reasoningBody = await reasoningResponse.json();
+    const enabled = providerRequests[2];
+    assert(
+      reasoningResponse.status === 200 && Number(providers) === 3 &&
+        events.join(",") === "reserve,provider,settle" &&
+        (enabled.thinking as { type: string }).type === "enabled" &&
+        enabled.reasoning_effort === "high" &&
+        !("reasoning_enabled" in enabled),
+      "An explicit reasoning toggle must reach the fixed hosted provider contract",
+    );
+    assert(
+      reasoningBody.charged_micros === 41 &&
+        reasoningBody.completion.choices[0].message.reasoning_content === "Fixture",
+      "Reasoning-on tool requests retain real reasoning and the verified usage tariff",
+    );
     values.delete("FILEY_AI_DEEPSEEK_KEY");
     assert(
       (await call()).status === 503 && events.length === 0 &&
-        Number(providers) === 2,
+        Number(providers) === 3,
       "An old OpenRouter key cannot provide a hosted fallback",
     );
   } finally {
