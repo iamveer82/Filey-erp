@@ -68,6 +68,25 @@ async function collect(stream: AsyncGenerator<AgentEvent, string, void>) {
   }
 }
 
+it("discards a provider reply if the workspace changed away and back while it was pending", async () => {
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const fetchFn = vi.fn(async () => {
+    await pending;
+    return new Response(JSON.stringify(oa("Private original workspace answer")));
+  });
+  const result = collect(runAgentStream([{ role: "user", text: "Review finance" }], {}, {
+    cfg: { provider: "openai", baseUrl: "https://example.test", model: "test", apiKey: "test" }, fetchFn,
+  }));
+  await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledOnce());
+  setCacheOrg("other-org", "test-user");
+  setCacheOrg("test-org", "test-user");
+  const stopped = expect(result).rejects.toMatchObject({ name: "AbortError" });
+  release();
+  await stopped;
+  expect(fetchFn).toHaveBeenCalledOnce();
+});
+
 it("persists the call before dispatch and restores its record reference on follow-up", async () => {
   setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "test" });
   setAgentMode("accept_edits");

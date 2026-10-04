@@ -64,6 +64,10 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
   if (payload.model !== undefined && payload.model !== FILEY_AI_MODEL_ID) {
     throw new FileyAIError("Select Filey AI to use Coins.", 400);
   }
+  if (payload.reasoning_enabled !== undefined && typeof payload.reasoning_enabled !== "boolean") {
+    throw new FileyAIError("Choose whether reasoning is on or off.", 400);
+  }
+  const reasoningEnabled = payload.reasoning_enabled === true;
   let prepared;
   try {
     prepared = prepareCreditRequest(payload, RESERVATION_MODEL);
@@ -77,17 +81,18 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
   ) {
     throw new FileyAIError("Choose a supported reasoning level.", 400);
   }
-  // DeepSeek requires the exact reasoning from earlier tool turns. Reject an
-  // incompatible old-provider continuation before reserving or sending it.
+  // Thinking + tools requires exact reasoning on every prior assistant turn,
+  // including plain replies. OFF runs need no trace. When switching ON, callers
+  // pass prior UI history as quoted context, never fabricated reasoning.
   for (const source of prepared.request.messages) {
     const message = source as Record<string, unknown>;
     if (
-      message.role === "assistant" && Array.isArray(message.tool_calls) &&
-      message.tool_calls.length &&
+      reasoningEnabled && prepared.request.tools !== undefined &&
+      message.role === "assistant" &&
       typeof message.reasoning_content !== "string"
     ) {
       throw new FileyAIError(
-        "This conversation cannot be continued with Filey AI. Start a new chat.",
+        "Turn reasoning off for this conversation, or start a new chat to use reasoning.",
         400,
       );
     }
@@ -106,12 +111,15 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
       ...(prepared.request.tools ? { tools: prepared.request.tools } : {}),
       stream: false,
       max_tokens: prepared.request.max_tokens,
-      thinking: { type: "enabled" },
-      reasoning_effort: effort === "max"
-        ? "max"
-        : ["medium", "high", "xhigh"].includes(String(effort))
-        ? "high"
-        : "low",
+      thinking: { type: reasoningEnabled ? "enabled" : "disabled" },
+      // Positive effort values can enable thinking independently of the toggle.
+      ...(reasoningEnabled ? {
+        reasoning_effort: effort === "max"
+          ? "max"
+          : ["medium", "high", "xhigh"].includes(String(effort))
+          ? "high"
+          : "low",
+      } : {}),
     },
   };
 }
@@ -171,7 +179,7 @@ export function fileyAIUsage(completion: unknown, maxTokens: number) {
   };
 }
 
-function publicMessage(completion: unknown): FileyAIMessage {
+function publicMessage(completion: unknown, requiresReasoning: boolean): FileyAIMessage {
   if (
     !record(completion) || !Array.isArray(completion.choices) ||
     completion.choices.length !== 1 || !record(completion.choices[0]) ||
@@ -212,7 +220,7 @@ function publicMessage(completion: unknown): FileyAIMessage {
     );
   }
   if (
-    Array.isArray(calls) && calls.length &&
+    requiresReasoning &&
     typeof message.reasoning_content !== "string"
   ) throw new FileyAIError(USAGE_ERROR);
   return {
@@ -322,7 +330,7 @@ export async function fileyAICompletion(
     }
     const raw: unknown = await response.json();
     const usage = fileyAIUsage(raw, prepared.request.max_tokens);
-    const message = publicMessage(raw);
+    const message = publicMessage(raw, prepared.request.thinking.type === "enabled" && prepared.request.tools !== undefined);
     const source = raw as Record<string, unknown>;
     const completion = {
       id: source.id as string,

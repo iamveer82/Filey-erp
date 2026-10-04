@@ -20,7 +20,7 @@ import { skillsIndex } from "./agentSkills";
 import { modeSystemNote } from "./agentMode";
 import { journalDigest, recordRun, failuresFrom } from "./agentJournal";
 import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig, openAiHeaders, openAiGenerationOptions, anthropicGenerationOptions, type AiEffort, AI_DEV_ORIGINS } from "./aiEndpoint";
-import { agentStorageScope } from "./agentStorage";
+import { agentStorageScope, readAgentStorage, writeAgentStorage } from "./agentStorage";
 import { getCacheScope } from "./api";
 import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
 import { creditChoice, createCreditFetch, FILEY_AI_MODEL } from "./aiCredits";
@@ -33,6 +33,10 @@ export type AiProvider = "openai" | "anthropic";
 
 export interface AiConfig {
   billing?: "credits" | "free";
+  /** Managed Filey AI uses quick answers unless the user enables reasoning. */
+  reasoningEnabled?: boolean;
+  /** Managed effort is independent of a bring-your-own-provider setting. */
+  reasoningEffort?: AiEffort;
   provider: AiProvider;
   /** Base URL for the selected OpenAI-compatible or Anthropic API. */
   baseUrl: string;
@@ -99,9 +103,27 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
   return { ...cfg, apiKey: await readCredential(aiCredentialName(cfg), scope) ?? "" };
 }
 
+export function getFileyAiReasoning(): boolean {
+  return readAgentStorage("filey.ai.reasoning") === "true";
+}
+
+export function setFileyAiReasoning(enabled: boolean, expectedScope?: string): void {
+  writeAgentStorage("filey.ai.reasoning", String(enabled === true), expectedScope);
+}
+
+export function getFileyAiEffort(): "low" | "high" | "max" {
+  const saved = readAgentStorage("filey.ai.effort");
+  return saved === "high" || saved === "max" ? saved : "low";
+}
+
+export function setFileyAiEffort(effort: AiEffort, expectedScope?: string): void {
+  if (effort !== "low" && effort !== "high" && effort !== "max") throw new Error("Choose a supported Filey AI reasoning effort.");
+  writeAgentStorage("filey.ai.effort", effort, expectedScope);
+}
+
 export function getActiveAiConfig(): AiConfig {
   const choice = creditChoice();
-  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.funding === "credits" ? FILEY_AI_MODEL : "", apiKey: "", billing: choice.funding } : getAiConfig();
+  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.funding === "credits" ? FILEY_AI_MODEL : "", apiKey: "", billing: choice.funding, reasoningEnabled: getFileyAiReasoning(), reasoningEffort: getFileyAiEffort() } : getAiConfig();
 }
 
 async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
@@ -260,6 +282,7 @@ const WORKING_RULES =
   "When a user refers to a previous conversation or decision, use search_conversations or recall to recover the relevant context. History and remembered preferences are context, not permission to repeat a past send, purchase or edit. Verify current records before reusing an old result. " +
   "HOW TO WORK: look things up before you act on them. If the user names a customer, supplier, product, invoice or file, find it first — do not create a document for a name you have not confirmed exists, and do not quote a number you have not read. When a lookup comes back empty, say so and ask, rather than proceeding with the name as given; inventing the record is worse than pausing. " +
   "When the user dictates a document in one breath — 'PO for Rennox, purchasing OIL SN 500, qty 39.22, rate 3890' — decode it: the party after 'for' is the supplier on POs/bills and the customer on invoices/quotes/receipts, the product words are the description verbatim, 'qty' is the quantity, 'rate'/'price' is the per-unit price. Fill every field you were given, and ask only for what is genuinely missing — one short question, in document order. " +
+  "For clear routine requests, perform the necessary lookup and action directly without a plan or extra confirmation beyond the existing action approval controls. If asked to create an invoice like the last one, retrieve the matching latest invoice, reuse its confirmed details in a new draft with a new document number, and verify the saved result. Do not mark it sent or paid unless requested. " +
   "Report only what the tools actually returned. If a tool failed, the thing did not happen — never describe a result you did not receive, and never round a failure up to a success. " +
   "A failed call is normal and is not the end of the task. Recover within the user's requested work: correct valid arguments or use read tools to find the cause. A failed invoice does not authorize a quotation, sales order, purchase order, supplier bill or another replacement document; ask before changing the requested document type, and never probe unrelated writes to diagnose a failure. QuotaExceededError or a browser/device storage quota error means storage is full, not that an invoice plan cap was reached. Report a plan limit or usage count only when a trusted result explicitly establishes it; never infer a cap from how many invoices already exist. You will be told how many steps remain; use them for authorized recovery. If blocked on a user decision, say exactly what is needed.";
 
@@ -315,6 +338,7 @@ interface ChatOpts {
   funding?: "byok";
   maxTokens?: number;
   effort?: AiEffort;
+  reasoningEnabled?: boolean;
   temperature?: number;
   signal?: AbortSignal;
 }
@@ -378,7 +402,7 @@ async function openaiChat(
   const url = `${cfg.baseUrl.trim().replace(/\/+$/, "")}/chat/completions`;
   const body = {
     model: cfg.model.trim(),
-    ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.4, opts.effort),
+    ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.4, opts.effort ?? (cfg.billing === "credits" ? cfg.reasoningEffort : undefined), opts.reasoningEnabled ?? cfg.reasoningEnabled),
     messages: messages.map((m) => ({
       role: m.role,
       content: m.images?.length
@@ -723,6 +747,7 @@ export async function* aiAutonomousStream(
   opts: {
     maxTokens?: number;
     effort?: AiEffort;
+    reasoningEnabled?: boolean;
     maxRounds?: number;
     signal?: AbortSignal;
     onProgress?: (text: string) => void;
@@ -758,6 +783,7 @@ export async function* aiAutonomousStream(
   const stream = aiAgentStream(messages, {
     maxTokens: opts.maxTokens ?? 4096,
     effort: opts.effort,
+    reasoningEnabled: opts.reasoningEnabled,
     maxRounds: opts.maxRounds ?? 20,
     extraTools: [TASK_COMPLETE_TOOL],
     finishToolName: "task_complete",

@@ -567,6 +567,12 @@ export function getCacheScope(): string | null {
   return activeCacheOrg.includes(":user:") ? activeCacheOrg : null;
 }
 
+/** Account/workspace transitions invalidate pending work even when the user
+ * returns to the same scope before an asynchronous operation finishes. */
+export function getCacheIdentity(): number {
+  return cacheIdentity;
+}
+
 /** The selected organization, excluding the temporary sign-in cache. */
 export function getCacheOrg(): string | null {
   const scope = getCacheScope();
@@ -2332,6 +2338,9 @@ export const fin = {
       if (!isLocalMode()) {
         const { data, error } = await sb().rpc("filey_record_expense", { p_expense: row });
         if (error) throw new Error(["PGRST202", "42883", "42703"].includes(error.code) ? "Expense storage needs the latest database update. Apply the expense-entry migration before saving." : error.message);
+        if ((typeof data !== "number" && typeof data !== "string") || String(data).trim() === ""
+          || !Number.isSafeInteger(Number(data)) || Number(data) <= 0)
+          throw new Error("Expense save could not be confirmed. Check your expenses before trying again.");
         return Number(data);
       }
       return withLocalTransaction(async client => {

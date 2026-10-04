@@ -125,13 +125,14 @@ describe("the agent's view of the document toolbox", () => {
       expect(endTurn("file-tool-partial").map(file => file.name)).toEqual(["good.pdf-result.pdf"]);
     } finally { transform.mockRestore(); endTurn("file-tool-partial"); setCacheOrg(null); }
   });
-  it("does not save a finished tool output into a changed workspace", async () => {
+  it.each([false, true])("does not save a finished tool output after changing workspace (return to original: %s)", async returnToOriginal => {
     setDataMode("local");
     setCacheOrg("file-tool-original", "fixture-user");
     setTurnFile("file-tool-scope", new File(["fixture"], "source.pdf"));
     vi.mocked(deliverFile).mockClear();
     const transform = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementationOnce(async () => {
       setCacheOrg("file-tool-other", "fixture-user");
+      if (returnToOriginal) setCacheOrg("file-tool-original", "fixture-user");
       return [{ name: "compressed.pdf", bytes: new Uint8Array([1]) }];
     });
     try {

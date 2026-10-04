@@ -3,7 +3,7 @@
 .composer-control:disabled { opacity: .5; cursor: not-allowed; }
 .effort-slider { position: relative; height: 30px; }
 .effort-track { position: absolute; inset: 3px 0; overflow: hidden; border-radius: 999px; background: hsl(var(--hover)); }
-.effort-fill { height: 100%; width: var(--effort-fill); border-radius: inherit; background: hsl(var(--foreground)); transition: width 180ms ease-out; }
+.effort-fill { height: 100%; width: var(--effort-fill); border-radius: inherit; background: hsl(var(--foreground)); }
 .effort-slider input { position: relative; display: block; width: 100%; height: 30px; margin: 0; appearance: none; background: transparent; cursor: pointer; border-radius: 999px; }
 .effort-slider input::-webkit-slider-thumb { appearance: none; width: 28px; height: 28px; border-radius: 50%; background: hsl(var(--card)); border: 1px solid hsl(var(--muted-foreground)); }
 .effort-slider input::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: hsl(var(--card)); border: 1px solid hsl(var(--muted-foreground)); }
@@ -11,3 +11,12 @@
 .effort-change { animation: effort-change 220ms ease-out; }
 @keyframes effort-change { from { transform: scale(.7) rotate(-18deg); } to { transform: scale(1) rotate(0); } }
 @media (prefers-reduced-motion: reduce) { .effort-fill, .composer-control { transition: none; } .effort-change { animation: none; } }
+.effort-managed .effort-slider, .effort-managed .effort-slider input { height: 44px; }
+.effort-managed .effort-track { inset-block: 4px; }
+.effort-managed .effort-slider input::-webkit-slider-thumb { width: 36px; height: 36px; }
+.effort-managed .effort-slider input::-moz-range-thumb { width: 34px; height: 34px; }
+.effort-managed .effort-slider input:disabled { cursor: not-allowed; opacity: .5; }
+.effort-stops { position: absolute; inset: 0 18px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.effort-stops span { width: 5px; height: 5px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
+.effort-option-button { min-width: 44px; min-height: 44px; justify-content: center; }
+.effort-option-button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
