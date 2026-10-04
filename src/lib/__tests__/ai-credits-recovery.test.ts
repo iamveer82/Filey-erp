@@ -96,14 +96,76 @@ it.each([2, 3])("Stop releases pending authentication check %s immediately witho
 it("dispatches a cloud-funded round once and retrieves its pending result by the same owner-scoped request ID", async () => {
   invoke().mockResolvedValueOnce({ data: { state: "pending" }, error: null });
   const response = createCreditFetch()("ignored", request);
-  await vi.waitFor(() => expect(invoke()).toHaveBeenCalledOnce());
-  await vi.advanceTimersByTimeAsync(3000);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(invoke()).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(499);
+  expect(invoke()).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
   expect(await (await response).json()).toEqual(reply);
   expect(bodyAt(0)).toMatchObject({ action: "completion", recoverable: true, org_id: "fixture-org" });
   expect(bodyAt(1)).toEqual({ action: "completion_status", request_id: bodyAt(0).request_id, org_id: "fixture-org" });
   expect(bodyAt(1)).not.toHaveProperty("request");
   expect(invoke()).toHaveBeenCalledTimes(2);
   for (const [, options] of invoke().mock.calls) expect(options?.headers).toEqual({ Authorization: "Bearer fixture-user-token" });
+});
+
+it("delivers five healthy tool rounds in 2.5 seconds of polling instead of adding fifteen seconds", async () => {
+  invoke().mockImplementation(async (_name, options) => ({
+    data: (options?.body as Record<string, unknown>).action === "completion" ? { state: "pending" } : complete,
+    error: null,
+  }));
+  const send = createCreditFetch(), start = Date.now();
+  for (let round = 0; round < 5; round++) {
+    const response = send("ignored", request);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await (await response).json()).toEqual(reply);
+  }
+  expect(Date.now() - start).toBe(2500);
+  expect(invoke()).toHaveBeenCalledTimes(10);
+  const dispatches = invoke().mock.calls.map((_, index) => bodyAt(index)).filter(body => body.action === "completion");
+  expect(dispatches).toHaveLength(5);
+  expect(new Set(dispatches.map(body => body.request_id)).size).toBe(5);
+  expect(new Set(dispatches.map(body => body.run_id)).size).toBe(1);
+});
+
+it("backs healthy pending receipts off from 500ms to 1s to 1.5s and then stays at 3s", async () => {
+  const controller = new AbortController();
+  invoke().mockResolvedValue({ data: { state: "pending" }, error: null });
+  const response = createCreditFetch()("ignored", { ...request, signal: controller.signal });
+  const stopped = expect(response).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(invoke()).toHaveBeenCalledOnce();
+  for (const [index, delay] of [500, 1000, 1500, 3000, 3000].entries()) {
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(invoke()).toHaveBeenCalledTimes(index + 1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(invoke()).toHaveBeenCalledTimes(index + 2);
+  }
+  expect(new Set(invoke().mock.calls.map((_, index) => bodyAt(index).request_id)).size).toBe(1);
+  expect(invoke().mock.calls.slice(1).every((_, index) => bodyAt(index + 1).action === "completion_status")).toBe(true);
+  controller.abort();
+  await stopped;
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("keeps slow polling after a transient status failure even when the connection responds again", async () => {
+  invoke()
+    .mockResolvedValueOnce({ data: { state: "pending" }, error: null })
+    .mockResolvedValueOnce({ data: null, error: { name: "FunctionsFetchError", message: "Connection lost" } } as never)
+    .mockResolvedValueOnce({ data: { state: "pending" }, error: null });
+  const response = createCreditFetch()("ignored", request);
+  await vi.advanceTimersByTimeAsync(500);
+  expect(invoke()).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(invoke()).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(invoke()).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(invoke()).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await (await response).json()).toEqual(reply);
+  expect(invoke().mock.calls.map((_, index) => bodyAt(index).action)).toEqual(["completion", "completion_status", "completion_status", "completion_status"]);
 });
 
 it("recovers a lost dispatch acknowledgement using status and never submits inference again when its receipt exists", async () => {

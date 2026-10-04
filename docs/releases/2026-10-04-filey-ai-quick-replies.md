@@ -6,6 +6,8 @@ The managed request carries a strict `reasoning_enabled` boolean. The backend ma
 
 Routine clear requests use the required lookup and action directly. For an invoice based on the last invoice, the assistant retrieves the matching record, reuses confirmed details in a new draft with a new document number, and verifies the saved result. It does not mark the invoice sent or paid unless requested.
 
+Healthy cloud completion polling checks after 500 ms, 1 second, 1.5 seconds, then every 3 seconds. Transport failures and missing-receipt recovery keep the slower 3-second delay. Five immediately ready rounds incur 2.5 seconds of polling in the timer regression instead of 15 seconds. This is a controlled timing test, not a measured provider response-time promise. Account scoping, single dispatch, active wait budget, background pause and the shared server read limit remain enforced.
+
 Deploy the reviewed `ai-credits` handler and shared dependencies first, then the matching web build. No database migration, price change, credit grant, provider credential change or desktop updater release is required. Provider inference and tool calls still take time; this removes forced reasoning, not all request latency.
 
 Validation covers quick chat and tool turns without reasoning, explicit opt-in and opt-out, mode pinning across tool rounds, continuing an existing chat after switching modes, preference isolation, recovery, unchanged user-supplied providers, and frontend/backend type and build checks.

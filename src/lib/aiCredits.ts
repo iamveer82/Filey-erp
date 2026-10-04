@@ -310,9 +310,10 @@ async function recoverManagedCompletion(
     wake();
   });
   let action: "completion" | "completion_status" = "completion", submissions = 0;
+  let nextDelay = 0, pendingPolls = 0;
   try {
     for (let attempt = 0; attempt < 120; attempt++) {
-      await wait(attempt ? 3000 : 0);
+      await wait(nextDelay);
       assertCurrent();
       if (remaining() <= 0) break;
       let result: ManagedCompletion;
@@ -330,6 +331,8 @@ async function recoverManagedCompletion(
         if (!(error instanceof CompletionTransportError)) throw error;
         // A lost HTTP acknowledgement never authorizes a new model request.
         if (dispatchStarted) action = "completion_status";
+        pendingPolls = 3;
+        nextDelay = 3000;
         continue;
       }
       assertCurrent();
@@ -349,7 +352,15 @@ async function recoverManagedCompletion(
         // Only an owner-scoped missing receipt permits the exact original UUID
         // and payload to be submitted again. The server claims it atomically.
         action = "completion";
-      } else if (result?.state === "pending") action = "completion_status";
+        pendingPolls = 3;
+        nextDelay = 3000;
+      } else if (result?.state === "pending") {
+        action = "completion_status";
+        // Healthy short replies should not wait three seconds per tool round.
+        // Back off quickly; transport recovery keeps the slower cadence above.
+        nextDelay = [500, 1000, 1500, 3000][pendingPolls];
+        pendingPolls = Math.min(3, pendingPolls + 1);
+      }
       else throw new Error("Filey AI recovery is unavailable. Check your chat before trying again.");
     }
     throw new Error("Filey AI is still reconnecting. Your request was not repeated. Check your connection before continuing.");
