@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { aiAgent, aiChat, aiReady, getActiveAiConfig, getFileyAiReasoning, setFileyAiReasoning } from "../ai";
+import { aiAgent, aiChat, aiReady, getActiveAiConfig, getFileyAiEffort, getFileyAiReasoning, setFileyAiEffort, setFileyAiReasoning } from "../ai";
 import { agentStorageScope } from "../agentStorage";
 import { aiEffortLevels, openAiGenerationOptions } from "../aiEndpoint";
 import { setCacheOrg } from "../api";
@@ -130,4 +130,25 @@ it("can enable reasoning on a follow-up without inventing traces for previous re
   expect(request.messages).not.toContainEqual(expect.objectContaining({ role: "assistant" }));
   expect(request.messages).toContainEqual(expect.objectContaining({ role: "user", content: expect.stringContaining('"Draft prepared."') }));
   expect(request.messages).toContainEqual({ role: "user", content: "Now check it carefully." });
+});
+
+it("scopes managed effort separately and pins it throughout a tool run", async () => {
+  const scope = agentStorageScope()!;
+  expect(getFileyAiEffort()).toBe("low");
+  setFileyAiEffort("high", scope);
+  setFileyAiReasoning(true, scope);
+  const invoke = vi.fn().mockImplementationOnce(async () => {
+    setFileyAiEffort("max");
+    return response({ role: "assistant", content: "", reasoning_content: "Exact trace.", tool_calls: [{ id: "effort-memory", type: "function", function: { name: "recall", arguments: "{}" } }] });
+  }).mockResolvedValueOnce(response({ role: "assistant", content: "Done." }));
+  vi.spyOn(supabase!, "functions", "get").mockReturnValue({ invoke } as never);
+  await aiAgent([{ role: "user", text: "Check this." }], { isOwner: true });
+  for (const call of invoke.mock.calls) expect(call[1].body.request).toMatchObject({ reasoning_enabled: true, reasoning_effort: "high" });
+  expect(getFileyAiEffort()).toBe("max");
+  setCacheOrg("other-workspace", "managed-user");
+  expect(getFileyAiEffort()).toBe("low");
+  expect(() => setFileyAiEffort("high", scope)).toThrow(/account changed/i);
+  expect(() => setFileyAiEffort("xhigh")).toThrow(/supported/i);
+  setCacheOrg("managed-qa", "managed-user");
+  expect(getFileyAiEffort()).toBe("max");
 });

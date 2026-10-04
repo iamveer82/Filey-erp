@@ -37,7 +37,7 @@ import { VideoJobCard } from "../components/AgentVideoPanel";
 import AgentMediaPanel, { MediaJobCard } from "../components/AgentMediaPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
 import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
-import { getActiveAiConfig, getFileyAiReasoning, setFileyAiReasoning } from "../lib/ai";
+import { getActiveAiConfig, getFileyAiEffort, getFileyAiReasoning, setFileyAiEffort, setFileyAiReasoning } from "../lib/ai";
 import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
 import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, selectAgentBrowser } from "../lib/desktopBrowser";
 import { enableComputerUse, disableComputerUse } from "../lib/computerUse";
@@ -308,9 +308,15 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     return saved && Object.prototype.hasOwnProperty.call(EFFORT_LABELS, saved) ? saved as AiEffort : "auto";
   });
   const [reasoningEnabled, setReasoningEnabled] = useState(getFileyAiReasoning);
+  const [managedEffort, setManagedEffort] = useState(getFileyAiEffort);
   useEffect(() => {
     if (busy) return;
-    const refresh = () => setReasoningEnabled(getFileyAiReasoning());
+    const refresh = () => {
+      setReasoningEnabled(getFileyAiReasoning());
+      setManagedEffort(getFileyAiEffort());
+      const saved = readAgentStorage("filey.agent.effort");
+      setEffort(saved && Object.prototype.hasOwnProperty.call(EFFORT_LABELS, saved) ? saved as AiEffort : "auto");
+    };
     refresh();
     window.addEventListener(AGENT_STORAGE_EVENT, refresh);
     window.addEventListener("storage", refresh);
@@ -321,7 +327,12 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   }, [busy]);
   const browserPanel = useSyncExternalStore(subscribeBrowserPanel, getBrowserPanelState);
   const changeEffort = (next: AiEffort) => {
-    try { writeAgentStorage("filey.agent.effort", next, scope ?? undefined); setEffort(next); }
+    if (busy) return;
+    try {
+      if (modelConfig.billing === "credits") {
+        setFileyAiEffort(next, scope ?? undefined); setManagedEffort(getFileyAiEffort());
+      } else { writeAgentStorage("filey.agent.effort", next, scope ?? undefined); setEffort(next); }
+    }
     catch { setErr("Could not save the effort setting. Try again."); }
   };
   const changeReasoning = (enabled: boolean) => {
@@ -648,7 +659,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         { role: "user", text: goalText, images },
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
-      const selectedEffort = modelConfig.billing === "credits" ? "auto" : aiEffortLevels(modelConfig).includes(effort) ? effort : "auto";
+      const selectedEffort = modelConfig.billing === "credits" ? reasoningEnabled ? managedEffort : "auto" : aiEffortLevels(modelConfig).includes(effort) ? effort : "auto";
       const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort,
         ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm };
       const stream = auto
@@ -1163,7 +1174,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 }} />}
                 <div className="filey-composer-models">
                 {active && <AiFundingControl disabled={busy} compact />}
-                {active && <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort}
+                {active && <AgentEffortControl config={modelConfig} value={modelConfig.billing === "credits" ? managedEffort : effort} disabled={busy} onChange={changeEffort}
                   reasoningEnabled={reasoningEnabled} onReasoningChange={changeReasoning} />}
                 {/* Mic — dictation straight into the composer. Browser engine
                     (Chromium WebView2), free, no key. Hidden where the browser

@@ -29,6 +29,7 @@ import { log } from "./log";
 import type { AiConfig, AiMessage, AiImage } from "./ai";
 import { openAiHeaders, openAiGenerationOptions, anthropicGenerationOptions, type AiEffort } from "./aiEndpoint";
 import { agentStorageScope } from "./agentStorage";
+import { getCacheIdentity } from "./api";
 import { desktopBrowserSupported, getBrowserPanelState } from "./desktopBrowser";
 import { serviceError } from "./serviceError";
 
@@ -436,7 +437,7 @@ const openaiAdapter: Adapter = {
         headers: openAiHeaders(cfg.apiKey),
         body: JSON.stringify({
           model: cfg.model.trim(),
-          ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.3, opts.effort, opts.reasoningEnabled ?? cfg.reasoningEnabled),
+          ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.3, opts.effort ?? (cfg.billing === "credits" ? cfg.reasoningEffort : undefined), opts.reasoningEnabled ?? cfg.reasoningEnabled),
           messages: wire.convo,
           tools: tools.map((t) => ({
             type: "function",
@@ -702,9 +703,10 @@ export async function* runAgentStream(
   const unresolvedFailures = () => guard.unresolvedFailures();
   const budget = opts.budget ?? { requests: maxRounds, tools: 128 };
   const scope = agentStorageScope();
+  const identity = getCacheIdentity();
   const assertActive = () => {
     opts.signal?.throwIfAborted();
-    if (agentStorageScope() !== scope)
+    if (agentStorageScope() !== scope || getCacheIdentity() !== identity)
       throw new DOMException(
         "The workspace changed. Start a new task in the current workspace.",
         "AbortError"

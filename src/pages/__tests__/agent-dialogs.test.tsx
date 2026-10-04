@@ -20,7 +20,7 @@ import { billing, setCacheOrg } from "../../lib/api";
 import * as computer from "../../lib/computerUse";
 import { loadChats, saveChats, type Chat } from "../../lib/aiChats";
 import * as voice from "../../lib/voice";
-import { agentStorageScope, writeAgentStorage } from "../../lib/agentStorage";
+import { agentStorageScope, readAgentStorage, writeAgentStorage } from "../../lib/agentStorage";
 
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
@@ -593,10 +593,7 @@ it("starts Filey AI with reasoning off and ignores an old managed effort choice"
     yield { type: "text" as const, text: "Fast reply." }; return "Fast reply.";
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  const reasoning = screen.getByRole("switch", { name: "Reasoning" });
-  expect(reasoning).toHaveAttribute("aria-checked", "false");
-  expect(reasoning).toHaveTextContent("Off");
-  expect(reasoning).toHaveAttribute("title", "Reasoning off · Faster replies");
+  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toHaveAttribute("title", "Filey AI · Fast · Reasoning off");
   expect(screen.queryByRole("button", { name: /Reasoning effort/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("slider", { name: "Reasoning effort" })).not.toBeInTheDocument();
   expect(document.body).not.toHaveTextContent(/filey-ai|DeepSeek|deepseek-flash/);
@@ -612,24 +609,26 @@ it("turns Filey AI reasoning on and off for later turns and remembers only this 
     yield { type: "text" as const, text: "Managed reply." }; return "Managed reply.";
   });
   const view = render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  fireEvent.click(openManagedReasoning());
   expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
+  closeManagedEffort();
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Review this draft." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Managed reply.");
-  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: true, effort: "auto" });
+  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: true, effort: "low" });
   view.unmount();
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
   act(() => { setCacheOrg("other-org", "test-user"); });
-  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toBeInTheDocument();
   act(() => { setCacheOrg("test-org", "test-user"); });
-  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
-  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
+  fireEvent.click(openManagedReasoning());
+  closeManagedEffort();
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Quick follow-up." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
-  await waitFor(() => expect(screen.getByRole("switch", { name: "Reasoning" })).not.toBeDisabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).not.toBeDisabled());
   expect(stream.mock.calls[1][1]?.reasoningEnabled).toBe(false);
 });
 
@@ -641,7 +640,7 @@ it("keeps the current reasoning selection fixed during a running task", async ()
     yield { type: "text" as const, text: "Working." }; await done; return "Done.";
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  fireEvent.click(openManagedReasoning());
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Check this." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Working.");
@@ -655,4 +654,47 @@ it("keeps the current reasoning selection fixed during a running task", async ()
   expect(await screen.findByText("Done.")).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: "Reasoning" })).not.toBeDisabled();
   expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "false");
+});
+
+function openManagedEffort() {
+  const trigger = screen.getByRole("button", { name: /^Filey AI effort:/ });
+  if (trigger.getAttribute("aria-expanded") !== "true") fireEvent.click(trigger);
+  return screen.getByRole("slider", { name: "Filey AI effort" });
+}
+
+function openManagedReasoning() {
+  openManagedEffort();
+  if (!screen.queryByRole("switch", { name: "Reasoning" })) fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+  return screen.getByRole("switch", { name: "Reasoning" });
+}
+
+function closeManagedEffort() {
+  fireEvent.keyDown(screen.getByRole("slider", { name: "Filey AI effort" }), { key: "Escape" });
+}
+
+it("uses the managed slider effort without overwriting the user's own provider effort", async () => {
+  writeAgentStorage("filey.agent.effort", "xhigh");
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () { yield { type: "text" as const, text: "Checked." }; return "Checked."; });
+  const view = render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  fireEvent.change(openManagedEffort(), { target: { value: "2" } });
+  expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", "High reasoning");
+  closeManagedEffort();
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Check the invoice." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Checked.");
+  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: true, effort: "high" });
+  expect(ai.getFileyAiEffort()).toBe("high");
+  expect(readAgentStorage("filey.agent.effort")).toBe("xhigh");
+  view.unmount();
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Filey AI effort: High" })).toBeInTheDocument();
+  act(() => { setCacheOrg("other-org", "test-user"); });
+  expect(ai.getFileyAiEffort()).toBe("low");
+  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toBeInTheDocument();
+  act(() => { setCacheOrg("test-org", "test-user"); });
+  expect(screen.getByRole("button", { name: "Filey AI effort: High" })).toBeInTheDocument();
+  fireEvent.change(openManagedEffort(), { target: { value: "0" } });
+  expect(ai.getFileyAiReasoning()).toBe(false);
+  expect(ai.getFileyAiEffort()).toBe("high");
 });

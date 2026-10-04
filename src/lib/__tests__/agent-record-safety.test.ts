@@ -206,12 +206,9 @@ it("refuses ambiguous invoice numbers across all invoice actions before changing
   for (const name of actions) {
     const result = await runTool(
       name,
-      {
-        invoice_number: "INV-10",
-        number: "INV-10",
-        kind: "invoice",
-        template: "minimal",
-      },
+      name === "share_document_link"
+        ? { number: "INV-10", kind: "invoice" }
+        : { invoice_number: "INV-10", ...(name === "set_invoice_template" ? { template: "minimal" } : {}) },
       () => true,
       true
     );
@@ -311,9 +308,13 @@ it("does not report missing records when the lookup actually failed", async () =
   ).toEqual({ error: "Inventory storage unavailable", retry_safe: false });
 });
 
-it.each(["workspace", "cancel"] as const)("prevents multi-step record mutations after a %s change", async reason => {
+it.each(["workspace", "workspace_return", "cancel"] as const)("prevents multi-step record mutations after a %s change", async reason => {
   let controller = new AbortController();
-  const change = () => reason === "cancel" ? controller.abort() : setCacheOrg("other-org", "other-user");
+  const change = () => {
+    if (reason === "cancel") { controller.abort(); return; }
+    setCacheOrg("other-org", "other-user");
+    if (reason === "workspace_return") setCacheOrg("test-org", "test-user");
+  };
   vi.spyOn(crm, "customers").mockResolvedValue([]);
   vi.spyOn(erp, "products").mockResolvedValue([]);
   const companyFixture = { name: "Fixture", default_accent: "#111111", default_template: "minimal" };
@@ -349,6 +350,43 @@ it.each(["workspace", "cancel"] as const)("prevents multi-step record mutations 
     expect(item.write, item.name).not.toHaveBeenCalled();
   }
   expect(invoices).toHaveBeenCalled();
+});
+
+it.each(["organization", "account"] as const)("does not revive an approved action after switching %s away and back", async kind => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1" }] as never);
+  const status = vi.spyOn(billing, "setStatus").mockResolvedValue();
+  const approve = vi.fn(async () => {
+    setCacheOrg(kind === "organization" ? "other-org" : "test-org", kind === "account" ? "other-user" : "test-user");
+    setCacheOrg("test-org", "test-user");
+    return true;
+  });
+  await expect(runTool("mark_invoice_paid", { invoice_number: "INV-1" }, approve, true))
+    .rejects.toMatchObject({ name: "AbortError" });
+  expect(approve).toHaveBeenCalledOnce();
+  expect(status).not.toHaveBeenCalled();
+});
+
+it("keeps approval valid when the active workspace identity has not changed", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1" }] as never);
+  const status = vi.spyOn(billing, "setStatus").mockResolvedValue();
+  const result = await runTool("mark_invoice_paid", { invoice_number: "INV-1" }, async () => {
+    setCacheOrg("test-org", "test-user");
+    return true;
+  }, true);
+  expect(result).toMatchObject({ ok: true });
+  expect(status).toHaveBeenCalledExactlyOnceWith(1, "paid");
+});
+
+it("does not apply an invoice template after its lookup crossed workspaces", async () => {
+  vi.spyOn(billing, "listDocs").mockImplementationOnce(async () => {
+    setCacheOrg("other-org", "other-user");
+    setCacheOrg("test-org", "test-user");
+    return [{ id: 1, number: "INV-1" }] as never;
+  });
+  const appearance = vi.spyOn(billing, "updateAppearance").mockResolvedValue();
+  await expect(runTool("set_invoice_template", { invoice_number: "INV-1", template: "minimal" }, () => true, true))
+    .rejects.toMatchObject({ name: "AbortError" });
+  expect(appearance).not.toHaveBeenCalled();
 });
 
 it("reports bank balances by native currency without an invented combined total", async () => {

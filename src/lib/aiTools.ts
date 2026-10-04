@@ -18,6 +18,7 @@ import {
   computeBalanceSheet,
   computeCashSummary,
   links,
+  getCacheIdentity,
   type InvoiceDocInput,
 } from "./api";
 import { ENTITY_TYPES, isEntityType } from "./links";
@@ -44,7 +45,7 @@ import {
 } from "./documentMessage";
 import { log } from "./log";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
-import { applyRoundOff } from "./money";
+import { applyRoundOff, r2 } from "./money";
 import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
 import { loadDocFormats } from "./numberFormat";
 import { allocateDocumentNumber } from "./documentNumbers";
@@ -160,6 +161,22 @@ async function documentContext(
   };
 }
 
+/** Accept calendar dates only; Date.parse alone normalizes February 31. */
+function documentDate(raw: unknown, label: string, allowEmpty = false): string {
+  const value = str(raw).trim();
+  if (allowEmpty && !value) return "";
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value)
+    throw documentInputError(`${label} needs a valid date in YYYY-MM-DD format. Nothing was saved.`);
+  return value;
+}
+
+function cashDocumentAmount(raw: unknown, label: string): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0 || raw >= 1e12 || raw !== r2(raw))
+    throw documentInputError(`${label} needs a positive amount with at most two decimal places. Nothing was saved.`);
+  return raw;
+}
+
 /** Validate the active operands before shared display math can normalize bad
  * strings to zero. Keep the persisted calculation metadata intact. */
 function documentPricing(
@@ -248,11 +265,13 @@ const today = () => todayYmd();
 
 /** Async record lookups can finish after the user changes workspace or presses
  * Stop. Check the captured workspace immediately before a later mutation. */
-function toolExecutionCheck(signal?: AbortSignal): () => void {
+function toolExecutionCheck(signal?: AbortSignal, workspaceMessage = "Workspace changed before saving."): () => void {
   const scope = agentStorageScope();
+  const identity = getCacheIdentity();
   return () => {
     signal?.throwIfAborted();
-    if (scope !== agentStorageScope()) throw new DOMException("Workspace changed before saving.", "AbortError");
+    if (scope !== agentStorageScope() || identity !== getCacheIdentity())
+      throw new DOMException(workspaceMessage, "AbortError");
   };
 }
 
@@ -415,9 +434,11 @@ async function findInvoice(numberOrId: unknown) {
 /** Resolve the stored customer by ID before considering a unique name. */
 async function invoiceWhatsAppDraft(a: Record<string, unknown>, signal?: AbortSignal) {
   const expectedScope = requireAgentStorageScope();
+  const checkExecution = toolExecutionCheck(signal);
   const current = () => {
     signal?.throwIfAborted();
     requireAgentStorageScope(expectedScope);
+    checkExecution();
   };
   current();
   const summary = await findInvoice(a.invoice_number);
@@ -836,7 +857,7 @@ export const TOOLS: ToolDef[] = [
       const t = today();
       const overdue = (inv as unknown as Record<string, unknown>[]).filter(
         (d) =>
-          numOf(d.balance) > 0 && d.due_date && str(d.due_date) < t && d.status !== "paid"
+          ["sent", "overdue"].includes(str(d.status)) && numOf(d.balance) > 0 && d.due_date && str(d.due_date) < t
       ).length;
       return {
         customers: c.length,
@@ -1162,10 +1183,9 @@ export const TOOLS: ToolDef[] = [
       if (status === "overdue")
         rows = docs.filter(
           (d) =>
-            numOf(d.balance) > 0 &&
+            ["sent", "overdue"].includes(str(d.status)) && numOf(d.balance) > 0 &&
             d.due_date &&
-            str(d.due_date) < t &&
-            d.status !== "paid"
+            str(d.due_date) < t
         );
       else if (status) rows = docs.filter((d) => d.status === status);
       const q = lc(query).trim();
@@ -1348,66 +1368,80 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
-      await (assertCurrent(), fin.createExpense(
-        str(a.category) || "Other",
-        str(a.description) || null,
-        numOf(a.amount),
-        str(a.date) || today(),
-        null
-      ));
-      return { ok: true, message: `Logged ${numOf(a.amount)} expense.` };
+      let id: number;
+      try {
+        id = await (assertCurrent(), fin.createExpense(
+          str(a.category) || "Other",
+          str(a.description) || null,
+          numOf(a.amount),
+          str(a.date) || today(),
+          null
+        ));
+      } catch (error) {
+        if ((error as Error)?.name === "AbortError") throw error;
+        // A failed acknowledgement can follow a committed ledger entry.
+        return { error: errMsg(error), retry_safe: false };
+      }
+      return { ok: true, id, message: `Logged ${numOf(a.amount)} expense.` };
     },
   },
   {
     name: "create_invoice_draft",
     description:
-      "Create a draft for review using the company template, or pass a template from list_templates. Preserve item descriptions/codes verbatim. Ask for missing customer, item, quantity or rate; never guess. The rate is per unit, never pre-multiplied. For pricing per litre/kg/hour, put the measure in a custom column and use its key as price_by. Example: 20 pails of 20L at 4.1/litre → qty:20, unit:'Pail', unit_price:4.1, custom:{total_liters:'400'}, custom_columns:[{key:'total_liters',label:'T.Liters'}], price_by:'total_liters'; amount is 400 × 4.1 = 1640. Use revise_invoice to correct an existing draft, not create a duplicate.",
+      "Create a numbered draft. Never guess customer, item, qty or rate. Preserve item codes; rate is per unit. For per litre/kg/hour: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. To repeat, get_invoice and retain lines/pricing/wording. Defaults: today's date, company VAT, zero discount. Correct with revise_invoice. Verify saved id with get_invoice(id:<id>).",
     parameters: {
       type: "object",
       properties: {
-        customer_id: { type: "integer", minimum: 1, description: "Saved customer ID; supply with its matching name when names are duplicated." },
+        customer_id: { type: "integer", minimum: 1, description: "Saved ID matching the customer name." },
         customer_name: {
           type: "string",
-          description:
-            "Who is being billed — the name after 'for'/'to' in 'invoice X for…'. Use the user's wording; a near-miss against saved customers is warned about, not fatal.",
         },
         currency: { type: "string" },
+        issue_date: { type: "string", description: "YYYY-MM-DD." },
+        due_date: { type: "string", description: "Optional YYYY-MM-DD payment deadline." },
+        notes: { type: "string", maxLength: 30000 },
+        terms: { type: "string", maxLength: 30000 },
+        discount: { type: "number", minimum: 0, maximum: 999999999999.99, description: "Discount amount, not percent." },
+        tax_rate: { type: "number", minimum: 0, maximum: 100, description: "VAT percent; zero disables document VAT." },
+        round_off: { type: "boolean" },
         template: {
-          type: "string",
-          description: "Design id or name, e.g. corporate. Omit for the company default.",
+            type: "string",
+            description: "Template ID; defaults to the company layout.",
         },
         items: {
           type: "array",
+          minItems: 1,
+          maxItems: 500,
           items: {
             type: "object",
             additionalProperties: false,
             properties: {
+              id: { type: "integer", minimum: 1 },
               product_id: {
                 type: "number",
-                description: "ID of a saved inventory product, when known.",
+                description: "Saved product ID.",
               },
               description: {
                 type: "string",
-                description: "The item exactly as the user said it — codes stay intact.",
+                description: "User's exact item text/codes.",
               },
               qty: {
                 type: "number",
-                description: "The quantity — decimals fine: 39.22.",
               },
               unit_price: {
                 type: "number",
                 description:
-                  "The per-unit price — the user's 'rate' or 'price'. Never multiply it by qty yourself.",
+                  "Rate per unit, not pre-multiplied.",
               },
               unit: {
                 type: "string",
-                description: "What one qty is — Pail, Drum, kg, hr. Shown on the line.",
+                description: "Pail, Drum, kg, hr, etc.",
               },
               tax_category: { type: "string", enum: ["S", "Z", "E", "O", "AE"] },
               custom: {
                 type: "object",
                 description:
-                  'Values for the custom columns, keyed by column key, e.g. {"total_liters":"400"}.',
+                  "Custom values by column key; preserve saved calculation metadata.",
               },
             },
             required: ["description", "qty", "unit_price"],
@@ -1416,7 +1450,7 @@ export const TOOLS: ToolDef[] = [
         custom_columns: {
           type: "array",
           description:
-            'Extra per-line columns to show on the document, e.g. [{key:"total_liters", label:"T.Liters"}]. Keys are lowercase identifiers; labels are what the customer reads.',
+            "Custom columns; lowercase keys and visible labels.",
           items: {
             type: "object",
             properties: { key: { type: "string" }, label: { type: "string" } },
@@ -1426,13 +1460,17 @@ export const TOOLS: ToolDef[] = [
         price_by: {
           type: "string",
           description:
-            "Custom column key the line amount multiplies by instead of qty (amount = custom[price_by] × unit_price). Omit for ordinary qty × unit_price pricing.",
+            "Multiplier column key; omit for qty × unit_price.",
         },
       },
       required: ["customer_name", "items"],
+      additionalProperties: false,
     },
     run: async (args, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
+      if (!str(args.customer_name).trim()) throw documentInputError("Choose the customer name before saving an invoice.");
+      const issueDate = args.issue_date === undefined ? today() : documentDate(args.issue_date, "Invoice date");
+      const dueDate = args.due_date === undefined ? undefined : documentDate(args.due_date, "Due date", true);
       args = await documentContext(args, "customer");
       // Not swallowed: these details carry the company's TRN onto the document,
       // and a UAE tax invoice issued without one is a compliance problem. Fail
@@ -1475,13 +1513,17 @@ export const TOOLS: ToolDef[] = [
         customer_email: str(args.customer_email),
         customer_address: str(args.customer_address),
         customer_trn: str(args.customer_trn),
-        issue_date: today(),
-        tax_rate: co?.default_tax_rate ?? 0,
-        discount: 0,
+        issue_date: issueDate,
+        ...(dueDate !== undefined ? { due_date: dueDate } : {}),
+        ...(args.notes !== undefined ? { notes: str(args.notes) } : {}),
+        ...(args.terms !== undefined ? { terms: str(args.terms) } : {}),
+        tax_rate: args.tax_rate === undefined ? co?.default_tax_rate ?? 0 : Number(args.tax_rate),
+        discount: args.discount === undefined ? 0 : Number(args.discount),
+        ...(args.round_off !== undefined ? { round_off: args.round_off as boolean } : {}),
         items: items.map((it) => ({
           product_id: it.product_id == null ? undefined : Number(it.product_id),
           description: str(it.description),
-          qty: numOf(it.qty) || 1,
+          qty: Number(it.qty),
           unit_price: numOf(it.unit_price),
           ...(str(it.tax_category) ? { tax_category: str(it.tax_category) } : {}),
           ...(str(it.unit) ? { unit: str(it.unit) } : {}),
@@ -1505,14 +1547,15 @@ export const TOOLS: ToolDef[] = [
         // indistinguishable from a hand-made one.
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       };
-      const pricing = documentPricing(input.items, cols, priceBy, input.discount, input.tax_rate);
-      await (assertCurrent(), billing.saveDoc(input));
+      const pricing = documentPricing(input.items, cols, priceBy, input.discount, input.tax_rate, input.round_off);
+      const id = await (assertCurrent(), billing.saveDoc(input));
       const unknownParty = await partyCheck("customer", args.customer_name);
       // Hand back what each line actually came to. The agent then states the
       // real figure instead of re-deriving it and reporting a total the
       // document does not have.
       return {
         ok: true,
+        id,
         number: input.number,
         ...(unknownParty ?? {}),
         ...pricing,
@@ -1524,16 +1567,22 @@ export const TOOLS: ToolDef[] = [
   {
     name: "revise_invoice",
     description:
-      "Correct an existing draft's buyer, lines or pricing. Read get_invoice first; items replaces ALL lines, so preserve every retained line and its custom metadata. Only drafts can be revised. Use a credit note for a sent/paid invoice.",
+      "Correct a draft after reading get_invoice. items replaces ALL lines: retain every wanted line and its metadata. Omitted fields stay unchanged; empty due_date/notes/terms clears them. Discount is an amount. Sent/paid invoices require a credit note.",
     parameters: {
       type: "object",
       properties: {
         invoice_number: {
           type: "string",
-          description: "The number returned when it was created.",
         },
         customer_name: { type: "string", minLength: 1 },
-        customer_id: { type: "integer", minimum: 1, description: "Saved customer ID; supply with its matching name when names are duplicated." },
+        customer_id: { type: "integer", minimum: 1, description: "Saved ID matching the customer name." },
+        issue_date: { type: "string", description: "YYYY-MM-DD." },
+        due_date: { type: "string", description: "YYYY-MM-DD; empty clears it." },
+        notes: { type: "string", maxLength: 30000 },
+        terms: { type: "string", maxLength: 30000 },
+        discount: { type: "number", minimum: 0, maximum: 999999999999.99, description: "Discount amount, not percent." },
+        tax_rate: { type: "number", minimum: 0, maximum: 100 },
+        round_off: { type: "boolean" },
         custom_columns: {
           type: "array",
           items: {
@@ -1545,33 +1594,36 @@ export const TOOLS: ToolDef[] = [
         price_by: {
           type: "string",
           description:
-            "Custom column key the amount multiplies by. Pass an empty string to go back to qty × unit_price.",
+            "Multiplier column key; empty restores qty pricing.",
         },
         items: {
           type: "array",
           minItems: 1,
-          description: "Replaces ALL existing lines. Omit to keep them.",
+          description: "Replaces ALL lines; omit to keep.",
           items: {
             type: "object",
             additionalProperties: false,
             properties: {
-              id: { type: "integer", minimum: 1, description: "Existing line ID, ignored because replacements get new IDs." },
+              id: { type: "integer", minimum: 1 },
               description: { type: "string", minLength: 1 },
               product_id: { type: "integer", minimum: 1 },
               qty: { type: "number", minimum: 0 },
               unit_price: { type: "number", minimum: 0 },
               tax_category: { type: "string", enum: ["S", "Z", "E", "O", "AE"] },
               unit: { type: "string" },
-              custom: { type: "object", description: "Preserve the custom values and packed calculation metadata returned by get_invoice when replacing lines." },
+              custom: { type: "object", description: "Retain saved values and calculation metadata." },
             },
             required: ["description", "qty", "unit_price"],
           },
         },
       },
       required: ["invoice_number"],
+      additionalProperties: false,
     },
     run: async (a, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
+      const issueDate = a.issue_date === undefined ? undefined : documentDate(a.issue_date, "Invoice date");
+      const dueDate = a.due_date === undefined ? undefined : documentDate(a.due_date, "Due date", true);
       const found = await findInvoice(a.invoice_number);
       if (!found) return { error: `No invoice matching "${str(a.invoice_number)}"` };
       const doc = (await billing.getDoc(Number(found.id))) as unknown as InvoiceDocInput;
@@ -1624,6 +1676,13 @@ export const TOOLS: ToolDef[] = [
 
       const next: InvoiceDocInput = {
         ...doc,
+        ...(issueDate !== undefined ? { issue_date: issueDate } : {}),
+        ...(dueDate !== undefined ? { due_date: dueDate } : {}),
+        ...(a.notes !== undefined ? { notes: str(a.notes) } : {}),
+        ...(a.terms !== undefined ? { terms: str(a.terms) } : {}),
+        ...(a.discount !== undefined ? { discount: Number(a.discount) } : {}),
+        ...(a.tax_rate !== undefined ? { tax_rate: Number(a.tax_rate) } : {}),
+        ...(a.round_off !== undefined ? { round_off: a.round_off as boolean } : {}),
         ...(str(a.customer_name) ? { customer_name: str(a.customer_name) } : {}),
         ...(changingCustomer ? {
           customer_id: context!.customer_id == null ? null : Number(context!.customer_id),
@@ -1944,11 +2003,7 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const tid = activeTurnId;
-      const scope = agentStorageScope();
-      const assertCurrent = () => {
-        signal?.throwIfAborted();
-        if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
-      };
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const files = workingTurnFiles(tid);
       if (!files.length)
         return {
@@ -2103,7 +2158,7 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const tid = activeTurnId;
-      const scope = agentStorageScope();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed before selecting this file.");
       const { listFiles, fileBytes } = await import("./files");
       const q = lc(a.name);
       if (!q) return { error: "Which file? Give me its name." };
@@ -2118,8 +2173,7 @@ export const TOOLS: ToolDef[] = [
           hint: "Call list_my_files to see what is there.",
         };
       const bytes = await fileBytes(hit);
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed before selecting this file.", "AbortError");
+      assertCurrent();
       if (!bytes) return { error: `Could not read "${hit.name}" back out of storage.` };
       // A File, not a Blob: the tools read .name for the output filename and
       // .type to decide whether they are looking at a PDF or an image. Filed
@@ -3210,7 +3264,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_payment_receipts",
     description:
-      "Payment receipts issued to customers, newest first — optionally filtered by customer name.",
+      "Payment receipts issued to customers, newest first — optionally filtered by customer name. Totals are grouped by currency; a single-currency result also has a labeled total. Never add different currencies at face value.",
     parameters: {
       type: "object",
       properties: { customer: { type: "string" }, limit: { type: "number" } },
@@ -3222,13 +3276,24 @@ export const TOOLS: ToolDef[] = [
       >[];
       const q = lc(a.customer);
       const hits = rows.filter((r) => !q || lc(r.customer_name).includes(q));
+      const totals = new Map<string, number>();
+      const currencyOf = (r: Record<string, unknown>) => str(r.currency).trim().toUpperCase() || "AED";
+      for (const row of hits) {
+        const amount = Number(row.amount);
+        if (!Number.isFinite(amount)) throw new Error("A receipt has an invalid amount. Review it before relying on receipt totals.");
+        const currency = currencyOf(row);
+        totals.set(currency, r2((totals.get(currency) ?? 0) + amount));
+      }
+      const singleCurrency = totals.size === 1 ? [...totals.keys()][0] : totals.size === 0 ? "AED" : undefined;
       return {
         count: hits.length,
-        total: hits.reduce((s, r) => s + numOf(r.amount), 0),
+        totals_by_currency: Object.fromEntries(totals),
+        ...(singleCurrency ? { currency: singleCurrency, total: totals.get(singleCurrency) ?? 0 } : {}),
         receipts: hits.slice(0, Math.min(numOf(a.limit) || 25, 100)).map((r) => ({
           number: r.number,
           customer: r.customer_name,
           amount: r.amount,
+          currency: currencyOf(r),
           method: r.payment_method ?? null,
           date: r.payment_date ?? null,
           status: r.status,
@@ -3249,7 +3314,7 @@ export const TOOLS: ToolDef[] = [
           type: "string",
           description: "The payer — the name after 'from' in 'receipt for X from Y'.",
         },
-        amount: { type: "number" },
+        amount: { type: "number", minimum: 0.01, maximum: 999999999999.99 },
         payment_method: {
           type: "string",
           description: "The user's 'via'/'by' — cash, bank transfer, cheque, card, UPI.",
@@ -3265,8 +3330,9 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
-      const amount = numOf(a.amount);
-      if (amount <= 0) return { error: "A receipt needs an amount greater than zero." };
+      if (typeof a.amount === "number" && a.amount <= 0) return { error: "A receipt needs an amount greater than zero." };
+      const amount = cashDocumentAmount(a.amount, "Receipt amount");
+      const paymentDate = a.payment_date === undefined ? today() : documentDate(a.payment_date, "Payment date");
       const [co, { receipts }] = await Promise.all([
         billing.getCompany(),
         import("./api"),
@@ -3287,7 +3353,7 @@ export const TOOLS: ToolDef[] = [
         tax_country_code: co?.country_code,
         seller_trn: co?.trn,
         customer_name: str(a.customer_name),
-        issue_date: str(a.payment_date) || today(),
+        issue_date: paymentDate,
         amount,
         payment_method: str(a.payment_method) || undefined,
         ref_number: str(a.ref_number) || undefined,
@@ -3669,9 +3735,9 @@ export const TOOLS: ToolDef[] = [
         type: { type: "string" },
         party: { type: "string" },
         bank: { type: "string" },
-        amount: { type: "number" },
-        issue_date: { type: "string" },
-        due_date: { type: "string" },
+        amount: { type: "number", minimum: 0.01, maximum: 999999999999.99 },
+        issue_date: { type: "string", description: "Valid YYYY-MM-DD date; defaults to today." },
+        due_date: { type: "string", description: "Valid YYYY-MM-DD date; defaults to the issue date." },
         notes: { type: "string" },
       },
       required: ["cheque_no", "type", "party", "amount"],
@@ -3681,6 +3747,9 @@ export const TOOLS: ToolDef[] = [
       const kind = lc(a.type);
       if (kind !== "issued" && kind !== "received")
         return { error: "type must be 'issued' or 'received'." };
+      const amount = cashDocumentAmount(a.amount, "Cheque amount");
+      const issueDate = a.issue_date === undefined ? today() : documentDate(a.issue_date, "Cheque date");
+      const dueDate = a.due_date === undefined ? issueDate : documentDate(a.due_date, "Cheque due date");
       const list = await readSettingList("cheque_register");
       const row = {
         id: Date.now(),
@@ -3688,9 +3757,9 @@ export const TOOLS: ToolDef[] = [
         type: kind,
         party: str(a.party),
         bank: str(a.bank),
-        amount: numOf(a.amount),
-        issue_date: str(a.issue_date) || today(),
-        due_date: str(a.due_date) || str(a.issue_date) || today(),
+        amount,
+        issue_date: issueDate,
+        due_date: dueDate,
         status: "pending",
         notes: str(a.notes),
         created_at: new Date().toISOString(),
@@ -3857,7 +3926,7 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     run: async (a, signal) => {
-      const scope = agentStorageScope();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const found = await findInvoice(a.invoice_number);
       if (!found) return { error: `No invoice matching "${str(a.invoice_number)}"` };
       const doc = await billing.getDoc(Number(found.id));
@@ -3879,8 +3948,7 @@ export const TOOLS: ToolDef[] = [
         patch[kind] = mark;
       }
       if (!Object.keys(patch).length) return { error: "Choose logo visibility, stamp, signature or opacity to change." };
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       await billing.updateAppearance(Number(doc.id), patch);
       return { ok: true, invoice_number: doc.number, message: "Invoice appearance updated. Export a fresh PDF to share these changes." };
     },
@@ -3898,7 +3966,7 @@ export const TOOLS: ToolDef[] = [
       required: ["invoice_number", "template"],
     },
     run: async (a, signal) => {
-      const scope = agentStorageScope();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const wanted = resolveTemplate(str(a.template));
       if (!wanted)
         return {
@@ -3907,8 +3975,7 @@ export const TOOLS: ToolDef[] = [
         };
       const d = await findInvoice(a.invoice_number);
       if (!d) return { error: `No invoice matching "${str(a.invoice_number)}"` };
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       await billing.updateAppearance(Number(d.id), { template: wanted });
       return {
         ok: true,
@@ -4277,8 +4344,14 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["source"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
       const scope = requireAgentStorageScope();
+      const checkExecution = toolExecutionCheck(signal);
+      const assertCurrent = () => {
+        signal?.throwIfAborted();
+        requireAgentStorageScope(scope);
+        checkExecution();
+      };
       const ref = str(a.source).trim();
       const { skillSourceUrls, parseSkillMarkdown, sourceLabel } =
         await import("./skillImport");
@@ -4291,6 +4364,7 @@ export const TOOLS: ToolDef[] = [
 
       const tried: string[] = [];
       for (const url of urls) {
+        assertCurrent();
         tried.push(url);
         let body = "";
         try {
@@ -4300,12 +4374,14 @@ export const TOOLS: ToolDef[] = [
         } catch {
           continue; // a candidate that isn't there is expected, not an error
         }
+        assertCurrent();
 
         const fallback = ref.split("/").filter(Boolean).pop() ?? "imported skill";
         const parsed = parseSkillMarkdown(body, fallback);
         if (!parsed) continue;
 
         const label = sourceLabel(url);
+        assertCurrent();
         const s = addSkill(
           {
             name: str(a.name).trim() || parsed.name,
@@ -5092,6 +5168,8 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const scope = agentStorageScope();
+      const identity = getCacheIdentity();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const { hasDesktop, bridgeState, sendWa } = await import("./waBridge");
       if (!hasDesktop) return { error: "WhatsApp runs in the desktop app only." };
       const digits = str(a.to).replace(/\D/g, "");
@@ -5101,12 +5179,11 @@ export const TOOLS: ToolDef[] = [
       const st = await bridgeState();
       if (st.state !== "connected")
         return { error: `WhatsApp isn't connected (state: ${st.state}). Pair it first.` };
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       const accepted = await sendWa(`${digits}@s.whatsapp.net`, text);
       if (!accepted) throw new Error("WhatsApp acceptance was not confirmed. Check the chat before retrying.");
       const { waLogAdd } = await import("./waLog");
-      if (scope === agentStorageScope()) waLogAdd({ dir: "out", from: digits, text });
+      if (scope === agentStorageScope() && identity === getCacheIdentity()) waLogAdd({ dir: "out", from: digits, text });
       return { ok: true, message: `Accepted by WhatsApp for ${digits}.`, message_id: accepted };
     },
   },
@@ -5116,16 +5193,15 @@ export const TOOLS: ToolDef[] = [
     parameters: { type: "object", properties: { invoice_number: { type: "string" } }, required: ["invoice_number"] },
     run: async (a, signal) => {
       const tid = activeTurnId;
-      const scope = agentStorageScope();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const summary = await findInvoice(a.invoice_number);
       if (!summary) return { error: "No matching invoice. Choose its exact number or id from list_invoices." };
       const [pdf] = await renderInvoicePdf(Number(summary.id), str(summary.number));
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       const { deliverFile } = await import("./agentFiles");
+      assertCurrent();
       const saved = await deliverFile({ name: pdf.filename, bytes: base64ToBytes(pdf.content) });
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       if (!saved.path && !saved.url) return { error: "The PDF could not be saved. Check the export folder in Settings." };
       pushTurnOutput(tid, { ...saved, documentKey: `invoice:${summary.id}` });
       return { ok: true, file: saved.name, message: "PDF exported. Customer delivery and invoice status are unchanged." };
@@ -5156,6 +5232,8 @@ export const TOOLS: ToolDef[] = [
     run: async (a, signal) => {
       const tid = activeTurnId;
       const scope = agentStorageScope();
+      const identity = getCacheIdentity();
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const { hasDesktop, bridgeState, sendWaFile } = await import("./waBridge");
       if (!hasDesktop)
         return { error: "Sending files over WhatsApp runs in the desktop app only." };
@@ -5184,9 +5262,12 @@ export const TOOLS: ToolDef[] = [
             hint: "Run the tool that produces the file first, then send it.",
           };
         const bytes = await fileBytes(hit);
+        assertCurrent();
         if (!bytes) return { error: `Could not read "${hit.name}" out of storage.` };
         const { deliverFile } = await import("./agentFiles");
+        assertCurrent();
         const d = await deliverFile({ name: hit.name, bytes });
+        assertCurrent();
         if (!d.path)
           return { error: `Could not write "${hit.name}" to disk to send it.` };
         path = d.path;
@@ -5212,8 +5293,7 @@ export const TOOLS: ToolDef[] = [
       }
       if (!jid) return { error: "No recipient: the bridge has no paired account yet." };
 
-      signal?.throwIfAborted();
-      if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
+      assertCurrent();
       const accepted = await sendWaFile(jid, {
         path,
         filename,
@@ -5223,7 +5303,7 @@ export const TOOLS: ToolDef[] = [
       if (!accepted) throw new Error("WhatsApp acceptance was not confirmed. Check the chat before retrying.");
       if (made) (made.whatsappRecipients ??= []).push(jid);
       const { waLogAdd } = await import("./waLog");
-      if (scope === agentStorageScope()) waLogAdd({
+      if (scope === agentStorageScope() && identity === getCacheIdentity()) waLogAdd({
         dir: "out",
         from: jid.split("@")[0],
         text: `[file] ${filename}${a.caption ? ` — ${str(a.caption)}` : ""}`,
@@ -5277,6 +5357,7 @@ export const TOOLS: ToolDef[] = [
     },
     run: async (a, signal) => {
       const scope = requireAgentStorageScope();
+      const assertCurrent = toolExecutionCheck(signal);
       const ids = Array.isArray(a.account_ids) ? a.account_ids.map(str) : [];
       const content = str(a.content);
       // Check the caption against each platform's limit here rather than
@@ -5284,6 +5365,7 @@ export const TOOLS: ToolDef[] = [
       const accounts = await listSocialAccounts();
       signal?.throwIfAborted();
       requireAgentStorageScope(scope);
+      assertCurrent();
       const chosen = accounts.filter((x) => ids.includes(x.id));
       const unknown = ids.filter((id) => !accounts.some((x) => x.id === id));
       if (unknown.length)
@@ -5298,6 +5380,7 @@ export const TOOLS: ToolDef[] = [
             .join("; "),
         };
       try {
+        assertCurrent();
         const post = await createSocialPost({
           accountIds: ids,
           content,
@@ -5399,6 +5482,7 @@ export async function runTool(
 ): Promise<unknown> {
   signal?.throwIfAborted();
   const scope = agentStorageScope();
+  const identity = getCacheIdentity();
   if (!args || typeof args !== "object" || Array.isArray(args))
     return { error: "Tool arguments must be a JSON object." };
   const tool = TOOLS.find((t) => t.name === name);
@@ -5462,7 +5546,7 @@ export async function runTool(
         .finally(() => signal?.removeEventListener("abort", abort));
     }));
   signal?.throwIfAborted();
-  if (agentStorageScope() !== scope)
+  if (agentStorageScope() !== scope || identity !== getCacheIdentity())
     throw new DOMException("Workspace changed before execution.", "AbortError");
   if (!approved) {
     log.warn("agent", `${name} refused: not approved`);
@@ -5472,7 +5556,7 @@ export async function runTool(
     // Approval can remain open while an administrator revokes access.
     await requireToolModuleAccess(name, args);
     signal?.throwIfAborted();
-    if (agentStorageScope() !== scope)
+    if (agentStorageScope() !== scope || identity !== getCacheIdentity())
       throw new DOMException("Workspace changed before execution.", "AbortError");
     if (!isToolAllowed(name) || name === "workspace_browser" && remote && !isToolAllowed("agent_computer"))
       return { error: "This capability was turned off before execution. Nothing was run.", retry_safe: false };
@@ -5496,7 +5580,8 @@ export async function runTool(
           ? await desktopBrowserCommand(args, signal, agentId)
           : await tool.run(args, signal);
     signal?.throwIfAborted();
-    if (agentStorageScope() !== scope) throw new DOMException("Workspace changed during execution.", "AbortError");
+    if (agentStorageScope() !== scope || identity !== getCacheIdentity())
+      throw new DOMException("Workspace changed during execution.", "AbortError");
     const failure = toolFailure(out);
     if (failure && out && typeof out === "object") {
       log.warn("agent", `${name} returned an error`, failure);

@@ -35,6 +35,8 @@ export interface AiConfig {
   billing?: "credits" | "free";
   /** Managed Filey AI uses quick answers unless the user enables reasoning. */
   reasoningEnabled?: boolean;
+  /** Managed effort is independent of a bring-your-own-provider setting. */
+  reasoningEffort?: AiEffort;
   provider: AiProvider;
   /** Base URL for the selected OpenAI-compatible or Anthropic API. */
   baseUrl: string;
@@ -109,9 +111,19 @@ export function setFileyAiReasoning(enabled: boolean, expectedScope?: string): v
   writeAgentStorage("filey.ai.reasoning", String(enabled === true), expectedScope);
 }
 
+export function getFileyAiEffort(): "low" | "high" | "max" {
+  const saved = readAgentStorage("filey.ai.effort");
+  return saved === "high" || saved === "max" ? saved : "low";
+}
+
+export function setFileyAiEffort(effort: AiEffort, expectedScope?: string): void {
+  if (effort !== "low" && effort !== "high" && effort !== "max") throw new Error("Choose a supported Filey AI reasoning effort.");
+  writeAgentStorage("filey.ai.effort", effort, expectedScope);
+}
+
 export function getActiveAiConfig(): AiConfig {
   const choice = creditChoice();
-  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.funding === "credits" ? FILEY_AI_MODEL : "", apiKey: "", billing: choice.funding, reasoningEnabled: getFileyAiReasoning() } : getAiConfig();
+  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.funding === "credits" ? FILEY_AI_MODEL : "", apiKey: "", billing: choice.funding, reasoningEnabled: getFileyAiReasoning(), reasoningEffort: getFileyAiEffort() } : getAiConfig();
 }
 
 async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
@@ -390,7 +402,7 @@ async function openaiChat(
   const url = `${cfg.baseUrl.trim().replace(/\/+$/, "")}/chat/completions`;
   const body = {
     model: cfg.model.trim(),
-    ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.4, opts.effort, opts.reasoningEnabled ?? cfg.reasoningEnabled),
+    ...openAiGenerationOptions(cfg.model, opts.maxTokens ?? 2048, opts.temperature ?? 0.4, opts.effort ?? (cfg.billing === "credits" ? cfg.reasoningEffort : undefined), opts.reasoningEnabled ?? cfg.reasoningEnabled),
     messages: messages.map((m) => ({
       role: m.role,
       content: m.images?.length

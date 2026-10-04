@@ -1,5 +1,5 @@
-import { useState, type CSSProperties } from "react";
-import { Check, ChevronDown, Hand, RotateCcw, Shield, ShieldCheck, SlidersHorizontal, Zap, ClipboardList } from "lucide-react";
+import { useId, useState, type CSSProperties } from "react";
+import { Check, ChevronDown, Gauge, Hand, RotateCcw, Shield, ShieldCheck, SlidersHorizontal, Zap, ClipboardList } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./Popover";
 import { AGENT_MODES, type AgentMode } from "../lib/agentMode";
 import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
@@ -48,21 +48,85 @@ export function AgentEffortControl(props: {
   config: AiConfig; value: AiEffort; disabled: boolean; onChange: (value: AiEffort) => void;
   reasoningEnabled?: boolean; onReasoningChange?: (enabled: boolean) => void;
 }) {
-  if (props.config.billing === "credits") {
-    const enabled = props.reasoningEnabled === true;
-    return <button type="button" role="switch" aria-label="Reasoning" aria-checked={enabled}
-      disabled={props.disabled || !props.onReasoningChange}
-      onClick={() => props.onReasoningChange?.(!enabled)}
-      title={enabled ? "Reasoning on · More thought for difficult tasks; replies can take longer" : "Reasoning off · Faster replies"}
-      className="composer-control text-foreground">
-      <span className="composer-detail">Reasoning</span>
-      <span className="composer-detail text-muted-foreground">{enabled ? "On" : "Off"}</span>
-      <span aria-hidden="true" className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors motion-reduce:transition-none", enabled ? "bg-foreground" : "bg-muted-foreground/40")}>
-        <span className={cn("absolute left-0 top-0.5 h-3 w-3 rounded-full bg-background transition-transform motion-reduce:transition-none", enabled ? "translate-x-3.5" : "translate-x-0.5")} />
-      </span>
-    </button>;
-  }
+  if (props.config.billing === "credits") return <AgentManagedEffortControl {...props} />;
   return <AgentProviderEffortControl {...props} />;
+}
+
+const MANAGED_LEVELS = ["auto", "low", "high", "max"] as const;
+const MANAGED_LABELS = ["Fast", "Low", "High", "Maximum"] as const;
+
+function AgentManagedEffortControl({ value, disabled, onChange, reasoningEnabled, onReasoningChange }: {
+  value: AiEffort; disabled: boolean; onChange: (value: AiEffort) => void;
+  reasoningEnabled?: boolean; onReasoningChange?: (enabled: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const advancedId = useId();
+  const enabled = reasoningEnabled === true;
+  const effort = value === "high" || value === "max" ? value : "low";
+  const index = enabled ? MANAGED_LEVELS.indexOf(effort) : 0;
+  const label = MANAGED_LABELS[index];
+  const locked = disabled || !onReasoningChange;
+  const selectLevel = (next: number) => {
+    if (locked || !Number.isInteger(next) || next < 0 || next >= MANAGED_LEVELS.length) return;
+    if (next > 0) onChange(MANAGED_LEVELS[next]);
+    onReasoningChange?.(next > 0);
+  };
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={locked} className="composer-control composer-effort min-w-0 max-w-full"
+        aria-label={`Filey AI effort: ${label}`} title={enabled ? `Filey AI · ${label} reasoning` : "Filey AI · Fast · Reasoning off"}>
+        <Gauge size={18} className="shrink-0" />
+        <span className="composer-detail text-foreground">Filey AI</span>
+        <span className="composer-detail text-muted-foreground">{label}</span>
+        <ChevronDown size={12} className="composer-detail shrink-0 text-muted-foreground" />
+      </button>
+    </PopoverTrigger>
+    <PopoverContent side="top" align="end" collisionPadding={12}
+      className="effort-managed max-h-[var(--radix-popover-content-available-height)] w-[340px] overflow-y-auto p-4" data-browser-overlay>
+      <div className="flex items-center justify-between gap-3">
+        <div><p className="text-sm font-semibold">Filey AI</p><p aria-live="polite" className="mt-0.5 text-xs text-muted-foreground">{enabled ? `${label} reasoning` : "Fast · Reasoning off"}</p></div>
+        <button type="button" disabled={locked || !enabled} onClick={() => selectLevel(0)} aria-label="Reset to fast mode"
+          title="Turn reasoning off" className="effort-option-button rounded-full text-muted-foreground hover:bg-hover disabled:opacity-40"><RotateCcw size={16} /></button>
+      </div>
+      <div className="effort-slider mt-4" style={{ "--effort-fill": `${index / (MANAGED_LEVELS.length - 1) * 100}%` } as CSSProperties}>
+        <div className="effort-track" aria-hidden="true"><div className="effort-fill" /></div>
+        <div className="effort-stops" aria-hidden="true">{MANAGED_LEVELS.map(level => <span key={level} />)}</div>
+        <input type="range" min={0} max={MANAGED_LEVELS.length - 1} step={1} value={index} disabled={locked}
+          aria-label="Filey AI effort" aria-valuetext={enabled ? `${label} reasoning` : "Fast, reasoning off"}
+          onChange={event => selectLevel(Number(event.target.value))} />
+      </div>
+      <div className="mt-1 flex justify-between text-xs text-muted-foreground"><span>Fast</span><span>Maximum</span></div>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{enabled ? "More reasoning can help with complex tasks and takes longer." : "Quick replies for everyday invoices and finance tasks."}</p>
+      <button type="button" aria-expanded={advanced} aria-controls={advancedId} onClick={() => setAdvanced(!advanced)}
+        className="mt-2 flex min-h-11 w-full items-center justify-between rounded-lg text-sm hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring">
+        <span>Advanced</span><ChevronDown size={16} className={cn("transition-transform motion-reduce:transition-none", advanced && "rotate-180")} />
+      </button>
+      {advanced && <div id={advancedId} className="mt-1 divide-y divide-border rounded-xl border border-border px-3">
+        <div className="flex min-h-11 items-center justify-between gap-3 text-sm"><span className="text-muted-foreground">Model</span><span>Filey AI</span></div>
+        <div className="flex min-h-12 items-center justify-between gap-3 text-sm">
+          <span>Reasoning</span>
+          <button type="button" role="switch" aria-label="Reasoning" aria-checked={enabled} disabled={locked}
+            onClick={() => { if (!locked) onReasoningChange?.(!enabled); }} className="effort-option-button inline-flex items-center gap-2 rounded-lg disabled:opacity-40">
+            <span className="text-xs text-muted-foreground">{enabled ? "On" : "Off"}</span>
+            <span aria-hidden="true" className={cn("relative h-5 w-9 rounded-full transition-colors motion-reduce:transition-none", enabled ? "bg-foreground" : "bg-muted-foreground/40")}>
+              <span className={cn("absolute left-0 top-0.5 h-4 w-4 rounded-full bg-background transition-transform motion-reduce:transition-none", enabled ? "translate-x-[18px]" : "translate-x-0.5")} />
+            </span>
+          </button>
+        </div>
+        <label className="flex min-h-12 items-center justify-between gap-3 text-sm"><span className="text-muted-foreground">Reasoning effort</span>
+          <select aria-label="Reasoning level" value={effort} disabled={locked || !enabled}
+            onChange={event => {
+              const next = event.target.value;
+              if (!locked && enabled && (next === "low" || next === "high" || next === "max")) onChange(next);
+            }}
+            className="min-h-11 rounded-lg bg-transparent px-2 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40">
+            <option value="low">Low</option><option value="high">High</option><option value="max">Maximum</option>
+          </select>
+        </label>
+      </div>}
+    </PopoverContent>
+  </Popover>;
 }
 
 function AgentProviderEffortControl({ config, value, disabled, onChange }: {
@@ -87,12 +151,12 @@ function AgentProviderEffortControl({ config, value, disabled, onChange }: {
       <div className="flex items-start justify-between gap-3">
         <Zap key={selected} size={19} className="effort-change mt-1 text-foreground" />
         <div className="min-w-0 flex-1 text-center"><p aria-live="polite" className="text-sm font-semibold">{EFFORT_LABELS[selected]}</p><p className="mt-0.5 truncate text-xs text-muted-foreground" title={model}>{model}</p></div>
-        <button type="button" onClick={() => onChange("auto")} disabled={selected === "auto"} aria-label="Reset effort" title="Use the model default" className="rounded-full p-1 text-muted-foreground hover:bg-hover disabled:opacity-40"><RotateCcw size={15} /></button>
+        <button type="button" onClick={() => onChange("auto")} disabled={disabled || selected === "auto"} aria-label="Reset effort" title="Use the model default" className="rounded-full p-1 text-muted-foreground hover:bg-hover disabled:opacity-40"><RotateCcw size={15} /></button>
       </div>
       {levels.length > 1 ? <>
         <div className="effort-slider mt-5" style={{ "--effort-fill": `${percent}%` } as CSSProperties}>
           <div className="effort-track" aria-hidden="true"><div className="effort-fill" /></div>
-          <input type="range" min={0} max={levels.length - 1} step={1} value={index} aria-label="Reasoning effort" aria-valuetext={EFFORT_LABELS[selected]} onChange={e => onChange(levels[Number(e.target.value)])} />
+          <input type="range" min={0} max={levels.length - 1} step={1} value={index} disabled={disabled} aria-label="Reasoning effort" aria-valuetext={EFFORT_LABELS[selected]} onChange={e => { if (!disabled) onChange(levels[Number(e.target.value)]); }} />
         </div>
         <div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>Default</span><span>{EFFORT_LABELS[levels[levels.length - 1]]}</span></div>
         <p className="mt-4 text-xs leading-relaxed text-muted-foreground">More effort can improve difficult answers and take longer.</p>
