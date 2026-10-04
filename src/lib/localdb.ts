@@ -139,7 +139,8 @@ function hashString(s: string): string {
 }
 
 async function putBlob(key: string, value: string): Promise<void> {
-  await writeDeviceValue(key, value);
+  // Dehydration runs inside serializeWrite's filey:local-data Web Lock.
+  await writeDeviceValue(key, value, { lockHeld: true });
 }
 
 /** Never throws, and tells the two failure cases apart.

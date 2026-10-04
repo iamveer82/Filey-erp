@@ -29,7 +29,7 @@ const finish = {
   parameters: { type: "object", properties: {} },
 };
 
-async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config) {
+async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, userRequest = "Do the task") {
   const requests: { url: string; body: Record<string, unknown> }[] = [];
   const fetchFn = vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: JSON.parse(String(init.body)) });
@@ -39,7 +39,7 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config) {
   const stream = runAgentStream(
     [
       { role: "system", text: "Never disclose private data." },
-      { role: "user", text: "Do the task" },
+      { role: "user", text: userRequest },
     ],
     opts,
     { cfg, fetchFn }
@@ -54,6 +54,46 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config) {
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it("does not dispatch quotation or purchase/order probes after a failed requested invoice", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "The quota has been exceeded." });
+    const fallbacks = ["create_quote", "create_order", "create_purchase_order", "create_purchase_invoice_draft"];
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_name: "Mark" })]),
+      turn(fallbacks.map(name => call(name))),
+      turn([], "The invoice could not be saved because browser storage is full."),
+    ], {}, config, "Create an invoice for Mark for 6 drums at 0.20 per litre.");
+    expect(runTool).toHaveBeenCalledTimes(1);
+    expect(result.events.filter(event => event.type === "tool_result" && fallbacks.includes(event.name))).toHaveLength(4);
+    for (const event of result.events.filter(event => event.type === "tool_result" && fallbacks.includes(event.name)))
+      expect(event).toMatchObject({ result: { code: "unrequested_document_fallback", retry_safe: false } });
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it("allows a corrected invoice after validation failure while blocking an unrequested quote", async () => {
+    const invoiceTool = { name: "create_invoice_draft", description: "Create invoice", parameters: { type: "object", properties: {
+      customer_name: { type: "string" }, unit_price: { type: "number", minimum: 0 },
+    }, required: ["customer_name", "unit_price"] } };
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_name: "Mark", unit_price: -1 }, "invalid")]),
+      turn([call("create_quote", {}, "fallback")]),
+      turn([call("create_invoice_draft", { customer_name: "Mark", unit_price: 0.2 }, "corrected")]),
+      turn([], "The requested invoice was created."),
+    ], { extraTools: [invoiceTool] }, config, "Create an invoice for Mark.");
+    expect(runTool).toHaveBeenCalledTimes(1);
+    expect(runTool).toHaveBeenCalledWith("create_invoice_draft", { customer_name: "Mark", unit_price: 0.2 }, undefined, undefined, undefined, undefined, undefined, undefined);
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
+  });
+
+  it("continues a quotation that the user separately requested alongside the invoice", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "Invoice save failed" }).mockResolvedValueOnce({ ok: true, number: "QT-1" });
+    await run([
+      turn([call("create_invoice_draft", { customer_name: "Mark" })]),
+      turn([call("create_quote", { customer_name: "Alice" })]),
+      turn([], "The invoice could not be saved; the requested quotation was created."),
+    ], {}, config, "Create an invoice for Mark and a quotation for Alice.");
+    expect(runTool).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["INV-1", "INV-2"])("resolves a schema rejection only when the corrected call targets INV-1, not %s", async invoiceNumber => {
     const appearance = { name: "update_invoice_appearance", description: "Edit appearance", parameters: {
       type: "object", properties: { invoice_number: { type: "string" }, stamp_opacity: { type: "number", minimum: 5, maximum: 100 } }, required: ["invoice_number"],
