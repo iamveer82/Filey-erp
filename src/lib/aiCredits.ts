@@ -137,17 +137,14 @@ export async function callAiService<T>(
     body,
     headers: { Authorization: `Bearer ${session.access_token}` },
   });
+  const unavailable = name === "dodo"
+    ? "Coin checkout is temporarily unavailable. Please try again shortly."
+    : "Your AI wallet is temporarily unavailable. Please try again shortly.";
   if (error) {
-    throw await serviceError(
-      error,
-      "Your AI wallet is temporarily unavailable. Please try again shortly."
-    );
+    throw await serviceError(error, unavailable);
   }
   if (data?.error)
-    throw await serviceError(
-      new Error(data.error),
-      "Your AI wallet is temporarily unavailable. Please try again shortly."
-    );
+    throw await serviceError(new Error(data.error), unavailable);
   const current = await accountSession();
   assertCurrent();
   if (current.user.id !== session.user.id)

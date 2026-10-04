@@ -6,7 +6,7 @@ const sources=featureFunctionSources(readFileSync(new URL('../supabase/2026-10-0
 function fixture() {
   return {tables:[{table:'ai_credit_orders',rls:true,authenticated:null,anon:null}],
     columns:Object.entries({promotion_id:'uuid',promotion_discount_id:'text',promotion_discount_code:'text',promotion_customer_id:'text',
-      promotion_email:'text',promotion_expires_at:'timestamptz',expected_paid_cents:'int8',checkout_session_id:'text'})
+      promotion_email:'text',promotion_expires_at:'timestamptz',expected_paid_cents:'int8',checkout_session_id:'text',checkout_url:'text'})
       .map(([column,type])=>({table:'ai_credit_orders',column,type})),
     indexes:[['ai_credit_promotion_once','promotion_id'],['ai_credit_promotion_discount_once','promotion_discount_id']]
       .map(([name,column])=>({table:'ai_credit_orders',name,columns:[column],unique:true,valid:true,predicate:'(promotion_id IS NOT NULL)'})),
@@ -26,6 +26,11 @@ test('client order grants or wallet execution are rejected before a promotion re
   const data=fixture();data.tables[0].authenticated=['SELECT'];data.tables[0].anon=['INSERT'];data.functions[0].authenticated=true;
   assert.deepEqual(creditPromotionSchemaIssues(data,sources),['Unexpected private Coin order grants: authenticated',
     'Unexpected private Coin order grants: anon','Unexpected private Coin wallet contract']);
+});
+
+test('a deployed order table without durable checkout URLs cannot pass resume verification',()=>{
+  const data=fixture();data.columns=data.columns.filter(item=>item.column!=='checkout_url');
+  assert.deepEqual(creditPromotionSchemaIssues(data,sources),['Missing Coin promotion column: checkout_url']);
 });
 test('the previous positive-only wallet or a stale alternate RPC overload fails the exact deployed-body check',()=>{
   const data=fixture();data.functions[0].source=featureFunctionSources(readFileSync(new URL('../supabase/2026-10-03-ai-credit-payment-safety.sql',import.meta.url),'utf8')).get('filey_ai_wallet');

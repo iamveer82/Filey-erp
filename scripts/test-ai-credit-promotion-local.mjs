@@ -25,6 +25,11 @@ try {
   run('psql',args,sql('supabase/2026-09-20-ai-credits.sql')+'\n'+sql('supabase/2026-09-21-ai-credit-topup-fee.sql')+'\n'+sql('supabase/2026-10-03-ai-credit-payment-safety.sql'));
   const promotion=sql('supabase/2026-10-04-ai-credit-test-promotion.sql');run('psql',args,promotion+'\n'+promotion);
   console.log(run('psql',args,sql('scripts/fixtures/ai-credit-promotion-assertions.sql')).trim());
+  const legacyBefore=query('select jsonb_agg(to_jsonb(o) order by id) from ai_credit_orders o;');
+  const resume=sql('supabase/2026-10-04-ai-credit-checkout-resume.sql');run('psql',args,resume+'\n'+resume);
+  assert.equal(query("select jsonb_agg(to_jsonb(o)-'checkout_url' order by id) from ai_credit_orders o;"),legacyBefore,
+    'Resume migration changed old claims or payment authority');
+  console.log(run('psql',args,sql('scripts/fixtures/ai-credit-checkout-resume-assertions.sql')).trim());
   const results=await Promise.allSettled(Array.from({length:8},(_,i)=>promisify(execFile)(exe('psql'),[...args,'-tA','-c',
     `set role service_role;insert into ai_credit_orders(id,user_id,product_id,credits_micros,service_fee_cents,promotion_id,promotion_discount_id,promotion_discount_code,promotion_customer_id,promotion_email,promotion_expires_at,expected_paid_cents,checkout_session_id)
       values('45000000-0000-4000-8000-${String(i+101).padStart(12,'0')}','35000000-0000-4000-8000-000000000004','pdt_race',5000000,50,'75000000-0000-4000-8000-000000000099','dsc_race','FIXTURETEST','cus_race','race@fixture.test',now()+interval '1 hour',0,'session_race') returning id;`],{encoding:'utf8',windowsHide:true})));
@@ -36,7 +41,7 @@ try {
     `set role service_role;select filey_ai_wallet('reconcile_payment','35000000-0000-4000-8000-000000000004','${receipt}');`],{encoding:'utf8',windowsHide:true})));
   assert.equal(query("select balance_micros from ai_credit_accounts where user_id='35000000-0000-4000-8000-000000000004';"),'5000000');
   assert.equal(query("select count(*) from ai_credit_ledger where user_id='35000000-0000-4000-8000-000000000004';"),'1');
-  const before=query('select jsonb_agg(to_jsonb(o) order by id) from ai_credit_orders o;');run('psql',args,promotion);
+  const before=query('select jsonb_agg(to_jsonb(o) order by id) from ai_credit_orders o;');run('psql',args,promotion+'\n'+resume);
   assert.equal(query('select jsonb_agg(to_jsonb(o) order by id) from ai_credit_orders o;'),before,'Repeated promotion migration rewrote saved orders');
   console.log('PASS: eight simultaneous claims open one order; eight succeeded receipt retries grant exactly five Coin once; repeated upgrade preserves orders.');
 } catch(error) {console.error(error.stderr?.toString()||error.stack||error.message);process.exitCode=1;}

@@ -40,7 +40,7 @@ export function creditPromotionSchemaIssues(catalog, sources = new Map()) {
     if(!table||!Object.hasOwn(table,role)||(table[role]??[]).length) issues.push(`Unexpected private Coin order grants: ${role}`);
   }
   for(const [column,type] of Object.entries({promotion_id:'uuid',promotion_discount_id:'text',promotion_discount_code:'text',
-    promotion_customer_id:'text',promotion_email:'text',promotion_expires_at:'timestamptz',expected_paid_cents:'int8',checkout_session_id:'text'})) {
+    promotion_customer_id:'text',promotion_email:'text',promotion_expires_at:'timestamptz',expected_paid_cents:'int8',checkout_session_id:'text',checkout_url:'text'})) {
     if(!(catalog.columns??[]).some(item=>item.table==='ai_credit_orders'&&item.column===column&&item.type===type))
       issues.push(`Missing Coin promotion column: ${column}`);
   }

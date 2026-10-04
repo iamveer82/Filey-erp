@@ -215,7 +215,7 @@ Deno.test("workspace billing rejects stale or malformed workspace intent before 
   }
 });
 
-Deno.test("billing's real SDK route preapplies the selected customer's one-use promotion and rejects repeats without a paid fallback", async () => {
+Deno.test("billing's real SDK route saves and resumes one selected-customer promotion without a paid fallback", async () => {
   const originalEnv = Deno.env.get, originalFetch = globalThis.fetch;
   const promotion = { id: "70000000-0000-4000-8000-000000000001", user_id: userId, email: "fixture@example.test",
     customer_id: "cus_fixture", discount_id: "dsc_fixture", discount_code: "FIXTURETEST", product_id: "pdt_fixture",
@@ -233,11 +233,15 @@ Deno.test("billing's real SDK route preapplies the selected customer's one-use p
     if (url.pathname === "/rest/v1/rpc/filey_take_rate_limit") return Response.json(true);
     if (url.pathname === "/rest/v1/audit_log") return Response.json(null, { status: 201 });
     if (url.pathname === "/rest/v1/ai_credit_orders") {
-      if (method === "GET") return Response.json(saved ? [{ id: saved.id }] : []);
-      if (method === "POST") { saved = JSON.parse(String(raw)); assert(saved?.user_id === userId && saved?.promotion_id === promotion.id && saved?.expected_paid_cents === 0);
+      if (method === "GET") return Response.json(saved ? [saved] : []);
+      if (method === "POST") { saved = { payment_id: null, paid_cents: null, refunded_micros: 0, disputed: false,
+          checkout_session_id: null, checkout_url: null, ...JSON.parse(String(raw)) };
+        assert(saved?.user_id === userId && saved?.promotion_id === promotion.id && saved?.expected_paid_cents === 0);
         return Response.json(null, { status: 201 }); }
       if (method === "PATCH") { assert(saved && url.searchParams.get("id") === `eq.${saved.id}` && url.searchParams.get("user_id") === `eq.${userId}` &&
-        url.searchParams.get("payment_id") === "is.null"); Object.assign(saved, JSON.parse(String(raw))); return Response.json({ id: saved.id }); }
+        url.searchParams.get("payment_id") === "is.null" && url.searchParams.get("checkout_session_id") === "is.null" &&
+        url.searchParams.get("checkout_url") === "is.null" && url.searchParams.get("promotion_customer_id") === `eq.${promotion.customer_id}`);
+        Object.assign(saved, JSON.parse(String(raw))); return Response.json({ id: saved.id }); }
     }
     if (url.pathname === "/products/pdt_fixture") { providerReads++; return Response.json({ price: { type: "one_time_price", currency: "USD", price: 550 }, is_recurring: false }); }
     if (url.pathname === "/discounts/dsc_fixture") { providerReads++; return Response.json({ ...promotion, discount_id: promotion.discount_id,
@@ -247,8 +251,13 @@ Deno.test("billing's real SDK route preapplies the selected customer's one-use p
     if (url.pathname === "/discounts/dsc_fixture/customers") { providerReads++; assert(url.searchParams.get("page_size") === "100");
       return Response.json({ items: url.searchParams.get("page_number") === "0" ? [{ customer_id: promotion.customer_id }] : [] }); }
     if (url.pathname === "/checkouts") { checkouts++; const body = JSON.parse(String(raw));
+      // Regression for the actual provider's 422 response to the former
+      // contradictory preapplied-coupon/disabled-coupon checkout payload.
+      if (body.discount_codes?.length && body.feature_flags?.allow_discount_code === false)
+        return Response.json({ code: "INVALID_REQUEST_PARAMETERS",
+          message: "Discount code is not allowed if allow_discount_code is false" }, { status: 422 });
       assert(JSON.stringify(body.discount_codes) === JSON.stringify([promotion.discount_code]) && body.customer.customer_id === promotion.customer_id &&
-        body.feature_flags.allow_discount_code === false && body.feature_flags.allow_customer_editing_email === false && body.metadata.promotion_id === promotion.id);
+        body.feature_flags.allow_discount_code === true && body.feature_flags.allow_customer_editing_email === false && body.metadata.promotion_id === promotion.id);
       return Response.json({ checkout_url: "https://checkout.dodopayments.com/fixture", session_id: "session_promotion" }); }
     throw new Error(`Unexpected synthetic billing operation: ${url.href}`);
   }) as typeof fetch;
@@ -260,8 +269,11 @@ Deno.test("billing's real SDK route preapplies the selected customer's one-use p
       body: JSON.stringify({ action: "checkout_ai_credits", pack_id: "pdt_fixture", promotion_id: promotion.id }) }));
     const first = await request(), result = await first.json();
     assert(first.status === 200 && result.order_id === (saved as Record<string, unknown> | null)?.id && checkouts === 1 && providerReads === 5);
-    const duplicate = await request(); assert(duplicate.status === 400 &&
-      (await duplicate.json()).error === "This Coin promotion has already been opened. Complete your original checkout." && checkouts === 1 && providerReads === 5);
+    const resumed = await request(); assert(resumed.status === 200 && JSON.stringify(await resumed.json()) === JSON.stringify(result) &&
+      checkouts === 1 && providerReads === 5);
+    (saved as Record<string, unknown> | null)!.checkout_session_id = null;
+    const unknown = await request(); assert(unknown.status === 400 &&
+      (await unknown.json()).error === "This Coin promotion has already been opened. Complete your original checkout." && checkouts === 1 && providerReads === 5);
   } finally { Deno.env.get = originalEnv; globalThis.fetch = originalFetch; }
 });
 

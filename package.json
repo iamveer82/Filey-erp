@@ -25,7 +25,7 @@
     "shortcut": "powershell -ExecutionPolicy Bypass -File scripts/create-desktop-shortcut.ps1",
     "setup": "npm run tauri build && npm run shortcut",
     "test:browser:tools": "node scripts/test-browser-tools.mjs",
-    "test:edge": "deno test --allow-env --allow-net --allow-read --lock=deno.lock --frozen supabase/functions"
+    "test:edge": "deno test --node-modules-dir=none --allow-env --allow-net --allow-read --lock=deno.lock --frozen supabase/functions"
   },
   "dependencies": {
     "@cantoo/pdf-lib": "^2.7.1",

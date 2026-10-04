@@ -3,6 +3,7 @@ import { aiAgent, aiChat, aiReady, getActiveAiConfig, getAiConfig, setAiConfig }
 import { setCacheOrg } from "../api";
 import { supabase } from "../supabase";
 import { writeAgentStorage } from "../agentStorage";
+import * as billing from "../billingService";
 import {
   createCreditFetch,
   buyAiCredits,
@@ -127,6 +128,65 @@ it("never retries or falls back after a paid request fails", async () => {
   );
   expect(supabase!.functions.invoke).toHaveBeenCalledTimes(1);
   expect(network).not.toHaveBeenCalled();
+});
+
+it.each([
+  "Coin payments are not available yet.",
+  "This AI credit pack is not configured correctly.",
+  "This Coin promotion is not available for this account or amount.",
+  "This Coin promotion has already been opened. Complete your original checkout.",
+])("shows the known checkout failure without retrying or opening payment: %s", async (message) => {
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: null,
+    error: { context: new Response(JSON.stringify({ error: message }), { status: 400 }) },
+  } as never);
+  const openPayment = vi.spyOn(billing, "openBilling");
+  const network = vi.fn();
+  vi.stubGlobal("fetch", network);
+  const promotionId = "00000000-0000-4000-8000-000000000061";
+  await expect(buyAiCredits("pdt_test", promotionId)).rejects.toThrow(message);
+  expect(supabase!.functions.invoke).toHaveBeenCalledExactlyOnceWith("dodo", {
+    body: { action: "checkout_ai_credits", pack_id: "pdt_test", promotion_id: promotionId },
+    headers: { Authorization: "Bearer fixture-user-a-token" },
+  });
+  expect(openPayment).not.toHaveBeenCalled();
+  expect(network).not.toHaveBeenCalled();
+});
+
+it.each([
+  [503, "Billing is temporarily unavailable. Please try again later."],
+  [503, "Provider exception: Authorization Bearer private-provider-fixture"],
+  [400, "This Coin promotion is not available for this account or amount. SQL SELECT private_rows"],
+])("uses checkout-specific guidance and redacts unknown HTTP %s details", async (status, message) => {
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: null,
+    error: { context: new Response(JSON.stringify({ error: message }), { status }) },
+  } as never);
+  const openPayment = vi.spyOn(billing, "openBilling");
+  await expect(buyAiCredits(500)).rejects.toThrow(
+    "Coin checkout is temporarily unavailable. Please try again shortly."
+  );
+  expect(supabase!.functions.invoke).toHaveBeenCalledExactlyOnceWith("dodo", {
+    body: { action: "checkout_ai_credits", amount_cents: 500 },
+    headers: { Authorization: "Bearer fixture-user-a-token" },
+  });
+  expect(openPayment).not.toHaveBeenCalled();
+});
+
+it("uses checkout guidance for error bodies while keeping AI wallet guidance unchanged", async () => {
+  vi.mocked(supabase!.functions.invoke).mockResolvedValue({
+    data: { error: "Database exception: private_rows" }, error: null,
+  });
+  const openPayment = vi.spyOn(billing, "openBilling");
+  await expect(buyAiCredits(500)).rejects.toThrow(
+    "Coin checkout is temporarily unavailable. Please try again shortly."
+  );
+  expect(openPayment).not.toHaveBeenCalled();
+  expect(supabase!.functions.invoke).toHaveBeenCalledOnce();
+  await expect(getCreditStatus(true)).rejects.toThrow(
+    "Your AI wallet is temporarily unavailable. Please try again shortly."
+  );
+  expect(supabase!.functions.invoke).toHaveBeenCalledTimes(2);
 });
 
 it("never converts a retired free choice into a paid request without explicit selection", async () => {

@@ -1,4 +1,4 @@
-import type DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
+import type DodoPayments from "npm:dodopayments@2.50.0";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const TABLE = "subscription_refund_requests";

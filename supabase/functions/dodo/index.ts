@@ -27,7 +27,9 @@ import { appCheckoutReturn } from "../_shared/checkout-return.ts";
 // Deploy:  supabase functions deploy dodo --no-verify-jwt
 // (the webhook carries no Supabase JWT; the action path verifies the user.)
 
-import DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
+// Use Deno's supported npm runtime. The esm.sh target=deno build imports an
+// obsolete std Node process shim that calls unsupported Deno.core tick APIs.
+import DodoPayments from "npm:dodopayments@2.50.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
@@ -246,6 +248,17 @@ export async function handleRequest(req: Request): Promise<Response> {
     // Only known first-party instructions are safe for callers. Provider and
     // SQL errors may include response bodies, addresses, row values or keys.
     const message = error instanceof Error ? error.message : "";
+    if (!BILLING_MESSAGES.has(message)) {
+      // Keep operational failures diagnosable without logging provider bodies,
+      // database details, credentials or customer information.
+      const status = error && typeof error === "object" && "status" in error &&
+        Number.isInteger(error.status) && Number(error.status) >= 400 && Number(error.status) <= 599
+        ? Number(error.status) : null;
+      console.error("billing_action_failed", {
+        action: action === "checkout_ai_credits" ? "checkout_ai_credits" : "billing",
+        provider_status: status,
+      });
+    }
     return BILLING_MESSAGES.has(message)
       ? json({ error: message }, message === "Workspace changed. Reopen Billing before continuing." ? 409 : 400)
       : json({ error: "Billing is temporarily unavailable. Please try again later." }, 503);
