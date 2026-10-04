@@ -28,6 +28,7 @@ jobs:
       - run: node scripts/test-schema-bootstrap-local.mjs
       - run: node scripts/test-cloud-privacy-local.mjs
       - run: node scripts/test-ai-credit-promotion-local.mjs
+      - run: node scripts/test-ai-completion-recovery-local.mjs
       - run: node scripts/test-business-workflows-local.mjs
       - run: node scripts/test-stripe-totals-local.mjs
       - run: node scripts/test-mfa-local.mjs

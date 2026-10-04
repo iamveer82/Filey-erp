@@ -30,6 +30,7 @@ export interface Chat {
 
 const CHATS_KEY = "filey.ai.chats";
 const ACTIVE_KEY = "filey.ai.active";
+const SESSION_KEY = "filey.ai.session";
 export const TURN_CAP = 30;
 /** Total sessions kept. Chats used to be unbounded, so a long-lived install
  *  crept toward the ~5 MB localStorage ceiling and then silently stopped
@@ -157,20 +158,25 @@ export function saveChats(chats: Chat[], expectedScope?: string): boolean {
 /**
  * The chat to open, given where in the app's life we are.
  *
- * Each launch starts a clean conversation — yesterday's half-finished thread is
- * rarely what you meant to continue. Within one run, leaving the page (or using
- * the popover instead) keeps the chat you were having.
+ * A new browser/webview session starts clean; remounting the chat in the same
+ * session restores its current conversation. Normal section navigation keeps
+ * the live chat mounted so its request, attachments and unfinished draft survive.
  *
  * sessionStorage draws that line for free: the webview clears it when the app
  * closes, while the chats themselves live in localStorage and survive. So
- * history keeps everything; only the *active* pointer resets. Both the full
- * page and the popover call this, or they would disagree about which chat is
- * current depending on which one you opened first.
+ * history keeps everything; only this session's pointer resets. The pointer is
+ * scoped to the account, organization and storage mode, like the history.
  */
 export function resolveOpeningChat(): Chat {
-  // Every launch starts clean - the last conversation stays in History,
-  // it just does not reopen over your screen.
-  return newChat();
+  const scope = agentStorageScope();
+  const key = scope ? `${SESSION_KEY}:${encodeURIComponent(scope)}` : null;
+  let active: string | null = null;
+  try { if (key) active = sessionStorage.getItem(key); } catch { /* storage may be blocked */ }
+  const saved = active ? loadChats().find(chat => chat.id === active) : undefined;
+  if (saved) return saved;
+  const chat = newChat();
+  try { if (key) sessionStorage.setItem(key, chat.id); } catch { /* the mounted chat still retains state */ }
+  return chat;
 }
 
 export function getActiveId(): string | null {
@@ -183,7 +189,13 @@ export function getActiveId(): string | null {
 }
 export function setActiveId(id: string | null): void {
   try {
-    writeAgentStorage(ACTIVE_KEY, id);
+    const scope = requireAgentStorageScope();
+    writeAgentStorage(ACTIVE_KEY, id, scope);
+    const key = `${SESSION_KEY}:${encodeURIComponent(scope)}`;
+    try {
+      if (id) sessionStorage.setItem(key, id);
+      else sessionStorage.removeItem(key);
+    } catch { /* session storage must not prevent saving history */ }
   } catch {
     console.error("Failed to set active chat ID in localStorage");
   }

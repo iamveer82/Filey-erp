@@ -87,11 +87,12 @@ function Wordmark() {
   );
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout({ children, persistentContent }: { children: ReactNode; persistentContent?: ReactNode }) {
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const { profile } = useAuth();
-  const { modules, enabledModules } = useModules();
+  const { profile, profileRefreshError, reloadProfile } = useAuth();
+  const { modules, enabledModules, isEnabled, loading: modulesLoading, error: modulesError, refreshError, retry } = useModules();
+  const persistentAgentVisible = !!persistentContent && pathname === "/agent" && !modulesLoading && !modulesError && isEnabled("agent");
   const navModules = enabledModules();
   const name = profile?.name || "User";
   const { t } = useLang();
@@ -755,6 +756,15 @@ export default function Layout({ children }: { children: ReactNode }) {
             {/* Stable content box for Lenis: the keyed child below is remounted
                 on every navigation, so anchoring to it would lose the node. */}
             <div ref={scrollContentRef}>
+              {!modulesError && (profileRefreshError || refreshError) && (
+                <aside aria-label="Connection status" className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm sm:mx-6">
+                  <p role="status" className="text-muted-foreground">Connection interrupted. Your current chat is kept open while Filey reconnects.</p>
+                  <button type="button" className="btn-ghost" onClick={() => { if (profileRefreshError) void reloadProfile(); if (refreshError) retry(); }}>Reconnect</button>
+                </aside>
+              )}
+              {/* Active AI work belongs to the workspace, not the current page.
+                  Keep this slot outside the navigation/currency remount below. */}
+              {persistentContent}
               {/* Route container - pages are content-only; padding lives here
                   (reference: px-6 pt-6 page gutter). */}
               {/* Currency is part of the key: pages arrive here as a `children`
@@ -770,6 +780,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   the footer above the fold whatever the scroller does. */}
               <div
                 key={`${pathname}:${displayCcy}`}
+                hidden={persistentAgentVisible}
                 className="workspace-content min-w-0 fade-in px-4 sm:px-6 pt-6 pb-16"
               >
                 <ErrorBoundary>{children}</ErrorBoundary>

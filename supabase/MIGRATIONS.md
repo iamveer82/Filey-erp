@@ -571,3 +571,22 @@ checks that repeated installation preserves the objects. The runtime catalog
 now includes private bucket flags and effective service-function grants. No
 production schema, Storage configuration or Edge deployment was changed or
 independently inspected during this review; release remains on hold.
+
+## 2026-10-04 AI completion delivery recovery
+
+Apply `2026-10-04-ai-completion-recovery.sql` before deploying the updated
+`ai-credits` function and web frontend. The canonical fresh installer includes
+it. Cloud Filey AI requests atomically reserve a private request receipt, return
+immediately, and run inference with `EdgeRuntime.waitUntil`. The verified result
+and Coin charge commit together; a reconnect only reads the original receipt.
+Request UUIDs cannot be reused with different content, ownership or workspace.
+
+Only service-role RPCs may read/write response receipts. Every user read checks
+current profile and organization membership after JWT/MFA authentication.
+Responses expire after 30 minutes. On hosted databases with pg_cron, the
+`filey-ai-completion-purge` job clears expired content each minute; installations
+without pg_cron reject expired reads and clear content on the next account read.
+No prompts are persisted by this cache. Local mode and BYOK requests retain
+their existing storage behavior. Account/workspace changes and Stop cannot
+execute late tool output. Disposable SQL and transport tests use synthetic data
+and do not call a paid provider.

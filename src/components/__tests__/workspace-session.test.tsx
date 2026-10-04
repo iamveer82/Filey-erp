@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 const fixture = vi.hoisted(() => ({
   user: { id: "owner", email: "owner@example.test" },
   signOut: vi.fn(),
@@ -43,7 +43,10 @@ vi.mock("../../lib/supabase", () => ({
     }),
   },
 }));
-vi.mock("../../lib/api", () => ({ setCacheOrg: vi.fn((org?: string | null, user?: string) => { fixture.scope = user ? `${org || "default"}:${user}` : "signed out"; }) }));
+vi.mock("../../lib/api", () => ({
+  getCacheScope: () => fixture.scope === "signed out" ? null : fixture.scope,
+  setCacheOrg: vi.fn((org?: string | null, user?: string) => { fixture.scope = user ? `${org || "default"}:${user}` : "signed out"; }),
+}));
 vi.mock("../../lib/realtime", () => ({ watchRealtimeSession: vi.fn(), stopRealtime: vi.fn() }));
 vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
@@ -104,15 +107,102 @@ it("catches up on a workspace switch missed during disconnection without resetti
   expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
 });
 
+it("keeps the verified same-account workspace mounted after a transport-only reconnect failure and on retry", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  const draft = screen.getByLabelText("Retained workspace draft");
+  fireEvent.change(draft, { target: { value: "Preserve my ongoing chat" } });
+  fixture.profileRead.mockResolvedValueOnce({ data: null, error: { code: "", message: "TypeError: Failed to fetch" }, status: 0 });
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  await screen.findByRole("status");
+  expect(currentAuth.profileError).toBeNull();
+  expect(currentAuth.profileLoading).toBe(false);
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "org:owner");
+  expect(screen.getByLabelText("Retained workspace draft")).toBe(draft);
+  expect(draft).toHaveValue("Preserve my ongoing chat");
+  await act(async () => { await currentAuth.reloadProfile(); });
+  expect(currentAuth.profileRefreshError).toBeNull();
+  expect(screen.getByLabelText("Retained workspace draft")).toBe(draft);
+  expect(draft).toHaveValue("Preserve my ongoing chat");
+});
+
+it.each(["denied", "missing"])("still tears down the verified workspace after a confirmed %s profile", async reason => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  expect(screen.getByLabelText("Retained workspace draft")).toBeInTheDocument();
+  fixture.profileRead.mockResolvedValueOnce(reason === "denied"
+    ? { data: null, error: { code: "42501", message: "Permission denied" }, status: 403 }
+    : { data: null, error: null, status: 200 });
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  await waitFor(() => expect(screen.queryByLabelText("Retained workspace draft")).not.toBeInTheDocument());
+  expect(currentAuth.profileRefreshError).toBeNull();
+  if (reason === "denied") expect(currentAuth.profileError).toBe("Permission denied");
+  else expect(currentAuth.needsProfile).toBe(true);
+});
+
+it("does not retain an initial unverified workspace after a network failure", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  fixture.profileRead.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await screen.findByText("Failed to fetch");
+  expect(currentAuth.profileRefreshError).toBeNull();
+  expect(currentAuth.profileError).toBe("Failed to fetch");
+  expect(currentAuth.needsProfile).toBe(false);
+  expect(screen.queryByLabelText("Retained workspace draft")).not.toBeInTheDocument();
+});
+
+it("ignores a late reconnect transport error after the account has changed", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  let rejectEarlier!: (error: Error) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectEarlier = reject; }));
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  fixture.profileRead.mockResolvedValueOnce({ data: { id: "second", email: "second@example.test", name: "Second", company: "Second workspace", org_id: "other-org" }, error: null });
+  act(() => fixture.onAuth?.("SIGNED_IN", { user: { id: "second", email: "second@example.test" } }));
+  await waitFor(() => expect(currentAuth.profile?.id).toBe("second"));
+  await act(async () => { rejectEarlier(new TypeError("Failed to fetch")); });
+  expect(currentAuth.profileRefreshError).toBeNull();
+  expect(currentAuth.profileError).toBeNull();
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "other-org:second");
+});
+
+it.each(["returned", "rejected"])("ignores a stale JWT refresh failure (%s) after a newer verified profile read", async failure => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  let finish!: (value: unknown) => void;
+  let reject!: (reason: unknown) => void;
+  fixture.refreshSession.mockImplementationOnce(() => new Promise((resolve, fail) => { finish = resolve; reject = fail; }));
+  fixture.profileRead.mockResolvedValueOnce({ data: null, error: { code: "PGRST301", message: "JWT expired" }, status: 401 });
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  await waitFor(() => expect(fixture.refreshSession).toHaveBeenCalledOnce());
+  fixture.profileRead.mockResolvedValueOnce({ data: { ...fixture.user, name: "Owner", company: "Fresh verified profile", org_id: "org" }, error: null });
+  act(() => window.dispatchEvent(new Event("filey:cloud-change")));
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Fresh verified profile"));
+  await act(async () => {
+    if (failure === "returned") finish({ data: { session: null }, error: { code: "403", message: "Earlier refresh denied" } });
+    else reject(new TypeError("Failed to fetch"));
+  });
+  expect(currentAuth.profile?.company).toBe("Fresh verified profile");
+  expect(currentAuth.profileError).toBeNull();
+  expect(currentAuth.profileRefreshError).toBeNull();
+  expect(screen.getByLabelText("Retained workspace draft")).toBeInTheDocument();
+});
+
 function SessionProbe() {
   const auth = useAuth();
   currentAuth = auth;
   return (
     <div data-testid="session" data-cache-scope={fixture.scope}>
       {auth.profileError && <span>{auth.profileError}</span>}
+      {auth.profileRefreshError && <span role="status">{auth.profileRefreshError}</span>}
       {auth.loading || auth.profileLoading
         ? "Loading"
         : `${auth.user?.id}:${auth.profile?.company}:${auth.needsProfile ? "setup" : "ready"}`}
+      {!auth.loading && !auth.profileLoading && !auth.profileError && auth.profile && <input aria-label="Retained workspace draft" defaultValue="" />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Mic,
@@ -124,27 +124,43 @@ type PendingApproval = {
 /* The bot draws in the accent colour directly — see BloubBot — so nothing here
    re-tints it. The old orb was grayscale and needed a filter stack to fake one. */
 
-export default function AgentChat() {
+export interface AgentChatStatus {
+  busy: boolean;
+  approvalPending: boolean;
+  stop: () => void;
+}
+
+interface AgentChatProps {
+  /** Visibility changes pause page interactions, never the running task. */
+  active?: boolean;
+  onStatusChange?: (status: AgentChatStatus) => void;
+}
+
+export default function AgentChat({ active = true, onStatusChange }: AgentChatProps) {
   const [scope, setScope] = useState(agentStorageScope);
   useEffect(() => {
     const refresh = () => setScope(agentStorageScope());
     window.addEventListener(AGENT_STORAGE_EVENT, refresh);
     window.addEventListener("storage", refresh);
+    window.addEventListener("filey:workspace-changed", refresh);
+    window.addEventListener("filey:workspace-transition", refresh);
     return () => {
       window.removeEventListener(AGENT_STORAGE_EVENT, refresh);
       window.removeEventListener("storage", refresh);
+      window.removeEventListener("filey:workspace-changed", refresh);
+      window.removeEventListener("filey:workspace-transition", refresh);
     };
   }, []);
-  return <AgentWorkspace key={scope ?? "signed-out"} scope={scope} />;
+  return <AgentWorkspace key={scope ?? "signed-out"} scope={scope} active={active} onStatusChange={onStatusChange} />;
 }
 
-function AgentWorkspace({ scope }: { scope: string | null }) {
+function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { scope: string | null; active: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   // Fresh chat per app launch, same chat within a run — see resolveOpeningChat.
   const [chat, setChat] = useState<Chat>(resolveOpeningChat);
   const [input, setInput] = useState<string>(() =>
-    typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope) ? location.state.draft.slice(0, 4000) : ""
+    active && location.pathname === "/agent" && typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope) ? location.state.draft.slice(0, 4000) : ""
   );
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState(false);
@@ -171,7 +187,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const [videosOpen, setVideosOpen] = useState(() => new URLSearchParams(location.search).get("video") === "1");
+  const [videosOpen, setVideosOpen] = useState(() => active && location.pathname === "/agent" && new URLSearchParams(location.search).get("video") === "1");
+  const handoffsRef = useRef(new Set(active && location.pathname === "/agent" ? [location.key] : []));
+  const pendingHandoffsRef = useRef(new Map<string, { draft: string; video: boolean }>());
   const [webOn, setWebOn] = useState(getReachConfig().enabled);
   const plusRef = useRef<HTMLDivElement>(null);
 
@@ -179,6 +197,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // shortcut promises — but not while typing, where Ctrl+U belongs to the
   // browser and the field.
   useEffect(() => {
+    if (!active) return;
     const keys = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const typing =
@@ -191,7 +210,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     };
     window.addEventListener("keydown", keys);
     return () => window.removeEventListener("keydown", keys);
-  }, []);
+  }, [active]);
 
   const [dragging, setDragging] = useState(false);
   // ── Voice dictation (Web Speech API — Chromium, free, no key) ──────────
@@ -199,6 +218,49 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const dictationRef = useRef<ReturnType<typeof startDictation> | null>(null);
   const dictationTokenRef = useRef(0);
   const micSupported = useMemo(() => speechRecognitionSupported(), []);
+
+  useEffect(() => {
+    if (active) return;
+    dictationTokenRef.current++;
+    dictationRef.current?.stop();
+    dictationRef.current = null;
+    setListening(false);
+    setDragging(false);
+    setHistOpen(false);
+    setMemOpen(false);
+    setAutoOpen(false);
+    setSkillsOpen(false);
+    setCapsOpen(false);
+    setPlusOpen(false);
+    setMoreOpen(false);
+    // Media cards/panels unmount below while hidden; preserve the selected view.
+  }, [active]);
+
+  // A later integration handoff is applied once, after the current task has
+  // finished. Append to unsent wording; navigation never starts a task.
+  useEffect(() => {
+    if (!active || location.pathname !== "/agent") return;
+    if (!handoffsRef.current.has(location.key)) {
+      const draft = typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope)
+        ? location.state.draft.slice(0, 4000) : "";
+      const video = new URLSearchParams(location.search).get("video") === "1";
+      if ((draft || video) && !pendingHandoffsRef.current.has(location.key)) {
+        if (pendingHandoffsRef.current.size >= 16) {
+          setErr("Review your pending integration drafts before adding another.");
+          return;
+        }
+        pendingHandoffsRef.current.set(location.key, { draft, video });
+      }
+      handoffsRef.current.add(location.key);
+      if (handoffsRef.current.size > 128) handoffsRef.current.delete(handoffsRef.current.values().next().value!);
+    }
+    if (busy) return;
+    const pending = [...pendingHandoffsRef.current.values()];
+    pendingHandoffsRef.current.clear();
+    const draft = pending.map(handoff => handoff.draft).filter(Boolean).join("\n\n");
+    if (draft) setInput(current => current ? `${current}\n\n${draft}` : draft);
+    if (pending.some(handoff => handoff.video)) setVideosOpen(true);
+  }, [active, location.key, location.pathname, location.search, location.state, scope, busy]);
 
   const toggleMic = () => {
     if (listening) {
@@ -283,9 +345,23 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
   useEffect(() => {
     const stopBrowser = () => { abortRef.current?.abort(); pendingRef.current?.resolve(false); pendingRef.current = null; setPendingConfirm(null); };
+    const workspaceChanged = (event: Event) => {
+      if (event.type === "filey:workspace-changed" ||
+        (event.type === "filey:workspace-transition" && (event as CustomEvent<boolean>).detail) ||
+        scope !== agentStorageScope()) {
+        stopBrowser();
+        void disableComputerUse().catch(() => {});
+      }
+    };
     window.addEventListener("filey:stop-agent-browser", stopBrowser);
-    return () => window.removeEventListener("filey:stop-agent-browser", stopBrowser);
-  }, []);
+    for (const event of [AGENT_STORAGE_EVENT, "storage", "filey:workspace-changed", "filey:workspace-transition"])
+      window.addEventListener(event, workspaceChanged);
+    return () => {
+      window.removeEventListener("filey:stop-agent-browser", stopBrowser);
+      for (const event of [AGENT_STORAGE_EVENT, "storage", "filey:workspace-changed", "filey:workspace-transition"])
+        window.removeEventListener(event, workspaceChanged);
+    };
+  }, [scope]);
 
 
   // Attach a file + build an image preview (revoking the previous one).
@@ -303,28 +379,43 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // Auto-grow the textarea up to a cap — tall enough for a real brief, short
   // enough that it never crowds the conversation off the screen.
   useEffect(() => {
+    if (!active) return;
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-  }, [input]);
+  }, [active, input]);
 
-  // Route the agent's sensitive-action approvals through an in-app modal
-  // instead of the browser's native confirm() while this page is mounted.
+  // Route this session's sensitive-action approvals through an in-app modal.
+  // Ordinary section changes keep its exact resolver and arguments pending.
   // pendingRef mirrors pendingConfirm so unmount cleanup can settle whatever
   // is on screen: leaving with the dialog up used to strand its resolver
   // unreached — the awaiting runTool promise (and the whole turn) hung forever.
   const pendingRef = useRef<PendingApproval | null>(null);
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    pendingRef.current?.resolve(false);
+    pendingRef.current = null;
+    setPendingConfirm(null);
+    void disableComputerUse().catch(() => {});
+  }, []);
   useEffect(() => {
-    setToolConfirm(
-      (name, args) =>
-        new Promise<boolean>((resolve) => {
-          pendingRef.current?.resolve(false);
-          const pc = { id: ++approvalIdRef.current, name, args, resolve };
-          pendingRef.current = pc;
-          setPendingConfirm(pc);
-        })
-    );
+    onStatusChange?.({ busy, approvalPending: !!pendingConfirm, stop });
+  }, [busy, pendingConfirm, stop, onStatusChange]);
+  useEffect(() => () => {
+    // A contained chat crash can unmount this session while its shell survives.
+    onStatusChange?.({ busy: false, approvalPending: false, stop });
+  }, [onStatusChange, stop]);
+  const requestConfirm = useCallback((name: string, args: Record<string, unknown>) =>
+    new Promise<boolean>((resolve) => {
+      if (!scope || scope !== agentStorageScope() || abortRef.current?.signal.aborted) { resolve(false); return; }
+      pendingRef.current?.resolve(false);
+      const pc = { id: ++approvalIdRef.current, name, args, resolve };
+      pendingRef.current = pc;
+      setPendingConfirm(pc);
+    }), [scope]);
+  useEffect(() => {
+    setToolConfirm(requestConfirm);
     return () => {
       abortRef.current?.abort();
       dictationTokenRef.current++;
@@ -343,7 +434,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           : false
       );
     };
-  }, []);
+  }, [requestConfirm]);
 
   /** A callback from a replaced dialog must never settle its successor. */
   const settleConfirm = (request: PendingApproval, ok: boolean) => {
@@ -378,19 +469,19 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // it only populates the shared 60s memo, and send() still awaits properly if
   // this hasn't finished.
   useEffect(() => {
-    if (!videosOpen) buildAiContext().catch(() => {});
-  }, [videosOpen]);
+    if (active && !videosOpen) buildAiContext().catch(() => {});
+  }, [active, videosOpen]);
 
   useEffect(() => {
-    if (videosOpen) conversationRef.current?.scrollTo({ top: 0 });
-  }, [videosOpen]);
+    if (active && videosOpen) conversationRef.current?.scrollTo({ top: 0 });
+  }, [active, videosOpen]);
 
   // Remember the reader's position before new content changes scrollHeight.
   // Checking after a large streamed chunk can mistake a pinned reader for one
   // who scrolled up; finishing a reply must respect the same choice.
   const trackScroll = () => {
     const scroller = conversationRef.current;
-    if (!scroller || videosOpen) return;
+    if (!active || !scroller || videosOpen) return;
     const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 48;
     followLatestRef.current = atBottom;
     setShowJumpToLatest(!atBottom);
@@ -406,7 +497,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // same path so neither the page nor a reader reviewing earlier text jumps.
   useEffect(() => {
     const scroller = conversationRef.current;
-    if (!scroller || videosOpen) return;
+    if (!active || !scroller || videosOpen) return;
     if (scrolledChatRef.current !== chat.id) {
       scrolledChatRef.current = chat.id;
       followLatestRef.current = true;
@@ -419,17 +510,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       scroller.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
     });
     return () => cancelAnimationFrame(id);
-  }, [chat.id, chat.turns, busy, streaming, runProgress, videosOpen]);
-
-  /** Stop the run. The catch in send() turns the abort into a kept partial
-   *  reply rather than an error banner. */
-  const stop = () => {
-    abortRef.current?.abort();
-    pendingRef.current?.resolve(false);
-    pendingRef.current = null;
-    setPendingConfirm(null);
-    void disableComputerUse().catch(() => {});
-  };
+  }, [active, chat.id, chat.turns, busy, streaming, runProgress, videosOpen]);
 
   const changeChat = (c: Chat) => {
     if (chat.turns.length && (input || files.length)) draftsRef.current.set(chat.id, { text: input, files });
@@ -454,7 +535,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const send = async (raw: string) => {
     const q = raw.trim();
     const attached = files;
-    if ((!q && !attached.length) || busy) return;
+    if (!active || (!q && !attached.length) || busy) return;
+    if (!scope || scope !== agentStorageScope()) { setErr("Your workspace changed. Start a new task in the current workspace."); return; }
     if (!ready) {
       setErr(
         modelConfig.billing ? "Choose Filey AI to pay with Coin, or use your own API key below." : "Choose a local model or connect your provider in AI settings to start this conversation."
@@ -485,6 +567,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     const turnId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const withUser: Chat = {
       ...chat,
+      title: deriveTitle([...chat.turns, { role: "user", text: shownText }]),
       turns: [...chat.turns, { role: "user", text: shownText }],
     };
     followLatestRef.current = true;
@@ -549,7 +632,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
       const selectedEffort = aiEffortLevels(getActiveAiConfig()).includes(effort) ? effort : "auto";
-      const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort, computerSession };
+      const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort, computerSession, confirm: requestConfirm };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
         : aiAgentStream(messages, options);
@@ -677,9 +760,9 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const openHistory = () => {
     setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
     setHistOpen(v => !v);
-    if (!histOpen) requestAnimationFrame(() => historySearchRef.current?.focus());
+    if (!histOpen && active) requestAnimationFrame(() => { if (!workspaceRef.current?.closest("[hidden]")) historySearchRef.current?.focus(); });
   };
-  const closeHistory = () => { setHistOpen(false); requestAnimationFrame(() => historyToggleRef.current?.focus()); };
+  const closeHistory = () => { setHistOpen(false); if (active) requestAnimationFrame(() => { if (!workspaceRef.current?.closest("[hidden]")) historyToggleRef.current?.focus(); }); };
   const switchChat = (c: Chat) => {
     if (busy) return;
     changeChat(c);
@@ -774,7 +857,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               </button>
               <div ref={moreRef}>
                 <button type="button" onClick={() => setMoreOpen(v => !v)} className="filey-chat-icon" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={20} /></button>
-                <MenuPopover open={moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
+                <MenuPopover open={active && moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
                   <MenuItemRow icon={<CoinMark />} label="Coin wallet" onClick={() => { setMoreOpen(false); navigate("/settings?section=credits"); }} />
                   <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
                   <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
@@ -800,7 +883,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         {/* The conversation and composer share one readable measure. */}
         <div className="filey-conversation-viewport">
         <div ref={conversationRef} className="filey-conversation-scroll" onScroll={trackScroll}>
-        {videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
+        {active && videosOpen && <AgentMediaPanel onClose={() => setVideosOpen(false)} onDraft={job => {
           setChat(current => ({ ...current, turns: [...current.turns,
             { role: "assistant", text: job.state === "draft" ? `Review your ${job.kind}, then choose Generate to use your own provider key.` : `Here is your ${job.kind} request.`, files: [{ name: `Generated ${job.kind}`, mediaJobId: job.id }] }], updatedAt: Date.now() }));
           setVideosOpen(false);
@@ -819,7 +902,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   one animates: it breathes, blinks and looks around while it
                   waits for a first question. */}
               <div className="mx-auto mb-4 grid h-12 w-12 place-items-center">
-                <BloubBot size={48} state="idle" label="Filey AI" ambient />
+                {active && <BloubBot size={48} state="idle" label="Filey AI" ambient />}
               </div>
               <h2 className="text-xl font-medium leading-tight text-foreground tracking-tight sm:text-2xl">
                 What shall we <AnnotatedText variant="wavy">work on?</AnnotatedText>
@@ -828,7 +911,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           ) : (
             // Turns separate by spacing alone: ChatTurn carries no timestamp
             // (aiChats.ts stores none), so no time meta is invented here.
-            chat.turns.map((t, i) => <Bubble key={i} turn={t} />)
+            chat.turns.map((t, i) => <Bubble key={i} turn={t} active={active} />)
           )}
 
           {busy && (
@@ -836,6 +919,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               <Bubble
                 turn={{ role: "assistant", text: streaming || "", run: runProgress }}
                 pending
+                active={active}
               />
             </>
           )}
@@ -853,7 +937,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
               model's reply: a data URL is kilobytes of base64 that would bloat
               every subsequent turn's context, and the code refreshes on its own
               timer - this card follows it. */}
-          <WhatsAppPairingCard />
+          {active && <WhatsAppPairingCard />}
 
         </div>
         </div>
@@ -949,7 +1033,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 }}
                 /* The wrapper's border shows focus for the whole composer. */
                 className="filey-composer-input w-full resize-none bg-transparent text-foreground outline-none focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground"
-                autoFocus={!videosOpen && typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
+                autoFocus={active && !videosOpen && typeof matchMedia !== "undefined" && matchMedia("(pointer: fine)").matches}
               />
 
               {/* One row on every screen; compact controls keep their menus. */}
@@ -968,7 +1052,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                   </button>
 
                   <MenuPopover
-                    open={plusOpen}
+                    open={active && plusOpen}
                     onClose={() => setPlusOpen(false)}
                     anchorRef={plusRef}
                     side="top"
@@ -1054,14 +1138,14 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                     e.target.value = ""; // allow re-selecting the same file
                   }}
                 />
-                <AgentAccessControl mode={mode} disabled={busy} onCapabilities={() => setCapsOpen(true)} onChange={next => {
+                {active && <AgentAccessControl mode={mode} disabled={busy} onCapabilities={() => setCapsOpen(true)} onChange={next => {
                   setAgentMode(next);
                   const saved = getAgentMode(); setMode(saved);
                   if (saved !== next) setErr("Could not save the access mode. Your previous selection is unchanged.");
-                }} />
+                }} />}
                 <div className="filey-composer-models">
-                <AiFundingControl disabled={busy} compact />
-                <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />
+                {active && <AiFundingControl disabled={busy} compact />}
+                {active && <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />}
                 {/* Mic — dictation straight into the composer. Browser engine
                     (Chromium WebView2), free, no key. Hidden where the browser
                     doesn't ship SpeechRecognition. */}
@@ -1117,7 +1201,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
         </div>
 
         {/* Closing an approval always resolves the waiting tool as denied. */}
-        {pendingConfirm && (
+        {active && pendingConfirm && (
           <Modal key={pendingConfirm.id} open onClose={() => settleConfirm(pendingConfirm, false)} title="Approve action">
             <p className="flex items-start gap-2 text-sm text-muted-foreground">
               <ShieldAlert size={18} className="shrink-0 text-warning" />
@@ -1152,7 +1236,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </Modal>
         )}
 
-        <Modal open={memOpen} onClose={() => setMemOpen(false)} title="Agent memory">
+        <Modal open={active && memOpen} onClose={() => setMemOpen(false)} title="Agent memory">
           {mems.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               Nothing learned yet. The agent saves durable facts and preferences here as
@@ -1196,10 +1280,10 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
           </div>
         </Modal>
 
-        <AutomationsDrawer open={autoOpen} onClose={() => setAutoOpen(false)} />
-        <SkillsDrawer open={skillsOpen} onClose={() => setSkillsOpen(false)} />
+        <AutomationsDrawer open={active && autoOpen} onClose={() => setAutoOpen(false)} />
+        <SkillsDrawer open={active && skillsOpen} onClose={() => setSkillsOpen(false)} />
         <CapabilitiesDrawer
-          open={capsOpen}
+          open={active && capsOpen}
           onClose={() => {
             setCapsOpen(false);
             setMode(getAgentMode());
@@ -1238,7 +1322,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
+function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: boolean; active?: boolean }) {
   const [fileError, setFileError] = useState("");
   if (turn.role === "user") {
     return (
@@ -1252,7 +1336,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
   return (
     <div className="group/msg">
       {/* Keep Filey's animated identity while working, and give replies the full width. */}
-      {pending && <div className="mb-2 grid h-7 w-7 place-items-center">
+      {active && pending && <div className="mb-2 grid h-7 w-7 place-items-center">
         <BloubBot
           size={28}
           animate
@@ -1275,7 +1359,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
           ) : (
             // Nothing streamed yet: the three dots stand in for words, matching
             // the thought trail the bot's face is wearing at that same moment.
-            <ThinkingDots className="text-muted-foreground" />
+            active ? <ThinkingDots className="text-muted-foreground" /> : null
           )}
           {pending && turn.text && (
             <span className="ml-1 inline-block motion-safe:animate-pulse">▍</span>
@@ -1292,7 +1376,7 @@ function Bubble({ turn, pending }: { turn: ChatTurn; pending?: boolean }) {
             {turn.files.map((f, i) =>
               // Desktop: the file is already on disk, so open it where it
               // landed. Browser: hand over the blob as a real download.
-              f.mediaJobId ? <MediaJobCard key={f.mediaJobId} id={f.mediaJobId} /> : f.videoJobId ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : f.path ? (
+              f.mediaJobId ? (active ? <MediaJobCard key={f.mediaJobId} id={f.mediaJobId} /> : null) : f.videoJobId ? (active ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : null) : f.path ? (
                 <button
                   key={i}
                   type="button"

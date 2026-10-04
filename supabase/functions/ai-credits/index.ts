@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { MFA_REQUIRED, mfaAllowed } from "../_shared/mfa.ts";
 import { CORS_HEADERS, json, rateLimit } from "../_shared/rateLimit.ts";
 import { creditGateway } from "../_shared/ai-credit-gateway.ts";
+import { recoverFileyAICompletion } from "../_shared/ai-completion-recovery.ts";
 import { creditPaymentsReady } from "../_shared/ai-credit-payments.ts";
 import { isAuthorizedZeroCreditOrder, publicTestPromotion } from "../_shared/ai-credit-promotion.ts";
 import {
@@ -35,6 +36,10 @@ export async function handleRequest(req: Request): Promise<Response> {
   const jwt = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ??
     "";
   const { data: auth, error: authError } = await admin.auth.getUser(jwt);
+  if (authError && (authError.name === "AuthRetryableFetchError" ||
+    (typeof authError.status === "number" && authError.status >= 500))) {
+    return json({ error: "Your AI wallet is temporarily unavailable. Please try again shortly." }, 503);
+  }
   if (authError || !auth.user) {
     return json(
       { error: "Sign in to your Filey account to use AI credits." },
@@ -187,6 +192,24 @@ export async function handleRequest(req: Request): Promise<Response> {
           ? null
           : "Filey-funded AI is being set up. Your own API key still works.",
       });
+    }
+    if (action === "completion_status" || (action === "completion" && body.recoverable === true)) {
+      if (!(await rateLimit(admin, user.id, "ai_completion_recovery", 1200, 3600))) {
+        return json({ error: "Too many AI requests. Try again shortly." }, 429);
+      }
+      const rpc = async (operation: string, args: Record<string, unknown>) => {
+        const { data, error } = await admin.rpc("filey_ai_completion_recovery", {
+          p_action: operation, p_user: user.id, p_args: args,
+        });
+        if (error) throw new Error(error.message);
+        return data;
+      };
+      const runtime = (globalThis as typeof globalThis & {
+        EdgeRuntime?: { waitUntil(promise: Promise<unknown>): void };
+      }).EdgeRuntime;
+      const result = await recoverFileyAICompletion(user, body, rpc,
+        runtime ? (promise) => runtime.waitUntil(promise) : undefined);
+      return json(result, result.state === "pending" ? 202 : 200);
     }
     if (action !== "completion") {
       return json({ error: "Unknown AI credits action." }, 400);
