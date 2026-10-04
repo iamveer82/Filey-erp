@@ -583,13 +583,10 @@ async function transportFetch(input: string, init: RequestInit): Promise<Respons
 /** Status codes worth retrying: rate limits + transient server faults. */
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
-/** fetch wrapper that retries transient failures (network error + 429/5xx) with
- *  exponential backoff, honouring a `Retry-After` header. Throws AiError after
- *  the final attempt. User aborts (signal) and non-retryable 4xx are never
- *  retried — they throw immediately. Keeps a long autonomous run alive through
- *  a rate-limit blip instead of dying at round 19. The backoff waits are
- *  abortable too — a `Retry-After: 60` must not mean Stop does nothing for a
- *  minute. */
+/** Retry reads after transient failures, and rejected requests after a 429.
+ *  A POST may already have generated a billable answer despite a network/5xx
+ *  failure, so never replay it without a server-side recovery contract.
+ *  Backoff honours `Retry-After` and remains abortable. */
 export async function aiFetch(
   input: string,
   init: RequestInit,
@@ -597,12 +594,13 @@ export async function aiFetch(
 ): Promise<Response> {
   const retries = opts.retries ?? 3;
   const base = opts.baseDelayMs ?? 500;
+  const replaySafe = ["GET", "HEAD"].includes((init.method ?? "GET").toUpperCase());
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await transportFetch(input, init);
       if (res.ok) return res;
-      if (!RETRYABLE.has(res.status) || attempt === retries)
+      if (!RETRYABLE.has(res.status) || (!replaySafe && res.status !== 429) || attempt === retries)
         throw new AiError(redactAiError(await errText(res), init.headers).slice(0, 1000), res.status);
       const ra = Number(res.headers.get("retry-after"));
       await withAbort(sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt), init.signal);
@@ -612,7 +610,7 @@ export async function aiFetch(
       if (init.signal?.aborted || (e as Error)?.name === "TimeoutError")
         throw new AiError("The provider took too long to respond. Check your connection or try another model.");
       lastErr = e; // network failure
-      if (attempt === retries) break;
+      if (!replaySafe || attempt === retries) break;
       await withAbort(sleep(base * 2 ** attempt), init.signal);
     }
   }

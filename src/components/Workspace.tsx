@@ -14,6 +14,7 @@ import AgentScheduler from "./AgentScheduler";
 import { Toaster } from "./Toaster";
 import WorkspaceDataProvider from "./WorkspaceDataProvider";
 import { workspaceQueryScope } from "../lib/workspaceQueries";
+import PersistentAgentChat from "./PersistentAgentChat";
 
 const CustomerDetail = lazy(() => import("../pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("../pages/SupplierDetail"));
@@ -59,7 +60,7 @@ function AppRoutes() {
             <Route
               key={m.id}
               path={m.to}
-              element={isEnabled(m.id) ? <Page /> : <ModuleDisabled name={m.label} />}
+              element={isEnabled(m.id) ? m.id === "agent" ? null : <Page /> : <ModuleDisabled name={m.label} />}
             />
           );
         })}
@@ -87,7 +88,7 @@ export default function Workspace() {
   return (
     <WorkspaceDataProvider key={workspaceQueryScope()}>
     <ModulesProvider>
-      <Layout>
+      <Layout persistentContent={<PersistentAgentChat />}>
         <AppRoutes />
       </Layout>
       <CommandPalette />

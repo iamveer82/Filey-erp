@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { assertWorkspaceCurrent, isLocalMode } from "./dataMode";
 import { getCacheScope } from "./api";
 import { setOf } from "./toolsets";
+import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 
 export interface ModuleAccess { admin: boolean; modules: string[] | null }
 let pending: { scope: string; promise: Promise<ModuleAccess> } | null = null;
@@ -15,9 +16,11 @@ export async function loadModuleAccess(): Promise<ModuleAccess> {
   if (!scope || !supabase) throw new Error("Sign in to load workspace permissions.");
   if (pending?.scope === scope) return pending.promise;
   const promise = (async () => {
-    const { data, error } = await supabase.rpc("filey_module_access");
+    const { data, error, status } = await supabase.rpc("filey_module_access");
     assertWorkspaceCurrent();
     if (scope !== getCacheScope()) throw new Error("Your workspace changed. Reopen this section.");
+    if (error && isTransientConnectionError(error, status))
+      throw new ConnectionUnavailableError("Workspace connection is unavailable. Your current task is preserved; reconnect to verify access.");
     if (error || !data || data.allowed !== true || typeof data.admin !== "boolean" ||
       (data.modules !== null && (!Array.isArray(data.modules) || data.modules.some((id: unknown) => typeof id !== "string"))))
       throw new Error("Workspace permissions could not be verified. Retry or contact your administrator.");

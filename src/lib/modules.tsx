@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { tools, getCacheScope } from "./api";
 import { useAuth } from "./auth";
 import { effectiveDataMode } from "./dataMode";
@@ -6,12 +6,15 @@ import { MODULES, type AppModule } from "../modules/registry";
 import { useLiveSync } from "./realtime";
 
 import { canUseModule, loadModuleAccess, type ModuleAccess } from "./moduleAccess";
+import { isTransientConnectionError } from "./connectionError";
 
 const KEY = "modules.disabled";
 
 interface ModulesValue {
   loading: boolean;
   error: string;
+  /** A transport-only recheck failure does not tear down the verified UI. */
+  refreshError: string;
   retry: () => void;
   modules: AppModule[];
   isEnabled: (id: string) => boolean;
@@ -29,6 +32,8 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   const [access, setAccess] = useState<ModuleAccess | null>(null);
   const [accessWorkspace, setAccessWorkspace] = useState("");
   const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
+  const verifiedWorkspace = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [generation, retry] = useState(0);
   useLiveSync(() => retry(n => n + 1), ["org_members", "app_settings"]);
@@ -40,29 +45,58 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
     window.addEventListener("filey:agent-storage", changed);
     window.addEventListener("filey:workspace-changed", refresh);
     window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
     return () => {
       window.removeEventListener("filey:agent-storage", changed);
       window.removeEventListener("filey:workspace-changed", refresh);
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
     };
   }, []);
   useEffect(() => {
     let active = true;
     // Keep the current screen/form mounted during a same-workspace recheck.
-    // Server reads and writes still enforce permissions; failure clears access.
+    // Server reads and writes still enforce permissions; a confirmed denial
+    // clears access, while a transport-only recheck preserves the current UI.
     setError("");
+    setRefreshError("");
     void (async () => {
-      const [permissions, rows] = await Promise.all([loadModuleAccess(), tools.settings()]);
+      const [permissionRead, settingsRead] = await Promise.allSettled([loadModuleAccess(), tools.settings()]);
+      // A faster settings outage must never mask a confirmed membership denial.
+      if (permissionRead.status === "rejected") {
+        if (settingsRead.status === "rejected" && isTransientConnectionError(permissionRead.reason) &&
+            !isTransientConnectionError(settingsRead.reason)) throw settingsRead.reason;
+        throw permissionRead.reason;
+      }
+      const permissions = permissionRead.value;
+      if (settingsRead.status === "rejected") {
+        if (active && verifiedWorkspace.current === workspace && workspace === workspaceKey() &&
+            isTransientConnectionError(settingsRead.reason)) {
+          // Apply a freshly confirmed role even when module preferences could
+          // not be refreshed; never preserve the previous administrator role.
+          setAccess(permissions); setAccessWorkspace(workspace);
+        }
+        throw settingsRead.reason;
+      }
+      const rows = settingsRead.value;
       const raw = rows.find(row => row.key === KEY)?.value;
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(parsed)) throw new Error("Module settings could not be read.");
       if (active && workspace === workspaceKey()) {
+        verifiedWorkspace.current = workspace;
         setAccess(permissions); setAccessWorkspace(workspace); setDisabled(parsed.map(String));
       }
     })().catch(error => {
       if (active) {
-        setAccess(null); setDisabled([]);
-        setError(error instanceof Error ? error.message : "Workspace permissions could not be loaded.");
+        if (verifiedWorkspace.current === workspace && workspace === workspaceKey() && isTransientConnectionError(error)) {
+          // Existing forms/chat remain on this device. Tool executions always
+          // perform a fresh permission RPC and still reject this same outage.
+          setRefreshError("Your connection is unavailable. Your current chat and drafts are preserved. Reconnect to verify workspace access.");
+        } else {
+          verifiedWorkspace.current = null;
+          setAccess(null); setDisabled([]);
+          setError(error instanceof Error ? error.message : "Workspace permissions could not be loaded.");
+        }
       }
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -99,6 +133,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   const value: ModulesValue = {
     loading,
     error,
+    refreshError,
     retry: () => retry(n => n+1),
     modules: MODULES,
     isEnabled,
@@ -113,6 +148,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 const defaultValue: ModulesValue = {
   loading: true,
   error: "",
+  refreshError: "",
   retry: () => {},
   modules: MODULES,
   isEnabled: () => false,

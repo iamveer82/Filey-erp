@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { setCacheOrg } from "../api";
+import { setCacheOrg, tools } from "../api";
 import { loadModuleAccess, requireToolModuleAccess } from "../moduleAccess";
 import { runTool } from "../aiTools";
 import { ModulesProvider, useModules } from "../modules";
@@ -73,6 +73,83 @@ it("keeps an unfinished form mounted while focus rechecks workspace access", asy
   expect(input).toHaveValue("Unsaved invoice");
   complete({ data: { allowed: true, admin: false, modules: ["inventory"] }, error: null });
   await waitFor(() => expect(screen.getByLabelText("Draft title")).toHaveValue("Unsaved invoice"));
+});
+it("preserves a verified same-workspace chat/form during a transport outage while fresh tool gates still reject", async () => {
+  function ChatForm() {
+    const access = useModules();
+    return access.loading ? <p>Loading</p> : access.error ? <p>{access.error}</p> : <>
+      <input aria-label="Preserved task draft" defaultValue="" />
+      <p>{access.isEnabled("agent") ? "Agent mounted" : "Agent denied"}</p>
+      {access.refreshError && <p role="alert">{access.refreshError}</p>}
+      <button onClick={access.retry}>Retry workspace</button>
+    </>;
+  }
+  render(<ModulesProvider><ChatForm /></ModulesProvider>);
+  const draft = await screen.findByLabelText("Preserved task draft");
+  fireEvent.change(draft, { target: { value: "Keep my pending request" } });
+  rpc.mockResolvedValue({ data: null, error: { code: "", message: "TypeError: Failed to fetch" }, status: 0 });
+  fireEvent.focus(window);
+  await screen.findByRole("alert");
+  expect(screen.getByLabelText("Preserved task draft")).toBe(draft);
+  expect(draft).toHaveValue("Keep my pending request");
+  expect(screen.getByText("Agent mounted")).toBeInTheDocument();
+  await expect(requireToolModuleAccess("create_product", {})).rejects.toThrow("connection is unavailable");
+  rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["inventory"] }, error: null });
+  fireEvent.click(screen.getByText("Retry workspace"));
+  await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  expect(screen.getByLabelText("Preserved task draft")).toBe(draft);
+  rpc.mockResolvedValue({ data: { allowed: false, admin: false, modules: [] }, error: null });
+  fireEvent.focus(window);
+  await screen.findByText(/could not be verified/);
+  expect(screen.queryByText("Agent mounted")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Preserved task draft")).not.toBeInTheDocument();
+});
+it("never preserves unverified initial or switched-workspace access on a transport failure", async () => {
+  rpc.mockResolvedValue({ data: null, error: { code: "", message: "TypeError: Failed to fetch" }, status: 0 });
+  const first = render(<ModulesProvider><Consumer /></ModulesProvider>);
+  await screen.findByText(/connection is unavailable/);
+  expect(screen.queryByText("People allowed")).not.toBeInTheDocument();
+  first.unmount();
+  rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null }, error: null });
+  render(<ModulesProvider><Consumer /></ModulesProvider>);
+  await screen.findByText("People allowed");
+  rpc.mockResolvedValue({ data: null, error: { code: "", message: "TypeError: Failed to fetch" }, status: 0 });
+  act(() => setCacheOrg("other", "staff"));
+  await screen.findByText(/connection is unavailable/);
+  expect(screen.queryByText("People allowed")).not.toBeInTheDocument();
+});
+it("does not let an earlier settings transport failure hide a confirmed membership denial", async () => {
+  rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null }, error: null });
+  render(<ModulesProvider><Consumer /></ModulesProvider>);
+  await screen.findByText("People allowed");
+  let finish!: (value: unknown) => void;
+  rpc.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const settings = vi.spyOn(tools, "settings").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  try {
+    fireEvent.focus(window);
+    await waitFor(() => expect(settings).toHaveBeenCalled());
+    await act(async () => finish({ data: { allowed: false, admin: false, modules: [] }, error: null }));
+    await screen.findByText(/could not be verified/);
+    expect(screen.queryByText("People allowed")).not.toBeInTheDocument();
+  } finally { settings.mockRestore(); }
+});
+it("applies a newly verified restricted role even when module preferences cannot be refreshed", async () => {
+  function AccessStatus() {
+    const access = useModules();
+    return <><Consumer />{access.refreshError && <p role="status">{access.refreshError}</p>}</>;
+  }
+  rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null }, error: null });
+  render(<ModulesProvider><AccessStatus /></ModulesProvider>);
+  await screen.findByText("People allowed");
+  rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["inventory"] }, error: null });
+  const settings = vi.spyOn(tools, "settings").mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  try {
+    fireEvent.focus(window);
+    await screen.findByRole("status");
+    expect(screen.getByText("People blocked")).toBeInTheDocument();
+    expect(screen.queryByText("People allowed")).not.toBeInTheDocument();
+    await expect(requireToolModuleAccess("list_employees", {})).rejects.toThrow("people");
+  } finally { settings.mockRestore(); }
 });
 it("refreshes revoked permissions after a membership event or reconnect, without rechecking unrelated messages", async () => {
   rpc.mockResolvedValue({data:{allowed:true,admin:true,modules:null},error:null});

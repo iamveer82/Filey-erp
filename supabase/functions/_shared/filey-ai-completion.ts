@@ -324,6 +324,25 @@ export async function fileyAICompletion(
     const usage = fileyAIUsage(raw, prepared.request.max_tokens);
     const message = publicMessage(raw);
     const source = raw as Record<string, unknown>;
+    const completion = {
+      id: source.id as string,
+      object: "chat.completion",
+      model: FILEY_AI_MODEL_ID,
+      choices: [{
+        index: 0,
+        message,
+        finish_reason: ["stop", "length", "tool_calls", "content_filter", "insufficient_system_resource"].includes(
+            String((source.choices as Record<string, unknown>[])[0].finish_reason),
+          )
+          ? (source.choices as Record<string, unknown>[])[0].finish_reason as string
+          : null,
+      }],
+      usage: {
+        prompt_tokens: usage.inputTokens,
+        completion_tokens: usage.outputTokens,
+        total_tokens: usage.inputTokens + usage.outputTokens,
+      },
+    };
     const account = await wallet("settle", {
       request_id: requestId,
       charged_micros: usage.chargedMicros,
@@ -332,38 +351,13 @@ export async function fileyAICompletion(
       provider_id: source.id,
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,
+      // Recoverable cloud calls store the verified response in the SAME SQL
+      // transaction as settlement. Ordinary/local wallets ignore this field.
+      completion,
     });
     settled = true;
     return {
-      completion: {
-        id: source.id as string,
-        object: "chat.completion",
-        model: FILEY_AI_MODEL_ID,
-        choices: [{
-          index: 0,
-          message,
-          finish_reason: [
-              "stop",
-              "length",
-              "tool_calls",
-              "content_filter",
-              "insufficient_system_resource",
-            ].includes(
-              String(
-                (source.choices as Record<string, unknown>[])[0]
-                  .finish_reason,
-              ),
-            )
-            ? (source.choices as Record<string, unknown>[])[0]
-              .finish_reason as string
-            : null,
-        }],
-        usage: {
-          prompt_tokens: usage.inputTokens,
-          completion_tokens: usage.outputTokens,
-          total_tokens: usage.inputTokens + usage.outputTokens,
-        },
-      },
+      completion,
       account,
       charged_micros: Math.min(usage.chargedMicros, prepared.reserve),
     };

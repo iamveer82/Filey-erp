@@ -11,7 +11,8 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured, createSignupClient } from "./supabase";
 import { isLocalMode } from "./dataMode";
-import { setCacheOrg } from "./api";
+import { getCacheScope, setCacheOrg } from "./api";
+import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
 import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache } from "./license";
 import { mfaRequired } from "./mfa";
@@ -158,6 +159,8 @@ interface AuthValue {
   profileLoading: boolean;
   /** Message when the profile READ failed. Never means "no profile". */
   profileError: string | null;
+  /** A transient refresh outage leaves the verified same-account UI intact. */
+  profileRefreshError: string | null;
   /** Retry a failed profile read. */
   reloadProfile: () => Promise<void>;
   signInWithPassword: (c: Credential, password: string) => Promise<void>;
@@ -260,11 +263,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** Set when the profile READ failed. Distinct from "no profile exists" —
    *  the first must never be mistaken for the second (see loadProfile). */
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileRefreshError, setProfileRefreshError] = useState<string | null>(null);
   // The user id whose profile is currently loaded — lets us ignore token
   // refreshes (tab focus) that would otherwise re-trigger the loading screen.
   const loadedFor = useRef<string | null>(null);
   const profileReadRevision = useRef(0);
   const loadedOrg = useRef(profile?.org_id);
+  const loadedScope = useRef<string | null>(initialIdentity.user ? getCacheScope() : null);
   loadedOrg.current = profile?.org_id;
 
   const completeLocalSignIn = (u: User) => {
@@ -278,11 +283,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async function readProfile(u: User, refreshed = false): Promise<void> {
     if (!supabase) return;
     const revision = ++profileReadRevision.current;
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", u.id)
-      .maybeSingle();
+    let result;
+    try {
+      result = await supabase.from("profiles").select("*").eq("id", u.id).maybeSingle();
+    } catch (error) {
+      if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
+      throw error;
+    }
+    const { data, error, status } = result;
     if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
     // A read that FAILED is not evidence the profile is missing. This used to
     // ignore `error` and set profileLoaded in a finally, so one network blip or
@@ -292,17 +300,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A sleeping device may wake with a token the server has already expired.
     // Refresh once before retrying; never interpret an auth failure as new setup.
     if (error && /jwt expired/i.test(error.message) && !refreshed) {
-      const { data: renewed, error: refreshError } = await supabase.auth.refreshSession();
+      let refreshResult;
+      try {
+        refreshResult = await supabase.auth.refreshSession();
+      } catch (refreshError) {
+        if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
+        throw refreshError;
+      }
+      if (loadedFor.current !== u.id || revision !== profileReadRevision.current) return;
+      const { data: renewed, error: refreshError } = refreshResult;
       if (refreshError) throw refreshError;
       if (renewed.session?.user.id !== u.id || loadedFor.current !== u.id) return;
       return readProfile(u, true);
     }
-    if (error) throw error;
+    if (error) {
+      if (isTransientConnectionError(error, status))
+        throw new ConnectionUnavailableError("Your connection is unavailable. Reconnect to refresh your profile.");
+      throw error;
+    }
     const prof = (data as Profile) ?? null;
     if (loadedOrg.current !== prof?.org_id) clearEntitlementCache();
     setCacheOrg(prof?.org_id, u.id);
+    loadedScope.current = prof ? getCacheScope() : null;
     setProfile(prof);
     setProfileError(null);
+    setProfileRefreshError(null);
     setProfileLoaded(true);
   }, []);
 
@@ -316,12 +338,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const next = (event as CustomEvent<Profile>).detail;
       if (next.org_id === profile?.org_id) return;
       setCacheOrg(null,user.id);
+      loadedScope.current = null;
+      setProfileRefreshError(null);
       clearEntitlementCache();
       setProfileLoaded(false);
       void loadProfile(user).catch((e: Error) => setProfileError(e.message));
     };
     const transition = (event: Event) => {
       if ((event as CustomEvent<boolean>).detail) {
+        loadedScope.current = null; setProfileRefreshError(null);
         setCacheOrg(null,user.id); clearEntitlementCache(); setProfileLoaded(false);
       } else {
         void loadProfile(user).catch((e: Error) => setProfileError(e.message));
@@ -330,7 +355,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const reconnected = (event: Event) => {
       if ((event as CustomEvent<{tables?: string[]}>).detail?.tables?.length) return;
       // Catch up after sleep/reconnect without discarding a same-workspace draft.
-      void loadProfile(user).catch((e: Error) => setProfileError(e.message));
+      const expectedScope = getCacheScope();
+      const preserve = profileLoaded && profile?.id === user.id && !profileError &&
+        expectedScope !== null && loadedScope.current === expectedScope;
+      void loadProfile(user).catch((error: unknown) => {
+        if (loadedFor.current !== user.id || expectedScope !== getCacheScope()) return;
+        if (preserve && loadedScope.current === expectedScope && isTransientConnectionError(error))
+          setProfileRefreshError("Your connection is unavailable. Your current chat and drafts are preserved. Reconnect to refresh your profile.");
+        else setProfileError(error instanceof Error ? error.message : String((error as { message?: unknown })?.message ?? error));
+      });
     };
     window.addEventListener("filey:cloud-profile",changed);
     window.addEventListener("filey:workspace-transition",transition);
@@ -340,7 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("filey:workspace-transition",transition);
       window.removeEventListener("filey:cloud-change",reconnected);
     };
-  }, [local,user,profile?.org_id,loadProfile]);
+  }, [local,user,profile?.id,profile?.org_id,profileLoaded,profileError,loadProfile]);
 
   useEffect(() => {
     if (local) return; // no Supabase auth in local mode — synthetic user
@@ -362,6 +395,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(u);
         setProfile(null);
         setProfileError(null);
+        setProfileRefreshError(null); loadedScope.current = null;
         setProfileLoaded(false);
         // Defer DB read: never block while the auth lock may be held.
         if (u) {
@@ -398,6 +432,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCacheOrg(null, u.id);
         setProfile(null);
         setProfileError(null);
+        setProfileRefreshError(null); loadedScope.current = null;
         setProfileLoaded(false);
         setTimeout(() => {
           if (!active) return;
@@ -409,6 +444,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }, 0);
       } else {
         loadedFor.current = null;
+        loadedScope.current = null; setProfileRefreshError(null);
         setCacheOrg(null);
         setProfile(null);
         setProfileLoaded(false);
@@ -881,14 +917,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     needsProfile: !!user && profileLoaded && (!profile || isProfileStub(profile)),
     profileLoading: !!user && !profileLoaded && !profileError,
     profileError,
+    profileRefreshError,
     reloadProfile: async () => {
       if (!user) return;
-      if (!local) { setProfileLoaded(false); setCacheOrg(null,user.id); clearEntitlementCache(); }
+      const expectedScope = getCacheScope();
+      const preserve = !local && profileLoaded && profile?.id === user.id && !profileError &&
+        expectedScope !== null && loadedScope.current === expectedScope;
+      if (!local && !preserve) { setProfileLoaded(false); setCacheOrg(null,user.id); loadedScope.current = null; clearEntitlementCache(); }
       setProfileError(null);
+      setProfileRefreshError(null);
       try {
         await loadProfile(user);
       } catch (err: any) {
-        setProfileError(err?.message ?? String(err));
+        if (loadedFor.current !== user.id || (preserve && expectedScope !== getCacheScope())) return;
+        if (preserve && loadedScope.current === expectedScope && isTransientConnectionError(err))
+          setProfileRefreshError("Your connection is unavailable. Your current chat and drafts are preserved. Reconnect to refresh your profile.");
+        else setProfileError(err?.message ?? String(err));
       }
     },
     signInWithPassword,
