@@ -38,7 +38,7 @@ export async function requireModuleAccess(id: string, admin = false): Promise<vo
 const toolModules: Record<string,string> = {
   find_customers:"customers",create_customer:"customers",find_products:"inventory",create_product:"inventory",
   find_suppliers:"suppliers",create_supplier:"suppliers",financial_summary:"accounting",
-  list_invoices:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",
+  list_invoices:"invoicing",get_invoice:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",
   create_quote:"quoting",list_templates:"invoicing",create_order:"orders",
   create_payment_receipt:"payment-receipts",list_payment_receipts:"payment-receipts",
   create_purchase_order:"purchase-orders",create_purchase_invoice_draft:"purchase-invoices",list_purchase_invoices:"purchase-invoices",
@@ -54,7 +54,7 @@ const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browse
  *  by name rather than inferred — an unplaced tool is refused below, and
  *  module-access-coverage.test.ts fails the build instead of the user. */
 const MODULE_FREE = new Set([
-  "get_stats","current_time","open_page",
+  "get_stats","current_time",
   "remember","recall","search_conversations",
   "list_skills","use_skill","learn_skill","import_skill",
   "list_toolsets","use_toolset",
@@ -87,6 +87,9 @@ export async function requireToolModuleAccess(name: string, args: Record<string,
     return;
   }
   let module = toolModules[name] || domains[setOf(name)];
+  // Navigation keeps the destination's permission boundary; a section placed
+  // under Tools in the sidebar still has its own module ID (for example letters).
+  if (name === "open_page") module = typeof args.page === "string" ? args.page.trim().toLowerCase().replace(/^\/+/, "") : "";
   if (name === "list_work_items" || name === "save_work_item") module = args.kind === "ticket" ? "helpdesk" : "projects";
   // Fail closed. An unmapped tool used to skip this gate entirely, so every
   // tool outside a domain toolset ran for members whose role denies the module.
@@ -100,6 +103,7 @@ export async function requireToolModuleAccess(name: string, args: Record<string,
 /** For the coverage test: every tool must be placed somewhere. */
 export const moduleToolPlacement = (name: string): string | null =>
   ADMIN_TOOLS.has(name) ? "admin"
+  : name === "open_page" ? "navigation"
   : MODULE_FREE.has(name) ? "module-free"
   : name === "link_records" || name === "find_links" ? "entity"
   : name === "list_work_items" || name === "save_work_item" ? "work-items"

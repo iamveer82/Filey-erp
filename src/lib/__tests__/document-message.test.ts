@@ -1,9 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { internationalPhone, messageUrl, publicAppBase, invoicePublicLink } from "../documentMessage";
-import { billing } from "../api";
+import { internationalPhone, messageUrl, publicAppBase, invoicePublicLink, quotationPublicLink, receiptPublicLink } from "../documentMessage";
+import { billing, quotes, receipts } from "../api";
 import { isLocalMode } from "../dataMode";
 
-vi.mock("../api", () => ({ billing: { publicLink: vi.fn(async () => "token/123") } }));
+vi.mock("../api", () => ({
+  billing: { publicLink: vi.fn(async () => "token/123") },
+  quotes: { publicLink: vi.fn(async () => "token/123") },
+  receipts: { publicLink: vi.fn(async () => "token/123") },
+}));
 vi.mock("../dataMode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../dataMode")>()),
   isLocalMode: vi.fn(() => false),
@@ -33,4 +37,23 @@ it("only creates public links for a hosted cloud app, preserving its base path",
   vi.stubEnv("VITE_PUBLIC_APP_URL", "http://localhost:1420");
   await expect(invoicePublicLink(42)).rejects.toThrow("Share the PDF");
   expect(billing.publicLink).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["quotation", quotationPublicLink, () => quotes.publicLink],
+  ["receipt", receiptPublicLink, () => receipts.publicLink],
+] as const)("creates usable %s links and refuses localhost, local mode and failed publication", async (_kind, createLink, backend) => {
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "https://billing.example.com/filey/");
+  expect(await createLink(9)).toBe("https://billing.example.com/filey/#/portal/token%2F123");
+  expect(backend()).toHaveBeenCalledExactlyOnceWith(9);
+  vi.mocked(backend()).mockClear();
+  vi.mocked(isLocalMode).mockReturnValue(true);
+  await expect(createLink(9)).rejects.toThrow("Share the PDF");
+  vi.mocked(isLocalMode).mockReturnValue(false);
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "http://127.0.0.1:1420");
+  await expect(createLink(9)).rejects.toThrow("Share the PDF");
+  expect(backend()).not.toHaveBeenCalled();
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "https://billing.example.com/filey/");
+  vi.mocked(backend()).mockRejectedValueOnce(new Error("Publication unavailable"));
+  await expect(createLink(9)).rejects.toThrow("Publication unavailable");
 });

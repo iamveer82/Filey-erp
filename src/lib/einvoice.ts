@@ -1,6 +1,7 @@
 // UAE Electronic Invoice (Peppol PINT-AE) — mandatory-field code lists & helpers.
 //
-// Ref: "UAE Electronic Invoice Mandatory Fields" v1.0 (23 Feb 2026), MD No. 243
+// Ref: MoF Electronic Invoicing Guidelines v1.1 (1 June 2026), "UAE Electronic
+// Invoice Mandatory Fields" v1.0 (23 Feb 2026), MD No. 243
 // & 244 of 2025, and the Peppol PINT-AE specification. Values below are the
 // standard code lists the FTA mandate is built on (UN/EDIFACT 1001, UN/ECE 4461,
 // UN/ECE 5305, ISO 3166) plus the UAE-specific fixed values from the spec.
@@ -21,13 +22,16 @@ export const DEFAULT_TAX_SCHEME = "VAT";
 export const PINT_AE_SPEC_IDENTIFIER = "urn:peppol:pint:billing-1@ae-1";
 export const PINT_AE_PROCESS_ID = "urn:peppol:bis:billing";
 
-/** Only a Corporate Tax TRN can supply a UAE TIN. Never pass a VAT TRN here. */
+/** First ten digits of the entity's own FTA TRN (any tax type), per MoF's
+ * June 2026 guidelines. Never derive it from a tax-group representative's TRN.
+ * The historical helper/JSON field name remains compatible with saved drafts. */
 export function tinFromCorporateTrn(trn?: string | null): string {
   const value = (trn ?? "").trim();
   return /^\d{15}$/.test(value) ? value.slice(0, 10) : "";
 }
 
 export interface EInvoiceParty {
+  /** Legacy key for the entity's own FTA TRN; it is not limited to Corporate Tax. */
   corporate_trn?: string;
   tin?: string;
   endpoint_id?: string;
@@ -99,7 +103,7 @@ export const PINT_AE_INVOICE_TYPE_CODES: Code[] = [
   { code: "381", label: "Tax credit note" },
   { code: "81", label: "Commercial credit note" },
 ];
-export const isCreditNote = (type?: string | null) => type === "381" || type === "81";
+export { isCreditNote } from "./money";
 export const isCommercialInvoice = (type?: string | null) => type === "480" || type === "81";
 
 /** Payment means type code — UN/ECE 4461 subset (spec field 9). */

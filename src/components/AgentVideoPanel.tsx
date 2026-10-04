@@ -1,14 +1,11 @@
-import { SelectMenu } from "./ui-menu";
-import { useEffect, useId, useRef, useState } from "react";
-import { Film, ArrowUpRight, ImagePlus, X, Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Film, ArrowUpRight, X, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { FileySpinner } from "./FileySpinner";
 import { creditCoin, invalidateCreditStatus } from "../lib/aiCredits";
 import {
   getVideo,
   listVideos,
-  quoteVideo,
-  startVideo,
   cancelVideo,
   openVideoFile,
   videoActive,
@@ -16,7 +13,7 @@ import {
 } from "../lib/aiVideo";
 
 const stateLabels: Record<VideoJob["state"], string> = {
-  draft: "Ready to generate",
+  draft: "Older draft",
   submitting: "Submitting",
   uncertain: "Checking submission",
   queued: "In the queue",
@@ -71,18 +68,15 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
       clearTimeout(timer);
     };
   }, [id, state]);
-  async function act(action: "start" | "cancel" | "refresh") {
+  async function act(action: "cancel" | "refresh") {
     if (!job || busy) return;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const result =
-        action === "start"
-          ? { job: await startVideo(job) }
-          : action === "cancel"
-            ? await cancelVideo(id)
-            : { job: await getVideo(id) };
+      const result = action === "cancel"
+        ? await cancelVideo(id)
+        : { job: await getVideo(id) };
       if (mounted.current) {
         setJob(result.job);
         setNotice("message" in result ? (result.message ?? "") : "");
@@ -105,7 +99,6 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
         )}
       </div>
     );
-  const expired = job.state === "draft" && Date.parse(job.quote_expires_at) <= Date.now();
   const active = videoActive(job);
   const noCharge = ["failed", "nsfw", "canceled"].includes(job.state);
   return (
@@ -124,31 +117,29 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
               <Film size={16} />
             )}
             <span role="status">
-              {expired ? "Quote expired" : stateLabels[job.state]}
+              {stateLabels[job.state]}
             </span>
           </div>
-          <span className="shrink-0 text-sm tabular-nums">
+          {job.state !== "draft" && <span className="shrink-0 text-sm tabular-nums">
             {creditCoin(
               job.state === "completed" || noCharge
                 ? job.charged_micros
                 : job.charge_micros
             )}
             {active ? " held" : ""}
-          </span>
+          </span>}
         </div>
         <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
           {job.prompt}
         </p>
         <p className="text-xs text-muted-foreground">
-          Seedance 2.0 · {job.duration}s · 720p ·{" "}
+          {job.duration}s · 720p ·{" "}
           {job.has_reference ? "Photo framing" : job.aspect_ratio} ·{" "}
           {job.generate_audio ? "With audio" : "Silent"}
         </p>
         {job.state === "draft" && (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {expired
-              ? "Request a new quote in Videos to continue."
-              : `${creditCoin(job.charge_micros)} will be held from your Coin wallet. Charged only when the video completes. Failed requests release the hold.`}
+            This older draft cannot be generated with Coin. Create a new video using your own API key in media settings.
           </p>
         )}
         {active && (
@@ -179,17 +170,6 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
           </p>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {job.state === "draft" && !expired && (
-            <button
-              type="button"
-              disabled={busy}
-              className="btn-primary"
-              onClick={() => void act("start")}
-            >
-              {busy ? <FileySpinner size={15} /> : <Film size={15} />}Generate ·{" "}
-              {creditCoin(job.charge_micros)}
-            </button>
-          )}
           {["draft", "queued"].includes(job.state) && (
             <button
               type="button"
@@ -231,8 +211,8 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
             </>
           )}
           {job.state === "draft" && (
-            <Link className="btn-ghost" to="/settings?section=credits">
-              Balance & limits
+            <Link className="btn-ghost" to="/settings?section=ai">
+              Set up video API key
             </Link>
           )}
         </div>
@@ -256,242 +236,33 @@ export function VideoJobCard({ id, initial }: { id: string; initial?: VideoJob }
   );
 }
 
+/** Read-only access to requests created before videos moved to user API keys. */
 export default function AgentVideoPanel({ onClose }: { onClose: () => void }) {
-  const formId = useId();
-  const [prompt, setPrompt] = useState("");
-  const [duration, setDuration] = useState(4);
-  const [aspect, setAspect] = useState("9:16");
-  const [audio, setAudio] = useState(true);
-  const [file, setFile] = useState<File>();
-  const [image, setImage] = useState("");
   const [jobs, setJobs] = useState<VideoJob[]>([]);
-  const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [configured, setConfigured] = useState(true);
-  const mounted = useRef(true);
-  const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    mounted.current = true;
+    let stopped = false;
     void listVideos()
-      .then((result) => {
-        if (mounted.current) {
-          setJobs(result.jobs);
-          setConfigured(result.configured);
-        }
-      })
-      .catch((e) => {
-        if (mounted.current)
-          setError(e instanceof Error ? e.message : "Could not load your videos.");
-      })
-      .finally(() => {
-        if (mounted.current) setLoading(false);
-      });
-    return () => {
-      mounted.current = false;
-    };
+      .then((result) => { if (!stopped) setJobs(result.jobs); })
+      .catch((e) => { if (!stopped) setError(e instanceof Error ? e.message : "Could not load your previous videos."); })
+      .finally(() => { if (!stopped) setLoading(false); });
+    return () => { stopped = true; };
   }, []);
-  useEffect(() => {
-    const url = file ? URL.createObjectURL(file) : "";
-    setImage(url);
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [file]);
-  async function quote(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const job = await quoteVideo(
-        { prompt, duration, aspect_ratio: aspect, generate_audio: audio },
-        file
-      );
-      if (mounted.current) setJobs((list) => [job, ...list].slice(0, 30));
-    } catch (e) {
-      if (mounted.current)
-        setError(e instanceof Error ? e.message : "Could not prepare this video.");
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  }
   return (
-    <section
-      id="filey-video-panel"
-      aria-label="Create brand videos"
-      className="mx-auto mb-6 w-full max-w-3xl rounded-3xl border border-border bg-card p-4 sm:p-6"
-    >
+    <section id="filey-video-panel" aria-label="Previous Filey video requests" className="mx-auto mb-6 w-full max-w-3xl rounded-2xl border border-border bg-card p-4 sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-3">
         <div>
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <Film size={18} /> Brand videos
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            From an idea to a short film. 0.25 Coin ($0.25) per second.
-          </p>
+          <h2 className="flex items-center gap-2 text-base font-semibold"><Film size={18} /> Previous Filey video requests</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Check or download videos created previously. New videos use your own API key.</p>
         </div>
-        <button
-          type="button"
-          className="btn-ghost w-10 !px-0"
-          onClick={onClose}
-          aria-label="Close videos"
-        >
-          <X size={16} />
-        </button>
+        <button type="button" className="btn-ghost w-10 !px-0" onClick={onClose} aria-label="Close videos"><X size={16} /></button>
       </div>
-      <form onSubmit={quote} className="space-y-4">
-        <div>
-          <label className="mb-2 block text-sm font-medium" htmlFor={`${formId}-prompt`}>
-            Describe your video
-          </label>
-          <textarea
-            id={`${formId}-prompt`}
-            className="input min-h-28 w-full resize-y"
-            maxLength={4000}
-            required
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="A slow close-up of our coffee packaging, warm morning light, steam rising. End on the brand name."
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="space-y-2 text-sm">
-            <span className="block font-medium">Length</span>
-            <SelectMenu
-              value={String(duration)}
-              onChange={(nextValue) => setDuration(Number(nextValue))}
-              options={[4, 5, 6, 8, 10, 12, 15].map((v) => ({
-                value: String(v),
-                label: [String(v), "seconds"].join(" "),
-              }))}
-              ariaLabel="Video length"
-              className="w-full"
-            />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="block font-medium">Format</span>
-            <SelectMenu
-              value={String(aspect)}
-              onChange={(nextValue) => setAspect(nextValue)}
-              options={[
-                { value: "9:16", label: "Portrait · 9:16" },
-                { value: "16:9", label: "Landscape · 16:9" },
-                { value: "1:1", label: "Square · 1:1" },
-              ]}
-              disabled={!!file}
-              ariaLabel="Video format"
-              className="w-full"
-            />
-          </label>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="sr-only"
-            aria-label="Reference photo"
-            onChange={(e) => {
-              const next = e.target.files?.[0];
-              if (
-                next &&
-                (next.size > 2_000_000 ||
-                  !["image/png", "image/jpeg", "image/webp"].includes(next.type))
-              )
-                setError("Use a JPG, PNG or WebP image under 2 MB.");
-              else {
-                setFile(next);
-                setError("");
-              }
-              e.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => inputRef.current?.click()}
-          >
-            <ImagePlus size={15} />
-            {file ? "Change photo" : "Add product photo"}
-          </button>
-          <label className="flex min-h-10 items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={audio}
-              onChange={(e) => setAudio(e.target.checked)}
-              className="accent-primary"
-            />
-            Generate audio
-          </label>
-        </div>
-        {file && (
-          <div className="flex items-center gap-3 rounded-xl bg-muted p-3">
-            <img
-              src={image}
-              alt="Video starting frame"
-              className="h-14 w-14 rounded-lg object-cover"
-            />
-            <div className="min-w-0 flex-1 text-xs">
-              <p className="truncate font-medium">{file.name}</p>
-              <p className="mt-1 text-muted-foreground">
-                The video uses this photo’s framing. Uploaded to Higgsfield when you
-                request a quote.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-ghost w-10 !px-0"
-              aria-label="Remove reference photo"
-              onClick={() => setFile(undefined)}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-        {!configured && (
-          <p className="text-sm text-muted-foreground">
-            Video generation is being connected. Your previous videos remain available
-            below.
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            className="btn-primary"
-            disabled={busy || !configured || !prompt.trim()}
-          >
-            {busy && <FileySpinner size={15} />}Review video ·{" "}
-            {creditCoin(duration * 250000)}
-          </button>
-          <span className="text-xs text-muted-foreground">
-            Seedance 2.0 · 720p · No charge for a quote
-          </span>
-        </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Available on every plan using your Coin balance. Your task and daily
-          spending limits apply. Video generation has its own rates, separate from chat.
-        </p>
-      </form>
-      <div className="mt-6 space-y-3 border-t border-border pt-5">
-        <h3 className="text-sm font-medium">Recent videos</h3>
-        {loading ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <FileySpinner size={15} />
-            Loading videos…
-          </p>
-        ) : !jobs.length ? (
-          <p className="text-sm text-muted-foreground">
-            Your drafts and finished videos will stay here when you return.
-          </p>
-        ) : (
-          jobs.map((job) => <VideoJobCard key={job.id} id={job.id} initial={job} />)
-        )}
+      <div className="space-y-3">
+        {loading ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><FileySpinner size={15} />Loading videos…</p>
+          : error ? <p role="alert" className="text-sm text-destructive">{error}</p>
+          : !jobs.length ? <p className="text-sm text-muted-foreground">No previous Filey video requests.</p>
+          : jobs.map((job) => <VideoJobCard key={job.id} id={job.id} initial={job} />)}
       </div>
     </section>
   );

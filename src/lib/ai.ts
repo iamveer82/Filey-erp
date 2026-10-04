@@ -11,7 +11,7 @@
  *  - "anthropic" → Claude Messages API (native).
  */
 
-import { runAgentStream, type AgentEvent } from "./agentHarness";
+import { runAgentStream, type AgentDoneReason, type AgentEvent } from "./agentHarness";
 // Type-only: erased at compile time, so this cannot reintroduce a runtime cycle
 // with aiTools (see the note at the top of agentHarness.ts).
 import type { ConfirmFn } from "./aiTools";
@@ -23,7 +23,7 @@ import { aiEndpoint, isLocalAiEndpoint, mergeAiConfig, openAiHeaders, openAiGene
 import { agentStorageScope } from "./agentStorage";
 import { getCacheScope } from "./api";
 import { peekCredential, readCredential, saveCredential, hasCredential } from "./credentialStore";
-import { creditChoice, createCreditFetch } from "./aiCredits";
+import { creditChoice, createCreditFetch, FILEY_AI_MODEL } from "./aiCredits";
 import { agentProgressRecorder, priorAgentProgress } from "./agentRunState";
 import { botAppearance } from "./botAppearance";
 import { CapacitorHttp } from "@capacitor/core";
@@ -101,7 +101,7 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
 
 export function getActiveAiConfig(): AiConfig {
   const choice = creditChoice();
-  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.model === "filey-ai" ? "" : choice.model, apiKey: "", billing: choice.funding } : getAiConfig();
+  return choice.funding !== "byok" ? { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: choice.funding === "credits" ? FILEY_AI_MODEL : "", apiKey: "", billing: choice.funding } : getAiConfig();
 }
 
 async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
@@ -109,7 +109,7 @@ async function activeRequestConfig(funding?: "byok"): Promise<AiConfig> {
 }
 
 export function aiReady(cfg: AiConfig = getActiveAiConfig()): boolean {
-  if (cfg.billing) return !!cfg.model.trim();
+  if (cfg.billing) return cfg.billing === "credits" && cfg.model === FILEY_AI_MODEL;
   return !!aiEndpoint(cfg.baseUrl) && !!cfg.model.trim() &&
     (!!cfg.apiKey.trim() || hasCredential(aiCredentialName(cfg)) || isLocalAiEndpoint(cfg));
 }
@@ -349,7 +349,7 @@ export async function aiChat(
   const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
     throw new AiError(
-      cfg.billing ? "Choose a model in the chat's AI model selector before starting a task." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
+      cfg.billing ? "Choose Filey AI to use Coin, or use your own API key." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant."
     );
   return cfg.provider === "anthropic"
     ? anthropicChat(cfg, messages, opts)
@@ -522,8 +522,9 @@ function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
  *  needs a request id and a cancel command; add it if that waste ever shows up
  *  on a bill. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
+  const endpoint = aiEndpoint(input);
   if (isNativeApp()) {
-    const url = aiEndpoint(input);
+    const url = endpoint;
     if (!url || url.protocol !== "https:")
       throw new AiError("Mobile AI providers require a valid HTTPS endpoint without embedded credentials.");
     if (init.signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -547,13 +548,19 @@ async function transportFetch(input: string, init: RequestInit): Promise<Respons
       : typeof r.data === "string" ? r.data : JSON.stringify(r.data);
     return new Response(body, { status: r.status, headers: r.headers });
   }
+  if (!endpoint || (endpoint.protocol !== "https:" && !isLocalAiEndpoint({ provider: "openai", baseUrl: input })))
+    throw new AiError("Use an HTTPS AI endpoint, or a local server on this device, without embedded credentials.");
   if (!isTauri) {
+    // Provider keys and conversation content must reach only the reviewed URL.
+    // Ignore caller redirect/cookie/cache settings rather than allowing a
+    // provider response to retarget a credential-bearing request.
+    const request: RequestInit = { ...init, redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" };
     if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
-      const url = aiEndpoint(input);
+      const url = endpoint;
       const index = url ? AI_DEV_ORIGINS.indexOf(url.origin) : -1;
-      if (index >= 0 && url) return fetch(`/__filey_ai/${index}${url.pathname}${url.search}`, init);
+      if (index >= 0 && url) return fetch(`/__filey_ai/${index}${url.pathname}${url.search}`, request);
     }
-    return fetch(input, init);
+    return fetch(input, request);
   }
   const { invoke } = await import("@tauri-apps/api/core");
   const headers: Record<string, string> = {};
@@ -647,7 +654,7 @@ export async function* aiAgentStream(
 ): AsyncGenerator<AgentEvent, string, void> {
   const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
-    throw new AiError(cfg.billing ? "Choose a model in the chat's AI model selector before starting a task." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
+    throw new AiError(cfg.billing ? "Choose Filey AI to use Coin, or use your own API key." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
   const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
   const scope = agentStorageScope();
   const prior = opts.isOwner === false ? "" : [journalDigest(), opts.agentId && scope ? priorAgentProgress(opts.agentId) : ""].filter(Boolean).join("\n\n");
@@ -655,18 +662,34 @@ export async function* aiAgentStream(
   const context = prior ? [{ role: "system" as const, text: prior }, ...messages] : messages;
   const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing ? createCreditFetch(cfg.billing) : aiFetch });
   const events: AgentEvent[] = [];
+  let completed = false;
+  let interruption: AgentDoneReason = "stopped";
   try {
     for (;;) {
       const step = await stream.next();
       if (step.done) return step.value;
+      if (step.value.type === "done") completed = true;
       checkpoint?.(step.value);
       if (step.value.type === "tool_result") events.push(step.value);
       if (step.value.type === "done" && opts.isOwner !== false && scope && scope === agentStorageScope())
         recordRun({ goal, reason: step.value.reason, failures: failuresFrom(events) }, scope);
       yield step.value;
     }
+  } catch (error) {
+    interruption = opts.signal?.aborted || (error as { name?: string } | null)?.name === "AbortError" ? "stopped" : "error";
+    throw error;
   } finally {
-    await stream.return("");
+    try {
+      await stream.return("");
+    } finally {
+      // Provider exceptions and callers closing a stream bypass its done event.
+      // Preserve receipts without marking an interrupted run as still running.
+      if (!completed && scope && scope === agentStorageScope()) {
+        try { checkpoint?.({ type: "done", text: "", reason: interruption }); }
+        catch { /* A progress-storage failure must not replace the run's error. */ }
+        if (opts.isOwner !== false) recordRun({ goal, reason: interruption, failures: failuresFrom(events) }, scope);
+      }
+    }
   }
 }
 

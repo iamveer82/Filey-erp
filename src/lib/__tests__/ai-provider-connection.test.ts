@@ -80,3 +80,32 @@ it("does not retry an expired request", async () => {
   await expect(aiFetch("https://api.openai.com/v1/models", {})).rejects.toThrow("too long");
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it.each([
+  "http://provider.example/v1/chat/completions",
+  "http://192.168.1.20/v1/chat/completions",
+  "https://user:password@provider.example/v1/chat/completions",
+  "file:///private/account.json",
+])("rejects unsafe provider destinations before sending credentials: %s", async (url) => {
+  const fetch = vi.fn(async () => reply());
+  vi.stubGlobal("fetch", fetch);
+  await expect(aiFetch(url, {
+    method: "POST", headers: { "x-api-key": "synthetic-private-key" }, body: "private fixture",
+  })).rejects.toThrow("HTTPS AI endpoint");
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(["https://provider.example/v1", "http://localhost:11434/v1", "http://127.0.0.1:11434/v1", "http://[::1]:11434/v1"])(
+  "prevents redirects, ambient cookies and browser caching for provider requests: %s", async (url) => {
+    const fetch = vi.fn(async () => reply());
+    vi.stubGlobal("fetch", fetch);
+    await aiFetch(url, {
+      method: "POST", headers: { "x-api-key": "synthetic-private-key" }, body: "private fixture",
+      redirect: "follow", credentials: "include", cache: "force-cache", referrerPolicy: "unsafe-url",
+    });
+    const [destination, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(destination).toBe(url);
+    expect(init).toMatchObject({ redirect: "error", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", body: "private fixture" });
+    expect(new Headers(init.headers).get("x-api-key")).toBe("synthetic-private-key");
+  },
+);

@@ -1,4 +1,6 @@
 import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
+import CustomerOpeningBalanceFields from "../components/CustomerOpeningBalanceFields";
+import { customerOpeningBalanceInputs, readCustomerOpeningBalance } from "../lib/customerOpeningBalance";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import { companyCountry, companyPhoneHint, customerPhoneE164 } from "../lib/companyCountry";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -865,15 +867,15 @@ export default function CustomerDetail() {
               className={cn(
                 "text-[16px] font-semibold tabular-nums",
                 opening > 0
-                  ? "text-danger"
+                  ? "text-success"
                   : opening < 0
-                    ? "text-success"
+                    ? "text-danger"
                     : "text-foreground"
               )}
             >
-              {aed(opening)}
+              {aed(Math.abs(opening))}
               <span className="text-[11px] text-muted-foreground ml-2 font-normal">
-                {opening > 0 ? "Debit, they owe" : opening < 0 ? "Credit" : ""}
+                {opening > 0 ? "Credit / Receivable" : opening < 0 ? "Debit / Payable" : ""}
               </span>
             </div>
           </div>
@@ -1533,7 +1535,7 @@ function EditCustomerModal({
     address: "",
     segment: "",
     credit_limit: "",
-    opening_balance: "",
+    opening_balance: customerOpeningBalanceInputs(),
   };
   const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -1554,10 +1556,7 @@ function EditCustomerModal({
             segment: customer.segment ?? "",
             credit_limit:
               customer.credit_limit != null ? String(customer.credit_limit) : "",
-            opening_balance:
-              customer.opening_balance != null
-                ? String(customer.opening_balance)
-                : "",
+            opening_balance: customerOpeningBalanceInputs(customer.opening_balance),
           }
         : blank
     );
@@ -1565,11 +1564,12 @@ function EditCustomerModal({
   }, [open, customer]);
 
   const nameErr = !f.name.trim();
+  const openingBalance = readCustomerOpeningBalance(f.opening_balance);
 
   const save = async () => {
     if (!customer || saving) return;
     setTouched(true);
-    if (nameErr) return;
+    if (nameErr || openingBalance.value === null) return;
     setSaving(true);
     try {
       await crm.updateCustomer(customer.id, {
@@ -1581,8 +1581,7 @@ function EditCustomerModal({
         address: f.address.trim() || undefined,
         segment: f.segment.trim() || undefined,
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
-        opening_balance:
-          f.opening_balance.trim() === "" ? undefined : Number(f.opening_balance),
+        opening_balance: openingBalance.value,
         phone_e164: customerPhoneE164(f.phone, country) ?? undefined,
       });
       toast.success("Customer updated.");
@@ -1663,14 +1662,9 @@ function EditCustomerModal({
             onChange={(e) => setF({ ...f, credit_limit: e.target.value })}
           />
         </Field>
-        <Field label="Opening balance (AED)">
-          <input
-            className="input"
-            type="number"
-            value={f.opening_balance}
-            onChange={(e) => setF({ ...f, opening_balance: e.target.value })}
-          />
-        </Field>
+        <div className="sm:col-span-2">
+          <CustomerOpeningBalanceFields value={f.opening_balance} onChange={opening_balance => setF({ ...f, opening_balance })} error={touched ? openingBalance.error : null} />
+        </div>
       </div>
       <div className="flex flex-wrap justify-end gap-2 pt-4 mt-5 border-t border-border">
         <button onClick={onClose} className="btn-ghost">

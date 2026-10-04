@@ -8,7 +8,7 @@ and learn reusable procedures. It can run through the following surfaces:
 | In-app copilot | Inside Filey (browser/desktop) | BYOK or configured Filey Coin model | Working in the app: drafting, scanning documents, autonomous goals |
 | Desktop WhatsApp agent | Paired phone and Filey desktop, while open | Your configured in-app model | Owner tasks and replies through the local QR bridge |
 | Desktop Telegram agent | Private paired Telegram chat and Filey desktop, while open | Your configured in-app model | Owner tasks, photos, documents and returned files through a dedicated bot |
-| Hosted channel agent | Supabase edge function | `ANTHROPIC_API_KEY` secret | Single-owner cloud lookups and drafts through Telegram / WhatsApp Cloud / Slack |
+| Hosted channel agent | Supabase edge function | Filey AI server key and paired owner's Coin wallet | Single-owner cloud lookups and drafts through Telegram / WhatsApp Cloud / Slack |
 | MCP server | Your own machine | Your Filey login / JWT | Claude Code, Hermes and other MCP clients driving Filey |
 
 Business data stays scoped to the signed-in workspace and the user's module
@@ -226,7 +226,7 @@ function refuses traffic until it's set.
 
 | Secret | Required | What it is |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | The agent's model key |
+| `FILEY_AI_DEEPSEEK_KEY` | yes | Server-only Filey AI key; hosted requests use the paired owner's Coin wallet |
 | `OWNER_USER_ID` | yes | `auth.users.id` this install belongs to (messages/memories/audit are logged under it) |
 | `TELEGRAM_BOT_TOKEN` | for Telegram | From @BotFather |
 | `TELEGRAM_WEBHOOK_SECRET` | for Telegram | Any long random string; Telegram echoes it back so we can verify |
@@ -240,7 +240,6 @@ function refuses traffic until it's set.
 | `SLACK_BOT_TOKEN` | for Slack | Bot OAuth token (`xoxb-…`) |
 | `SLACK_SIGNING_SECRET` | for Slack | From your Slack app's Basic Information page — every request's `X-Slack-Signature` is verified against it; unsigned requests are **rejected** |
 | `SLACK_OWNER_USER_ID` | for Slack | Owner's Slack member id (`U…`) — the only user the agent answers |
-| `AGENT_MODEL` | optional | Default `claude-haiku-4-5-20251001` |
 | `RESEND_API_KEY` | optional | Needed to actually send approved payment-reminder emails |
 | `REMINDER_FROM` | optional | Sender address for reminders, default `Filey <reminders@filey.app>` |
 
@@ -254,7 +253,7 @@ The service-role key never leaves the function — see §3 for what that means.
    ```bash
    supabase secrets set TELEGRAM_BOT_TOKEN=123456:ABC... \
      TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 32) \
-     ANTHROPIC_API_KEY=sk-ant-... \
+     FILEY_AI_DEEPSEEK_KEY=<server-only-key> \
      OWNER_USER_ID=<your auth.users id>
    ```
 3. Obtain your numeric private chat ID through a trusted administrative setup
@@ -489,7 +488,7 @@ hosted relay uses a separate bounded JSON preview, not this desktop retrieval ca
 | Hosted channel bot never replies | Check function configuration and provider webhook. Telegram: check `setWebhook` and the owner pin. WhatsApp: check callback URL + **messages** subscription. Slack: check the Request URL is verified. Look for a failed/expired request before repeating writes. |
 | Hosted bot replies "private assistant" | The sender does not match the configured owner. Correct the numeric Telegram owner IDs, WhatsApp owner phone or Slack member ID through trusted administration. The unconfigured bot does not send a bootstrap owner ID. |
 | 403 in function logs | Check the Telegram secret header, Meta app-secret signature or Slack signing secret/timestamp. WhatsApp's verify token authenticates setup, not message signatures. |
-| "This assistant isn't configured yet" | Check hosted `ANTHROPIC_API_KEY`, owner configuration and current channel credentials. Missing configuration fails closed. |
+| "This assistant isn't configured yet" | Check hosted `FILEY_AI_DEEPSEEK_KEY`, confirmed owner configuration, Coin balance and current channel credentials. Missing configuration fails closed. |
 | Hosted business tools unavailable | Check `OWNER_USER_ID`, its profile organization and active owner/admin membership. A regular member cannot access organization-wide service-role tools. |
 | Hosted draft cannot be created | Apply and verify `2026-09-30-channel-agent-drafts.sql` and inspect internal logs. Do not bypass the transaction with legacy header/line inserts. |
 | "rate limited" | Hosted 30 task messages/hour cap hit. Wait before retrying. |

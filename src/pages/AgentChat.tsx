@@ -114,6 +114,13 @@ const SYSTEM =
  *  on one measure so long replies don't stretch wider than where you type. */
 const COLUMN = "mx-auto w-full max-w-[760px]";
 
+type PendingApproval = {
+  id: number;
+  name: string;
+  args: Record<string, unknown>;
+  resolve: (ok: boolean) => void;
+};
+
 /* The bot draws in the accent colour directly — see BloubBot — so nothing here
    re-tints it. The old orb was grayscale and needed a filter stack to fake one. */
 
@@ -148,11 +155,8 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   const [previews, setPreviews] = useState<string[]>([]);
   const previewUrlsRef = useRef<string[]>([]);
   const draftsRef = useRef(new Map<string, { text: string; files: File[] }>());
-  const [pendingConfirm, setPendingConfirm] = useState<{
-    name: string;
-    args: Record<string, unknown>;
-    resolve: (ok: boolean) => void;
-  } | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingApproval | null>(null);
+  const approvalIdRef = useRef(0);
   const [memOpen, setMemOpen] = useState(false);
   const [mems, setMems] = useState<Memory[]>([]);
   const [histOpen, setHistOpen] = useState(false);
@@ -246,8 +250,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     try { writeAgentStorage("filey.agent.effort", next, scope ?? undefined); setEffort(next); }
     catch { setErr("Could not save the effort setting. Try again."); }
   };
-  /** The tools run so far this turn ("Looking up customers…"), shown as a chip
-   *  trail while the agent works so a long turn reads as work, not a hang. */
+  /** Keep action receipts for continuation; the chat shows only a short status. */
   const [runProgress, setRunProgress] = useState<ChatTurn["run"]>();
   /** Lets the Stop button cut a run short. ponytail: on desktop the native AI
    *  proxy call itself isn't cancellable (see ai.ts), so an abort stops the
@@ -311,12 +314,13 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
   // pendingRef mirrors pendingConfirm so unmount cleanup can settle whatever
   // is on screen: leaving with the dialog up used to strand its resolver
   // unreached — the awaiting runTool promise (and the whole turn) hung forever.
-  const pendingRef = useRef<{ resolve: (ok: boolean) => void } | null>(null);
+  const pendingRef = useRef<PendingApproval | null>(null);
   useEffect(() => {
     setToolConfirm(
       (name, args) =>
         new Promise<boolean>((resolve) => {
-          const pc = { name, args, resolve };
+          pendingRef.current?.resolve(false);
+          const pc = { id: ++approvalIdRef.current, name, args, resolve };
           pendingRef.current = pc;
           setPendingConfirm(pc);
         })
@@ -341,12 +345,12 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     };
   }, []);
 
-  /** Settle the dialog one way or the other. The ref is cleared alongside the
-   *  state so cleanup can never double-resolve a stale entry. */
-  const settleConfirm = (ok: boolean) => {
-    pendingConfirm?.resolve(ok);
+  /** A callback from a replaced dialog must never settle its successor. */
+  const settleConfirm = (request: PendingApproval, ok: boolean) => {
+    if (pendingRef.current?.resolve !== request.resolve) return;
+    request.resolve(ok);
     pendingRef.current = null;
-    setPendingConfirm(null);
+    setPendingConfirm(current => current?.resolve === request.resolve ? null : current);
   };
 
   // Persist the conversation (shared store with the popover copilot).
@@ -453,7 +457,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
     if ((!q && !attached.length) || busy) return;
     if (!ready) {
       setErr(
-        modelConfig.billing ? "Choose a model in the AI model selector below to start this conversation." : "Choose a local model or connect your provider in AI settings to start this conversation."
+        modelConfig.billing ? "Choose Filey AI to pay with Coin, or use your own API key below." : "Choose a local model or connect your provider in AI settings to start this conversation."
       );
       return;
     }
@@ -639,7 +643,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
                 role: "assistant",
                 text:
                   streamedRef.current ||
-                  "The task stopped before finishing. Review the actions below before trying again.",
+                  "The task stopped before finishing. Check any changes or files already created before trying again.",
                 run: { ...trace, outcome: "error" },
                 ...(failedFiles.length ? { files: failedFiles } : {}),
               },
@@ -836,7 +840,14 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
             </>
           )}
 
-          {err && <ErrorBanner message={err} />}
+          {err && <div className="space-y-2">
+            <ErrorBanner message={err} />
+            {err === "Insufficient credit. Add Coin to continue." && (
+              <Link to="/settings?section=credits" className="btn-primary">
+                <CoinMark /> Add Coin
+              </Link>
+            )}
+          </div>}
 
           {/* Pairing QR, rendered from live bridge state rather than from the
               model's reply: a data URL is kilobytes of base64 that would bloat
@@ -1107,7 +1118,7 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
 
         {/* Closing an approval always resolves the waiting tool as denied. */}
         {pendingConfirm && (
-          <Modal open onClose={() => settleConfirm(false)} title="Approve action">
+          <Modal key={pendingConfirm.id} open onClose={() => settleConfirm(pendingConfirm, false)} title="Approve action">
             <p className="flex items-start gap-2 text-sm text-muted-foreground">
               <ShieldAlert size={18} className="shrink-0 text-warning" />
               <span>
@@ -1127,13 +1138,14 @@ function AgentWorkspace({ scope }: { scope: string | null }) {
             )}
             <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
               <button
+                type="button"
                 className="btn-ghost"
                 autoFocus
-                onClick={() => settleConfirm(false)}
+                onClick={() => settleConfirm(pendingConfirm, false)}
               >
                 Deny
               </button>
-              <button className="btn-primary" onClick={() => settleConfirm(true)}>
+              <button type="button" className="btn-primary" onClick={() => settleConfirm(pendingConfirm, true)}>
                 Allow
               </button>
             </div>

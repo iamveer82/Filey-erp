@@ -6,8 +6,17 @@
 // own API key. Both return text usable in the browser and on desktop.
 
 import { aiFetch } from "./ai";
+import { getCacheScope } from "./api";
+import { assertWorkspaceCurrent } from "./dataMode";
+import { peekCredential, readCredential, saveCredential } from "./credentialStore";
 
 const STORE_KEY = "filey_reach_config";
+const CREDENTIAL = "web:jina";
+function configKey(): string | null {
+  assertWorkspaceCurrent();
+  const scope = getCacheScope();
+  return scope ? `${STORE_KEY}:${encodeURIComponent(scope)}` : null;
+}
 
 export interface ReachConfig {
   /** Required for Search; optional for Reader's limited keyless access. */
@@ -24,9 +33,13 @@ const DEFAULTS: ReachConfig = { apiKey: "", enabled: true };
 
 export function getReachConfig(): ReachConfig {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ReachConfig>) };
+    const key = configKey();
+    const raw = key ? localStorage.getItem(key) : null;
+    // An old device-wide key has no verified owner. Retain its opt-out, but
+    // never adopt another account's spending credential.
+    const legacy = raw ? null : JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+    return { enabled: raw ? JSON.parse(raw).enabled !== false : legacy?.enabled !== false,
+      apiKey: peekCredential(CREDENTIAL) };
   } catch {
     console.error("Failed to parse web reach config from localStorage");
     return { ...DEFAULTS };
@@ -34,9 +47,18 @@ export function getReachConfig(): ReachConfig {
 }
 
 export function setReachConfig(patch: Partial<ReachConfig>): ReachConfig {
+  const key = configKey();
+  if (!key) throw new Error("Sign in before saving web research settings.");
   const next = { ...getReachConfig(), ...patch };
-  localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  if (patch.apiKey !== undefined) void saveCredential(CREDENTIAL, patch.apiKey.trim() || null);
+  localStorage.setItem(key, JSON.stringify({ enabled: next.enabled }));
   return next;
+}
+
+async function requestConfig(): Promise<ReachConfig> {
+  const scope = getCacheScope();
+  const cfg = getReachConfig();
+  return { ...cfg, apiKey: scope ? await readCredential(CREDENTIAL, scope) ?? "" : "" };
 }
 
 export function reachReady(cfg: ReachConfig = getReachConfig()): boolean {
@@ -192,7 +214,7 @@ export async function readUrl(
   url: string,
   opts: { signal?: AbortSignal } = {}
 ): Promise<ReachPage> {
-  const cfg = getReachConfig();
+  const cfg = await requestConfig();
   if (!reachReady(cfg))
     throw new ReachError("Web access is off. Turn it on in Integrations → Web research.");
   const target = publicHttpUrl(url);
@@ -207,15 +229,19 @@ export async function readUrl(
  *  guard as readUrl. Returns status + clipped body. */
 export async function httpFetch(
   url: string,
-  opts: { method?: string; body?: string; headers?: Record<string, string> } = {}
+  opts: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal } = {}
 ): Promise<{ status: number; body: string }> {
+  opts.signal?.throwIfAborted();
   const target = publicHttpUrl(url);
   const res = await aiFetch(target, {
     method: (opts.method || "GET").toUpperCase(),
     headers: { "content-type": "application/json", ...(opts.headers ?? {}) },
     body: opts.body,
-  });
+    signal: opts.signal,
+    redirect: "error",
+  }, { retries: 0 }); // An approved raw request may mutate remote state.
   const body = await res.text();
+  opts.signal?.throwIfAborted();
   return { status: res.status, body: clip(body).text };
 }
 
@@ -244,7 +270,7 @@ export async function searchWeb(
   query: string,
   opts: { limit?: number; signal?: AbortSignal } = {}
 ): Promise<{ hits: ReachHit[]; text: string }> {
-  const cfg = getReachConfig();
+  const cfg = await requestConfig();
   if (!reachReady(cfg))
     throw new ReachError("Web access is off. Turn it on in Integrations → Web research.");
   const q = query.trim();

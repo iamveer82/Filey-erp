@@ -33,6 +33,7 @@ import {
   insertedBefore,
   Product,
   type StockMovement,
+  StocktakeChangedError,
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { MenuPopover, MenuItemRow } from "../components/ui-menu";
@@ -79,6 +80,7 @@ export default function Inventory() {
   const [batchFilter, setBatchFilter] = useState("");
   const [draftingPo, setDraftingPo] = useState(false);
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [startingStocktake, setStartingStocktake] = useState(false);
   const [quickView, setQuickView] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -111,6 +113,16 @@ export default function Inventory() {
     } finally {
       setDraftingPo(false);
     }
+  };
+
+  const openStocktake = async () => {
+    if (startingStocktake) return;
+    setStartingStocktake(true);
+    try {
+      setProducts(await erp.products({ fresh: true }));
+      setStocktakeOpen(true);
+    } catch (e) { toast.error(errMsg(e)); }
+    finally { setStartingStocktake(false); }
   };
 
   const toggleShare = async (p: Product, next: boolean) => {
@@ -314,7 +326,8 @@ export default function Inventory() {
             <button
               className="btn-ghost"
               aria-label="Stocktake"
-              onClick={() => setStocktakeOpen(true)}
+              disabled={startingStocktake}
+              onClick={() => void openStocktake()}
             >
               <ClipboardList size={15} /> Stocktake
             </button>
@@ -767,6 +780,7 @@ export default function Inventory() {
         products={products}
         onClose={() => setStocktakeOpen(false)}
         onSaved={load}
+        onReload={async () => { setProducts(await erp.products({ fresh: true })); }}
       />
 
       <BarcodeScanner
@@ -1246,21 +1260,25 @@ function StocktakeModal({
   products,
   onClose,
   onSaved,
+  onReload,
 }: {
   open: boolean;
   products: Product[];
   onClose: () => void;
   onSaved: () => void;
+  onReload: () => Promise<void>;
 }) {
   const { toast } = useUI();
   const [counts, setCounts] = useState<Record<number, string>>({});
   const [filter, setFilter] = useState("");
   const [posting, setPosting] = useState(false);
+  const requests = useRef<Record<number, { id: string; counted: number; expected: number; status?: "unconfirmed" | "changed" }>>({});
 
   useEffect(() => {
     if (open) {
       setCounts({});
       setFilter("");
+      requests.current = {};
     }
   }, [open]);
 
@@ -1277,30 +1295,65 @@ function StocktakeModal({
       if (raw === undefined || raw.trim() === "") return null;
       const counted = Number(raw);
       if (!Number.isFinite(counted) || counted < 0) return null;
-      const diff = Math.trunc(counted) - p.quantity;
-      return diff === 0 ? null : { p, counted: Math.trunc(counted), diff };
+      const diff = counted - p.quantity;
+      return diff === 0 && !requests.current[p.id] ? null : { p, counted, diff };
     })
     .filter(Boolean) as { p: Product; counted: number; diff: number }[];
+  const invalidCount = products.some(p => {
+    const raw = counts[p.id];
+    const counted = Number(raw);
+    return raw !== undefined && raw.trim() !== "" && (!Number.isFinite(counted) || counted < 0
+      || counted >= 100000000000 || Number(counted.toFixed(3)) !== counted);
+  });
+
+  const reload = async () => {
+    if (posting) return;
+    setPosting(true);
+    try {
+      // A verified book quantity is required before starting a new count.
+      // A failed refresh keeps the original request available for safe retry.
+      await onReload();
+      for (const [id, request] of Object.entries(requests.current)) {
+        // A server rejection rolled back; an ambiguous response still needs
+        // confirmation with its original immutable request, even after a read.
+        if (request.status === "changed") delete requests.current[Number(id)];
+      }
+      toast.info("Stock reloaded. Review your physical counts before posting.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally { setPosting(false); }
+  };
 
   const post = async () => {
     if (posting) return;
-    if (!diffs.length) return;
+    if (!diffs.length || invalidCount) return;
     setPosting(true);
+    let posted = 0;
+    let attemptedId: number | undefined;
     try {
       for (const d of diffs) {
-        await erp.recordStockEntry(
-          d.p.id,
-          "adjust",
-          d.diff,
-          "Stocktake",
-          `Counted ${d.counted}, book ${d.p.quantity}`
-        );
+        const previous = requests.current[d.p.id];
+        const request = previous?.counted === d.counted ? previous
+          : { id: crypto.randomUUID(), counted: d.counted, expected: d.p.quantity };
+        requests.current[d.p.id] = request;
+        attemptedId = d.p.id;
+        // A retry repeats the exact scoped request, even after a lost response.
+        // The backend commits quantity, history and its receipt together.
+        await erp.recordStocktake(d.p.id, request.counted, request.expected, request.id);
+        posted++;
+        delete requests.current[d.p.id];
+        // Remove confirmed adjustments immediately so a later row failure
+        // cannot cause the next attempt to apply those deltas a second time.
+        setCounts(previous => { const next = { ...previous }; delete next[d.p.id]; return next; });
       }
       toast.success(`Stocktake posted - ${diffs.length} adjustment(s).`);
       onSaved();
       onClose();
     } catch (e) {
+      if (attemptedId !== undefined && requests.current[attemptedId])
+        requests.current[attemptedId].status = e instanceof StocktakeChangedError ? "changed" : "unconfirmed";
       toast.error(e instanceof Error ? e.message : String(e));
+      if (posted) onSaved();
     } finally {
       setPosting(false);
     }
@@ -1309,7 +1362,7 @@ function StocktakeModal({
   return (
     <Modal open={open} onClose={() => { if (!posting) onClose(); }} title="Stocktake: physical count" size="2xl">
       <fieldset disabled={posting} className="min-w-0" aria-busy={posting}>
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <input
           className="input max-w-xs"
           aria-label="Filter by name or SKU"
@@ -1317,9 +1370,10 @@ function StocktakeModal({
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <p className="text-xs text-brand-400 shrink-0">
-          Leave a row blank to skip it.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-xs text-brand-400">Leave a row blank to skip it.</p>
+          <button type="button" className="btn-secondary text-xs" onClick={() => void reload()}>Reload stock</button>
+        </div>
       </div>
 
       <div className="overflow-auto rounded-xl border border-brand-100 dark:border-white/10">
@@ -1337,9 +1391,9 @@ function StocktakeModal({
               const raw = counts[p.id] ?? "";
               const counted = raw.trim() === "" ? null : Number(raw);
               const diff =
-                counted === null || !Number.isFinite(counted)
+                counted === null || !Number.isFinite(counted) || counted < 0
                   ? null
-                  : Math.trunc(counted) - p.quantity;
+                  : counted - p.quantity;
               return (
                 <tr key={p.id} className="border-t border-brand-100 dark:border-white/10">
                   <td className="px-3 py-1.5">
@@ -1353,13 +1407,18 @@ function StocktakeModal({
                     <input
                       type="number"
                       min={0}
+                      step="0.001"
+                      disabled={requests.current[p.id]?.status === "unconfirmed"}
                       className="input !h-8 tabular-nums"
                       aria-label={`Counted quantity for ${p.name}`}
                       placeholder="—"
                       value={raw}
-                      onChange={(e) =>
-                        setCounts((c) => ({ ...c, [p.id]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        if (requests.current[p.id]?.status === "unconfirmed") return;
+                        const raw = e.target.value;
+                        if (raw.trim() === "" || requests.current[p.id]?.counted !== Number(raw)) delete requests.current[p.id];
+                        setCounts((c) => ({ ...c, [p.id]: raw }));
+                      }}
                     />
                   </td>
                   <td
@@ -1387,6 +1446,8 @@ function StocktakeModal({
           </tbody>
         </table>
       </div>
+      {invalidCount && <p role="alert" className="mt-3 text-sm text-danger">Enter a quantity of 0 or more with at most 3 decimal places for each counted product.</p>}
+      {Object.values(requests.current).some(request => request.status === "unconfirmed") && <p role="status" className="mt-3 text-sm text-muted-foreground">Retry posting to confirm the pending count before changing it.</p>}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <p className="text-xs text-brand-400">
@@ -1400,7 +1461,7 @@ function StocktakeModal({
           </button>
           <button
             className="btn-primary"
-            disabled={posting || !diffs.length}
+            disabled={posting || !diffs.length || invalidCount}
             onClick={post}
           >
             {posting ? (

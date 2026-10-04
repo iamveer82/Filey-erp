@@ -22,6 +22,7 @@ import {
 import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
 import { pendingProfile, syncProfile } from "./profileSync";
 import { assertWorkspaceCurrent } from "./dataMode";
+import { checkCloudTransfer, assertCloudTransfer, type CloudTransferPermit } from "./cloudTransfer";
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
 // profiles, invitations…) is harmless — the local shim just stores them.
@@ -81,18 +82,20 @@ export interface MigrateResult {
  *  survive); user/org ownership is re-stamped by the cloud's defaults and
  *  triggers. Existing cloud rows are updated only when their revision matches
  *  this device's last copy. Conflicts stay pending for review. File bytes are
- *  uploaded before their metadata, through the same path as automatic sync. */
+ *  uploaded before their metadata, only under an explicit cloud-transfer permit. */
 export async function migrateLocalToCloud(
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  transfer?: CloudTransferPermit,
 ): Promise<MigrateResult[]> {
   if (!supabase)
     throw new Error("Cloud isn't configured in this build — nowhere to push.");
+  assertCloudTransfer(transfer, supabase);
   const { data: sess } = await supabase.auth.getSession();
   const uid = sess.session?.user?.id;
   if (!uid)
     throw new Error(
       "Not signed in to your cloud account. In offline mode, connect under " +
-        "“Cloud sync (automatic)” above; in cloud mode, log in — then push again."
+        "“Account connection” above, then turn on cloud storage."
     );
 
   assertLocalAccount(uid);
@@ -100,7 +103,7 @@ export async function migrateLocalToCloud(
   const out: MigrateResult[] = [];
   if (Object.keys(pendingProfile(uid)).length) {
     try {
-      await syncProfile(supabase, uid);
+      await syncProfile(supabase, uid, transfer);
       out.push({ table: "profiles", rows: 1 });
     } catch (error) {
       out.push({ table: "profiles", rows: 0, error: error instanceof Error ? error.message : String(error) });
@@ -108,6 +111,7 @@ export async function migrateLocalToCloud(
   }
 
   for (const t of PUSH_TABLES) {
+    await checkCloudTransfer(transfer, supabase, uid);
     await journalMark(t, { all: true, silent: true });
     const pending = await journalSnapshot();
     // Through loadColl, not the raw key: oversized fields (the logo a doc was
@@ -121,10 +125,11 @@ export async function migrateLocalToCloud(
     onProgress?.(`Pushing ${t}…`);
     const failures: SyncFailure[] = [];
     const report = (failure: SyncFailure) => failures.push(failure);
-    const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report) : { rows, failed: [] };
+    const uploaded = t === "user_files" ? await pushFileBlobs(supabase, uid, rows, report, transfer) : { rows, failed: [] };
     const prepared = prepareSyncRows(uploaded.rows, uid, t, report);
-    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report, uid)];
-    // This upload does not execute queued deletions; automatic sync owns them.
+    const failed = [...uploaded.failed, ...prepared.failed, ...await pushCollection(supabase, t, prepared.rows, report, uid, transfer)];
+    // This helper does not execute queued deletions; the workspace-transfer engine handles them.
+    await checkCloudTransfer(transfer, supabase, uid);
     await journalCommit(pending.v, [t], { [t]: [...failed, ...(pending.tables[t]?.deleted ?? [])] });
     out.push({
       table: t,
@@ -137,6 +142,7 @@ export async function migrateLocalToCloud(
   // the next normal insert doesn't collide.
   onProgress?.("Fixing id sequences…");
   try {
+    await checkCloudTransfer(transfer, supabase, uid);
     await supabase.rpc("sync_bump_sequences");
   } catch {
     /* older cloud DBs without the fn: next insert may need a retry */

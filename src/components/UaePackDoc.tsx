@@ -10,7 +10,7 @@
 import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
 import { docTotals, docLineAmount, docTaxBreakdown } from "../lib/docItems";
-import { ENFORCE_LICENSING, currentTier } from "../lib/license";
+import { showFreePlanBranding } from "../lib/license";
 import { applyRoundOff } from "../lib/money";
 import {
   EMIRATES,
@@ -564,8 +564,7 @@ export default function UaePackDoc({
   const advance = Number(form.advance_applied) || 0;
   const partyLabel = labels?.partyLabel || (cfg.table === "credit" ? "Issued To" : "Bill To");
   const grandLabel = labels?.totalLabel || cfg.totalLabel || "Total Payable";
-  // Free-tier branding line — volume+branding are the only free limits.
-  const freeWatermark = ENFORCE_LICENSING && currentTier() === "free";
+  const freeWatermark = showFreePlanBranding();
 
   // Notes consumed by a dedicated slot (reason/plan box, voucher "Being
   // payment of") are not repeated in the footer.

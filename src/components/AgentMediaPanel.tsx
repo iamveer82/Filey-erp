@@ -333,7 +333,7 @@ export default function AgentMediaPanel({
   const [reference, setReference] = useState<File>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [creditVideos, setCreditVideos] = useState(false);
+  const [previousVideos, setPreviousVideos] = useState(false);
   const [recent, setRecent] = useState(listMediaJobs);
   const [scope] = useState(agentStorageScope);
   const config = getMediaConfig();
@@ -361,13 +361,13 @@ export default function AgentMediaPanel({
       if (scope === agentStorageScope()) setBusy(false);
     }
   }
-  if (creditVideos)
+  if (previousVideos)
     return (
       <>
         <button
           className="btn-ghost mb-3"
           type="button"
-          onClick={() => setCreditVideos(false)}
+          onClick={() => setPreviousVideos(false)}
         >
           Back to your media models
         </button>
@@ -540,9 +540,9 @@ export default function AgentMediaPanel({
       <button
         type="button"
         className="btn-ghost mt-4 text-xs"
-        onClick={() => setCreditVideos(true)}
+        onClick={() => setPreviousVideos(true)}
       >
-        Filey credit video requests
+        Previous Filey video requests
       </button>
     </section>
   );

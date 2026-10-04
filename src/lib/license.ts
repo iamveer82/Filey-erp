@@ -18,6 +18,7 @@ import { billingRequest, openBilling } from "./billingService";
 import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
 import { PUSH_TABLES } from "./syncTables";
+import { agentStorageScope } from "./agentStorage";
 
 /** Gates desktop features behind the four-tier plan model. Flipped on for the
  *  v2.3.0 licensing launch — the matching server-side cap (supabase/
@@ -210,29 +211,74 @@ export type RegisterResult =
   | { ok: true; existing?: boolean }
   | { ok: false; reason: "limit" | "unauthenticated" | "missing_fingerprint" | string };
 
+/** Cloud slots belong to the signed-in account; Freedom's install ID stays global. */
+async function cloudDeviceContext() {
+  if (!supabase) return null;
+  const client = supabase, scope = agentStorageScope();
+  const { data, error } = await client.auth.getSession();
+  if (error) throw new Error("Reconnect your Filey account to manage devices.");
+  const session = data.session;
+  if (!session) return null;
+  const reviewedUser = scope?.slice(scope.lastIndexOf(":user:") + 6);
+  const checkScope = () => {
+    if (agentStorageScope() !== scope || (reviewedUser && reviewedUser !== session.user.id))
+      throw new Error("Your account or workspace changed. Reopen devices and try again.");
+  };
+  checkScope();
+  const checkSession = async () => {
+    checkScope();
+    const active = await client.auth.getSession();
+    checkScope();
+    if (active.error || active.data.session?.access_token !== session.access_token)
+      throw new Error("Your account session changed. Reopen devices and try again.");
+  };
+  const fingerprint = async () => {
+    const installId = await deviceId();
+    await checkSession();
+    // Keep an owned legacy row even when revoked, so changing the fingerprint
+    // cannot bypass an admin logout or consume a second slot during upgrade.
+    const legacy = await client.from("org_devices").select("fingerprint")
+      .eq("fingerprint", installId).eq("user_id", session.user.id).limit(1).maybeSingle()
+      .setHeader("Authorization", `Bearer ${session.access_token}`);
+    await checkSession();
+    if (legacy.error) throw new Error("Could not check this device. Please try again.");
+    return legacy.data ? installId : `${installId}:${session.user.id}`;
+  };
+  return { client, session, checkScope, checkSession, fingerprint };
+}
+
 /** Register this device against the org (called on cloud session start).
  *  Refused with reason "limit" when the workspace is at CLOUD_DEVICE_LIMIT. */
 export async function registerCloudDevice(): Promise<RegisterResult> {
   if (!supabase) return { ok: false, reason: "not_configured" };
+  const context = await cloudDeviceContext();
+  if (!context) return { ok: false, reason: "unauthenticated" };
+  const fingerprint = await context.fingerprint();
+  context.checkScope();
   const name =
     (hasTauri ? "Desktop" : "Browser") +
     (typeof navigator !== "undefined" ? ` · ${navigator.platform}` : "");
-  const { data, error } = await supabase.rpc("register_device", {
-    p_fingerprint: await deviceId(),
+  const { data, error } = await context.client.rpc("register_device", {
+    p_fingerprint: fingerprint,
     p_name: name,
-  });
-  if (error) return { ok: false, reason: error.message };
+  }).setHeader("Authorization", `Bearer ${context.session.access_token}`);
+  await context.checkSession();
+  if (error) return { ok: false, reason: "Could not register this device. Please try again." };
   return (data ?? { ok: false, reason: "no_response" }) as RegisterResult;
 }
 
 /** The org's registered devices (RLS-scoped to the member's org). */
 export async function listOrgDevices(): Promise<OrgDevice[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase
+  const context = await cloudDeviceContext();
+  if (!context) return [];
+  context.checkScope();
+  const { data, error } = await context.client
     .from("org_devices")
     .select("*")
     .is("revoked_at", null)
-    .order("last_seen", { ascending: false });
+    .order("last_seen", { ascending: false })
+    .setHeader("Authorization", `Bearer ${context.session.access_token}`);
+  await context.checkSession();
   if (error) throw new Error("Could not load your devices. Please try again.");
   return (data ?? []) as OrgDevice[];
 }
@@ -240,19 +286,26 @@ export async function listOrgDevices(): Promise<OrgDevice[]> {
 /** Log out an org device (own device, or any if org admin). */
 export async function releaseOrgDevice(id: string): Promise<void> {
   if (!supabase) throw new Error("Cloud isn't configured.");
-  const { error } = await supabase.rpc("filey_logout_device",{p_id:id});
+  const context = await cloudDeviceContext();
+  if (!context) throw new Error("Sign in to manage devices.");
+  context.checkScope();
+  const { error } = await context.client.rpc("filey_logout_device",{p_id:id})
+    .setHeader("Authorization", `Bearer ${context.session.access_token}`);
+  await context.checkSession();
   if (error) throw new Error(error.message);
 }
 
 export async function checkCloudDeviceLogout(): Promise<void> {
-  if (!supabase) return;
-  const {data:{session}}=await supabase.auth.getSession();
-  if(!session)return;
-  const {data,error}=await supabase.rpc("filey_device_logged_out",{p_fingerprint:await deviceId()});
+  const context = await cloudDeviceContext();
+  if (!context) return;
+  const fingerprint = await context.fingerprint();
+  context.checkScope();
+  const {data,error}=await context.client.rpc("filey_device_logged_out",{p_fingerprint:fingerprint})
+    .setHeader("Authorization", `Bearer ${context.session.access_token}`);
   if (!error && data===true) {
-    const {data:{session:current}}=await supabase.auth.getSession();
     // A late check for a previous login must not sign out a newer account/session.
-    if(current?.access_token===session.access_token) await supabase.auth.signOut({scope:"local"});
+    await context.checkSession();
+    await context.client.auth.signOut({scope:"local"});
   }
 }
 
@@ -287,9 +340,17 @@ export async function claimPurchasedLicense(
   attempts = 10,
   delayMs = 3000
 ): Promise<LicenseState | null> {
+  const scope = agentStorageScope();
+  const assertCurrent = () => {
+    if (scope !== agentStorageScope()) throw new Error("Your workspace changed. Reopen Billing.");
+  };
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (await licensePurchased()) {
+    assertCurrent();
+    const purchased = await licensePurchased();
+    assertCurrent();
+    if (purchased) {
       const state = await activateThisDevice();
+      assertCurrent();
       // The cached tier still says "free" until this is dropped, so the caps
       // would keep firing for someone who just paid.
       clearEntitlementCache();
@@ -365,6 +426,11 @@ export async function entitlement(force = false): Promise<Tier> {
  *  until entitlement() has run — callers gate on ENFORCE_LICENSING anyway. */
 export function currentTier(): Tier {
   return cachedTier ?? "free";
+}
+
+/** Free device documents are unbranded. Hosted Basic retains its plan branding. */
+export function showFreePlanBranding(): boolean {
+  return !isLocalMode() && ENFORCE_LICENSING && currentTier() === "free";
 }
 
 /* ---------------- who may use the cloud ---------------- */
@@ -529,9 +595,14 @@ export const EMAIL_DAILY_LIMIT: Record<Tier, number> = {
 
 const EMAIL_COUNT_KEY = "filey:email_count";
 const localDay = () => todayYmd();
+const emailCountKey = () => {
+  const scope = agentStorageScope();
+  // An unowned legacy counter cannot be assigned to a newly signed-in user.
+  return scope ? `${EMAIL_COUNT_KEY}:${encodeURIComponent(scope)}` : EMAIL_COUNT_KEY;
+};
 
-async function emailCountToday(): Promise<number> {
-  const raw = await kvGet(EMAIL_COUNT_KEY);
+async function emailCountToday(key = emailCountKey()): Promise<number> {
+  const raw = await kvGet(key);
   if (!raw) return 0;
   try {
     const { date, n } = JSON.parse(raw) as { date: string; n: number };
@@ -541,15 +612,14 @@ async function emailCountToday(): Promise<number> {
   }
 }
 
-/** Throws when today's sends have hit the current tier's daily email cap.
- *  No-op for unlimited (pro) tiers or while licensing is unenforced.
- *  ponytail: local per-device counter — honest-enough for lite (own SMTP);
- *  the cloud/free path is additionally capped server-side where it matters. */
+/** Client guard for Filey's hosted email service. The server also enforces its
+ *  quota. Personal-provider email in local mode does not call this counter. */
 export async function checkEmailDailyCap(): Promise<void> {
   if (!ENFORCE_LICENSING) return;
+  const key = emailCountKey();
   const limit = EMAIL_DAILY_LIMIT[await entitlement()];
   if (!Number.isFinite(limit)) return;
-  if ((await emailCountToday()) >= limit) {
+  if ((await emailCountToday(key)) >= limit) {
     offerUpgrade("emails");
     throw new Error(
       `Daily email limit reached (${limit} today). ` +
@@ -558,11 +628,14 @@ export async function checkEmailDailyCap(): Promise<void> {
   }
 }
 
-/** Record one successful send against today's local counter. */
-export async function bumpEmailCount(): Promise<void> {
+/** Record an accepted hosted send in its originating workspace's device counter. */
+export async function bumpEmailCount(checkCurrent: () => void = () => {}): Promise<void> {
   if (!ENFORCE_LICENSING) return;
-  const n = (await emailCountToday()) + 1;
-  await kvSet(EMAIL_COUNT_KEY, JSON.stringify({ date: localDay(), n }));
+  checkCurrent();
+  const key = emailCountKey();
+  const n = (await emailCountToday(key)) + 1;
+  checkCurrent();
+  await kvSet(key, JSON.stringify({ date: localDay(), n }));
 }
 
 /** The account's license + device slots (RLS-scoped reads, for the panel). */

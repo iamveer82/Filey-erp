@@ -1,0 +1,508 @@
+{
+  "audit_date": "2026-10-04",
+  "recorded_at_utc": "2026-10-04T02:54:27.930547Z",
+  "workspace": "C:/Users/iamvi/.codex/worktrees/filey-ui-refinement/Filey-erp",
+  "version": "3.0.10",
+  "range_semantics": "Inclusive one-based source line ranges; complete ranges cover the recorded snapshot",
+  "counts": {
+    "complete_runtime_files": 26,
+    "complete_migration_files": 5,
+    "targeted_files": 5,
+    "complete_runtime_lines": 5598.0,
+    "complete_migration_lines": 581.0
+  },
+  "limits": [
+    "Tests and fixtures are referenced in the report but excluded from manual runtime coverage counts.",
+    "Generated deno.lock entries were validated by frozen checks, not counted as manual source review.",
+    "Historical wallet/video function copies and the entire canonical schema were not fully read in this wave.",
+    "No live provider, payment, migration or deployment validation occurred.",
+    "Hashes identify the shared working-tree snapshot recorded for this report; later edits need a separate review."
+  ],
+  "entries": [
+    {
+      "path": "supabase/functions/dodo/index.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          453
+        ]
+      ],
+      "snapshot_line_count": 453,
+      "sha256": "afb285c7b50b3df713952050e6d39c5c3eb94b2c643a47bbec99074cf51c63b7"
+    },
+    {
+      "path": "supabase/functions/stripe/index.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          287
+        ]
+      ],
+      "snapshot_line_count": 287,
+      "sha256": "62edc040e8e9245728b4b1e1495abf77a781f9963da18b4e6102052e2162c85f"
+    },
+    {
+      "path": "supabase/functions/ai-credits/index.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          188
+        ]
+      ],
+      "snapshot_line_count": 188,
+      "sha256": "e70ce784b91e4d931347d72c56c7ac2a0f6265892a94f8cc85bbadb1c38d6e93"
+    },
+    {
+      "path": "supabase/functions/ai-video/index.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          243
+        ]
+      ],
+      "snapshot_line_count": 243,
+      "sha256": "862382d5210d018c1cac457e0ea9460a4fde907005e08b447b401a1387117cd9"
+    },
+    {
+      "path": "supabase/functions/_shared/filey-ai-completion.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          386
+        ]
+      ],
+      "snapshot_line_count": 386,
+      "sha256": "d6ea6398ce3e30dfcfabd47f96080dcbb5e2b390525b25b51c77750a78b7989d"
+    },
+    {
+      "path": "supabase/functions/_shared/ai-credit-gateway.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          12
+        ]
+      ],
+      "snapshot_line_count": 12,
+      "sha256": "b9507a9cf1c9daaa9b336af54b071a22f7cb838eaf46a1d34ff41bfbc2a2b83b"
+    },
+    {
+      "path": "supabase/functions/_shared/ai-credits.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          507
+        ]
+      ],
+      "snapshot_line_count": 507,
+      "sha256": "122e8a7989b56930857903c9cdfc316c50c4502b128b551c4aeeb4fe28b9684e"
+    },
+    {
+      "path": "supabase/functions/_shared/ai-credit-payments.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          158
+        ]
+      ],
+      "snapshot_line_count": 158,
+      "sha256": "25a7a9e58382cf5c912a3eed7ff7bdb2d106ad13554b96cf3fd696898b3a2e53"
+    },
+    {
+      "path": "supabase/functions/_shared/license.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          169
+        ]
+      ],
+      "snapshot_line_count": 169,
+      "sha256": "27871b8e1cc0c45b4103ae6d5ad3dfda06637a565517f0b0cd49675467375712"
+    },
+    {
+      "path": "supabase/functions/_shared/billing.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          92
+        ]
+      ],
+      "snapshot_line_count": 92,
+      "sha256": "a75f09ebd172c101cef0ea93e450e339cf11c36c5657158331f20830d852ad06"
+    },
+    {
+      "path": "supabase/functions/_shared/stripe-subscriptions.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          99
+        ]
+      ],
+      "snapshot_line_count": 99,
+      "sha256": "0dd08b4cb054aad83e30285d20ce624e2151fb2da46758b82c273cf3f31289ee"
+    },
+    {
+      "path": "supabase/functions/_shared/stripe-checkout.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          59
+        ]
+      ],
+      "snapshot_line_count": 59,
+      "sha256": "645eaded296815e879c5a1a03e07e3933efe38edcdcbcf1ebf8584c578600aef"
+    },
+    {
+      "path": "supabase/functions/_shared/stripe-actions.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          18
+        ]
+      ],
+      "snapshot_line_count": 18,
+      "sha256": "0a75d2ff16613215336a4484375e223ea6bf7bbf5fc60e0aa107f8fcfbaf57b7"
+    },
+    {
+      "path": "supabase/functions/_shared/subscription-refunds.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          303
+        ]
+      ],
+      "snapshot_line_count": 303,
+      "sha256": "a918cef8c5c8e262eb57b31f148e14972a8580b849ac994e828ce4f90daa6d14"
+    },
+    {
+      "path": "supabase/functions/_shared/billing-request.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          30
+        ]
+      ],
+      "snapshot_line_count": 30,
+      "sha256": "7dba3a3d6bcb6589c736e5d820e5511257904744a524e99c45362aac33c9a3d8"
+    },
+    {
+      "path": "supabase/functions/_shared/admin-workspace.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          21
+        ]
+      ],
+      "snapshot_line_count": 21,
+      "sha256": "0ad2ac98b75bbb8ceb264a48309548dbfe415ea63d1bd8d38a375a9b2bb2dfa9"
+    },
+    {
+      "path": "supabase/functions/_shared/mfa.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          21
+        ]
+      ],
+      "snapshot_line_count": 21,
+      "sha256": "12f76dccfbfa303266189e38d35194605488595507b92133289a1537a9b147b4"
+    },
+    {
+      "path": "supabase/functions/_shared/rateLimit.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          73
+        ]
+      ],
+      "snapshot_line_count": 73,
+      "sha256": "0f8d13a506115fad4a63ff4934a6798d1ce939579368ec76b2a52c14ac3d6d2e"
+    },
+    {
+      "path": "src/lib/aiCredits.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          243
+        ]
+      ],
+      "snapshot_line_count": 243,
+      "sha256": "c0d563dbc7106f35345ad56d38f54558d8ce2429f99b2183d0f7b3130febbd0a"
+    },
+    {
+      "path": "src/lib/aiVideo.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          75
+        ]
+      ],
+      "snapshot_line_count": 75,
+      "sha256": "d1793dfa5c15e8e6453966d0c9716477d3db7081369aa6293538dc422550bb03"
+    },
+    {
+      "path": "src/lib/billingService.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          96
+        ]
+      ],
+      "snapshot_line_count": 96,
+      "sha256": "c51ea75c19d61aeb37a5365407f82dffd17ae55c2f3644f25fe4361fc40a6eb5"
+    },
+    {
+      "path": "src/lib/subscription.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          209
+        ]
+      ],
+      "snapshot_line_count": 209,
+      "sha256": "764301c27df980a8899e2a67ec1845d52eb2e85e91cd87ae9fc84c5a9f967955"
+    },
+    {
+      "path": "src/lib/license.ts",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          645
+        ]
+      ],
+      "snapshot_line_count": 645,
+      "sha256": "c52aeac6ed808a292db1b8e04fe417dd1d3ad3c6264c2ff6c18f5ed97f08a696"
+    },
+    {
+      "path": "src/components/PaymentReview.tsx",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          156
+        ]
+      ],
+      "snapshot_line_count": 156,
+      "sha256": "8fe836a97a4d12f0357ea94ac7e1e57817d046f581b086c53dafbd17752fb531"
+    },
+    {
+      "path": "src/pages/settings/AiCreditsPanel.tsx",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          496
+        ]
+      ],
+      "snapshot_line_count": 496,
+      "sha256": "8643aa2c6da49139f8bd83a86f4e09b76c974b3820e37a95056d80be6186c291"
+    },
+    {
+      "path": "src/pages/settings/BillingPanel.tsx",
+      "review": "complete",
+      "category": "runtime",
+      "ranges": [
+        [
+          1,
+          559
+        ]
+      ],
+      "snapshot_line_count": 559,
+      "sha256": "d520216db9c4e6a17a68f10f1d60cd48d6dd06399cb0ef30e0882cb96d65c024"
+    },
+    {
+      "path": "supabase/2026-09-19-billing-integrity.sql",
+      "review": "complete",
+      "category": "migration",
+      "ranges": [
+        [
+          1,
+          159
+        ]
+      ],
+      "snapshot_line_count": 159,
+      "sha256": "d15bc3056b2db57ad7f66faeb07999409560965afc75f2fc76291311220f4d5f"
+    },
+    {
+      "path": "supabase/2026-10-03-ai-credit-payment-safety.sql",
+      "review": "complete",
+      "category": "migration",
+      "ranges": [
+        [
+          1,
+          147
+        ]
+      ],
+      "snapshot_line_count": 147,
+      "sha256": "2700af6889a2fef568d98cc6860a60a9df8783e0379d25432fd9aa91044d163b"
+    },
+    {
+      "path": "supabase/2026-10-04-atomic-payroll.sql",
+      "review": "complete",
+      "category": "migration",
+      "ranges": [
+        [
+          1,
+          123
+        ]
+      ],
+      "snapshot_line_count": 123,
+      "sha256": "cb77bd8b73697e233e253c330a06b0ec55683c70c5ce5d424ccd800876c833c6"
+    },
+    {
+      "path": "supabase/2026-10-04-subscription-claim-serialization.sql",
+      "review": "complete",
+      "category": "migration",
+      "ranges": [
+        [
+          1,
+          51
+        ]
+      ],
+      "snapshot_line_count": 51,
+      "sha256": "39435892fba4f8f66c0e9422dff409807bc87d797811f33ac7479496c9ad1822"
+    },
+    {
+      "path": "supabase/2026-10-04-workspace-device-authority.sql",
+      "review": "complete",
+      "category": "migration",
+      "ranges": [
+        [
+          1,
+          101
+        ]
+      ],
+      "snapshot_line_count": 101,
+      "sha256": "6d24e4adfb6d9dbcf74fcc4afc40f36a8cdf0a9516995e9766c5a215cf6af1dc"
+    },
+    {
+      "path": "src/lib/api.ts",
+      "review": "targeted",
+      "category": "source_or_schema",
+      "ranges": [
+        [
+          1892,
+          2030
+        ]
+      ],
+      "reason": "Payroll client, receipts, local transaction and actor/workspace binding",
+      "snapshot_line_count": 6655,
+      "sha256": "1b8d9c1622929827fefe1052cc26b55d50a64084e56e75aa75251f3a44d13755"
+    },
+    {
+      "path": "src/lib/auth.tsx",
+      "review": "targeted",
+      "category": "source_or_schema",
+      "ranges": [
+        [
+          438,
+          482
+        ]
+      ],
+      "reason": "Cloud device registration and logout lifecycle",
+      "snapshot_line_count": 869,
+      "sha256": "907b1036a84190c90de3bb69e7a15a71254e1651a3054f77ad4292cd76c62227"
+    },
+    {
+      "path": "supabase/schema.sql",
+      "review": "targeted",
+      "category": "source_or_schema",
+      "ranges": [
+        [
+          95,
+          235
+        ],
+        [
+          2025,
+          2135
+        ],
+        [
+          2838,
+          2897
+        ],
+        [
+          3134,
+          3164
+        ]
+      ],
+      "reason": "Payroll/account structures, module policies, legacy Stripe settlement and license device claim",
+      "snapshot_line_count": 4078,
+      "sha256": "d69f13e0e34c71dcfed9bb58fdd7220e9a181ef226d0bcaa27d836f6e55e93ab"
+    },
+    {
+      "path": "supabase/2026-09-20-ai-credits.sql",
+      "review": "targeted",
+      "category": "source_or_schema",
+      "ranges": [
+        [
+          1,
+          90
+        ]
+      ],
+      "reason": "Wallet DDL, grants, RLS and account-lock introduction",
+      "snapshot_line_count": 178,
+      "sha256": "ed765f6edd22a611ed1658c5cb7a41ed0a62671065eef0c1da870fef8b21d2a8"
+    },
+    {
+      "path": "supabase/2026-09-21-ai-video.sql",
+      "review": "targeted",
+      "category": "source_or_schema",
+      "ranges": [
+        [
+          1,
+          107
+        ]
+      ],
+      "reason": "Legacy job authority, settlement, reservation and callback privacy",
+      "snapshot_line_count": 210,
+      "sha256": "f891822b72fdf2c10c5f3938de037e4b728641264b1ee6a243ead9f25ea9e172"
+    }
+  ]
+}

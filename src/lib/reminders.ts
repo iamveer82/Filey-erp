@@ -1,6 +1,7 @@
 // Reminder store — user-defined scheduled messages ("remind me to X at Y").
 // Fired by the proactive agent and delivered to the owner over WhatsApp.
-// localStorage-backed; resets only if the app data is cleared.
+// Account/workspace scoped; unattributed legacy reminders remain untouched.
+import { agentStorageKey, writeAgentStorage } from "./agentStorage";
 export interface Reminder {
   id: string;
   text: string;
@@ -12,17 +13,27 @@ export interface Reminder {
 const KEY = "filey.reminders";
 
 export function loadReminders(): Reminder[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    const v = raw ? JSON.parse(raw) : [];
-    return Array.isArray(v) ? (v as Reminder[]) : [];
-  } catch {
-    return [];
-  }
+  const key = agentStorageKey(KEY);
+  if (!key) return [];
+  const raw = localStorage.getItem(key);
+  if (!raw) return [];
+  let list: unknown;
+  try { list = JSON.parse(raw); } catch { throw new Error("Your reminders could not be read. Saved reminders were not changed."); }
+  validateReminders(list);
+  return list;
 }
 
-export function saveReminders(list: Reminder[]): void {
-  localStorage.setItem(KEY, JSON.stringify(list));
+function validateReminders(list: unknown): asserts list is Reminder[] {
+  if (!Array.isArray(list) || list.some(r => !r || typeof r.id !== "string" || !r.id
+    || typeof r.text !== "string" || !r.text.trim() || !Number.isFinite(r.at)
+    || !Number.isFinite(new Date(r.at).getTime())
+    || (r.repeat !== undefined && !["none", "daily", "weekly", "monthly"].includes(r.repeat))))
+    throw new Error("Your reminders contain invalid details. Saved reminders were not changed.");
+}
+
+export function saveReminders(list: Reminder[], expectedScope?: string): void {
+  validateReminders(list);
+  writeAgentStorage(KEY, JSON.stringify(list), expectedScope);
 }
 
 export function addReminder(
@@ -59,7 +70,5 @@ export function nextOccurrence(at: number, repeat: string, now: number): number 
         : repeat === "monthly"
           ? 2_592_000_000
           : 0;
-  let next = at;
-  while (next <= now && step > 0) next += step; // ponytail: O(n) catch-up, fine at this scale
-  return next;
+  return step > 0 && at <= now ? at + (Math.floor((now - at) / step) + 1) * step : at;
 }

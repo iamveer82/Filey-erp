@@ -9,7 +9,7 @@ import {
   type CompanyProfile,
   type Payroll,
 } from "../lib/api";
-import { aed, numInput, getDisplayCurrency } from "../lib/format";
+import { aed, numInput, getDisplayCurrency, todayYmd } from "../lib/format";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { PageHeader, ErrorBanner } from "../components/ui";
 import { useUI } from "../lib/ui";
@@ -21,9 +21,9 @@ export default function PayslipPage() {
   const ref = useRef<HTMLDivElement>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [allowances, setAllowances] = useState(0);
-  const [deductions, setDeductions] = useState(0);
+  const [month, setMonth] = useState(() => todayYmd().slice(0, 7));
+  const [draftAllowances, setAllowances] = useState(0);
+  const [draftDeductions, setDeductions] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [payrollError, setPayrollError] = useState("");
@@ -33,39 +33,59 @@ export default function PayslipPage() {
   const [payroll, setPayroll] = useState<Payroll[]>([]);
   const [saving, setSaving] = useState(false);
   const operation = useRef(false);
+  const loadVersion = useRef(0);
+  const historyVersion = useRef(0);
 
   const loadPayroll = useCallback(() => {
+    const version = loadVersion.current;
+    const history = ++historyVersion.current;
+    const current = () => version === loadVersion.current && history === historyVersion.current;
     return hr.payroll()
-      .then((rows) => { setPayroll(rows); setPayrollError(""); })
+      .then((rows) => { if (current()) { setPayroll(rows); setPayrollError(""); } })
       .catch(() => {
-        setPayrollError("Payroll history could not be checked. Refresh it before recording or downloading a payslip.");
+        if (current()) setPayrollError("Payroll history could not be checked. Refresh it before recording or downloading a payslip.");
       });
   }, []);
 
   useEffect(() => {
+    const version = ++loadVersion.current;
+    const current = () => version === loadVersion.current;
+    setLoading(true);
+    setEmployee(null);
+    setCompany(null);
+    setPayroll([]);
+    setLoadError("");
+    setPayrollError("");
+    setAllowances(0);
+    setDeductions(0);
     Promise.all([
       hr.employees().then((list) => {
-        const emp = list.find((e) => e.id === Number(id));
-        if (emp) setEmployee(emp);
+        if (current()) setEmployee(list.find((e) => e.id === Number(id)) ?? null);
       }),
-      billing.getCompany().then(setCompany).catch(() => {}),
+      billing.getCompany().then((profile) => { if (current()) setCompany(profile); }).catch(() => {}),
       loadPayroll(),
-    ]).catch(() => setLoadError("Could not load this employee. Please reopen the payslip.")).finally(() => setLoading(false));
+    ]).catch(() => { if (current()) setLoadError("Could not load this employee. Please reopen the payslip."); }).finally(() => { if (current()) setLoading(false); });
+    return () => { if (current()) ++loadVersion.current; };
   }, [id, loadPayroll]);
 
   if (loading) return <div className="p-10 text-center text-muted-foreground">Loading…</div>;
   if (loadError) return <ErrorBanner message={loadError} />;
   if (!employee) return <div className="p-10 text-center text-muted-foreground">Employee not found.</div>;
 
-  const basic = employee.salary || 0;
-  const net = basic + allowances - deductions;
-  const periodLabel = new Date(month + "-01").toLocaleDateString("en", {
+  const recorded = payroll.find((p) => Number(p.employee_id) === employee.id && p.period === month);
+  // A recorded period is a financial snapshot, independent of later salary edits.
+  const basic = recorded?.basic ?? employee.salary ?? 0;
+  const allowances = recorded?.allowances ?? draftAllowances;
+  const deductions = recorded?.deductions ?? draftDeductions;
+  const net = recorded?.net_pay ?? basic + allowances - deductions;
+  const validPeriod = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
+  const periodLabel = validPeriod ? new Date(month + "-01T12:00:00").toLocaleDateString("en", {
     month: "long",
     year: "numeric",
-  });
+  }) : "Select a month";
 
   const download = async () => {
-    if (operation.current || payrollError) return;
+    if (operation.current || payrollError || !validPeriod) return;
     const src = ref.current?.querySelector(".invoice-print") as HTMLElement | null;
     if (!src) {
       window.print(); // never leave the button doing nothing at all
@@ -123,18 +143,13 @@ export default function PayslipPage() {
     }
   };
 
-  /** The payslip this page is showing, if it has already been recorded. */
-  const recorded = payroll.find(
-    (p) => Number(p.employee_id) === employee.id && p.period === month
-  );
-
   /** Save the payslip as a payroll record.
    *
    *  Downloading a PDF was the only thing this page did, so a payslip existed
    *  as a file and nowhere else: the employee's payroll history stayed empty,
    *  monthly payroll read zero, and the agent's list_payroll saw nothing. */
   const save = async () => {
-    if (recorded || operation.current || payrollError) return;
+    if (recorded || operation.current || payrollError || !validPeriod) return;
     operation.current = true;
     setSaving(true);
     try {
@@ -165,14 +180,14 @@ export default function PayslipPage() {
             <button className="btn-ghost" onClick={() => nav("/people")}>
               <ArrowLeft size={15} /> Back
             </button>
-            <button className="btn-ghost" aria-label="Download PDF" disabled={saving || !!payrollError} onClick={() => void download()}>
+            <button className="btn-ghost" aria-label="Download PDF" disabled={saving || !!payrollError || !validPeriod} onClick={() => void download()}>
               <Download size={15} /> PDF
             </button>
             <button
               className="btn-primary"
               aria-label={recorded ? "Saved payslip" : saving ? "Saving payslip…" : "Save payslip"}
               onClick={save}
-              disabled={!!recorded || saving || !!payrollError}
+              disabled={!!recorded || saving || !!payrollError || !validPeriod}
               title={
                 recorded
                   ? "Already recorded for this month"
@@ -200,7 +215,7 @@ export default function PayslipPage() {
                 className="input"
                 disabled={saving}
                 value={month}
-                onChange={(e) => setMonth(e.target.value)}
+                onChange={(e) => { setMonth(e.target.value); setAllowances(0); setDeductions(0); }}
               />
             </div>
             <div>
@@ -220,7 +235,7 @@ export default function PayslipPage() {
                 type="number"
                 className="input"
                 value={allowances || ""}
-                disabled={saving}
+                disabled={saving || !!recorded}
                 onChange={(e) => setAllowances(numInput(e.target.value))}
               />
             </div>
@@ -231,7 +246,7 @@ export default function PayslipPage() {
                 type="number"
                 className="input"
                 value={deductions || ""}
-                disabled={saving}
+                disabled={saving || !!recorded}
                 onChange={(e) => setDeductions(numInput(e.target.value))}
               />
             </div>

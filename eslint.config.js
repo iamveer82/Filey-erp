@@ -18,6 +18,7 @@ export default tseslint.config(
       "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
       "src-tauri/target",
+      "src-tauri/binaries", // generated sidecars and vendored native media packages
       "mobile/android/**/build/**",
       "mobile/android/.gradle/**",
       "mobile/android/app/src/main/assets/public/**",

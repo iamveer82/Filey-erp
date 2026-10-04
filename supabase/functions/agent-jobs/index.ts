@@ -77,6 +77,7 @@ Deno.serve(async (req) => {
     if (messages.length) {
       out.telegram = await tell(supa, messages.join("\n\n"), {
         owner: OWNER,
+        org,
         bot: BOT,
         chat: Deno.env.get("TELEGRAM_OWNER_CHAT_ID") ?? "",
       });
@@ -91,7 +92,6 @@ Deno.serve(async (req) => {
       {
         ok: false,
         job,
-        ...out,
         error: "Job could not finish. Check delivery before retrying.",
       },
       { status: 502 }

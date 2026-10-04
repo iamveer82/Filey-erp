@@ -4,14 +4,16 @@
 //
 // ponytail: one JSON array per collection, loaded/saved whole, stored in the
 // SQLite kv_cache (desktop), IndexedDB (native phones), or localStorage (web).
-// Collections are small and writes are serial, so whole-array
-// read-modify-write is fine. Move to row-level SQL only if a table grows big
+// Collections are small. Whole-array writes compare their original read set
+// inside the storage transaction, including independent desktop/MCP writers.
+// Move to row-level SQL only if a table grows big
 // enough to lag.
 
 import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
 import { nextLocalId } from "./recordId";
-import { readDeviceValue, writeDeviceValue, writeDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
+import { validateNumberedCollection } from "./documentNumberRules";
+import { readDeviceValue, writeDeviceValue, compareDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -32,28 +34,53 @@ function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
 
 // ---- storage backend: collection name -> Row[] ----------------------------
 
-/** Parsed collections, kept between reads.
- *
- *  Reading a collection used to mean an IPC hop, a SQLite read and a JSON.parse
- *  of the WHOLE array — every time. One screen does that a dozen times over the
- *  same table and an agent turn does it far more, all on the main thread, which
- *  is a large part of why the app stopped repainting under load. This process is
- *  the only writer, so between writes the parsed array IS the stored state and
- *  the round trip buys nothing.
- *
- *  The raw JSON rides along so replaceColl can compare against what's stored
- *  without re-serialising it.
- *
- *  Rows handed out are shared and read-only by contract. That takes nothing
- *  away: mutating a returned row never reached storage before either — only
- *  saveColl writes — so any code doing it was already a no-op bug.
- *
- *  PACKAGED APPS ONLY. This process owns the desktop/phone store, so a parsed
- *  collection stays true until we write it. In a browser a second tab writes
- *  the same localStorage key behind our back and a stale memo would serve rows
- *  another tab deleted. Browser mode re-reads; localStorage is synchronous and
- *  it is not where the cost was. */
-const memo = new Map<string, { rows: Row[]; json: string }>();
+/** Reuse parsing/hydration only while the stored bytes still match. MCP and
+ * another window can write the database independently of this process's queue.
+ * These private rows never cross a caller boundary without an ownership copy. */
+const memo = new Map<string, { rows: Row[]; json: string | null }>();
+
+/** Copy mutable JSON containers, retaining large primitive strings such as
+ * shared logos. A caller must not mutate a parsed memo or a captured payload.
+ * Cycles are retained so the normal JSON save rejects them without data loss. */
+function ownedCopy<T>(value: T): T {
+  const seen = new WeakMap<object, any>();
+  let containers = 0;
+  const copy = (current: any, depth: number): any => {
+    if (current === null || typeof current !== "object") return current;
+    if (seen.has(current)) return seen.get(current);
+    if (depth > 128 || ++containers > 1_000_000) throw new Error("Local records are too complex to copy safely. The original data was preserved.");
+    if (current instanceof Date) return new Date(current.getTime());
+    const next: any = Array.isArray(current) ? new Array(current.length) : {};
+    seen.set(current, next);
+    for (const [key, entry] of Object.entries(current)) Object.defineProperty(next, key, {
+      value: copy(entry, depth + 1), enumerable: true, configurable: true, writable: true,
+    });
+    return next;
+  };
+  return copy(value, 0);
+}
+
+export class LocalWriteConflictError extends Error {
+  readonly code = "local_conflict";
+  constructor() {
+    super("Local records changed in another Filey window or connected tool. Refresh the records and retry your change. Nothing from this save was committed.");
+    this.name = "LocalWriteConflictError";
+  }
+}
+
+async function commitLocal(
+  entries: [string, string | null][],
+  expected: [string, string | null][],
+): Promise<void> {
+  try {
+    if (!(await compareDeviceValues(entries, expected))) throw new LocalWriteConflictError();
+  } finally {
+    // A conflict/failure must not leave staged records or an unpersisted journal
+    // in the memo. Subsequent reads also revalidate independent changes.
+    for (const [key] of entries) if (key.startsWith("localdb:")) memo.delete(key.slice(8));
+    journalMemo = null;
+  }
+}
 
 /** Forget everything cached. Exported for tests and for a restore, which
  *  replaces the database underneath us. */
@@ -220,43 +247,27 @@ async function hydrate(rows: Row[]): Promise<Row[]> {
 // the leak is bounded and small. Sweep unreferenced keys on restore if that
 // ever stops being true.
 
-export async function loadColl(coll: string): Promise<Row[]> {
-  const hit = transactionalDeviceStorage ? memo.get(coll) : undefined;
-  if (hit) return hit.rows;
+async function collectionSnapshot(coll: string): Promise<{ rows: Row[]; json: string | null }> {
   const key = "localdb:" + coll;
   try {
     const v = await readDeviceValue(key);
+    const hit = transactionalDeviceStorage ? memo.get(coll) : undefined;
+    if (hit && hit.json === v) return hit;
     const parsed: unknown = v ? JSON.parse(v) : [];
     if (!Array.isArray(parsed) || parsed.some((row) => !row || typeof row !== "object" || Array.isArray(row)))
       throw new Error("Stored records are not a valid collection");
     const rows = await hydrate(parsed as Row[]);
     // json stays the STORED form (markers, not payloads) so replaceColl keeps
     // comparing like with like.
-    if (transactionalDeviceStorage) memo.set(coll, { rows, json: v ?? "[]" });
-    return rows;
+    const snapshot = { rows, json: v };
+    if (transactionalDeviceStorage) memo.set(coll, snapshot);
+    return snapshot;
   } catch (error) {
     // Don't memo a failed read — the next call should try again.
     throw new Error(`Could not read local ${coll}. Your saved records were not changed. ${error instanceof Error ? error.message : String(error)}`);
   }
 }
-
-async function saveColl(coll: string, rows: Row[]): Promise<void> {
-  const key = "localdb:" + coll;
-  const json = await dehydrate(rows);
-  if (!transactionalDeviceStorage) {
-    await writeDeviceValue(key, json);
-    return;
-  }
-  try {
-    // Cache only what actually reached storage. A write that fails (disk full,
-    // DB locked) must not leave the UI reading rows nobody saved.
-    await writeDeviceValue(key, json);
-    memo.set(coll, { rows, json });
-  } catch (e) {
-    memo.delete(coll);
-    throw e;
-  }
-}
+export async function loadColl(coll: string): Promise<Row[]> { return ownedCopy((await collectionSnapshot(coll)).rows); }
 
 /** Overwrite a collection from the cloud (pull-sync) WITHOUT journalling —
  *  journalling it would echo the pulled rows straight back up on the next
@@ -266,27 +277,20 @@ export function replaceColl(
   rows: Row[],
   expectedJournalVersion?: number,
 ): Promise<boolean> {
+  const captured = ownedCopy(rows);
   return serializeWrite(async () => {
-    if (expectedJournalVersion !== undefined && (await journalVersion()) !== expectedJournalVersion)
+    const journal = await journalState();
+    if (expectedJournalVersion !== undefined && journal.journal.v !== expectedJournalVersion)
       return false;
-    const next = await dehydrate(rows);
-    // Compare against the stored JSON rather than re-serialising what's already
-    // there: a pull that changes nothing used to parse AND stringify every table.
-    await loadColl(coll); // fills memo.json; free once warm
-    const current = transactionalDeviceStorage
-      ? memo.get(coll)?.json
-      : ((await readDeviceValue("localdb:" + coll)) ?? "[]");
-    if (current === next) return false;
+    const current = await collectionSnapshot(coll);
+    const next = await dehydrate(captured);
+    if ((current.json ?? "[]") === next) return false;
     const key = "localdb:" + coll;
-    if (!transactionalDeviceStorage) {
-      await writeDeviceValue(key, next);
-      return true;
-    }
     try {
-      await writeDeviceValue(key, next);
-      memo.set(coll, { rows, json: next });
+      await commitLocal([[key, next]], [[key, current.json], [JOURNAL_KEY, journal.raw]]);
+      memo.set(coll, { rows: captured, json: next });
     } catch (e) {
-      memo.delete(coll);
+      if (e instanceof LocalWriteConflictError && expectedJournalVersion !== undefined) return false;
       throw e;
     }
     return true;
@@ -309,17 +313,16 @@ export type SyncJournal = {
 
 const JOURNAL_KEY = "syncjournal";
 
-// Same deal as the collection memo above: journalMark reads and rewrites the
-// whole journal on every single row write, so saving an invoice with 20 lines
-// was 40 IPC round trips on the main thread.
-let journalMemo: SyncJournal | null = null;
+// Reuse journal parsing only after validating the persisted bytes.
+let journalMemo: { journal: SyncJournal; raw: string | null } | null = null;
 
-async function journalLoad(): Promise<SyncJournal> {
-  if (transactionalDeviceStorage && journalMemo) return journalMemo;
+async function journalState(): Promise<{ journal: SyncJournal; raw: string | null }> {
   try {
     const raw = await readDeviceValue(JOURNAL_KEY);
+    if (transactionalDeviceStorage && journalMemo?.raw === raw)
+      return { journal: structuredClone(journalMemo.journal), raw };
     const j = raw ? JSON.parse(raw) : null;
-    if (j && Number.isFinite(j.v) && j.v >= 0 && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
+    if (j && Number.isSafeInteger(j.v) && j.v >= 0 && j.v < Number.MAX_SAFE_INTEGER && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
       for (const t of Object.keys(j.tables)) {
         const e = j.tables[t];
         // Journals written before row-level tracking meant "whole collection".
@@ -329,34 +332,16 @@ async function journalLoad(): Promise<SyncJournal> {
         }
         if (!Array.isArray(e.deleted)) e.deleted = [];
       }
-      journalMemo = j as SyncJournal;
-      return journalMemo;
+      journalMemo = { journal: j as SyncJournal, raw };
+      return { journal: structuredClone(journalMemo.journal), raw };
     }
     if (raw) throw new Error("Invalid pending-change journal");
   } catch (error) {
     journalMemo = null;
     throw new Error(`Could not read pending local changes. Sync was stopped to preserve unsent records. ${error instanceof Error ? error.message : String(error)}`);
   }
-  journalMemo = { v: 0, tables: {} };
-  return journalMemo;
-}
-
-async function journalSave(j: SyncJournal): Promise<void> {
-  const json = JSON.stringify(j);
-  if (!transactionalDeviceStorage) {
-    await writeDeviceValue(JOURNAL_KEY, json);
-    return;
-  }
-  journalMemo = j;
-  try {
-    await writeDeviceValue(JOURNAL_KEY, json);
-  } catch (e) {
-    // journalCommit clears pushed tables before saving. Keeping an unpersisted
-    // clear in memory would drop rows that never reached the cloud, so fall
-    // back to storage — the worst it costs is re-pushing, which is idempotent.
-    journalMemo = null;
-    throw e;
-  }
+  journalMemo = { journal: { v: 0, tables: {} }, raw: null };
+  return { journal: structuredClone(journalMemo.journal), raw: null };
 }
 
 /** Mark rows dirty and notify the auto-sync scheduler. Bare call (no opts) or
@@ -374,9 +359,13 @@ export function journalMark(
 /** The public seed/import path shares the collection queue. Transaction commits
  * already hold that queue and must not acquire it recursively. */
 async function markPendingChanges(coll: string, opts: Parameters<typeof journalMark>[1]): Promise<void> {
-  const j = await journalLoad();
-  markJournal(j, coll, opts);
-  await journalSave(j);
+  // This is a pure dirty-id union; a bounded retry preserves concurrent marks.
+  for (let attempt = 0; ; attempt++) {
+    const { journal, raw } = await journalState();
+    markJournal(journal, coll, opts);
+    try { await commitLocal([[JOURNAL_KEY, JSON.stringify(journal)]], [[JOURNAL_KEY, raw]]); break; }
+    catch (error) { if (!(error instanceof LocalWriteConflictError) || attempt >= 2) throw error; }
+  }
   if (!opts?.silent && typeof window !== "undefined")
     window.dispatchEvent(new Event("filey:local-write"));
 }
@@ -403,21 +392,9 @@ function markJournal(j: SyncJournal, coll: string, opts: Parameters<typeof journ
   if (opts?.deletedRevisions) entry.deletedRevisions = { ...entry.deletedRevisions, ...opts.deletedRevisions };
 }
 
-/** A COPY of the journal, isolated from writes that land afterwards.
- *
- *  It has to be a copy. On desktop journalLoad hands back the memo object that
- *  journalMark mutates in place, so a caller holding a "before" snapshot was
- *  holding the live journal: `snapshot.v !== current.v` compared a number with
- *  itself and could never be true. Both guards built on that comparison were
- *  dead — journalCommit's "don't clear what wasn't pushed", and pullNow's "a
- *  local write raced this pull, stop". A row edited during a sync could be
- *  cleared from the journal without ever being pushed, and then overwritten by
- *  the next pull with the cloud's older copy.
- *
- *  Browser mode always re-read and re-parsed localStorage, so it was already
- *  getting a fresh object and never had the bug. */
+/** A copy of the current persisted journal, isolated from later local/MCP writes. */
 export async function journalSnapshot(): Promise<SyncJournal> {
-  const j = await journalLoad();
+  const j = (await journalState()).journal;
   const tables: SyncJournal["tables"] = {};
   for (const t of Object.keys(j.tables)) {
     const e = j.tables[t];
@@ -430,23 +407,26 @@ export async function journalSnapshot(): Promise<SyncJournal> {
  *  a loop want this, not a full copy of a journal that may hold thousands of
  *  ids after a bulk import. */
 export async function journalVersion(): Promise<number> {
-  return (await journalLoad()).v;
+  return (await journalState()).journal.v;
 }
 
 /** Commit a complete downloaded workspace and its clean journal together. */
 export function replaceWorkspaceSnapshot(tables: Map<string, Row[]>, expectedVersion: number): Promise<void> {
+  const captured = new Map(Array.from(tables, ([table, rows]) => [table, ownedCopy(rows)] as const));
   return serializeWrite(async () => {
-    const journal = await journalSnapshot();
+    const { journal, raw } = await journalState();
     if (journal.v !== expectedVersion)
       throw new Error("Local records changed during the copy. Finish editing and retry.");
     const entries: [string, string][] = [];
-    for (const [table, rows] of tables) {
+    const expected: [string, string | null][] = [[JOURNAL_KEY, raw]];
+    for (const [table, rows] of captured) {
+      expected.push(["localdb:" + table, (await collectionSnapshot(table)).json]);
       entries.push(["localdb:" + table, await dehydrate(rows)]);
       delete journal.tables[table];
     }
     journal.v++;
     entries.push([JOURNAL_KEY, JSON.stringify(journal)]);
-    await writeDeviceValues(entries);
+    await commitLocal(entries, expected);
     clearLocalCache();
   });
 }
@@ -459,17 +439,19 @@ export function rememberSyncRevision(coll: string, id: string | number, revision
 /** One collection write per upload batch, preserving edits made in flight. */
 export function rememberSyncRevisions(coll: string, revisions: Map<string | number, number>): Promise<void> {
   return serializeWrite(async () => {
-    const rows = await loadColl(coll);
-    if (rows.some(row => revisions.has(row.id)))
-      await saveColl(coll, rows.map(row => revisions.has(row.id) ? { ...row, sync_revision: revisions.get(row.id) } : row));
-    const j = await journalSnapshot();
+    const { journal: j, raw } = await journalState();
+    const { rows, json } = await collectionSnapshot(coll);
+    const entries: [string, string][] = [];
+    if (rows.some(row => revisions.has(row.id))) entries.push(["localdb:" + coll,
+      await dehydrate(rows.map(row => revisions.has(row.id) ? { ...row, sync_revision: revisions.get(row.id) } : row))]);
     const deleted = j.tables[coll]?.deleted.filter(id => revisions.has(id)) ?? [];
     if (deleted.length) {
       const entry = j.tables[coll];
       entry.deletedRevisions = { ...entry.deletedRevisions };
       for (const id of deleted) entry.deletedRevisions[String(id)] = revisions.get(id)!;
-      await journalSave(j);
+      entries.push([JOURNAL_KEY, JSON.stringify(j)]);
     }
+    if (entries.length) await commitLocal(entries, [["localdb:" + coll, json], [JOURNAL_KEY, raw]]);
   });
 }
 
@@ -481,19 +463,19 @@ export function resolveLocalSyncConflict(coll: string, id: string | number, remo
 
 /** Validate the whole collection first, then persist it and its journal once. */
 export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[], keepLocal: boolean): Promise<void> {
+  const captured = ownedCopy(choices);
   return serializeWrite(async () => {
-    const rows = await loadColl(coll);
+    const { journal, raw } = await journalState();
+    const { rows, json: originalJson } = await collectionSnapshot(coll);
     const byId = new Map(rows.map(row => [row.id, row]));
-    for (const { id, reviewedLocal } of choices) {
+    for (const { id, reviewedLocal } of captured) {
       if (JSON.stringify(byId.get(id) ?? null) !== JSON.stringify(reviewedLocal))
         throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
     }
-    const original = await journalSnapshot();
-    const journal = structuredClone(original);
     const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
     const changed = new Set(entry.all ? rows.map(row => row.id) : entry.changed);
     const deleted = new Set(entry.deleted);
-    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of choices) {
+    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of captured) {
       const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
       if (targetId !== id && byId.has(targetId))
         throw new Error("Company settings changed on this device. Sync again before choosing a version.");
@@ -519,23 +501,10 @@ export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[
     if (!changed.size && !deleted.size) delete journal.tables[coll];
     journal.v++;
     const next = [...byId.values()];
-    if (transactionalDeviceStorage) {
-      const json = await dehydrate(next);
-      // The chosen versions and their upload queue must survive together.
-      await writeDeviceValues([["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]]);
-      memo.set(coll, { rows: next, json });
-      journalMemo = journal;
-      window.dispatchEvent(new Event("filey:remote-update"));
-      return;
-    }
-    try {
-      await saveColl(coll, next);
-      await journalSave(journal);
-    } catch (error) {
-      await saveColl(coll, rows);
-      await journalSave(original);
-      throw error;
-    }
+    const json = await dehydrate(next);
+    await commitLocal([["localdb:" + coll, json], [JOURNAL_KEY, JSON.stringify(journal)]],
+      [["localdb:" + coll, originalJson], [JOURNAL_KEY, raw]]);
+    if (transactionalDeviceStorage) memo.set(coll, { rows: next, json });
     window.dispatchEvent(new Event("filey:remote-update"));
   });
 }
@@ -545,7 +514,7 @@ export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[
  *  re-pushes, and upserts make that harmless. */
 export function journalCommit(v: number, tables: string[], failures: Record<string, (string | number)[]> = {}): Promise<void> {
   return serializeWrite(async () => {
-    const j = await journalSnapshot();
+    const { journal: j, raw } = await journalState();
     if (j.v !== v) return;
     for (const t of tables) {
       const entry = j.tables[t];
@@ -558,7 +527,10 @@ export function journalCommit(v: number, tables: string[], failures: Record<stri
         entry.deleted.map(id => [String(id), entry.deletedRevisions![String(id)] ?? null]));
       delete entry.all;
     }
-    await journalSave(j);
+    // A writer may commit between the version read and this SQLite transaction.
+    // Leave its pending changes intact instead of clearing a stale snapshot.
+    try { await commitLocal([[JOURNAL_KEY, JSON.stringify(j)]], [[JOURNAL_KEY, raw]]); }
+    catch (error) { if (!(error instanceof LocalWriteConflictError)) throw error; }
   });
 }
 
@@ -567,8 +539,9 @@ export function journalCommit(v: number, tables: string[], failures: Record<stri
 type Op = "select" | "insert" | "update" | "upsert" | "delete";
 type LocalStore = {
   load: typeof loadColl;
-  save: typeof saveColl;
+  save: (coll: string, rows: Row[]) => Promise<void>;
   mark: typeof journalMark;
+  fail: (error: unknown) => void;
 };
 type Filter =
   | { kind: "is"; col: string; val: null | boolean }
@@ -600,17 +573,17 @@ class LocalBuilder implements PromiseLike<Result> {
   }
   insert(rows: Row | Row[]): this {
     this.op = "insert";
-    this.payload = Array.isArray(rows) ? rows : [rows];
+    this.payload = ownedCopy(Array.isArray(rows) ? rows : [rows]);
     return this;
   }
   update(patch: Row): this {
     this.op = "update";
-    this.payload = [patch];
+    this.payload = ownedCopy([patch]);
     return this;
   }
   upsert(rows: Row | Row[], opts?: { onConflict?: string }): this {
     this.op = "upsert";
-    this.payload = Array.isArray(rows) ? rows : [rows];
+    this.payload = ownedCopy(Array.isArray(rows) ? rows : [rows]);
     this.conflictKey = opts?.onConflict;
     return this;
   }
@@ -706,10 +679,9 @@ class LocalBuilder implements PromiseLike<Result> {
 
   private async exec(store = this.store): Promise<Result> {
     try {
-      // loadColl hands back the cached array itself, so a write works on a copy:
-      // insert/upsert splice in place, and mutating the cache before the store
-      // has accepted the write would show rows that a failed save never kept.
-      let rows = await (store?.load ?? loadColl)(this.coll);
+      // Internal rows stay private. Writes replace the array/affected row, and
+      // query results and payloads have separate mutable container ownership.
+      let rows = store ? await store.load(this.coll) : (await collectionSnapshot(this.coll)).rows;
       if (this.op !== "select") rows = [...rows];
       let result: any = null;
 
@@ -755,8 +727,8 @@ class LocalBuilder implements PromiseLike<Result> {
           rows.push(row);
           written.push(row);
         }
-        await (store?.save ?? saveColl)(this.coll, rows);
-        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
+        await store!.save(this.coll, rows);
+        await store!.mark(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "update") {
         const patch = this.payload[0] || {};
@@ -769,14 +741,14 @@ class LocalBuilder implements PromiseLike<Result> {
           }
           return r;
         });
-        await (store?.save ?? saveColl)(this.coll, rows);
-        await (store?.mark ?? journalMark)(this.coll, { changed: written.map((r) => r.id) });
+        await store!.save(this.coll, rows);
+        await store!.mark(this.coll, { changed: written.map((r) => r.id) });
         result = this.returnRows ? written : null;
       } else if (this.op === "delete") {
         const removed = rows.filter((r) => this.matches(r));
         rows = rows.filter((r) => !this.matches(r));
-        await (store?.save ?? saveColl)(this.coll, rows);
-        await (store?.mark ?? journalMark)(this.coll, {
+        await store!.save(this.coll, rows);
+        await store!.mark(this.coll, {
           deleted: removed.map((r) => r.id),
           deletedRevisions: Object.fromEntries(removed.map((r) => [String(r.id), r.sync_revision ?? null])),
         });
@@ -785,12 +757,16 @@ class LocalBuilder implements PromiseLike<Result> {
 
       if (this.want !== "no") {
         const arr = Array.isArray(result) ? result : result == null ? [] : [result];
-        if (this.want === "single" && arr.length === 0)
-          return { data: null, error: { message: "No rows found", code: "PGRST116" } };
+        if (this.want === "single" && arr.length === 0) {
+          const error = { message: "No rows found", code: "PGRST116" };
+          if (this.op !== "select") store?.fail(error);
+          return { data: null, error };
+        }
         result = arr.length ? arr[0] : null;
       }
-      return { data: result, error: null };
+      return { data: ownedCopy(result), error: null };
     } catch (e: any) {
+      store?.fail(e);
       return { data: null, error: { message: String(e?.message || e) } };
     }
   }
@@ -803,79 +779,59 @@ class LocalBuilder implements PromiseLike<Result> {
       const outcome = await this.exec(client.from(this.coll).store);
       if (outcome.error) throw outcome.error;
       return outcome;
-    }).catch((error) => ({ data: null, error }));
+    }, { retrySafe: this.op === "insert" }).catch((error) => ({ data: null, error }));
     return result.then(onF as any, onR as any);
   }
 }
 
-/** Stage a document's collection writes together, then publish one change event.
- *  Other writes wait; readers keep seeing committed records. Failed commits
- *  restore their original collections and journal. Desktop commits all rows and
- *  the pending-change journal in one native SQLite transaction. */
+/** Stage a document's writes, then atomically compare every read collection and
+ * the journal before publishing. Complex workflows run once: their callers may
+ * have performed external effects. Opt into retries only for pure mutations
+ * that recompute from fresh rows (inserts, stock/balance deltas). */
 export function withLocalTransaction<T>(
   run: (client: Pick<typeof localClient, "from">) => Promise<T>,
+  options?: { retrySafe?: boolean },
 ): Promise<T> {
   return serializeWrite(async () => {
-    const original = new Map<string, Row[]>();
-    const staged = new Map<string, Row[]>();
-    const changes: [string, Parameters<typeof journalMark>[1]][] = [];
-    const store: LocalStore = {
-      async load(coll) {
-        if (staged.has(coll)) return staged.get(coll)!;
-        if (!original.has(coll)) original.set(coll, await loadColl(coll));
-        return original.get(coll)!;
-      },
-      async save(coll, rows) {
-        staged.set(coll, rows);
-      },
-      async mark(coll, opts) {
-        changes.push([coll, opts]);
-      },
-    };
-    const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
-    if (!staged.size) return result;
-    const journal = await journalSnapshot();
-    if (transactionalDeviceStorage) {
+    for (let attempt = 0; ; attempt++) {
+      const { journal, raw } = await journalState();
+      const original = new Map<string, { rows: Row[]; json: string | null }>();
+      const staged = new Map<string, Row[]>();
+      const changes: [string, Parameters<typeof journalMark>[1]][] = [];
+      let failure: unknown;
+      const store: LocalStore = {
+        async load(coll) {
+          if (staged.has(coll)) return staged.get(coll)!;
+          if (!original.has(coll)) original.set(coll, await collectionSnapshot(coll));
+          return original.get(coll)!.rows;
+        },
+        async save(coll, rows) {
+          validateNumberedCollection(coll, staged.get(coll) ?? original.get(coll)?.rows ?? [], rows);
+          staged.set(coll, rows);
+        },
+        async mark(coll, opts) { changes.push([coll, opts]); },
+        fail(error) { failure ??= error; },
+      };
+      const result = await run({ from: (coll) => localClient.from(coll).inStore(store) });
+      if (failure) throw failure instanceof Error ? failure : new Error(String((failure as any)?.message ?? failure));
+      if (!staged.size) return result;
       const nextJournal = structuredClone(journal);
       for (const [coll, opts] of changes) markJournal(nextJournal, coll, opts);
       const entries: [string, string][] = [];
       for (const [coll, rows] of staged) entries.push(["localdb:" + coll, await dehydrate(rows)]);
       entries.push([JOURNAL_KEY, JSON.stringify(nextJournal)]);
       try {
-        await writeDeviceValues(entries);
-        for (const [coll, rows] of staged) memo.set(coll, { rows, json: entries.find(([key]) => key === "localdb:" + coll)![1] });
-        journalMemo = nextJournal;
+        await commitLocal(entries, [[JOURNAL_KEY, raw],
+          ...Array.from(original, ([coll, snapshot]): [string, string | null] => ["localdb:" + coll, snapshot.json])]);
       } catch (error) {
-        for (const coll of staged.keys()) memo.delete(coll);
-        journalMemo = null;
+        if (error instanceof LocalWriteConflictError && options?.retrySafe && attempt < 2) continue;
         throw error;
       }
-      window.dispatchEvent(new Event("filey:local-write"));
+      if (transactionalDeviceStorage) for (const [coll, rows] of staged)
+        memo.set(coll, { rows, json: entries.find(([key]) => key === "localdb:" + coll)![1] });
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:local-write"));
       return result;
     }
-    const committed: string[] = [];
-    try {
-      for (const [coll, rows] of staged) {
-        await saveColl(coll, rows);
-        committed.push(coll);
-      }
-      for (const [coll, opts] of changes) await markPendingChanges(coll, { ...opts, silent: true });
-    } catch (error) {
-      const restored = await Promise.allSettled(
-        committed.map((coll) => saveColl(coll, original.get(coll)!)),
-      );
-      const journalRestored = await journalSave(journal).then(
-        () => true,
-        () => false,
-      );
-      if (!journalRestored || restored.some((entry) => entry.status === "rejected"))
-        throw new Error(
-          "The save failed and local storage could not be fully restored. Stop editing and restore a backup before retrying.",
-        );
-      throw error;
-    }
-    if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:local-write"));
-    return result;
   });
 }
 
@@ -892,12 +848,16 @@ async function localRpc(name: string, args?: { p_id?: number; p_delta?: number }
         const field = name === "adjust_product_stock" ? "quantity" : "balance";
         const { data, error } = await client.from(coll).select("*").eq("id", args!.p_id).single();
         if (error) throw new Error(error.message);
+        const before = data[field] == null ? 0 : Number(data[field]);
+        const next = before + args!.p_delta!;
+        if (!Number.isFinite(before) || !Number.isFinite(next))
+          throw new Error(`The stored ${field} or adjustment is invalid. Repair the record before retrying.`);
         const updated = await client
           .from(coll)
-          .update({ [field]: (Number(data[field]) || 0) + args!.p_delta! })
+          .update({ [field]: next })
           .eq("id", args!.p_id);
         if (updated.error) throw new Error(updated.error.message);
-      });
+      }, { retrySafe: true });
       return { data: null, error: null };
     } catch (error) {
       return {
@@ -1002,9 +962,13 @@ async function blobGet(path: string): Promise<Blob64 | null> {
   const key = "fileblob:" + path;
   try {
     const raw = await readDeviceValue(key);
-    return raw ? (JSON.parse(raw) as Blob64) : null;
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+      typeof (value as Blob64).b64 !== "string") throw new Error("Invalid saved file");
+    return value as Blob64;
   } catch {
-    return null;
+    throw new Error("Could not read the saved file. Its stored data has been preserved.");
   }
 }
 

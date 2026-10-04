@@ -44,6 +44,7 @@ import {
 } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
+import { quotationPublicLink } from "../lib/documentMessage";
 import { SelectMenu } from "../components/ui-menu";
 import {
   aed,
@@ -64,6 +65,7 @@ import {
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
 import {
   sendEmail,
   emailShell,
@@ -369,6 +371,9 @@ export default function Quoting() {
       requireAgentStorageScope(scope ?? "signed-out");
       if (!active) return;
       const draft = blankForm(company, docs.map(d => d.number), quoteFmt);
+      draft.number = await allocateDocumentNumber("quote", docs.map(d => d.number), quoteFmt);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (!active) return;
       if (customer) Object.assign(draft, { customer_id: customer.id, customer_name: customer.company || customer.name, customer_address: customer.address, customer_trn: customer.trn, customer_email: customer.email });
       if (context) { draft.sales_person = context.deal.owner || ""; draft.items[0].product = context.deal.title; }
       setSourceDeal(context?.deal.id ?? null); setForm(draft); setParams({}, { replace: true });
@@ -378,11 +383,14 @@ export default function Quoting() {
 
   const newQuote = async () => {
     if (!company) return;
-    setSourceDeal(null);
-    const f = blankForm(company, docs.map((d) => d.number), quoteFmt);
-    // The section's preset wins over the profile-wide default template.
-    f.template = await startingTemplate("quote", company.default_template, f.template);
-    setForm(f);
+    const scope = agentStorageScope();
+    try {
+      const f = blankForm(company, docs.map((d) => d.number), quoteFmt);
+      f.number = await allocateDocumentNumber("quote", docs.map(d => d.number), quoteFmt);
+      f.template = await startingTemplate("quote", company.default_template, f.template);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setSourceDeal(null); setForm(f);
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const editQuote = useCallback(async (id: number) => {
@@ -456,14 +464,16 @@ export default function Quoting() {
   const duplicateQuote = async (id?: number) => {
     setSourceDeal(null);
     try {
+      const scope = agentStorageScope();
       const newBase = {
-        number: pickQuoteNumber(docs.map((x) => x.number), quoteFmt),
+        number: await allocateDocumentNumber("quote", docs.map((x) => x.number), quoteFmt),
         status: "draft" as const,
         quote_date: today(),
         valid_until: addDays(30),
       };
       if (id) {
         const d = await quotes.getDoc(id);
+        requireAgentStorageScope(scope ?? "signed-out");
         setForm({
           ...d,
           ...newBase,
@@ -486,6 +496,7 @@ export default function Quoting() {
           unit_price_formula: d.unit_price_formula || null,
         });
       } else if (form) {
+        requireAgentStorageScope(scope ?? "signed-out");
         setForm({
           ...form,
           ...newBase,
@@ -632,12 +643,12 @@ export default function Quoting() {
 
   const shareQuote = async (kind: ShareKind, d: QuotationSummary) => {
     const cust = findCustomer(d.customer_name);
-    let url = `${location.origin}${location.pathname}#/quoting`;
+    let url: string;
     try {
-      const token = await quotes.publicLink(d.id);
-      url = `${location.origin}${location.pathname}#/portal/${token}`;
-    } catch {
-      /* fall back to the app link */
+      url = await quotationPublicLink(d.id);
+    } catch (error) {
+      toast.error(errMsg(error));
+      return;
     }
     const text = `Hi ${d.customer_name || "there"},\n\nQuote ${d.number} for ${money(
       d.total || 0,
@@ -827,10 +838,13 @@ export default function Quoting() {
       setForm({
         ...form,
         customColumns: form.customColumns.filter((c) => c.key !== key),
+        unit_price_formula: form.unit_price_formula?.a === key ? null : form.unit_price_formula,
         items: form.items.map((it) => {
           const c = { ...it.custom };
           delete c[key];
-          return { ...it, custom: c };
+          return { ...it, custom: c, ...(it.itemFormula?.a === key ? {
+            itemFormula: null, calcMode: it.calcMode === "formula" ? "auto" as const : it.calcMode,
+          } : {}) };
         }),
       });
     };
@@ -896,8 +910,7 @@ export default function Quoting() {
         const t = totals(form);
         let portalUrl = "";
         try {
-          const token = await quotes.publicLink(savedId);
-          portalUrl = `${location.origin}${location.pathname}#/portal/${token}`;
+          portalUrl = await quotationPublicLink(savedId);
         } catch {
           /* link optional */
         }
@@ -970,8 +983,7 @@ export default function Quoting() {
         return;
       }
       try {
-        const token = await quotes.publicLink(form.id);
-        const url = `${location.origin}${location.pathname}#/portal/${token}`;
+        const url = await quotationPublicLink(form.id);
         await navigator.clipboard.writeText(url);
         toast.success("Public quotation link copied");
       } catch (e) {
@@ -2390,8 +2402,7 @@ export default function Quoting() {
             label: "Copy public link",
             run: async (sel) => {
               try {
-                const token = await quotes.publicLink(sel[0].id);
-                const url = `${location.origin}${location.pathname}#/portal/${token}`;
+                const url = await quotationPublicLink(sel[0].id);
                 await navigator.clipboard.writeText(url);
                 loadDocs();
                 toast.success("Public quotation link copied");

@@ -15,6 +15,7 @@ import {
   Lock,
   Monitor,
   Wallet,
+  Mail,
 } from "lucide-react";
 import { PageHeader } from "../../components/ui";
 import CoinMark from "../../components/CoinMark";
@@ -37,6 +38,7 @@ const BillingPanel = lazy(() => import("./BillingPanel"));
 const AiCreditsPanel = lazy(() => import("./AiCreditsPanel"));
 const BackupPanel = lazy(() => import("./BackupPanel"));
 const DataModePanel = lazy(() => import("./DataModePanel"));
+const EmailConnection = lazy(() => import("../../components/EmailConnection"));
 
 type Section =
   | "company"
@@ -54,12 +56,14 @@ type Section =
   | "datamode"
   | "devices"
   | "ai"
+  | "email"
   | "license";
 
 const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
   { id: "company", label: "Company Details", icon: Building2 },
   { id: "account", label: "Account & Profile", icon: UserCircle },
   { id: "ai", label: "AI Assistant", icon: Sparkles },
+  { id: "email", label: "Email", icon: Mail },
   { id: "credits", label: "Coin wallet", icon: Wallet },
   { id: "teams", label: "Teams", icon: UsersIcon },
   { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
@@ -149,6 +153,7 @@ export default function Settings() {
               { id: "company", el: <CompanyDetails /> },
               { id: "account", el: <AccountProfile /> },
               { id: "ai", el: <AiSettings /> },
+              { id: "email", el: <EmailConnection /> },
               { id: "credits", el: <AiCreditsPanel /> },
               { id: "teams", el: <UsersRoles /> },
               { id: "apps", el: <AppsManager /> },

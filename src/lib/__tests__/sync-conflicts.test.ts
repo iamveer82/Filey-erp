@@ -1,8 +1,10 @@
+import * as localSync from "../sync";
+import { transferPushCollection as pushCollection, transferSyncNow as syncNow } from "./cloud-transfer-fixture";
 import { beforeEach, expect, it, vi } from "vitest";
 import { localClient, journalSnapshot, replaceColl, resolveLocalSyncConflict, resolveLocalSyncConflicts, rememberSyncRevision } from "../localdb";
-import { pushCollection, listSyncConflicts, syncNow, getSyncStatus, syncStatusMessage } from "../sync";
+import { listSyncConflicts, getSyncStatus, syncStatusMessage } from "../sync";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); });
 
 it("preserves a stale local edit and records a durable conflict without an unsafe fallback", async () => {
   await replaceColl("products", [{ id: 1, name: "Original", sync_revision: 2 }]);
@@ -72,7 +74,7 @@ it("reports server validation failures without leaking details and preserves nul
   expect((await journalSnapshot()).tables.invoice_payments.changed).toEqual([2]);
   localStorage.setItem("filey_auto_sync", "on");
   rpc.mockClear();
-  expect(await syncNow(client)).toBe(false);
+  expect(await localSync.syncNow(client)).toBe(false);
   expect(rpc.mock.calls.some(([name]) => name === "sync_record")).toBe(false);
   expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
   rpc.mockResolvedValue({ data: { ok: true, revision: 2 }, error: null });

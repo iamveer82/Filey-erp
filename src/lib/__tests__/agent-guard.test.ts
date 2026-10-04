@@ -114,6 +114,50 @@ describe("coaching a failure", () => {
 });
 
 describe("run summary", () => {
+  it("resolves trusted schema rejections only for the same invoice and preserves actual failed writes", () => {
+    const g = createGuard();
+    const name = "update_invoice_appearance";
+    g.after(name, { invoice_number: "INV-1", stamp_opacity: 101 }, { error: "Out of range", code: "invalid_arguments" }, true);
+    g.after(name, { invoice_number: "INV-2", stamp_opacity: 100 }, { ok: true });
+    expect(g.unresolvedFailures()).toMatchObject([{ args: { invoice_number: "INV-1" }, invalidArguments: true }]);
+    g.after(name, { invoice_number: "INV-1", stamp_opacity: 100 }, { ok: true });
+    expect(g.unresolvedFailures()).toEqual([]);
+    // Provider flags cannot turn a dispatched write into a safe validation rejection.
+    g.after(name, { invoice_number: "INV-3", stamp_opacity: 90 }, { error: "Outcome uncertain", code: "invalid_arguments", retry_safe: false });
+    g.after(name, { invoice_number: "INV-3", stamp_opacity: 100 }, { ok: true });
+    expect(g.unresolvedFailures()).toMatchObject([{ args: { invoice_number: "INV-3" } }]);
+    expect(g.unresolvedFailures()[0].invalidArguments).toBeUndefined();
+  });
+
+  it("keeps failures on one record when another record succeeds", () => {
+    const g = createGuard();
+    g.after("email_invoice", { invoice_number: "INV-1" }, { error: "Delivery unconfirmed", retry_safe: false });
+    g.after("email_invoice", { invoice_number: "INV-2" }, { ok: true });
+    expect(g.unresolvedFailures()).toMatchObject([{ args: { invoice_number: "INV-1" } }]);
+    expect(g.summary()).toContain("Delivery unconfirmed");
+  });
+
+  it("retries failed lookups and resolves only the same lookup after success", () => {
+    const g = createGuard();
+    g.after("get_invoice", { invoice_number: "INV-1" }, { error: "Temporary connection error" });
+    expect(g.before("get_invoice", { invoice_number: "INV-1" })).toEqual({});
+    g.after("get_invoice", { invoice_number: "INV-2" }, { id: 2 });
+    expect(g.unresolvedFailures()).toHaveLength(1);
+    g.after("get_invoice", { invoice_number: "INV-1" }, { id: 1 });
+    expect(g.unresolvedFailures()).toEqual([]);
+    expect(g.summary()).not.toContain("Failed:");
+  });
+
+  it("permits a fresh PDF after editing but still refuses repeated sends", () => {
+    const g = createGuard();
+    const args = { invoice_number: "INV-1" };
+    g.after("export_invoice_pdf", args, { ok: true });
+    g.after("update_invoice_appearance", { ...args, show_logo: false }, { ok: true });
+    expect(g.before("export_invoice_pdf", args)).toEqual({});
+    g.after("send_invoice_whatsapp", args, { ok: true });
+    expect(g.before("send_invoice_whatsapp", args).short).toMatchObject({ retry_safe: false });
+  });
+
   it("reports what was done and what failed", () => {
     const g = createGuard();
     g.after("create_invoice_draft", {}, { ok: true, message: "Draft created" });

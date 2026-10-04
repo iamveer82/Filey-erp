@@ -12,6 +12,7 @@ const fixture = vi.hoisted(() => ({
   signUp: vi.fn(),
   verifyOtp: vi.fn(),
   updateUser: vi.fn(async () => ({ error: null })),
+  entitlement: vi.fn(async () => ({})),
   setSession: vi.fn(async () => ({ error: null })),
   scope: "previous-org:previous-user",
   onAuth: undefined as undefined | ((event: string, session: { user: { id: string; email: string } } | null) => void),
@@ -47,7 +48,7 @@ vi.mock("../../lib/realtime", () => ({ watchRealtimeSession: vi.fn(), stopRealti
 vi.mock("../../lib/license", () => ({
   registerCloudDevice: async () => ({ ok: true }),
   checkCloudDeviceLogout: async () => {},
-  entitlement: async () => ({}),
+  entitlement: fixture.entitlement,
   collectPurchases: async () => false,
   clearEntitlementCache: vi.fn(),
 }));
@@ -250,6 +251,103 @@ it("updates local profile scope before rendering its new company details", async
   await act(async () => { await currentAuth.createProfile("Owner", "Name", "Created"); });
   expect(screen.getByText("owner:Created:ready")).toBeTruthy();
   expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "updated-org:owner");
+});
+
+it("does not request paid entitlement to open the free local workspace", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  rememberLocalIdentity(fixture.user.email, fixture.user.id);
+  setLocalSignedIn(true);
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  expect(currentAuth.user?.id).toBe("owner");
+  expect(fixture.entitlement).not.toHaveBeenCalled();
+});
+
+it.each(["password", "otp"])("remembers the server-confirmed email after %s login", async (method) => {
+  localStorage.setItem("filey_data_mode", "local");
+  const verified = { ...fixture.user, email: "verified@example.test" };
+  const response = { data: { user: verified, session: { user: verified } }, error: null };
+  fixture.signIn.mockResolvedValue(response);
+  fixture.verifyOtp.mockResolvedValue(response);
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await act(async () => {
+    const credential = { channel: "email" as const, value: "typed-alias@example.test" };
+    if (method === "password") await currentAuth.signInWithPassword(credential, "test-password");
+    else await currentAuth.verifyOtp(credential, "123456", "login");
+  });
+  expect(localAuth.getLocalCredential()?.email).toBe(verified.email);
+  expect(currentAuth.user?.email).toBe(verified.email);
+});
+
+it("does not use a remembered identity when OTP returned no verified account", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  rememberLocalIdentity(fixture.user.email, fixture.user.id);
+  fixture.verifyOtp.mockResolvedValue({ data: { user: null, session: null }, error: null });
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await act(async () => {
+    await expect(currentAuth.verifyOtp({ channel: "email", value: fixture.user.email }, "123456", "login"))
+      .rejects.toThrow("did not confirm");
+  });
+  expect(currentAuth.user).toBeNull();
+  expect(localAuth.isLocalSignedIn()).toBe(false);
+});
+
+it("rejects an OTP response whose user and session belong to different accounts", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  fixture.verifyOtp.mockResolvedValue({
+    data: { user: fixture.user, session: { user: { id: "other", email: "other@example.test" } } }, error: null,
+  });
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await act(async () => {
+    await expect(currentAuth.verifyOtp({ channel: "email", value: fixture.user.email }, "123456", "login"))
+      .rejects.toThrow("did not confirm");
+  });
+  expect(localAuth.getLocalCredential()).toBeNull();
+  expect(currentAuth.user).toBeNull();
+});
+
+it("cannot publish or remember a password response received after sign-out", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  let finish!: (value: unknown) => void;
+  fixture.signIn.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  let response!: Promise<unknown>;
+  act(() => {
+    response = currentAuth.signInWithPassword({ channel: "email", value: fixture.user.email }, "test-password")
+      .catch(error => error);
+  });
+  await act(async () => { await currentAuth.signOut(); });
+  await act(async () => {
+    finish({ data: { user: fixture.user, session: { user: fixture.user } }, error: null });
+    expect(await response).toBeInstanceOf(Error);
+  });
+  expect(localAuth.rememberLocalCredential).not.toHaveBeenCalled();
+  expect(localAuth.getLocalCredential()).toBeNull();
+  expect(localAuth.isLocalSignedIn()).toBe(false);
+  expect(currentAuth.user).toBeNull();
+});
+
+it("cannot adopt an earlier cloud profile or reopen the local workspace after sign-out", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  rememberLocalIdentity(fixture.user.email, fixture.user.id);
+  adoptLocalProfile({ ...fixture.user, name: "Owner", company: "Original", org_id: "org" });
+  let finish!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  let response!: Promise<unknown>;
+  act(() => {
+    response = currentAuth.signInWithPassword({ channel: "email", value: fixture.user.email }, "test-password")
+      .catch(error => error);
+  });
+  await waitFor(() => expect(fixture.profileRead).toHaveBeenCalledOnce());
+  await act(async () => { await currentAuth.signOut(); });
+  await act(async () => {
+    finish({ data: { ...fixture.user, company: "Late company", org_id: "org" }, error: null });
+    expect(await response).toBeInstanceOf(Error);
+  });
+  expect(JSON.parse(localStorage.getItem("filey_local_profile")!).company).toBe("Original");
+  expect(localAuth.isLocalSignedIn()).toBe(false);
+  expect(currentAuth.user).toBeNull();
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "signed out");
 });
 
 it("uses the restored cloud user scope while its profile is pending and cannot revive it after sign-out", async () => {

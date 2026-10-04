@@ -1,141 +1,173 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowUpRight, RefreshCw } from "lucide-react";
+import { ArrowUpRight, Plus, RefreshCw } from "lucide-react";
 import CoinMark from "../../components/CoinMark";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { FileySpinner } from "../../components/FileySpinner";
 import PaymentReview from "../../components/PaymentReview";
 import AiFundingControl from "../../components/AiFundingControl";
 import {
+  AI_CREDITS_EVENT,
   buyAiCredits,
   creditHistory,
   creditMoney,
   creditCoin,
   getCreditStatus,
-  isPaidCreditModel,
-  saveCreditLimits,
+  verifyCreditCheckout,
   type CreditStatus,
 } from "../../lib/aiCredits";
 import { supabase } from "../../lib/supabase";
+import { getCacheScope } from "../../lib/api";
+import { AGENT_STORAGE_EVENT } from "../../lib/agentStorage";
 
 export default function AiCreditsPanel() {
   const [data, setData] = useState<CreditStatus | null>(null),
     [busy, setBusy] = useState("load"),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
-  const [task, setTask] = useState("1"),
-    [daily, setDaily] = useState("5");
   const [params, setParams] = useSearchParams();
   const [hasMore, setHasMore] = useState(false);
   const [accountVersion, setAccountVersion] = useState(0);
   const [customAmount, setCustomAmount] = useState("");
-  const [modelSearch, setModelSearch] = useState("");
+  const [reviewedPromotion, setReviewedPromotion] = useState<{ review: string; offer: NonNullable<CreditStatus["test_promotion"]> } | null>(null);
+  const checkoutOrder = useRef<{ id: string; review: string } | null>(null);
+  const walletRequest = useRef(0);
+  const scope = getCacheScope();
+  const walletOwner = useRef(scope?.slice(scope.lastIndexOf(":user:") + 6) ?? null);
+  const [checkoutReturn, setCheckoutReturn] = useState<{ cancelled: boolean; orderId: string } | null>(null);
   useEffect(() => {
-    const sub = supabase?.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT" || event === "SIGNED_IN") {
+    const updateOwner = (user: string | null) => {
+      if (user !== walletOwner.current) {
+        walletOwner.current = user;
+        walletRequest.current++;
         setData(null);
+        checkoutOrder.current = null;
+        setReviewedPromotion(null);
+        setCheckoutReturn(null);
+        setNotice("");
         setAccountVersion((n) => n + 1);
       }
+    };
+    const sub = supabase?.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") updateOwner(null);
+      if (event === "SIGNED_IN") updateOwner(session?.user.id ?? null);
     });
-    return () => sub?.data.subscription.unsubscribe();
+    const workspaceChanged = () => {
+      const selected = getCacheScope();
+      updateOwner(selected?.slice(selected.lastIndexOf(":user:") + 6) ?? null);
+    };
+    window.addEventListener(AGENT_STORAGE_EVENT, workspaceChanged);
+    return () => {
+      sub?.data.subscription.unsubscribe();
+      window.removeEventListener(AGENT_STORAGE_EVENT, workspaceChanged);
+    };
   }, []);
-  async function refresh() {
+  const refresh = useCallback(async (force = true) => {
+    const request = ++walletRequest.current;
     setBusy("load");
     setError("");
     try {
-      const value = await getCreditStatus(true);
+      const confirmed = checkoutReturn
+        ? await verifyCreditCheckout(checkoutReturn.orderId) : null;
+      if (request !== walletRequest.current) return;
+      const value = await getCreditStatus(force || !!checkoutReturn);
+      if (request !== walletRequest.current) return;
       setData(value);
       setHasMore(value.history.length === 30);
-      setTask(String(value.account.task_limit_micros / 1e6));
-      setDaily(String(value.account.daily_limit_micros / 1e6));
+      if (confirmed !== null) setNotice(confirmed
+        ? "Payment confirmed. Your Coin is ready to use."
+        : checkoutReturn?.cancelled
+          ? "Checkout closed. Your balance shows any confirmed Coin."
+          : "Payment is not confirmed yet. Coin appears after payment is verified. Refresh if your balance has not updated yet.");
     } catch (e) {
-      setError((e as Error).message);
+      if (request === walletRequest.current) {
+        setError((e as Error).message);
+        if (checkoutReturn)
+          setNotice("Payment is not confirmed yet. Refresh your balance to check again.");
+      }
     } finally {
-      setBusy("");
+      if (request === walletRequest.current) setBusy("");
     }
-  }
+  }, [checkoutReturn]);
   useEffect(() => {
-    let alive = true;
-    setBusy("load");
-    setError("");
-    void getCreditStatus()
-      .then((value) => {
-        if (alive) {
-          setData(value);
-          setHasMore(value.history.length === 30);
-          setTask(String(value.account.task_limit_micros / 1e6));
-          setDaily(String(value.account.daily_limit_micros / 1e6));
-        }
-      })
-      .catch((e) => {
-        if (alive) setError(e.message);
-      })
-      .finally(() => {
-        if (alive) setBusy("");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [accountVersion]);
+    const requests = walletRequest;
+    void refresh(false);
+    return () => { requests.current++; };
+  }, [accountVersion, refresh]);
   useEffect(() => {
     const state = params.get("credit_checkout");
     if (!state) return;
-    setNotice(
-      state === "cancelled"
-        ? "Checkout cancelled. No Coin was added."
-        : "Checkout finished. Coin appears after payment is verified. Refresh if your balance has not updated yet."
-    );
+    setCheckoutReturn({ cancelled: state === "cancelled", orderId: params.get("credit_order") ?? "" });
+    setNotice("Checking payment…");
     const next = new URLSearchParams(params);
     next.delete("credit_checkout");
+    next.delete("credit_order");
     setParams(next, { replace: true });
-    void refresh();
   }, [params, setParams]);
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy("limits");
-    setError("");
-    setNotice("");
-    try {
-      const account = await saveCreditLimits(Number(task), Number(daily));
-      setData((current) => (current ? { ...current, account } : current));
-      setNotice("Spending limits saved.");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy("");
-    }
-  }
+  const reviewing = params.has("pack") || params.has("amount_cents");
+  useEffect(() => {
+    if (reviewing) return; // PaymentReview owns checkout return verification.
+    let alive = true, queued = false;
+    const update = () => {
+      if (document.visibilityState === "hidden" || queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        if (alive) void refresh();
+      });
+    };
+    window.addEventListener(AI_CREDITS_EVENT, update);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      alive = false;
+      window.removeEventListener(AI_CREDITS_EVENT, update);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [reviewing, refresh]);
   async function more() {
     if (!data?.history.length) return;
+    const request = ++walletRequest.current;
     setBusy("history");
     setError("");
     try {
       const rows = await creditHistory(data.history[data.history.length - 1].id);
+      if (request !== walletRequest.current) return;
       setData((current) =>
         current ? { ...current, history: [...current.history, ...rows] } : current
       );
       setHasMore(rows.length === 30);
     } catch (e) {
-      setError((e as Error).message);
+      if (request === walletRequest.current) setError((e as Error).message);
     } finally {
-      setBusy("");
+      if (request === walletRequest.current) setBusy("");
     }
   }
 
   const customLimits = data?.custom_topup;
-  const modelCount = data?.models.filter(isPaidCreditModel).length ?? 0;
-  const modelQuery = modelSearch.trim().toLowerCase();
-  const rateModels =
-    data?.models.filter(
-      (model) =>
-        isPaidCreditModel(model) &&
-        `${model.name} ${model.id}`.toLowerCase().includes(modelQuery)
-    ) ?? [];
   const validCustomCents = (cents: number) =>
     !!customLimits &&
     Number.isSafeInteger(cents) &&
     cents >= customLimits.min_cents &&
     cents <= customLimits.max_cents;
+  const quickPack = [...(data?.packs ?? [])].sort((a, b) => a.cents - b.cents)[0];
+  const quickTopup = customLimits && validCustomCents(customLimits.min_cents) &&
+    (!quickPack || customLimits.min_cents < quickPack.cents)
+    ? { cents: customLimits.min_cents, choice: customLimits.min_cents }
+    : quickPack ? { cents: quickPack.cents, choice: quickPack.id } : null;
+  function reviewTopup(choice: string | number) {
+    if (!data?.topups_enabled || busy) return;
+    checkoutOrder.current = null;
+    setReviewedPromotion(null);
+    setCheckoutReturn(null);
+    setNotice("");
+    const next = new URLSearchParams(params);
+    next.delete("pack");
+    next.delete("amount_cents");
+    next.set(typeof choice === "number" ? "amount_cents" : "pack", String(choice));
+    setParams(next);
+  }
   const amountParts = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(customAmount.trim());
   const customCents = amountParts
     ? Number(amountParts[1]) * 100 + Number((amountParts[2] ?? "").padEnd(2, "0"))
@@ -154,10 +186,23 @@ export default function AiCreditsPanel() {
   const customHelp = customLimits
     ? `Enter ${creditMoney(customLimits.min_cents * 10000)}–${creditMoney(customLimits.max_cents * 10000)} USD, with up to two decimal places. 1 Coin = $1.`
     : "";
+  const promotionFor = (cents: number) => {
+    const offer = data?.test_promotion;
+    return offer && cents === 500 && offer.cents === cents &&
+      offer.discount_cents === cents + (data?.topup_fee_cents ?? 0) &&
+      offer.id.length === 36 && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(offer.id) &&
+      Date.parse(offer.expires_at) > Date.now() ? offer : null;
+  };
   if (selectedTopup && data?.topups_enabled) {
+    const review = `${accountVersion}:${selectedTopup.choice}`;
+    // Keep the reviewed free offer after checkout claims it. A subsequent wallet
+    // refresh must neither replace it with a paid checkout nor reset verification.
+    const promotion = reviewedPromotion?.review === review
+      ? reviewedPromotion.offer : promotionFor(selectedTopup.cents);
+    const discountCents = promotion?.discount_cents ?? 0;
     return (
       <PaymentReview
-        key={String(selectedTopup.choice)}
+        key={review}
         title="Add Coin"
         artwork={<CoinMark size={64} />}
         lines={[
@@ -169,27 +214,40 @@ export default function AiCreditsPanel() {
             label: "Filey service fee",
             value: creditMoney((data.topup_fee_cents ?? 0) * 10000),
           },
+          ...(promotion ? [{ label: "100% test discount", value: `-${creditMoney(discountCents * 10000)}` }] : []),
         ]}
-        total={`${creditMoney((selectedTopup.cents + (data.topup_fee_cents ?? 0)) * 10000)} USD`}
-        terms="1 Coin = $1 of AI usage. One-time top-up. No subscription or auto-recharge. Coin does not expire and is excluded from the subscription refund program."
+        total={`${creditMoney((selectedTopup.cents + (data.topup_fee_cents ?? 0) - discountCents) * 10000)} USD`}
+        terms={`${promotion ? "Your one-use test discount covers the 5 Coin top-up and service fee. " : ""}1 Coin = $1 of AI usage. One-time top-up. No subscription or auto-recharge. Coin does not expire. Top-ups are final and non-refundable, except where required by law. Coin cannot be withdrawn or exchanged for cash.`}
         onBack={() => {
+          checkoutOrder.current = null;
+          setReviewedPromotion(null);
           const next = new URLSearchParams(params);
           next.delete("pack");
           next.delete("amount_cents");
           setParams(next);
         }}
-        onPay={() => buyAiCredits(selectedTopup.choice)}
+        onPay={async () => {
+          const request = walletRequest.current;
+          if (promotion) setReviewedPromotion({ review, offer: promotion });
+          const checkout = promotion
+            ? await buyAiCredits(selectedTopup.choice, promotion.id)
+            : await buyAiCredits(selectedTopup.choice);
+          if (request !== walletRequest.current)
+            throw new Error("Your account changed. Reopen your Coin wallet.");
+          checkoutOrder.current = { id: checkout.order_id, review };
+          return checkout.mode;
+        }}
         onVerify={async () => {
+          const order = checkoutOrder.current;
+          if (!order || order.review !== review) return false;
+          const request = ++walletRequest.current;
+          const confirmed = await verifyCreditCheckout(order.id);
+          if (checkoutOrder.current !== order || request !== walletRequest.current) return false;
           const value = await getCreditStatus(true);
-          const added = value.history.some(
-            (entry) =>
-              entry.kind === "topup" && !data.history.some((old) => old.id === entry.id)
-          );
-          if (added) {
-            setData(value);
-            return true;
-          }
-          return false;
+          if (checkoutOrder.current !== order || request !== walletRequest.current) return false;
+          setData(value);
+          setHasMore(value.history.length === 30);
+          return confirmed;
         }}
       />
     );
@@ -277,7 +335,19 @@ export default function AiCreditsPanel() {
                   Coin = $1
                 </p>
               </div>
-              <AiFundingControl />
+              <div className="flex flex-wrap items-center gap-2">
+                <AiFundingControl />
+                {quickTopup && (
+                  <button
+                    type="button"
+                    className="btn-primary min-h-11"
+                    disabled={!!busy || !data.topups_enabled}
+                    onClick={() => reviewTopup(quickTopup.choice)}
+                  >
+                    <Plus size={15} /> Quick recharge · {creditCoin(quickTopup.cents * 10000)}
+                  </button>
+                )}
+              </div>
             </div>
             {data.account.reserved_micros > 0 && (
               <p className="text-xs text-muted-foreground">
@@ -290,7 +360,7 @@ export default function AiCreditsPanel() {
               data.account.available_micros < 1000000 && (
                 <p role="status" className="text-[13px] text-warning">
                   {data.account.available_micros === 0
-                    ? "Add Coin to start using paid Filey AI models."
+                    ? "Insufficient credit. Add Coin to continue."
                     : "Your balance is below 1 Coin ($1). Top up before your next large task."}
                 </p>
               )}
@@ -301,12 +371,14 @@ export default function AiCreditsPanel() {
             )}
             {data.account.balance_micros < 0 && (
               <p role="alert" className="text-sm text-danger">
-                Refund adjustment: {creditCoin(data.account.balance_micros, true)}.
+                Payment adjustment: {creditCoin(data.account.balance_micros, true)}.
                 Top-ups first cover this amount.
               </p>
             )}
-            {data.notice && (
-              <p className="text-sm text-muted-foreground">{data.notice}</p>
+            {!data.configured && (
+              <p className="text-sm text-muted-foreground">
+                Filey AI is not available yet. Your own API key still works.
+              </p>
             )}
             {!data.topups_enabled && (
               <p role="status" className="text-sm text-muted-foreground">
@@ -315,6 +387,11 @@ export default function AiCreditsPanel() {
               </p>
             )}
             <h3 className="text-sm font-semibold">Add Coin</h3>
+            {promotionFor(500) && (
+              <p role="status" className="text-[13px] text-muted-foreground">
+                One-use test offer: add 5 Coin for $0.00. The service fee is included in your 100% discount.
+              </p>
+            )}
             <p className="text-[13px] text-muted-foreground">
               Choose an amount, review the total, then continue to secure payment.
             </p>
@@ -325,12 +402,7 @@ export default function AiCreditsPanel() {
                   className="btn-primary"
                   key={pack.id}
                   disabled={!!busy || !data.topups_enabled}
-                  onClick={() => {
-                    const next = new URLSearchParams(params);
-                    next.delete("amount_cents");
-                    next.set("pack", pack.id);
-                    setParams(next);
-                  }}
+                  onClick={() => reviewTopup(pack.id)}
                 >
                   {busy === pack.id ? (
                     <FileySpinner size={15} />
@@ -338,7 +410,7 @@ export default function AiCreditsPanel() {
                     <ArrowUpRight size={15} />
                   )}
                   {creditCoin(pack.cents * 10000)} · Pay{" "}
-                  {creditMoney((pack.cents + (data.topup_fee_cents ?? 0)) * 10000)}
+                  {creditMoney((pack.cents + (data.topup_fee_cents ?? 0) - (promotionFor(pack.cents)?.discount_cents ?? 0)) * 10000)}
                 </button>
               ))}
             </div>
@@ -348,10 +420,7 @@ export default function AiCreditsPanel() {
                 onSubmit={(event) => {
                   event.preventDefault();
                   if (!customValid || busy || !data.topups_enabled) return;
-                  const next = new URLSearchParams(params);
-                  next.delete("pack");
-                  next.set("amount_cents", String(customCents));
-                  setParams(next);
+                  reviewTopup(customCents);
                 }}
               >
                 <label
@@ -402,7 +471,8 @@ export default function AiCreditsPanel() {
               Each top-up includes a {creditMoney((data.topup_fee_cents ?? 0) * 10000)}{" "}
               Filey service fee, separate from your spendable Coin. No auto-recharge or
               subscription required. Taxes, if applicable, appear at checkout. Paid Coin
-              does not expire and is excluded from the subscription refund program. A
+              does not expire. Top-ups are final and non-refundable, except where
+              required by law. Coin cannot be withdrawn or exchanged for cash. A
               stopped request can still use Coin for work already performed.
             </p>
             <Link
@@ -413,141 +483,26 @@ export default function AiCreditsPanel() {
             </Link>
           </SettingsSection>
           <SettingsSection
-            title="Spending limits"
-            description="These limits apply to paid chat and videos. Each video is a separate task. Daily limits reset at midnight UTC."
-          >
-            <form onSubmit={save} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block text-[13px]">
-                  Per task · USD
-                  <input
-                    className="input mt-2"
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    max="50"
-                    step="0.01"
-                    required
-                    value={task}
-                    onChange={(e) => setTask(e.target.value)}
-                  />
-                </label>
-                <label className="block text-[13px]">
-                  Per day · USD
-                  <input
-                    className="input mt-2"
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    max="100"
-                    step="0.01"
-                    required
-                    value={daily}
-                    onChange={(e) => setDaily(e.target.value)}
-                  />
-                </label>
-              </div>
-              <button className="btn-secondary" disabled={!!busy}>
-                {busy === "limits" && <FileySpinner size={15} />}Save limits
-              </button>
-            </form>
-          </SettingsSection>
-          <SettingsSection
-            title="AI rates"
-            description="Chat uses the provider's usage cost, with no Filey usage markup. Choose a model and review its rates before starting."
+            title="Coin usage"
+            description="Filey AI usage is deducted from your available Coin balance."
             stacked
           >
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-              <div>
-                <p className="text-sm font-medium">Brand videos · Seedance 2.0</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  0.25 Coin ($0.25) per second · 720p · 4–15 seconds · Charged on
-                  completion
-                </p>
-              </div>
-              <Link className="btn-ghost" to="/agent?video=1">
-                {data.video_configured ? "Create a video" : "Video setup & history"}
-                <ArrowUpRight size={14} />
-              </Link>
-            </div>
             <div>
-              <p className="text-sm font-medium">Choose your model</p>
+              <p className="text-sm font-medium">Filey AI</p>
               <p className="mt-1 text-[13px] text-muted-foreground">
-                Choose a model in Filey AI. Model usage is deducted from
-                your Coin balance. Spending limits apply before requests run.
+                Use Filey AI with Coin. You can also use your own API key or a local
+                connection without a Filey usage fee.
               </p>
             </div>
-            {!!modelCount && (
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <input
-                  type="search"
-                  aria-label="Search model rates"
-                  placeholder="Search models"
-                  className="input min-h-11 w-full sm:max-w-sm"
-                  value={modelSearch}
-                  onChange={(event) => setModelSearch(event.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  {rateModels.length} of {modelCount} models · 1 Coin = $1
-                </p>
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Rates vary by provider, context and time. You pay actual usage; these rates
-              are spending estimates.
-            </p>
-            {rateModels.length ? (
-              <div className="max-h-96 overflow-auto">
-                <table className="w-full text-left" aria-label="AI model rates">
-                  <thead>
-                    <tr>
-                      <th className="th">Model</th>
-                      <th className="th whitespace-nowrap">Input / 1M tokens</th>
-                      <th className="th whitespace-nowrap">Output / 1M tokens</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rateModels.map((model) => (
-                      <tr key={model.id}>
-                        <td className="td">
-                          <span className="font-medium">{model.name}</span>
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            {model.vision ? "Text & images" : "Text"}
-                          </span>
-                          {!!model.image && model.image > 0 && (
-                            <span className="mt-1 block text-xs text-muted-foreground">
-                              Up to {creditCoin(Math.ceil(model.image * 1e6), true)} /
-                              input image
-                            </span>
-                          )}
-                        </td>
-                        <td className="td whitespace-nowrap">
-                          Up to {creditCoin(model.input * 1e12, true)}
-                        </td>
-                        <td className="td whitespace-nowrap">
-                          Up to {creditCoin(model.output * 1e12, true)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {modelQuery
-                  ? "No matching models. Try a provider or model name."
-                  : "Model rates will appear when they are available."}
-              </p>
-            )}
             <p className="text-xs text-muted-foreground">
               1 Coin = $1. Coin covers chat, vision input and agent reasoning. Separate
-              image-generation, voice and external service fees use their own provider
-              connections.
+              image, video and voice generation use your own API connections and are
+              billed by those providers.
             </p>
           </SettingsSection>
           <SettingsSection
             title="Activity"
-            description="Your top-ups, model usage and refunds. Small usage charges are shown to six decimal places in Coin."
+            description="Your top-ups, Filey AI usage and balance adjustments. Small usage charges are shown to six decimal places in Coin."
             stacked
           >
             {data.history.length ? (
@@ -567,16 +522,21 @@ export default function AiCreditsPanel() {
                           <td className="td">
                             <span className="block font-medium">
                               {row.kind === "usage"
-                                ? "AI usage"
+                                ? "Filey AI usage"
                                 : row.kind === "refund"
-                                  ? "Refund"
+                                  ? "Adjustment"
                                   : "Top-up"}
                             </span>
                             <span
                               className="block max-w-64 truncate text-xs text-muted-foreground"
-                              title={row.description}
                             >
-                              {row.description}
+                              {row.kind === "usage"
+                                ? "Coin used by Filey AI."
+                                : row.kind === "refund"
+                                  ? row.amount_micros < 0
+                                    ? "Coin removed after a payment reversal."
+                                    : "Unused Coin restored to your wallet."
+                                  : row.description}
                             </span>
                           </td>
                           <td className="td whitespace-nowrap">

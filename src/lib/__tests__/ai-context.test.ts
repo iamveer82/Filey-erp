@@ -3,6 +3,9 @@ import { buildAiContext, clearAiContextCache } from "../aiContext";
 import { setDataMode } from "../dataMode";
 import { billing, crm, erp, quotes, setCacheOrg } from "../api";
 import { setDisplayCurrency } from "../format";
+import { loadModuleAccess } from "../moduleAccess";
+
+vi.mock("../moduleAccess", async original => ({ ...await original<typeof import("../moduleAccess")>(), loadModuleAccess: vi.fn(async () => ({ admin: true, modules: null })) }));
 
 beforeEach(async () => {
   localStorage.clear();
@@ -10,6 +13,7 @@ beforeEach(async () => {
   setDataMode("local");
   setCacheOrg("brief-test", "fixture-user");
   setDisplayCurrency("AED");
+  vi.mocked(loadModuleAccess).mockReset().mockResolvedValue({ admin: true, modules: null });
 });
 afterEach(() => { vi.restoreAllMocks(); clearAiContextCache(); setCacheOrg(null); setDisplayCurrency("AED"); });
 
@@ -116,6 +120,7 @@ describe("the business brief", () => {
     let finish!: (value: Awaited<ReturnType<typeof crm.customers>>) => void;
     customers.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const pending = buildAiContext();
+    await vi.waitFor(() => expect(customers).toHaveBeenCalled());
     setCacheOrg("next-org", "next-user");
     const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
     finish([{ name: "Private old customer" }] as Awaited<ReturnType<typeof crm.customers>>);
@@ -133,6 +138,55 @@ describe("the business brief", () => {
     expect(await buildAiContext()).toContain("unavailable until the user signs in");
     expect(customers).not.toHaveBeenCalled();
     expect(company).not.toHaveBeenCalled();
+  });
+
+  it("rechecks permissions before serving a memo and drops cached records after same-account access is revoked", async () => {
+    const { customers } = mockBriefReads();
+    customers.mockResolvedValue([{ name: "Previously accessible customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    expect(await buildAiContext()).toContain("Previously accessible customer");
+    vi.mocked(loadModuleAccess).mockResolvedValue({ admin: false, modules: ["inventory"] });
+    const restricted = await buildAiContext();
+    expect(restricted).not.toContain("Previously accessible customer");
+    expect(restricted).toContain("customers (workspace access restricted)");
+    expect(restricted).toContain("invoices (workspace access restricted)");
+    expect(customers).toHaveBeenCalledTimes(1);
+    expect(erp.products).toHaveBeenCalledTimes(2);
+    expect(loadModuleAccess).toHaveBeenCalledTimes(4);
+    expect(await buildAiContext()).toBe(restricted);
+    expect(loadModuleAccess).toHaveBeenCalledTimes(6);
+    expect(erp.products).toHaveBeenCalledTimes(3);
+  });
+
+  it("refreshes staff briefs through RLS even when allowed modules stay unchanged", async () => {
+    const { customers } = mockBriefReads();
+    vi.mocked(loadModuleAccess).mockResolvedValue({ admin: false, modules: null });
+    customers.mockResolvedValueOnce([{ name: "Previously shared customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    expect(await buildAiContext()).toContain("Previously shared customer");
+    customers.mockResolvedValue([]);
+    expect(await buildAiContext()).not.toContain("Previously shared customer");
+    expect(customers).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards an in-flight brief when same-account permissions change before it can reach the model", async () => {
+    const { customers } = mockBriefReads();
+    let finish!: (value: Awaited<ReturnType<typeof crm.customers>>) => void;
+    customers.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = buildAiContext();
+    await vi.waitFor(() => expect(customers).toHaveBeenCalled());
+    vi.mocked(loadModuleAccess).mockResolvedValue({ admin: false, modules: ["inventory"] });
+    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    finish([{ name: "Private pre-revocation customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    await rejection;
+    expect(await buildAiContext()).not.toContain("Private pre-revocation customer");
+  });
+
+  it("refuses a cached brief when current workspace permissions cannot be verified", async () => {
+    const { customers } = mockBriefReads();
+    customers.mockResolvedValue([{ name: "Private cached customer" }] as Awaited<ReturnType<typeof crm.customers>>);
+    await buildAiContext();
+    vi.mocked(loadModuleAccess).mockRejectedValueOnce(new Error("Workspace permissions could not be verified."));
+    await expect(buildAiContext()).rejects.toThrow("permissions could not be verified");
+    expect(customers).toHaveBeenCalledTimes(1);
   });
 
   it("keeps invoice currencies separate and converts AED product prices instead of relabelling them", async () => {

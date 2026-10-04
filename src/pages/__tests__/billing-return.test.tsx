@@ -44,17 +44,39 @@ it("shows unlimited local usage from the first render without fetching a monthly
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
   const usage = within(screen.getByRole("region", { name: "Usage" }));
   expect(usage.getByText("Unlimited local invoices")).toBeInTheDocument();
+  expect(usage.getByText(/Use all core local modules/)).toHaveTextContent("unbranded local PDFs");
   expect(usage.queryByRole("progressbar")).not.toBeInTheDocument();
   await waitFor(() => expect(getSubscription).toHaveBeenCalled());
   expect(usage.getByText("Unlimited local invoices")).toBeInTheDocument();
   expect(mode.count).not.toHaveBeenCalled();
 });
 
-it("advertises free unlimited local invoices on the startup screen", () => {
+it("explains verified setup, free unlimited local documents and separate cloud usage on startup", () => {
   render(<SetupNotice />);
   const localChoice = screen.getByRole("button", { name: /Use on this device/ });
-  expect(localChoice).toHaveTextContent("Unlimited local invoices and edits");
+  expect(localChoice).toHaveTextContent("Create and verify your free account online once");
+  expect(localChoice).toHaveTextContent("The full local ERP and CRM is free");
+  expect(localChoice).toHaveTextContent("Unlimited local documents, invoices and edits");
+  expect(localChoice).toHaveTextContent("Local PDFs without Filey branding");
+  expect(localChoice).toHaveTextContent("Optional paid cloud upgrades");
   expect(localChoice).not.toHaveTextContent(/5 invoices|5 new invoices|five invoices/i);
+  expect(screen.getByRole("button", { name: /Use Filey Cloud/ })).toHaveTextContent("5 new cloud invoices a month");
+});
+
+it("offers paid cloud benefits without selling exclusive offline use", async () => {
+  mode.local = true;
+  window.history.replaceState(null, "", "/#/settings?section=billing");
+  render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Get Ultra - $100" })).toBeEnabled());
+  const plans = within(screen.getByRole("region", { name: "Available plans" }));
+  expect(plans.getByText("$0")).toBeInTheDocument();
+  expect(plans.getByText("$5")).toBeInTheDocument();
+  expect(plans.getByText("$100")).toBeInTheDocument();
+  expect(plans.getByText("Local PDFs without Filey branding")).toBeInTheDocument();
+  expect(plans.getByText("“Made with Filey” on free cloud documents")).toBeInTheDocument();
+  expect(plans.getByText("Lifetime cloud benefits for your Filey account, paid once.")).toBeInTheDocument();
+  expect(plans.getByText("2 paid-license activation slots; free local installs are not limited")).toBeInTheDocument();
+  expect(plans.queryByText(/Works fully offline|Own it outright/)).toBeNull();
 });
 
 it("shows account-owned Ultra without a local activation token or a second purchase button", async () => {

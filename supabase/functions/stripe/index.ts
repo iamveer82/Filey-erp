@@ -27,14 +27,19 @@ import { adminWorkspace } from "../_shared/admin-workspace.ts";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { stripeCheckoutArgs } from "../_shared/stripe-checkout.ts";
 import { dispatchStripeAction } from "../_shared/stripe-actions.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
 import {
   applyStripeSubscription,
   stripeSubscriptionCheckoutAllowed,
 } from "../_shared/stripe-subscriptions.ts";
 
-const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
-  apiVersion: "2024-06-20",
-});
+// Licence-only legacy installs must work after Stripe sales are retired.
+// Constructing Stripe with an absent key throws before any request can run.
+function stripeClient() {
+  const key = Deno.env.get("STRIPE_SECRET_KEY")?.trim();
+  if (!key) throw new Error("Stripe billing is unavailable.");
+  return new Stripe(key, { apiVersion: "2024-06-20" });
+}
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
@@ -74,8 +79,9 @@ async function userOrg(supa: ReturnType<typeof admin>, userId: string) {
   return org ?? null;
 }
 
-Deno.serve(async (req) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "Use POST." }, 405);
 
   const sig = req.headers.get("stripe-signature");
   if (sig) return handleWebhook(req, sig);
@@ -84,8 +90,17 @@ Deno.serve(async (req) => {
   // ends up in Stripe success/cancel redirect URLs (open-redirect phishing on
   // the public pay_invoice path otherwise).
   const origin = SITE_URL || "https://app.gofiley.com";
-  const payload = await req.json().catch(() => ({}) as Record<string, unknown>);
-  const action = String(payload.action ?? "");
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(await readBillingBody(req, 16_384));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    payload = parsed as Record<string, unknown>;
+  } catch (error) {
+    return json({ error: error instanceof BillingRequestError ? error.message : "Invalid JSON billing request." }, error instanceof BillingRequestError ? 413 : 400);
+  }
+  const action = payload.action;
+  if (typeof action !== "string" || !["pay_invoice", "license_activate", "license_deactivate", "checkout", "checkout_lite", "portal"].includes(action))
+    return json({ error: "Unknown billing action." }, 400);
 
   try {
     return await dispatchStripeAction(
@@ -93,7 +108,7 @@ Deno.serve(async (req) => {
       async () => {
         // AUTHENTICATED actions below (the account owner).
         const supa = admin();
-        const jwt = (req.headers.get("Authorization") ?? "").replace("Bearer ", "");
+        const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
         const { data: u } = await supa.auth.getUser(jwt);
         const user = u?.user;
         if (!user) return json({ error: "Unauthorized" }, 401);
@@ -132,6 +147,10 @@ Deno.serve(async (req) => {
           );
 
         const plan = payload.plan;
+        if (action === "checkout" && (typeof plan !== "string" || !Object.hasOwn(PRICES, plan) || !PRICES[plan]))
+          return json({ error: "Choose an available plan." }, 400);
+        if (action === "checkout_lite" && !PRICE_LITE)
+          return json({ error: "Lite price not configured" }, 400);
         if (action === "checkout" && !stripeSubscriptionCheckoutAllowed(org))
           return json(
             {
@@ -140,6 +159,8 @@ Deno.serve(async (req) => {
             },
             409
           );
+
+        const stripe = stripeClient();
 
         // ensure a Stripe customer for the org
         let customerId = org.stripe_customer_id as string | null;
@@ -168,7 +189,6 @@ Deno.serve(async (req) => {
         // One-time desktop license (Lite). invoice_creation makes Stripe email a
         // proper invoice for the one-off payment (subscriptions do this natively).
         if (action === "checkout_lite") {
-          if (!PRICE_LITE) return json({ error: "Lite price not configured" }, 400);
           const session = await stripe.checkout.sessions.create({
             mode: "payment",
             customer: customerId,
@@ -183,8 +203,6 @@ Deno.serve(async (req) => {
 
         if (action === "checkout") {
           const price = PRICES[plan as string];
-          if (!price)
-            return json({ error: `Unknown or unconfigured plan: ${plan}` }, 400);
           const session = await stripe.checkout.sessions.create({
             mode: "subscription",
             customer: customerId,
@@ -201,21 +219,28 @@ Deno.serve(async (req) => {
       },
       CORS
     );
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  } catch {
+    return json({ error: "Billing is temporarily unavailable. Please try again later." }, 503);
   }
-});
+}
+if (import.meta.main) Deno.serve(handleRequest);
 
 async function handleWebhook(req: Request, sig: string): Promise<Response> {
-  const raw = await req.text();
+  let raw: string;
+  try {
+    raw = await readBillingBody(req, 1_000_000);
+  } catch (error) {
+    return json({ error: error instanceof BillingRequestError ? error.message : "Invalid billing request." }, error instanceof BillingRequestError ? 413 : 400);
+  }
+  let stripe: Stripe;
+  try { stripe = stripeClient(); } catch {
+    return json({ error: "Billing is temporarily unavailable. Please try again later." }, 503);
+  }
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(raw, sig, WEBHOOK_SECRET);
-  } catch (e) {
-    return json(
-      { error: `Webhook signature failed: ${e instanceof Error ? e.message : e}` },
-      400
-    );
+  } catch {
+    return json({ error: "Invalid webhook signature." }, 401);
   }
   const supa = admin();
 
@@ -255,8 +280,8 @@ async function handleWebhook(req: Request, sig: string): Promise<Response> {
         break;
       }
     }
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  } catch {
+    return json({ error: "Billing delivery could not be completed. Delivery will be retried." }, 503);
   }
   return json({ received: true });
 }

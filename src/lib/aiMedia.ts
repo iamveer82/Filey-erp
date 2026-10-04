@@ -22,7 +22,7 @@ export interface MediaConfig {
   imageProvider: "openai" | "fal";
   imageModel: string;
   videoModel: string;
-  videoSource: "byok" | "credits";
+  videoSource: "byok";
 }
 const DEFAULTS: MediaConfig = {
   imageProvider: "openai",
@@ -36,6 +36,8 @@ export function getMediaConfig(): MediaConfig {
     return {
       ...DEFAULTS,
       ...JSON.parse(readAgentStorage("filey.ai.media.config") ?? "{}"),
+      // Retired Coin video settings must never select a funded provider.
+      videoSource: "byok",
     };
   } catch {
     return { ...DEFAULTS };
@@ -50,7 +52,7 @@ export async function saveMediaConfig(
   requireAgentStorageScope(scope);
   if (key !== undefined) await saveCredential(mediaCredential(kind), key.trim() || null);
   requireAgentStorageScope(scope);
-  writeAgentStorage("filey.ai.media.config", JSON.stringify(config), scope);
+  writeAgentStorage("filey.ai.media.config", JSON.stringify({ ...config, videoSource: "byok" }), scope);
   window.dispatchEvent(new Event(MEDIA_EVENT));
 }
 export interface MediaJob {
@@ -209,6 +211,7 @@ export function safeMediaUrl(value: string) {
   return url.href;
 }
 async function fal(job: MediaJob, url: string, method = "GET", body?: unknown) {
+  const scope = requireAgentStorageScope();
   const owner = getCacheScope();
   if (!owner) throw new Error("Sign in before using media models.");
   const key = await readCredential(mediaCredential(job.kind), owner);
@@ -216,6 +219,8 @@ async function fal(job: MediaJob, url: string, method = "GET", body?: unknown) {
     throw new Error(
       `Add your ${job.kind} API key again in AI settings to check this request.`
     );
+  // Never send a queued request with credentials from a changed workspace.
+  requireAgentStorageScope(scope);
   const response = await aiFetch(
     url,
     {
@@ -227,7 +232,9 @@ async function fal(job: MediaJob, url: string, method = "GET", body?: unknown) {
     },
     { retries: 0 }
   );
-  return await response.json();
+  const result = await response.json();
+  requireAgentStorageScope(scope);
+  return result;
 }
 // Cross-tab lock + durable pre-submit state prevent repeated clicks charging twice.
 export function startMedia(id: string): Promise<MediaJob> {

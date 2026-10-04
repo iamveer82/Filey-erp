@@ -14,10 +14,21 @@
 
 import { supabase, invokeFn } from "./supabase";
 import { requireAgentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
+import { getCacheOrg } from "./api";
+import { isLocalMode } from "./dataMode";
 
 export type KeySource = "platform" | "own" | "none";
 
 export class IntegrationError extends Error {}
+
+// The cache scope is the identity whose screen/action was reviewed. Session
+// lookup can see a newer login before the workspace listener updates the cache.
+function assertSessionOwner(scope: string, userId: string | undefined): void {
+  const marker = scope.lastIndexOf(":user:");
+  const owner = marker >= 0 ? scope.slice(marker + 6) : "";
+  if (owner && owner !== userId)
+    throw new IntegrationError("Your account changed. Reopen Integrations.");
+}
 
 /** Call the platform proxy. Throws IntegrationError with the server's own
  *  wording — quota messages in particular are written for the user to read. */
@@ -27,29 +38,32 @@ export async function platformCall<T>(
   payload: Record<string, unknown> = {},
   expectedScope?: string
 ): Promise<T> {
-  const assertCurrent = () => { if (expectedScope) requireAgentStorageScope(expectedScope); };
+  const scope = requireAgentStorageScope(expectedScope);
+  const org = getCacheOrg();
+  const assertCurrent = () => { requireAgentStorageScope(scope); };
   assertCurrent();
   if (!supabase)
     throw new IntegrationError("Cloud isn't configured in this build.");
-  const { data: sess } = await supabase.auth.getSession();
+  const { data: sess, error: authError } = await supabase.auth.getSession();
   assertCurrent();
-  if (!sess.session)
+  if (authError || !sess.session?.access_token?.trim())
     throw new IntegrationError(
       "Sign in to use the built-in integrations, or add your own key on the Integrations page."
     );
-  const controller = expectedScope ? new AbortController() : undefined;
+  assertSessionOwner(scope, sess.session.user.id);
+  const controller = new AbortController();
   const abortStale = () => {
     try { assertCurrent(); }
-    catch { controller?.abort(); }
+    catch { controller.abort(); }
   };
   const scopeEvents = [AGENT_STORAGE_EVENT, "filey:workspace-changed", "storage"];
-  if (controller) for (const event of scopeEvents) window.addEventListener(event, abortStale);
+  for (const event of scopeEvents) window.addEventListener(event, abortStale);
   const request = {
-    body: { provider, action, payload },
+    body: { provider, action, payload, ...(org ? { expected_org_id: org } : {}) },
     // Bind this invocation to the session checked above, including if the SDK
     // would otherwise resolve a different active session before its fetch.
-    ...(expectedScope ? { headers: { Authorization: `Bearer ${sess.session.access_token}` } } : {}),
-    ...(controller ? { signal: controller.signal } : {}),
+    headers: { Authorization: `Bearer ${sess.session.access_token}` },
+    signal: controller.signal,
   };
   const readOnly = (provider === "composio"
     ? ["status", "list", "toolkits", "tools"]
@@ -63,7 +77,7 @@ export async function platformCall<T>(
     assertCurrent();
     throw error;
   } finally {
-    if (controller) for (const event of scopeEvents) window.removeEventListener(event, abortStale);
+    for (const event of scopeEvents) window.removeEventListener(event, abortStale);
   }
   assertCurrent();
   const { data, error } = response;
@@ -110,22 +124,50 @@ export async function platformAvailable(provider: "composio" | "zernio"): Promis
 
 export type KeyProvider = "composio" | "zernio";
 
-async function uid(): Promise<string | null> {
-  if (!supabase) return null;
-  const { data } = await supabase.auth.getSession();
-  return data.session?.user?.id ?? null;
+function requireCloudKeyMode(): void {
+  if (isLocalMode()) throw new IntegrationError(
+    "Local mode keeps your settings on this device. Use a personal key in the installed app, or switch to cloud mode before saving a cloud integration key."
+  );
+}
+
+async function keyOwner() {
+  requireCloudKeyMode();
+  const scope = requireAgentStorageScope();
+  if (!supabase) throw new IntegrationError("Cloud isn't configured in this build.");
+  const { data, error } = await supabase.auth.getSession();
+  requireCloudKeyMode();
+  requireAgentStorageScope(scope);
+  if (error || !data.session?.access_token?.trim()) throw new IntegrationError("Sign in to manage your own key.");
+  assertSessionOwner(scope, data.session.user.id);
+  return { scope, userId: data.session.user.id, token: data.session.access_token };
+}
+
+async function assertKeyOwner(owner: Awaited<ReturnType<typeof keyOwner>>): Promise<void> {
+  requireCloudKeyMode();
+  requireAgentStorageScope(owner.scope);
+  const { data, error } = await supabase!.auth.getSession();
+  requireCloudKeyMode();
+  requireAgentStorageScope(owner.scope);
+  if (error || data.session?.user.id !== owner.userId)
+    throw new IntegrationError("Your account changed. Reopen Integrations.");
 }
 
 /** True when this signed-in user has stored their own key for `provider`.
  *  Reads the non-secret columns — the key itself is not selectable. */
 export async function hasCloudKey(provider: KeyProvider): Promise<boolean> {
-  if (!supabase) return false;
+  if (isLocalMode() || !supabase) return false;
+  const owner = await keyOwner();
+  requireCloudKeyMode();
+  requireAgentStorageScope(owner.scope);
   const { data, error } = await supabase
     .from("integration_keys")
     .select("provider")
+    .eq("user_id", owner.userId)
     .eq("provider", provider)
+    .setHeader("Authorization", `Bearer ${owner.token}`)
     .maybeSingle();
-  if (error) return false;
+  await assertKeyOwner(owner);
+  if (error) throw new IntegrationError("Could not verify your saved integration key. Try again.");
   return !!data;
 }
 
@@ -133,23 +175,37 @@ export async function saveCloudKey(
   provider: KeyProvider,
   apiKey: string
 ): Promise<void> {
+  requireCloudKeyMode();
   if (!supabase) throw new IntegrationError("Cloud isn't configured in this build.");
-  const user_id = await uid();
-  if (!user_id) throw new IntegrationError("Sign in to save your own key.");
+  const key = apiKey.trim();
+  if (!key || key.length > 4096 || [...key].some(char => char.charCodeAt(0) < 33 || char.charCodeAt(0) > 126))
+    throw new IntegrationError("Enter a valid API key without spaces or line breaks.");
+  const owner = await keyOwner();
+  requireCloudKeyMode();
+  requireAgentStorageScope(owner.scope);
   const { error } = await supabase
     .from("integration_keys")
     .upsert(
-      { user_id, provider, api_key: apiKey.trim(), updated_at: new Date().toISOString() },
+      { user_id: owner.userId, provider, api_key: key, updated_at: new Date().toISOString() },
       { onConflict: "user_id,provider" }
-    );
-  if (error) throw new IntegrationError(error.message);
+    )
+    .setHeader("Authorization", `Bearer ${owner.token}`);
+  await assertKeyOwner(owner);
+  if (error) throw new IntegrationError("Could not save your integration key. Try again.");
 }
 
 export async function clearCloudKey(provider: KeyProvider): Promise<void> {
+  requireCloudKeyMode();
   if (!supabase) return;
+  const owner = await keyOwner();
+  requireCloudKeyMode();
+  requireAgentStorageScope(owner.scope);
   const { error } = await supabase
     .from("integration_keys")
     .delete()
-    .eq("provider", provider);
-  if (error) throw new IntegrationError(error.message);
+    .eq("user_id", owner.userId)
+    .eq("provider", provider)
+    .setHeader("Authorization", `Bearer ${owner.token}`);
+  await assertKeyOwner(owner);
+  if (error) throw new IntegrationError("Could not remove your integration key. Try again.");
 }

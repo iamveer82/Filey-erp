@@ -10,7 +10,7 @@ describe("parseStatementCsv", () => {
     ].join("\n");
     const lines = parseStatementCsv(csv);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toEqual({ date: "2026-01-15", description: "Payment from ACME", amount: 1000 });
+    expect(lines[0]).toEqual({ date: "2026-01-15", description: "Payment from ACME", amount: 1000, direction: "in" });
     expect(lines[1].amount).toBe(-25);
   });
 
@@ -28,6 +28,39 @@ describe("parseStatementCsv", () => {
   it("skips rows without a parseable date", () => {
     const csv = ["Date,Amount", "Opening balance,,", "2026-03-01,100"].join("\n");
     expect(parseStatementCsv(csv)).toHaveLength(1);
+  });
+
+  it("preserves multiline quoted descriptions and escaped quotes in one transaction", () => {
+    const escaped = 'Date,Description,Amount\r\n2026-03-01,"Payment for ""Acme""\r\nsecond line",125';
+    expect(parseStatementCsv(escaped)).toEqual([{ date: "2026-03-01", description: 'Payment for "Acme"\nsecond line', amount: 125 }]);
+    for (const row of ['2026-03-01,"unfinished,125', '2026-03-01,"closed"extra,125'])
+      expect(() => parseStatementCsv("Date,Description,Amount\n" + row)).toThrow(/CSV/);
+  });
+
+  it("rejects impossible statement dates instead of reconciling a rolled-over day", () => {
+    const csv = 'Date,Amount\n2026-02-31,100\n31/04/2026,200\n2026-13-01,300\n29/02/2024,400';
+    expect(parseStatementCsv(csv)).toEqual([{ date: "2024-02-29", description: "", amount: 400 }]);
+  });
+
+  it("does not shorten malformed numbers or scientific notation into a different amount", () => {
+    expect(parseStatementCsv('Date,Amount\n2026-03-01,1.2.3\n2026-03-01,1e3\n2026-03-01,AED 123.45')).toEqual([
+      { date: "2026-03-01", description: "", amount: 123.45 },
+    ]);
+  });
+
+  it("uses explicit debit/credit columns even when the export also has an unsigned amount", () => {
+    const [line] = parseStatementCsv('Date,Description,Amount,Debit,Credit\n2026-03-01,Rent,500,500,');
+    expect(line.amount).toBe(-500);
+    expect(line.direction).toBe("out");
+    const result = matchStatement([line], [{ id: 3, description: "Receipt", date: "2026-03-01", amount: 500, direction: "in" }]);
+    expect(result.matched).toHaveLength(0);
+  });
+
+  it("leaves an explicit credit unmatched when only an equal payment exists", () => {
+    const lines = parseStatementCsv('Date,Debit,Credit\n2026-03-01,,500');
+    const result = matchStatement(lines, [{ id: 3, description: "Payment", date: "2026-03-01", amount: 500, direction: "out" }]);
+    expect(result.matched).toHaveLength(0);
+    expect(result.unmatchedLines).toHaveLength(1);
   });
 });
 
@@ -64,6 +97,14 @@ describe("matchStatement", () => {
     const r = matchStatement(lines, txns);
     expect(r.matched).toHaveLength(1); // only one ledger txn of 1000
     expect(r.unmatchedLines).toHaveLength(1);
+  });
+
+  it("does not reconcile invalid book dates or nonfinite amounts", () => {
+    const result = matchStatement([{ date: "2026-03-03", description: "x", amount: 100 }], [
+      { id: 4, description: "Rolled date", date: "2026-02-31", amount: 100 },
+      { id: 5, description: "Corrupt amount", date: "2026-03-03", amount: NaN },
+    ]);
+    expect(result.matched).toHaveLength(0);
   });
 });
 

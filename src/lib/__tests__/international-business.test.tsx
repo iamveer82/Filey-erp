@@ -1,10 +1,11 @@
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   billing,
   quotes,
   pos,
   receipts,
+  setCacheOrg,
   type CompanyProfile,
   type InvoiceDocInput,
 } from "../api";
@@ -22,7 +23,9 @@ import { buildInvoiceXml, validateEInvoice } from "../einvoiceXml";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg("international-test-org", "international-test-user");
 });
+afterEach(() => setCacheOrg(null));
 const company = (country_code: string, rate: number): CompanyProfile => ({
   name: "International Co",
   country_code,

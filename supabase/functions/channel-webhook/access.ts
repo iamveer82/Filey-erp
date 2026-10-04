@@ -32,6 +32,26 @@ export async function channelCredentials(
     owner_ref: String(data.owner_ref ?? ""), configured: "true" };
 }
 
+/** Always read the current pairing/revocation state: a cached owner pin can
+ * authorize an old chat after another isolate disconnects or re-pairs it. */
+export async function channelActorAllowed(
+  // deno-lint-ignore no-explicit-any
+  client: any,
+  ownerId: string,
+  msg: InboundMsg,
+  io: AccessIO,
+): Promise<boolean> {
+  try {
+    const config = await channelCredentials(client, ownerId, msg.channel);
+    return await ownerRefusal(msg, {
+      ...io, dbOwner: config.owner_ref ?? "", disabled: !!config.disabled,
+      configured: !!config.configured,
+    }) === null;
+  } catch {
+    return false;
+  }
+}
+
 /** Owner pinning, fail-closed per channel (mirrors TELEGRAM_OWNER_CHAT_ID):
  *  WhatsApp compares digit-normalized phone numbers; Slack compares the
  *  sender's user id. Returns the refusal/guidance text to send back, or null

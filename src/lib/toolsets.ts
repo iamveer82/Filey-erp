@@ -28,6 +28,7 @@ export const CORE_TOOLS = [
   "find_products",
   "find_suppliers",
   "list_invoices",
+  "get_invoice",
   "financial_summary",
   // the documents people ask for by name
   "create_invoice_draft",
@@ -52,7 +53,7 @@ export const CORE_TOOLS = [
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   video: {
-    about: "Create brand/product videos from a brief or attached photo with the configured media provider. Own-key mode uses fal; the user approves generation in the chat card. Track persistent jobs",
+    about: "Create brand/product videos from a brief or attached photo with the configured media provider. Video generation uses the user's own fal key; the user approves generation in the chat card. Track persistent jobs",
     tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],
   },
   service: {

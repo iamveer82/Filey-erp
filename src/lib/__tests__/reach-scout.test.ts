@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const aiFetch = vi.fn();
 vi.mock("../ai", () => ({ aiFetch }));
+const identity = vi.hoisted(() => ({ scope: "org:user:alice" as string | null }));
+vi.mock("../api", () => ({ getCacheScope: () => identity.scope }));
 
-const { readUrl, searchWeb, parseHits, asUntrustedContext, setReachConfig } =
+const { readUrl, searchWeb, parseHits, asUntrustedContext, setReachConfig, getReachConfig } =
   await import("../reach");
 const { extractCompanyDetails, scoreLead } = await import("../scout");
 
@@ -11,6 +13,8 @@ const textRes = (body: string) => ({ text: async () => body }) as Response;
 
 beforeEach(() => {
   localStorage.clear();
+  identity.scope = "org:user:alice";
+  window.dispatchEvent(new Event("filey:agent-storage"));
   aiFetch.mockReset().mockResolvedValue(textRes("Title: Example\n\nHello world"));
   setReachConfig({ enabled: true, apiKey: "" });
 });
@@ -18,6 +22,21 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("readUrl guards", () => {
+  it("keeps Jina credentials isolated and out of persisted config, without adopting legacy keys", async () => {
+    localStorage.setItem("filey_reach_config", JSON.stringify({ apiKey: "private legacy key", enabled: true }));
+    setReachConfig({ apiKey: "Alice private key", enabled: false });
+    expect(localStorage.getItem("filey_reach_config:org%3Auser%3Aalice")).toBe('{"enabled":false}');
+    expect(getReachConfig()).toEqual({ enabled: false, apiKey: "Alice private key" });
+    identity.scope = "org:user:bob";
+    window.dispatchEvent(new Event("filey:agent-storage"));
+    expect(getReachConfig()).toEqual({ enabled: true, apiKey: "" });
+    await readUrl("https://example.com");
+    expect(aiFetch.mock.calls[0][1].headers.authorization).toBeUndefined();
+    await expect(searchWeb("suppliers")).rejects.toThrow(/Jina API key/);
+    expect(localStorage.getItem("filey_reach_config")).toContain("private legacy key");
+    identity.scope = null;
+    expect(() => setReachConfig({ apiKey: "Anonymous key" })).toThrow(/Sign in/);
+  });
   it("refuses anything that is not a public http(s) page", async () => {
     for (const bad of [
       "file:///etc/passwd",
@@ -104,6 +123,7 @@ describe("Jina search access and request lifecycle", () => {
     const controller = new AbortController();
     const pending = searchWeb("suppliers", { signal: controller.signal });
     const check = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(aiFetch).toHaveBeenCalledTimes(1));
     controller.abort();
     await check;
     expect(aiFetch.mock.calls[0][1].signal.aborted).toBe(true);

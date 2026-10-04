@@ -11,19 +11,32 @@ import { createRoot } from "react-dom/client";
 import type { ReactNode } from "react";
 import { elementToPdfBytes } from "./pdfTools";
 
-/** Resolve once every <img> under `el` has loaded (or failed). */
+/** Include images whose private Storage URLs resolve after the initial render. */
 async function imagesSettled(el: HTMLElement): Promise<void> {
-  const imgs = Array.from(el.querySelectorAll("img"));
-  await Promise.all(
-    imgs.map((img) =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>((res) => {
-            img.addEventListener("load", () => res(), { once: true });
-            img.addEventListener("error", () => res(), { once: true });
-          })
-    )
-  );
+  await new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error) => {
+      observer.disconnect();
+      clearTimeout(timeout);
+      el.removeEventListener("load", check, true);
+      el.removeEventListener("error", check, true);
+      if (error) reject(error); else resolve();
+    };
+    const check = () => {
+      const failed = el.querySelector<HTMLImageElement>('[data-company-asset-status="error"]');
+      if (failed) { finish(new Error(`The ${failed.alt || "company image"} could not be loaded. Reopen the document before exporting.`)); return; }
+      if (el.querySelector('[data-company-asset-status="loading"]')) return;
+      const images = Array.from(el.querySelectorAll("img"));
+      if (images.some((image) => !image.complete)) return;
+      if (images.some((image) => image.naturalWidth === 0)) { finish(new Error("A document image could not be loaded. Reopen the document before exporting.")); return; }
+      finish();
+    };
+    const observer = new MutationObserver(check);
+    const timeout = setTimeout(() => finish(new Error("Document images are still loading. Wait for the preview, then export again.")), 10000);
+    observer.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "data-company-asset-status"] });
+    el.addEventListener("load", check, true);
+    el.addEventListener("error", check, true);
+    check();
+  });
 }
 
 const nextFrame = () =>
@@ -47,6 +60,7 @@ export async function reactToPdfBytes(node: ReactNode, name: string) {
     await nextFrame();
     await nextFrame();
     if (document.fonts?.ready) await document.fonts.ready;
+    await nextFrame();
     await imagesSettled(host);
     return await elementToPdfBytes(host, name);
   } finally {

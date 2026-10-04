@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sb } from "./supabase";
 import { useAuth } from "./auth";
 import { getCacheScope } from "./api";
-import { assertWorkspaceCurrent, effectiveDataMode, isLocalMode } from "./dataMode";
+import { effectiveDataMode, isLocalMode } from "./dataMode";
 import { notifyDataChanged, useLiveSync } from "./realtime";
 import { errMsg } from "./format";
+import { fileOperation } from "./fileWorkspace";
 
 export interface SavedAsset {
   id: string;
@@ -27,23 +27,8 @@ export function legacyAssets(): SavedAsset[] {
 }
 
 const scope = () => `${effectiveDataMode()}:${getCacheScope()}`;
-function checkScope(expected: string) {
-  assertWorkspaceCurrent();
-  if (scope() !== expected) throw new Error("Your workspace changed. Please try again.");
-}
-async function context() {
-  const expected = scope();
-  const client = sb();
-  const { data, error } = await client.auth.getSession();
-  checkScope(expected);
-  if (error) throw error;
-  const uid = data.session?.user.id;
-  if (!uid) throw new Error("Sign in to access your image library.");
-  return { client, uid, expected };
-}
-
 export async function listAssets(): Promise<SavedAsset[]> {
-  const { client, uid, expected } = await context();
+  const operation = await fileOperation(), { client, uid } = operation;
   const items: SavedAsset[] = [];
   for (let offset = 0; ; offset += 100) {
     let query = client.from("user_assets")
@@ -52,8 +37,8 @@ export async function listAssets(): Promise<SavedAsset[]> {
     // Local collections belong to the single device owner. Pulled rows retain
     // cloud owner IDs; the local shim's session intentionally uses local-user.
     if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 99);
-    const { data, error } = await query;
-    checkScope(expected);
+    const { data, error } = await operation.pin(query);
+    await operation.assertSession();
     if (error) throw error;
     items.push(...(data ?? []).map(r => ({
       id: r.id, name: r.name, ratio: r.ratio, dataUrl: r.data_url,
@@ -67,24 +52,25 @@ export async function listAssets(): Promise<SavedAsset[]> {
 export async function saveAsset(name: string, dataUrl: string, ratio: number): Promise<SavedAsset> {
   if (!dataUrl.startsWith("data:image/") || !Number.isFinite(ratio) || ratio <= 0)
     throw new Error("Choose a valid image before saving.");
-  const { client, uid, expected } = await context();
+  const operation = await fileOperation(), { client, uid } = operation;
   const item = { id: crypto.randomUUID(), name: name.trim() || "Untitled", dataUrl, ratio, createdAt: Date.now() };
-  const { error } = await client.from("user_assets").insert({
+  const { error } = await operation.pin(client.from("user_assets").insert({
     id: item.id, owner: uid, name: item.name, ratio, data_url: dataUrl,
     created_at: new Date(item.createdAt).toISOString(),
-  });
-  checkScope(expected);
+    ...(!operation.local && operation.org !== "default" ? { org_id: operation.org } : {}),
+  }));
+  await operation.assertSession();
   if (error) throw error;
   notifyDataChanged(["user_assets"]);
   return item;
 }
 
 export async function deleteAsset(id: string): Promise<void> {
-  const { client, uid, expected } = await context();
+  const operation = await fileOperation(), { client, uid } = operation;
   let query = client.from("user_assets").delete().eq("id", id);
   if (!isLocalMode()) query = query.eq("owner", uid);
-  const { error } = await query;
-  checkScope(expected);
+  const { error } = await operation.pin(query);
+  await operation.assertSession();
   if (error) throw error;
   notifyDataChanged(["user_assets"]);
 }

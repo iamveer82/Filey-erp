@@ -3,22 +3,23 @@
 // Deploy:
 //   supabase functions deploy run-tool
 // (requires the tool_jobs table + tool-inputs/tool-outputs buckets from
-//  supabase/tool-jobs.sql and the existing schema.)
+//  supabase/tool-jobs.sql, 2026-10-04-tool-job-authority.sql and existing schema.)
 //
 // Auth: requires a valid Supabase JWT (verified by default). The function
-// acts AS the caller (forwards their Authorization header), so RLS scopes
-// every read/write to that user's own job and storage folder.
+// reads jobs/files AS the caller (forwards their Authorization header), so
+// RLS scopes inputs/outputs to the user's own storage folder. Server-only
+// status writes bind the verified user, pending edge job and captured claim.
 //
 // Body: { jobId: string }. The job row must already exist with the input
 // uploaded to the tool-inputs bucket. Heavy tools (engine='worker') are
 // NOT handled here — a self-hosted worker processes those.
 
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { ownedToolPath, toolFilename } from "../_shared/tool-path.ts";
 import { PDFDocument, degrees } from "https://esm.sh/pdf-lib@1.17.1";
-import { rateLimit, logAction } from "../_shared/rateLimit.ts";
+import { logAction } from "../_shared/rateLimit.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -32,15 +33,16 @@ interface OutFile {
   bytes: Uint8Array;
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  let client: SupabaseClient | null = null;
-  let jobId: string | null = null;
+  let adminClient: SupabaseClient | null = null;
+  let claimed: { id: string; user_id: string; updated_at: string } | null = null;
 
   try {
     const auth = req.headers.get("Authorization") ?? "";
-    client = createClient(
+    const client = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_ANON_KEY")!,
       { global: { headers: { Authorization: auth } } }
@@ -51,19 +53,25 @@ serve(async (req) => {
     if (!user) return json({ error: "Unauthorized" }, 401);
     if (!mfaAllowed(user, auth.replace(/^Bearer\s+/i, ""))) return json(MFA_REQUIRED, 403);
 
-    // RATE LIMIT: max 15 tool runs per hour per user
-    const adminClient = createClient(
+    let body: unknown;
+    try { body = JSON.parse(await readBillingBody(req, 4096)); }
+    catch (error) {
+      if (error instanceof BillingRequestError) return json({ error: "Tool request is too large" }, 413);
+      return json({ error: "Invalid tool request" }, 400);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof (body as {jobId?: unknown}).jobId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((body as {jobId: string}).jobId)) {
+      return json({ error: "A valid jobId is required" }, 400);
+    }
+    const jobId = (body as {jobId: string}).jobId;
+
+    // The INSERT trigger admits 15 jobs/hour for both engines. Execution does
+    // not reserve a second slot for the same already-admitted job.
+    adminClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-    const allowed = await rateLimit(adminClient, user.id, "run_tool", 15, 3600);
-    if (!allowed) return json({ error: "Rate limit exceeded — try again later." }, 429);
-
-    const body = await req.json().catch(() => ({}) as { jobId?: string });
-    jobId = body?.jobId ?? null;
-    if (!jobId) return json({ error: "jobId is required" }, 400);
-    await logAction(adminClient, user.id, "run_tool", { jobId });
-
     // RLS ensures the job belongs to the caller.
     const { data: job, error: jErr } = await client
       .from("tool_jobs")
@@ -78,25 +86,44 @@ serve(async (req) => {
     if (!ownedToolPath(job.input_path, user.id)) {
       return json({ error: "Forbidden: input path mismatch" }, 403);
     }
+    if (job.engine !== "edge" || job.tool !== "rotate") return json({ error: "This job requires its configured worker" }, 400);
+    const rotation = Number(job.params?.degrees ?? 90);
+    if (!Number.isFinite(rotation) || !Number.isInteger(rotation / 90)) return json({ error: "Rotation must be a multiple of 90 degrees" }, 400);
 
-    await client
+    // One request claims the immutable specification. Clients cannot rewrite
+    // status/inputs mid-run; a duplicate/retry cannot run the same job twice.
+    const { data: activeJob, error: claimError } = await adminClient
       .from("tool_jobs")
       .update({ status: "processing", updated_at: new Date().toISOString() })
-      .eq("id", jobId);
+      .eq("id", jobId)
+      .eq("user_id", user.id)
+      .eq("engine", "edge")
+      .eq("status", "pending")
+      .eq("updated_at", job.updated_at)
+      .select("*")
+      .maybeSingle();
+    if (claimError) throw claimError;
+    if (!activeJob) return json({ error: "This job is already running or has finished. Check its result before retrying." }, 409);
+    claimed = activeJob;
+    await logAction(adminClient, user.id, "run_tool", { jobId });
+    // The row returned by the conditional claim is authoritative, even when
+    // a trusted server edited the pending specification after the first read.
+    if (!ownedToolPath(activeJob.input_path, user.id) || activeJob.tool !== "rotate") throw new Error("Invalid claimed tool job");
 
     // Download the uploaded input.
-    const dl = await client.storage.from("tool-inputs").download(job.input_path);
+    const dl = await client.storage.from("tool-inputs").download(activeJob.input_path);
     if (dl.error || !dl.data) throw new Error("Input file not found in storage.");
+    if (dl.data.size > 52_428_800) throw new Error("Tool input is too large");
     const input = new Uint8Array(await dl.data.arrayBuffer());
 
-    const outputs = await runTool(job.tool, input, job.params ?? {}, job.file_name);
+    const outputs = await runTool(activeJob.tool, input, activeJob.params ?? {}, activeJob.file_name);
 
     // Store outputs in the per-user tool-outputs folder.
     const paths: string[] = [];
     let total = 0;
     for (let i = 0; i < outputs.length; i++) {
       const o = outputs[i];
-      const path = `${user.id}/${job.id}/${i}_${toolFilename(o.name)}`;
+      const path = `${user.id}/${activeJob.id}/${activeJob.updated_at.replace(/[^0-9]/g, "")}/${i}_${toolFilename(o.name)}`;
       if (!ownedToolPath(path, user.id)) throw new Error("Invalid tool output path.");
       const up = await client.storage
         .from("tool-outputs")
@@ -112,7 +139,7 @@ serve(async (req) => {
       total += o.bytes.byteLength;
     }
 
-    const { error: completionError } = await client
+    const { data: completed, error: completionError } = await adminClient
       .from("tool_jobs")
       .update({
         status: "done",
@@ -120,18 +147,27 @@ serve(async (req) => {
         size_bytes: total,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", jobId);
+      .eq("id", jobId)
+      .eq("user_id", user.id)
+      .eq("status", "processing")
+      .eq("updated_at", activeJob.updated_at)
+      .select("id")
+      .maybeSingle();
     if (completionError) throw completionError;
+    if (!completed) return json({ error: "This tool run was replaced or cancelled. Refresh its status." }, 409);
 
     return json({ ok: true, outputPaths: paths });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (client && jobId) {
+    const msg = "The tool could not finish. Check the job status before trying again.";
+    if (adminClient && claimed) {
       try {
-        await client
+        await adminClient
           .from("tool_jobs")
           .update({ status: "error", error: msg, updated_at: new Date().toISOString() })
-          .eq("id", jobId);
+          .eq("id", claimed.id)
+          .eq("user_id", claimed.user_id)
+          .eq("status", "processing")
+          .eq("updated_at", claimed.updated_at);
       } catch {
         /* best effort */
       }
@@ -154,7 +190,7 @@ async function runTool(
       const deg = Number(params.degrees ?? 90);
       const pdf = await PDFDocument.load(bytes);
       for (const page of pdf.getPages()) {
-        const next = (page.getRotation().angle + deg) % 360;
+        const next = ((page.getRotation().angle + deg) % 360 + 360) % 360;
         page.setRotation(degrees(next));
       }
       const out = await pdf.save();

@@ -21,3 +21,12 @@ it("rejects malformed launch arguments instead of silently choosing another pair
   for (const args of [["--state-dir"], ["--state-dir", ""], ["--state-dir", "relative"], ["--owner-number"], ["--unexpected"], ["unexpected"]])
     expect(() => bridgeLaunch(args, {})).toThrow();
 });
+
+it("accepts an explicit installed media resource directory and an isolated smoke check", () => {
+  const mediaDir = path.resolve("Filey.app", "Contents", "Resources", "wa-media");
+  expect(bridgeLaunch(["--check-media", "--media-dir", mediaDir], {})).toEqual({
+    stateDir: path.join(process.cwd(), "auth"), ownerNumber: "", checkMedia: true,
+  });
+  for (const args of [["--media-dir"], ["--media-dir", ""], ["--media-dir", "relative"]])
+    expect(() => bridgeLaunch(args, {})).toThrow();
+});

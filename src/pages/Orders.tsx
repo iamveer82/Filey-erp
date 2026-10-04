@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -37,6 +37,8 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { sendShareEmail } from "../lib/email";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 
 const FLOW = ["draft", "confirmed", "delivered", "cancelled"];
 
@@ -151,9 +153,11 @@ export default function Orders() {
   /** Duplicate via the real create flow — line items reserve stock again,
    *  just like building the same order a second time. */
   const doDuplicate = async (o: Order) => {
-    const orderNumber = nextOrderNumber(orders);
     try {
+      const scope = agentStorageScope();
+      const orderNumber = await allocateDocumentNumber("sales_order", orders.map(row => row.order_number), orderFormats);
       const detail = await erp.getOrder(o.id);
+      requireAgentStorageScope(scope ?? "signed-out");
       const lines = (detail.items ?? [])
         .filter((it) => it.product_id != null)
         .map((it) => ({
@@ -550,6 +554,9 @@ function EditOrderModal({
 }) {
   const { toast } = useUI();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [loadedId, setLoadedId] = useState<number | null>(null);
+  const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [customer, setCustomer] = useState("");
@@ -558,9 +565,15 @@ function EditOrderModal({
   const [lines, setLines] = useState<EditLine[]>([]);
   const [pickOpen, setPickOpen] = useState(false);
   const [q, setQ] = useState("");
+  const productsRef = useRef(products);
+  productsRef.current = products;
 
   useEffect(() => {
-    if (orderId == null) return;
+    setLoadedId(null);
+    setCustomer(""); setStatus("draft"); setManualTotal(0); setLines([]);
+    setLoadError("");
+    if (orderId == null) { setLoading(false); return; }
+    let active = true;
     setLoading(true);
     setErr(null);
     setPickOpen(false);
@@ -568,12 +581,13 @@ function EditOrderModal({
     erp
       .getOrder(orderId)
       .then((o) => {
+        if (!active) return;
         setCustomer(o.customer_name ?? "");
         setStatus(o.status ?? "draft");
         setManualTotal(o.total ?? 0);
         setLines(
           (o.items ?? []).map((it) => {
-            const p = products.find((x) => x.id === it.product_id);
+            const p = productsRef.current.find((x) => x.id === it.product_id);
             return {
               product_id: it.product_id ?? null,
               name: p?.name ?? (it.product_id ? `#${it.product_id}` : "Item"),
@@ -583,10 +597,12 @@ function EditOrderModal({
             };
           })
         );
+        setLoadedId(orderId);
       })
-      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [orderId, products]);
+      .catch((e) => { if (active) setLoadError(errMsg(e)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [orderId, retry]);
 
   const linesTotal = lines.reduce((s, l) => s + l.quantity * l.unit_price, 0);
   const effectiveTotal = lines.length ? linesTotal : manualTotal;
@@ -616,7 +632,7 @@ function EditOrderModal({
 
   const save = async () => {
     if (busy) return;
-    if (orderId == null) return;
+    if (orderId == null || loading || loadedId !== orderId) return;
     if (!customer.trim()) {
       setErr("Customer name is required.");
       return;
@@ -658,6 +674,11 @@ function EditOrderModal({
       <fieldset disabled={busy} className="min-w-0" aria-busy={busy}>
       {loading ? (
         <p className="py-10 text-center text-sm text-brand-400">Loading…</p>
+      ) : loadError ? (
+        <div className="space-y-3">
+          <ErrorBanner message={`Could not load this order: ${loadError}`} />
+          <button type="button" className="btn-secondary" onClick={() => setRetry(value => value + 1)}>Try again</button>
+        </div>
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -840,7 +861,7 @@ function EditOrderModal({
             </button>
             <button
               className="btn-primary"
-              disabled={busy || !customer.trim()}
+              disabled={busy || loadedId !== orderId || !customer.trim()}
               onClick={save}
             >
               {busy ? "Saving…" : "Save changes"}
@@ -858,7 +879,6 @@ function BuildOrderModal({
   onClose,
   products,
   onSaved,
-  suggestedNumber,
 }: {
   open: boolean;
   onClose: () => void;
@@ -887,7 +907,7 @@ function BuildOrderModal({
     setBusy(true);
     try {
       await erp.createOrderWithItems(
-        suggestedNumber,
+        await allocateDocumentNumber("sales_order", [], orderFormats),
         customer.trim(),
         lines.map((l) => ({
           product_id: l.id,
@@ -1008,7 +1028,7 @@ function OrderModal({
             setSaving(true);
             try {
               await erp.createOrder(
-                f.order_number.trim() || suggestedNumber,
+                f.order_number.trim() || await allocateDocumentNumber("sales_order", [], orderFormats),
                 f.customer_name,
                 f.total
               );

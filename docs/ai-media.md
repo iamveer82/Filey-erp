@@ -3,7 +3,11 @@
 Open Filey AI → Images and videos, or ask the agent for an image/video. Both
 paths create a review card in the conversation. **Generate** sends one request
 to the selected provider with the customer's own API key. Preparing a draft
-does not send a generation request. These requests never deduct Filey credits.
+does not send a generation request. These requests never deduct Coin. New video
+generation only uses the customer's key; there is no Filey-funded video option.
+
+These changes are local and unpublished. Web, Edge Function and desktop
+publishing remain on hold.
 
 Settings → AI has independent image and video connections:
 
@@ -11,8 +15,9 @@ Settings → AI has independent image and video connections:
   and FLUX Dev. Custom image APIs must support that protocol; a chat-only model
   does not become an image model by entering its ID.
 - Videos: fal Wan 2.2, silent 720p, approximately 5 or 10 seconds. Optional JPG,
-  PNG or WebP reference photo up to 2 MB. Provider pricing applies to BYOK;
-  Filey's managed-video $0.25/second price does not apply to the user's key.
+  PNG or WebP reference photo under 2 MB. Save your own fal key, prepare a video
+  draft, then click Generate on its card. fal bills your provider account at its
+  current rates; a valid key and sufficient provider balance are required.
 
 Keys are scoped to the account/workspace. Desktop uses the existing OS vault;
 the web/mobile app keeps keys only in memory until reload/sign-out. Separate
@@ -34,23 +39,26 @@ Interrupted/ambiguous submissions direct the user to provider history and cannot
 be automatically resubmitted. Cancellation acceptance is not reported as proof
 that a running provider request stopped or was refunded.
 
-The old shared Higgsfield pair was rejected and was never saved during setup.
-Local source/environment checks found no stored copy. After sign-in was restored
-on September 21, the hosted Supabase secret list also confirmed no Higgsfield
-credentials were present. Existing managed-credit video jobs remain readable; BYOK is the
-default for new agent-created videos. No shared replacement key is embedded.
+**Previous Filey video requests** contains legacy managed-job history only.
+Existing jobs can be viewed, refreshed or canceled where supported, and old
+drafts can be discarded. New managed quotes and submissions are disabled in the
+app and server, including stale-client requests. Saved credit-video settings
+now resolve to the customer's own-key path. Existing provider callbacks can
+still reconcile previously submitted jobs and their existing holds. See
+[Videos in Filey AI](ai-video.md) for the legacy compatibility boundary.
 
 Verification uses mocked provider calls and an isolated browser fixture; no
 customer records or paid generation are needed. Real provider generation still
-requires the customer's valid, funded key. A normal web release and desktop
-rebuild are required to distribute these changes.
+requires the customer's valid, funded key. Web/Edge publishing and a desktop
+rebuild are required to distribute these changes once the hold is lifted.
 
 Provider references:
+
 - [fal queue lifecycle](https://fal.ai/docs/documentation/model-apis/inference/queue)
 - [FLUX Schnell API](https://fal.ai/models/fal-ai/flux/schnell/api)
 - [Wan 2.2 API](https://fal.ai/models/fal-ai/wan/v2.2-a14b/text-to-video/api)
 
-Validation for this change: 1,647 tests passed in the full app suite, plus the
+Historical BYOK validation: 1,647 tests passed in the full app suite, plus the
 new desktop binary-download regression test; TypeScript, production web build,
 changed-file lint and native cargo check passed. Isolated browser checks covered
 390px/1280px settings, image generation with synthetic provider responses,

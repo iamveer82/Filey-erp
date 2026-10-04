@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { crm } from "../api";
+import { crm, setCacheOrg } from "../api";
 import { TOOLS } from "../aiTools";
 
 // "Confidently wrong" in an ERP looks like a tidy invoice raised for a customer
@@ -9,7 +9,9 @@ import { TOOLS } from "../aiTools";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg("party-agent-test-org", "party-agent-test-user");
 });
+afterEach(() => setCacheOrg(null));
 
 const tool = (name: string) => {
   const t = TOOLS.find((x) => x.name === name);

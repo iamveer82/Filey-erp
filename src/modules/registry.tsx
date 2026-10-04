@@ -20,6 +20,7 @@ const WorkspaceBrowser = page(() => import("../pages/WorkspaceBrowser"));
 const Inventory = page(() => import("../pages/Inventory"));
 const Orders = page(() => import("../pages/Orders"));
 const Invoicing = page(() => import("../pages/Invoicing"));
+const PackagingList = page(() => import("../pages/PackagingList"));
 const PurchaseInvoicing = page(async () => {
   const m = await import("../pages/Invoicing");
   return { default: () => <m.default mode="purchase" /> };
@@ -42,6 +43,7 @@ const Marketing = page(() => import("../pages/Marketing"));
 const DeliveryChallan = page(() => import("../pages/DeliveryChallan"));
 const PaymentReceipt = page(() => import("../pages/PaymentReceipt"));
 const DeclarationLetter = page(() => import("../pages/DeclarationLetter"));
+const Letter = page(() => import("../pages/Letter"));
 const ChequeRegister = page(() => import("../pages/ChequeRegister"));
 const BankAccounts = page(() => import("../pages/BankAccounts"));
 const EmailTemplates = page(() => import("../pages/EmailTemplates"));
@@ -135,6 +137,15 @@ export const MODULES: AppModule[] = [
     icon: "invoicing",
     to: "/invoicing",
     Component: Invoicing,
+  },
+  {
+    id: "packaging-list",
+    label: "Packaging List",
+    short: "Packing",
+    desc: "Independent packing lists, shipment weights and optional invoice references",
+    icon: "packing",
+    to: "/packaging-list",
+    Component: PackagingList,
   },
   {
     id: "quoting",
@@ -270,6 +281,15 @@ export const MODULES: AppModule[] = [
     icon: "files",
     to: "/files",
     Component: MyFilesPage,
+  },
+  {
+    id: "letters",
+    label: "Letter",
+    short: "Letters",
+    desc: "Custom company letters, letterheads and issued documents",
+    icon: "declaration",
+    to: "/letters",
+    Component: Letter,
   },
   {
     id: "settings",

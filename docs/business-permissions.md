@@ -29,6 +29,14 @@ The on-device workspace remains single-user and uses its existing sign-in gate;
 these policies do not sandbox an operating-system account that can directly read
 its own SQLite files.
 
+Shared workspace identity and team rosters require a current membership, even if
+the user's profile still selects a company they have left. The cloud audit trail
+contains full private record snapshots and is readable only by current owners
+and administrators. Ordinary members can append their own authenticated events;
+they cannot read copied private invoice/payroll values through the audit API.
+Apply `2026-10-03-workspace-membership-read-integrity.sql` for these protections;
+this migration is pending and has not been applied to production.
+
 Apply `2026-09-12-shared-record-permissions.sql`,
 `2026-09-12-sync-conflict-protection.sql`, then
 `2026-09-12-module-access.sql` after the feature migrations, before deploying this

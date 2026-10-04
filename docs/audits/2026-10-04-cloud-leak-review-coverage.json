@@ -1,0 +1,421 @@
+{
+  "date": "2026-10-04",
+  "scope": "Local checkout cloud privacy review; no production config inspection, saved credential read or live API request",
+  "checkout": "C:/Users/iamvi/.codex/worktrees/filey-ui-refinement/Filey-erp",
+  "version": "3.0.10",
+  "source_frozen": true,
+  "full_manual_reads": [
+    {
+      "path": "supabase/functions/run-tool/index.ts",
+      "lines": 210,
+      "sha256": "b59e04ae543b9470bddc76822ccc729a23078a1e82a39f6d205eebb99a30ce81",
+      "purpose": "JWT/MFA, authoritative claim, account paths, storage inputs/outputs and error completion"
+    },
+    {
+      "path": "supabase/functions/integrations/index.ts",
+      "lines": 378,
+      "sha256": "8e6e264e73528951f008ae0fa6b74890ef4fd4dbd49f7464114eaa6a6877c58b",
+      "purpose": "JWT/workspace/module, per-user keys/entity binding, response redaction and provider URLs"
+    },
+    {
+      "path": "supabase/functions/_shared/integration-access.ts",
+      "lines": 18,
+      "sha256": "ba0d03c1edb6e9aa0da8bc1e76b6b32f3b4855eaa3ac8659b74fa9617bbc1fb7",
+      "purpose": "module/role/entity summaries"
+    },
+    {
+      "path": "supabase/functions/agent-jobs/index.ts",
+      "lines": 101,
+      "sha256": "84b532efb4b19b7080dbcc0d1d257ae99ff566c93eecf2b549be5658b51b2dac",
+      "purpose": "cron secret and owner/org capture, private outputs and error paths"
+    },
+    {
+      "path": "supabase/functions/_shared/agent-jobs.ts",
+      "lines": 153,
+      "sha256": "fac2b09c3c5e70c4b84fc08be602e25dbafe1ce3e0f526c3327a0560ce1debe4",
+      "purpose": "pagination/scoped data, draft RPC and final delivery"
+    },
+    {
+      "path": "supabase/functions/_shared/admin-workspace.ts",
+      "lines": 22,
+      "sha256": "0ad2ac98b75bbb8ceb264a48309548dbfe415ea63d1bd8d38a375a9b2bb2dfa9",
+      "purpose": "authoritative active workspace/admin lookup"
+    },
+    {
+      "path": "supabase/functions/overdue-reminders/index.ts",
+      "lines": 77,
+      "sha256": "d2f13877ee6d2e993cf20901df1af3b63417a13c882fedc71d81aed0d3518695",
+      "purpose": "cron auth and original workspace capture"
+    },
+    {
+      "path": "supabase/functions/_shared/overdue-reminders.ts",
+      "lines": 76,
+      "sha256": "9bd3f70e131d301678df921754889b2efdbda6aed9c6982d2bdcf2228deca780",
+      "purpose": "recipient data, share links, idempotency, provider receipt and final authority"
+    },
+    {
+      "path": "supabase/functions/_shared/scheduled-workspace.ts",
+      "lines": 20,
+      "sha256": "682bd1d9d7e314865150fcdb009d386fcf69c0c0688af2373243baa12df93125",
+      "purpose": "new fail-closed atomic authority lookup"
+    },
+    {
+      "path": "supabase/2026-10-04-public-document-privacy.sql",
+      "lines": 72,
+      "sha256": "8d9c50af9f148a2b68198fa8e7feca1df7a9169839b0082407037ba81e81ef0a",
+      "purpose": "public token scope and field/child redaction"
+    },
+    {
+      "path": "supabase/2026-10-04-tool-job-authority.sql",
+      "lines": 41,
+      "sha256": "2bd099cba2545a55c4f842c5efaaf8dce5ed4bc8cf067b9f6fe7ef02d991f3be",
+      "purpose": "pending-only immutable jobs and result write authority"
+    },
+    {
+      "path": "supabase/2026-09-30-tool-path-integrity.sql",
+      "lines": 26,
+      "sha256": "8bdeeb6815d51939e44027d6dfa96d54cb6b530509ea5ceb6bba9bc4a3f596f7",
+      "purpose": "strict owner path predicate"
+    },
+    {
+      "path": "supabase/2026-09-28-team-attachments.sql",
+      "lines": 157,
+      "sha256": "7496ab28c622ec53a226d8b7a48c316dab1fba54cc91292d1de04f036d5c1e28",
+      "purpose": "DM participant RLS, bucket policies and trusted message validation"
+    },
+    {
+      "path": "supabase/2026-06-24-user-folders.sql",
+      "lines": 28,
+      "sha256": "f325efd54b14c63ec1e47a7e13633cfe2533445179b3933eb7309dce8d9060fe",
+      "purpose": "owner folder policy/parent relations"
+    },
+    {
+      "path": "supabase/2026-07-11-function-grants-hardening.sql",
+      "lines": 48,
+      "sha256": "7c98f4a4cef20adb6de2144fe1b96d3618c3f2192a268df3051ed548d6c4eb02",
+      "purpose": "historical maintenance/trigger grants"
+    },
+    {
+      "path": "supabase/2026-08-13-integration-keys.sql",
+      "lines": 43,
+      "sha256": "6f8bda86b2eba404f2bddaa9ce1b0384cf84d707a8329ed8bad7f9f8e370bbcb",
+      "purpose": "secret column grants and owner RLS"
+    },
+    {
+      "path": "supabase/2026-09-30-mfa-enforcement.sql",
+      "lines": 62,
+      "sha256": "bdf81cebbe4273832153512878b4afc7e79b36ca16750ed39b1d227b88d4cc3e",
+      "purpose": "Storage/Realtime restrictive MFA and pre-request gate"
+    },
+    {
+      "path": "supabase/2026-09-30-workspace-billing-acl.sql",
+      "lines": 33,
+      "sha256": "c07438e284de66e27087dc24e42006adeb7cf708c5159b00f73fd518d7257f32",
+      "purpose": "workspace billing/ownership column grants"
+    },
+    {
+      "path": "supabase/2026-09-12-shared-record-permissions.sql",
+      "lines": 102,
+      "sha256": "d1ef05ae324492ad495b09cf0aef5093c810319aaf3854dae602380eb282ab0a",
+      "purpose": "author/admin/shared-read authority and parent joins"
+    },
+    {
+      "path": "supabase/2026-10-04-cloud-storage-privacy.sql",
+      "lines": 32,
+      "sha256": "3d85f79d3596aa391bc73521e391b5ef59766513463a7546f448a7885099eac3",
+      "purpose": "new bucket flag and retention owner/grant fix"
+    },
+    {
+      "path": "supabase/2026-10-04-scheduled-agent-privacy.sql",
+      "lines": 17,
+      "sha256": "4e6813e69063a8060963ce1c70a1fcde3815c58f2c242dc33d6065beaaf4e3b9",
+      "purpose": "new service-only invoker profile/member check"
+    },
+    {
+      "path": "scripts/build-schema-bootstrap.mjs",
+      "lines": 65,
+      "sha256": "34a9659347c5c2542b614da8f842bdc09cafa2d0a48ce21633540758f268d96c",
+      "purpose": "historical exclusion, current source ordering and final ACL pass"
+    },
+    {
+      "path": "supabase/verify-runtime-schema.sql",
+      "lines": 53,
+      "sha256": "ef64d44c67afee1df8cffdd0b10a37b8ac8a3cd026215292fff65c22d0b922d0",
+      "purpose": "metadata-only bucket/role/grant/body export"
+    },
+    {
+      "path": "scripts/check-cloud-schema.mjs",
+      "lines": 62,
+      "sha256": "9788c5736cff51df0909ea90a86136dcbaea2f875744ebd19bb59bed6f91c80f",
+      "purpose": "current catalog contract checks"
+    },
+    {
+      "path": "scripts/test-cloud-privacy-local.mjs",
+      "lines": 54,
+      "sha256": "5c458b8f4695bcfd71be5222fe9d6884b7c20e336b5054f938b4942b99fb00f7",
+      "purpose": "isolated cluster, legacy repro, upgrades/repeat, cleanup and actual catalog"
+    },
+    {
+      "path": "scripts/test-cloud-privacy-checks.mjs",
+      "lines": 45,
+      "sha256": "e0f5432a096a477e7ac4f4b0fdfb28192fa0bec486a8c86a2b6e15e177272dc5",
+      "purpose": "six privacy metadata drift regressions"
+    },
+    {
+      "path": "scripts/fixtures/supabase-prerequisites.sql",
+      "lines": 39,
+      "sha256": "6f0ba64be77b9f812271fecc28a3f60e8805c63f0e198befb3380ee788fd31f3",
+      "purpose": "managed roles/Auth/Storage/default grants for synthetic cluster"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-setup.sql",
+      "lines": 19,
+      "sha256": "4514d946a08a1cec305dc5c2c62fe7f62a6df0773ad163c4f24013e064de4806",
+      "purpose": "synthetic accounts/buckets/outputs"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-baseline.sql",
+      "lines": 44,
+      "sha256": "cc3eb30d43a0185ab9696bd9a14794074f8e8e54860f27a1a78c052eed9011ba",
+      "purpose": "legacy client+cron attacks and public flag repro"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-assertions.sql",
+      "lines": 121,
+      "sha256": "920127c6615aa1d9200898a4f665ae460204f711fff976dbf20ac756ab8cd557",
+      "purpose": "actual isolation/compatibility matrix"
+    },
+    {
+      "path": "supabase/functions/_shared/agent-jobs_test.ts",
+      "lines": 162,
+      "sha256": "bb3ffbf4c79d6dfe9849336026dbb85451dfe86f1bbf4382a0d9e6ed40f66910",
+      "purpose": "six fake-provider/scoped scheduled job cases"
+    },
+    {
+      "path": "supabase/functions/_shared/admin-workspace_test.ts",
+      "lines": 63,
+      "sha256": "cd30c3816f29a4135d99b8442e372f8e386dbd53bec91cea97f48587439e7992",
+      "purpose": "three existing active admin/membership cases"
+    },
+    {
+      "path": "supabase/functions/_shared/overdue-reminders_test.ts",
+      "lines": 126,
+      "sha256": "3467dac75dd433b5e39dcce13e03291590794e8e2ca92986820c953e126c3486",
+      "purpose": "six fake-provider/authority reminder cases"
+    },
+    {
+      "path": "docs/audits/2026-10-04-cloud-data-audit.md",
+      "lines": 292,
+      "sha256": "c464d74601617f4b588ccc907196008ed68d2c85df714719af0aa5614168d926",
+      "purpose": "prior findings/limits and validation context"
+    }
+  ],
+  "targeted_manual_reads": [
+    {
+      "path": "supabase/schema.sql",
+      "lines": 13478,
+      "sha256": "1aae7371b473b0fe031c358b47c4d13df753cafbb13bf6ccf12b076b8927ac8a",
+      "coverage": "Storage/buckets/retention (1290-1378,1525-1635,2067-2190), secret tables (4445-4540), preserved SMS/OTP policies (2355-2540), final active sync/role/module/team/claim/share definitions (9955-10450,11095-11220,11560-11625,11976-12170), generated current privacy tail"
+    },
+    {
+      "path": "supabase/tool-jobs.sql",
+      "lines": 121,
+      "sha256": "64d2a3657d686100371a007c16ec82f8769c0fc7bd885213d0417f685a7603d2",
+      "coverage": "1-100: job table, paths, owner policy, MFA and input bucket"
+    },
+    {
+      "path": "supabase/2026-10-04-workspace-device-authority.sql",
+      "lines": 102,
+      "sha256": "6d24e4adfb6d9dbcf74fcc4afc40f36a8cdf0a9516995e9766c5a215cf6af1dc",
+      "coverage": "existing owner/membership/fingerprint authority definitions reviewed for remaining leaks; earlier full evidence retained"
+    },
+    {
+      "path": "supabase/functions/channel-webhook/delivery.ts",
+      "lines": 130,
+      "sha256": "1a94d1133ebb9e048003df04eef0348f036cfba25192af701cc1f62bd61833fc",
+      "coverage": "45-128: provider destination/config, redirect and receipt/error boundaries; owned by another audit agent"
+    },
+    {
+      "path": "scripts/runtime-schema-checks.mjs",
+      "lines": 233,
+      "sha256": "4cf27a7b037f1ff4d67f622e975a0d5d7b3ad8afe15792cd708abd1a68c697c2",
+      "coverage": "new privacy checker full; existing feature/workflow checker entry and final ACL/role checks"
+    },
+    {
+      "path": "scripts/test-runtime-schema-checks.mjs",
+      "lines": 136,
+      "sha256": "9b457635ae4aeedd145264ab310e60a0e073c54a417a235ee28cf5194813dec9",
+      "coverage": "first existing fixtures/regressions used to model privacy checks; all executed"
+    },
+    {
+      "path": "scripts/test-schema-bootstrap-local.mjs",
+      "lines": 158,
+      "sha256": "2d75219a35f065c868a0383fdbf872a427be3fc0ca860e4d68cc0efbcd6bab88",
+      "coverage": "cluster/bootstrap/repeat/upgrade runner and new two-upgrade allowlist; full runner executed"
+    },
+    {
+      "path": "scripts/test-rls-local.mjs",
+      "lines": 340,
+      "sha256": "42c8e1ddaf45c590dc7029d8b4169fa6889a423b1a0e3237573ba7d14775f9ae",
+      "coverage": "runner setup/security fixture inventory; full pre-change baseline executed"
+    },
+    {
+      "path": "src/lib/api.ts",
+      "lines": 6770,
+      "sha256": "80a550581c6e94114e1aedf719c1fefbaf1c70d9c73983472c9d86b26f304103",
+      "coverage": "symbol search only for obsolete SMS/OTP/custom table callers; no API edits"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "lines": 62,
+      "sha256": "50583b11e56c04e844b5ca853873abe0723c09c4098621e7cc95aa7e738a04fc",
+      "coverage": "new privacy checker/PG runner placement; other existing checks preserved"
+    }
+  ],
+  "changed_artifacts": [
+    {
+      "path": "supabase/2026-10-04-cloud-storage-privacy.sql",
+      "lines": 32,
+      "sha256": "3d85f79d3596aa391bc73521e391b5ef59766513463a7546f448a7885099eac3"
+    },
+    {
+      "path": "supabase/2026-10-04-scheduled-agent-privacy.sql",
+      "lines": 17,
+      "sha256": "4e6813e69063a8060963ce1c70a1fcde3815c58f2c242dc33d6065beaaf4e3b9"
+    },
+    {
+      "path": "supabase/schema.sql",
+      "lines": 13478,
+      "sha256": "1aae7371b473b0fe031c358b47c4d13df753cafbb13bf6ccf12b076b8927ac8a"
+    },
+    {
+      "path": "supabase/functions/_shared/scheduled-workspace.ts",
+      "lines": 20,
+      "sha256": "682bd1d9d7e314865150fcdb009d386fcf69c0c0688af2373243baa12df93125"
+    },
+    {
+      "path": "supabase/functions/_shared/agent-jobs.ts",
+      "lines": 153,
+      "sha256": "fac2b09c3c5e70c4b84fc08be602e25dbafe1ce3e0f526c3327a0560ce1debe4"
+    },
+    {
+      "path": "supabase/functions/agent-jobs/index.ts",
+      "lines": 101,
+      "sha256": "84b532efb4b19b7080dbcc0d1d257ae99ff566c93eecf2b549be5658b51b2dac"
+    },
+    {
+      "path": "supabase/functions/_shared/overdue-reminders.ts",
+      "lines": 76,
+      "sha256": "9bd3f70e131d301678df921754889b2efdbda6aed9c6982d2bdcf2228deca780"
+    },
+    {
+      "path": "supabase/functions/_shared/agent-jobs_test.ts",
+      "lines": 162,
+      "sha256": "bb3ffbf4c79d6dfe9849336026dbb85451dfe86f1bbf4382a0d9e6ed40f66910"
+    },
+    {
+      "path": "supabase/functions/_shared/overdue-reminders_test.ts",
+      "lines": 126,
+      "sha256": "3467dac75dd433b5e39dcce13e03291590794e8e2ca92986820c953e126c3486"
+    },
+    {
+      "path": "scripts/build-schema-bootstrap.mjs",
+      "lines": 65,
+      "sha256": "34a9659347c5c2542b614da8f842bdc09cafa2d0a48ce21633540758f268d96c"
+    },
+    {
+      "path": "scripts/runtime-schema-checks.mjs",
+      "lines": 233,
+      "sha256": "4cf27a7b037f1ff4d67f622e975a0d5d7b3ad8afe15792cd708abd1a68c697c2"
+    },
+    {
+      "path": "scripts/check-cloud-schema.mjs",
+      "lines": 62,
+      "sha256": "9788c5736cff51df0909ea90a86136dcbaea2f875744ebd19bb59bed6f91c80f"
+    },
+    {
+      "path": "supabase/verify-runtime-schema.sql",
+      "lines": 53,
+      "sha256": "ef64d44c67afee1df8cffdd0b10a37b8ac8a3cd026215292fff65c22d0b922d0"
+    },
+    {
+      "path": "scripts/test-schema-bootstrap-local.mjs",
+      "lines": 158,
+      "sha256": "2d75219a35f065c868a0383fdbf872a427be3fc0ca860e4d68cc0efbcd6bab88"
+    },
+    {
+      "path": "scripts/test-cloud-privacy-local.mjs",
+      "lines": 54,
+      "sha256": "5c458b8f4695bcfd71be5222fe9d6884b7c20e336b5054f938b4942b99fb00f7"
+    },
+    {
+      "path": "scripts/test-cloud-privacy-checks.mjs",
+      "lines": 45,
+      "sha256": "e0f5432a096a477e7ac4f4b0fdfb28192fa0bec486a8c86a2b6e15e177272dc5"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-setup.sql",
+      "lines": 19,
+      "sha256": "4514d946a08a1cec305dc5c2c62fe7f62a6df0773ad163c4f24013e064de4806"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-baseline.sql",
+      "lines": 44,
+      "sha256": "cc3eb30d43a0185ab9696bd9a14794074f8e8e54860f27a1a78c052eed9011ba"
+    },
+    {
+      "path": "scripts/fixtures/cloud-privacy-assertions.sql",
+      "lines": 121,
+      "sha256": "920127c6615aa1d9200898a4f665ae460204f711fff976dbf20ac756ab8cd557"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "lines": 62,
+      "sha256": "50583b11e56c04e844b5ca853873abe0723c09c4098621e7cc95aa7e738a04fc"
+    },
+    {
+      "path": "supabase/MIGRATIONS.md",
+      "lines": 574,
+      "sha256": "86859058808377520c5f5428d31a86c714d89e531a9f76472e8fb3b129acf2ad"
+    },
+    {
+      "path": "supabase/BOOTSTRAP.md",
+      "lines": 109,
+      "sha256": "a89bb19accfe7a2aa0162e9aba670ee69c71907c5340215d1aa6b8e488a29128"
+    }
+  ],
+  "automated_coverage": {
+    "actual_disposable_catalog": {
+      "tables": 93,
+      "columns": 1192,
+      "named_functions": 144,
+      "issues": 0,
+      "all_public_tables_rls": true
+    },
+    "metadata_regressions": {
+      "passed": 27,
+      "failed": 0
+    },
+    "focused_scheduled_deno": {
+      "passed": 15,
+      "failed": 0
+    },
+    "frozen_edge_entrypoints": 2,
+    "repeated_current_upgrades": 14,
+    "logs": [
+      "output/cloud-leak-rls-baseline.log",
+      "output/cloud-privacy-local.log",
+      "output/cloud-privacy-bootstrap.log",
+      "output/cloud-privacy-catalog-tests.log",
+      "output/cloud-privacy-scheduled-tests.log",
+      "output/cloud-privacy-edge-check.log"
+    ]
+  },
+  "limits": [
+    "Canonical schema targeted manually, fully installed/executed/catalog checked, not reread completely",
+    "No live Storage HTTP/Realtime sessions or live customer data accessed",
+    "Earlier reports remain separate evidence snapshots",
+    "Root owns full final frontend and Edge suites",
+    "No deployments/migrations to production/commits/providers/messages"
+  ]
+}

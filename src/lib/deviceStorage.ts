@@ -120,6 +120,7 @@ export async function writeDeviceValues(entries: readonly (readonly [string, str
     let restored = true;
     for (const [key, value] of previous) {
       try {
+        if (localStorage.getItem(key) === value) continue;
         if (value === null) localStorage.removeItem(key);
         else localStorage.setItem(key, value);
       } catch { restored = false; }
@@ -135,6 +136,60 @@ export async function writeDeviceValue(key: string, value: string | null): Promi
   // Browser setItem is already atomic for one key; a failed save needs no undo.
   else if (value === null) localStorage.removeItem(key);
   else localStorage.setItem(key, value);
+}
+
+/** Compare the entire read set and publish all writes in one storage transaction.
+ * A false result means another window/process committed first; nothing is saved. */
+export async function compareDeviceValues(
+  entries: readonly (readonly [string, string | null])[],
+  expected: readonly (readonly [string, string | null])[],
+): Promise<boolean> {
+  const readKeys = new Set(expected.map(([key]) => key));
+  if (entries.length > 256 || expected.length > 512 || readKeys.size !== expected.length
+      || new Set(entries.map(([key]) => key)).size !== entries.length
+      || [...expected, ...entries].some(([key]) => typeof key !== "string" || (!key.startsWith("localdb:") && key !== "syncjournal"))
+      || entries.some(([key]) => !readKeys.has(key)))
+    throw new Error("Invalid local transaction comparisons.");
+  if (hasTauri) return invoke<boolean>("cache_compare_set_many", { entries, expected });
+  if (isNativeApp()) {
+    const db = await mobileDatabase();
+    const committed = await new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction("values", "readwrite");
+      const store = tx.objectStore("values");
+      let matches = true;
+      let remaining = expected.length + 1;
+      let verifiedOwner: string;
+      const finishRead = () => {
+        if (--remaining !== 0 || !matches) return;
+        store.put(verifiedOwner, DURABLE_OWNER_KEY);
+        for (const [key, value] of entries) store.put(value, key);
+      };
+      tx.oncomplete = () => resolve(matches);
+      tx.onabort = () => reject(tx.error ?? new Error("Could not save device storage. Your previous records are preserved."));
+      const owner = store.get(DURABLE_OWNER_KEY);
+      owner.onsuccess = () => {
+        try { verifiedOwner = checkOwner(owner.result); finishRead(); }
+        catch (error) { tx.abort(); reject(error); }
+      };
+      for (const [key, value] of expected) {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const current = request.result === undefined ? localStorage.getItem(key) : request.result;
+          if (current !== value) matches = false;
+          finishRead();
+        };
+      }
+    });
+    if (committed) for (const [key] of entries) {
+      try { localStorage.removeItem(key); } catch { /* committed store is authoritative */ }
+    }
+    return committed;
+  }
+  // The caller owns the cross-tab Web Lock. Comparison and writes have no await
+  // boundary, so another cooperating tab cannot interleave this commit.
+  if (expected.some(([key, value]) => localStorage.getItem(key) !== value)) return false;
+  await writeDeviceValues(entries);
+  return true;
 }
 
 // Only the Supabase session uses preferences. Provider API keys stay in memory.

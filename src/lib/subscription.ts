@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { billingRequest, paymentUrl, openBilling } from "./billingService";
 import { clearEntitlementCache, resolveTier, CLOUD_DEVICE_LIMIT } from "./license";
+import { agentStorageScope } from "./agentStorage";
 
 /* Client side of billing. Reads the org's plan (RLS scopes it to the member's
  * own org) and invokes the `dodo` edge function for checkout and the customer
@@ -8,7 +9,7 @@ import { clearEntitlementCache, resolveTier, CLOUD_DEVICE_LIMIT } from "./licens
 
 export type Plan = "free" | "cloud" | "pro" | "business" | "enterprise";
 
-/** How a plan card is sold: monthly subscription, one-time offline licence, or
+/** How a plan card is sold: monthly subscription, one-time paid licence, or
  * contact-sales only. */
 export type PlanKind = "subscription" | "license" | "contact";
 
@@ -33,13 +34,14 @@ export const PLANS: PlanCard[] = [
     kind: "subscription",
     name: "Basic",
     price: "$0",
-    blurb: "Free ERP and CRM on your device, with unlimited local invoices.",
+    blurb: "Unlimited local invoices and the full local app, free. Verify your account once, then work offline.",
     features: [
       "Core ERP & CRM, all modules",
-      "Unlimited local invoices and edits",
-      "Optional cloud sync: 5 new cloud invoices per month",
+      "Unlimited local documents, invoices and edits",
+      "Local PDFs without Filey branding",
+      "Optional cloud storage: 5 new cloud invoices per month",
       "Local storage and backups on this device",
-      "“Made with Filey” on documents",
+      "“Made with Filey” on free cloud documents",
       "Bring-your-own AI key",
     ],
   },
@@ -53,7 +55,7 @@ export const PLANS: PlanCard[] = [
     features: [
       `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} registered devices`,
       "Filey on the web at app.gofiley.com",
-      "Unlimited invoices — no monthly cap",
+      "Unlimited cloud invoices — no monthly cap",
       "Team members share one workspace",
       "Backed up off your machine",
       "Cancel any time from Billing",
@@ -67,13 +69,12 @@ export const PLANS: PlanCard[] = [
     price: "$100",
     period: " one-time",
     recommended: true,
-    blurb: "Own it outright. Full local Filey, yours on your machine.",
+    blurb: "Lifetime cloud benefits for your Filey account, paid once.",
     features: [
-      "Unlimited invoices, no monthly cap",
-      "Works fully offline — verified without a network",
-      "2 device slots",
-      "Free updates included",
-      "No watermark",
+      "Unlimited cloud invoices, no monthly cap",
+      "Lifetime paid cloud and web access",
+      "2 paid-license activation slots; free local installs are not limited",
+      "Cloud PDFs without Filey branding",
       "Filey on the web at app.gofiley.com",
     ],
   },
@@ -96,7 +97,7 @@ export const PLANS: PlanCard[] = [
  * Display-card mapping does not change their resolveTier() entitlements. */
 
 /** Map an org's stored plan value onto its display card. A plan that is no
- *  longer sold has no card of its own, so it shows as Freedom — the closest
+ *  longer sold has no card of its own, so it shows as Ultra — the closest
  *  thing still on the menu, and never a downgrade in what it implies. */
 export function planCardFor(orgPlan: string | null | undefined): PlanCard {
   if (orgPlan === "pro" || orgPlan === "business")
@@ -112,7 +113,12 @@ export interface Subscription {
 
 export async function getSubscription(): Promise<Subscription> {
   if (!supabase) return { plan: "free" };
+  const scope = agentStorageScope();
+  const assertCurrent = () => {
+    if (scope !== agentStorageScope()) throw new Error("Your workspace changed. Reopen Billing.");
+  };
   const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+  assertCurrent();
   if (orgError) throw orgError;
   if (!orgId) return { plan: "free" };
   const { data, error } = await supabase
@@ -120,6 +126,7 @@ export async function getSubscription(): Promise<Subscription> {
     .select("plan, plan_status, current_period_end")
     .eq("id", orgId)
     .maybeSingle();
+  assertCurrent();
   if (error) throw error;
   return {
     plan: (data?.plan as Plan) ?? "free",
@@ -182,8 +189,14 @@ export async function awaitCloudPlan(
   attempts = 60,
   delayMs = 5000
 ): Promise<Subscription | null> {
+  const scope = agentStorageScope();
+  const assertCurrent = () => {
+    if (scope !== agentStorageScope()) throw new Error("Your workspace changed. Reopen Billing.");
+  };
   for (let attempt = 0; attempt < attempts; attempt++) {
+    assertCurrent();
     const sub = await getSubscription();
+    assertCurrent();
     if (resolveTier(false, sub.plan, sub.plan_status) === "pro") {
       // Tier and cloud access are cached; without this the app keeps refusing
       // to sync for someone whose subscription just went live.

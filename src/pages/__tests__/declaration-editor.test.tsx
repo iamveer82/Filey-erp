@@ -8,6 +8,8 @@ import { downloadElementAsPdf } from "../../lib/pdfTools";
 import { autoSaveDocument } from "../../lib/files";
 
 vi.mock("../../lib/api", () => ({
+  getCacheScope: () => "declaration-test-org:user:declaration-test-user",
+  getCacheOrg: () => "declaration-test-org",
   tools: { settings: vi.fn(), setSetting: vi.fn() },
   billing: { getCompany: vi.fn(async () => ({ name: "Test company", currency: "AED" })) },
   suppliers: { list: vi.fn(async () => []) },
@@ -17,6 +19,7 @@ vi.mock("../../lib/files", () => ({ autoSaveDocument: vi.fn(async () => false) }
 vi.mock("../../lib/pdfTools", () => ({ downloadElementAsPdf: vi.fn(), elementToPdfBytes: vi.fn() }));
 
 beforeEach(() => {
+  localStorage.clear(); localStorage.setItem("filey_data_mode", "local");
   vi.mocked(tools.settings).mockResolvedValue([]);
   vi.mocked(tools.setSetting).mockResolvedValue(undefined);
 });

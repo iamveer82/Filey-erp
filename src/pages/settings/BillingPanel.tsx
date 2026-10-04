@@ -20,7 +20,7 @@ import {
   FREE_LIMITS,
 } from "../../lib/license";
 import { Check } from "lucide-react";
-import { billing, erp, crm, quotes, invoicesThisMonth } from "../../lib/api";
+import { billing, erp, crm, quotes, invoicesThisMonth, getCacheScope } from "../../lib/api";
 import { useEffect, useRef, useState } from "react";
 import { fmtDate, cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
@@ -32,6 +32,7 @@ import { invokeFn } from "../../lib/supabase";
 
 /** Contact-sales lead → lead-contact edge function (website or app source). */
 async function submitLead(input: {
+  request_id: string;
   name: string;
   phone: string;
   email?: string;
@@ -41,6 +42,7 @@ async function submitLead(input: {
   if (!supabase) throw new Error("Connect your Filey account to contact sales.");
   const { data, error } = await invokeFn(supabase, "lead-contact", {
     body: {
+      request_id: input.request_id,
       name: input.name,
       phone: input.phone,
       email: input.email || "",
@@ -56,6 +58,8 @@ async function submitLead(input: {
 
 export default function BillingPanel() {
   const { toast } = useUI();
+  const contactRequest = useRef<{ fingerprint: string; id: string } | null>(null);
+  const contactFlight = useRef(false);
   const [params, setParams] = useSearchParams();
   const checkoutHandled = useRef(false);
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -265,7 +269,7 @@ export default function BillingPanel() {
       <SettingsPanel>
         <SettingsSection
           title="Current plan"
-          description="Purchased benefits activate automatically. No license key or manual setup needed."
+          description="The full local app is free. Optional paid cloud benefits activate after payment is confirmed."
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
@@ -346,7 +350,7 @@ export default function BillingPanel() {
           )}
           <p className="text-xs text-muted-foreground">
             {local
-              ? "Create and edit as many local invoices as you need. No subscription or monthly invoice limit."
+              ? "Use all core local modules and create unlimited documents and invoices, with unbranded local PDFs. No subscription is required."
               : !capped ? "This workspace has unlimited invoices."
               : pctUsed >= 100
                 ? `You've used this month's ${cap} new cloud invoices. You can keep editing existing invoices without a limit.`
@@ -372,7 +376,7 @@ export default function BillingPanel() {
 
         <SettingsSection
           title="Available plans"
-          description="Choose the plan that fits your workspace."
+          description="Start free with a verified account. Upgrade only if you want paid cloud benefits."
           stacked
         >
           <div className="grid gap-4 md:grid-cols-2 items-stretch">
@@ -472,21 +476,26 @@ export default function BillingPanel() {
           className="space-y-4"
           onSubmit={async (e) => {
             e.preventDefault();
-            if (!contactOpen) return;
+            if (!contactOpen || contactFlight.current) return;
             if (!contactName.trim() || contactPhone.replace(/\D/g, "").length < 6) {
               toast.error("Please give a name and a valid phone number.");
               return;
             }
+            contactFlight.current = true;
             setContactBusy(true);
             try {
-              await submitLead({
+              const input = {
                 name: contactName.trim(),
                 phone: contactPhone.trim(),
                 email: contactEmail.trim(),
                 message:
                   contactMessage.trim() ||
                   `Interested in Filey ${contactOpen.name} (${contactOpen.price}).`,
-              });
+              };
+              const fingerprint = JSON.stringify([getCacheScope(), input]);
+              if (contactRequest.current?.fingerprint !== fingerprint) contactRequest.current = { fingerprint, id: crypto.randomUUID() };
+              await submitLead({ ...input, request_id: contactRequest.current.id });
+              contactRequest.current = null;
               toast.success("Request sent — we'll be in touch shortly.");
               setContactOpen(null);
               setContactName("");
@@ -496,6 +505,7 @@ export default function BillingPanel() {
             } catch (err) {
               toast.error(err instanceof Error ? err.message : String(err));
             } finally {
+              contactFlight.current = false;
               setContactBusy(false);
             }
           }}

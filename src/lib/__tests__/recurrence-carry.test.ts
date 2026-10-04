@@ -6,11 +6,12 @@
 // would silently revert to qty x unit_price.
 import { describe, it, expect, beforeEach } from "vitest";
 import { localClient } from "../localdb";
-import { billing, recurrences } from "../api";
+import { billing, recurrences, setCacheOrg } from "../api";
 
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("filey_data_mode", "local");
+  setCacheOrg("recurrence-fixture-org", "recurrence-fixture-user");
 });
 
 const baseDoc = async () => {

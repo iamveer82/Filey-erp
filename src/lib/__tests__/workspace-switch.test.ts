@@ -132,13 +132,13 @@ it.each(["on", "off"])("turning cloud off pauses background sync (previously %s)
   expect(localStorage.getItem("filey_auto_sync")).toBe("off");
 });
 
-it("keeps local mode and restores background sync after a failed upload", async () => {
+it("keeps local mode without re-enabling legacy background sync after a failed upload", async () => {
   localStorage.setItem("filey_data_mode", "local");
   localStorage.setItem("filey_auto_sync", "on");
   state.syncOk = false;
   await expect(switchWorkspace("cloud")).rejects.toThrow("Couldn't finish saving to Filey Cloud");
   expect(localStorage.getItem("filey_data_mode")).toBe("local");
-  expect(localStorage.getItem("filey_auto_sync")).toBe("on");
+  expect(localStorage.getItem("filey_auto_sync")).toBe("off");
   expect(state.migrating).toBe(false);
 });
 

@@ -29,7 +29,7 @@ import {
   verifyLocalPassword,
 } from "./localAuth";
 
-// ---- Local mode: a single on-device user, no real authentication ----------
+// ---- Local mode: the remembered identity of a verified Filey account ------
 const LOCAL_PROFILE_KEY = "filey_local_profile";
 const LOCAL_USER = {
   id: "local-user",
@@ -50,10 +50,9 @@ function loadLocalProfile(): Profile {
   return { id: LOCAL_USER.id, email: "", name: "You", company: "" };
 }
 
-/** The on-device user for an offline install, carrying the email of the account
- *  that claimed this device. Offline data is NOT keyed by user id — localdb is a
- *  flat per-device store — so attaching an account never moves or hides a row
- *  that was created before the device had one. */
+/** The device identity uses the verified account ID. The local workspace owner
+ *  and scoped caches keep a later cloud sign-in from adopting another account's
+ *  device records. */
 function localUserFrom(cred: { email: string; userId: string } | null): User {
   if (!cred) return LOCAL_USER;
   return { ...LOCAL_USER, id: cred.userId || LOCAL_USER.id, email: cred.email } as User;
@@ -101,15 +100,15 @@ export function adoptLocalProfile(p: Partial<Profile>): void {
 /** Offline sign-in that reached the server: take the account's profile with it,
  *  so the same person sees the same name and company in both modes and is never
  *  asked to set up a profile they already have. Best-effort by design. */
-async function pullCloudProfile(uid: string, email: string): Promise<void> {
-    if (!uid || !supabase) return;
+async function pullCloudProfile(uid: string, email: string, isCurrent: () => boolean): Promise<void> {
+    if (!uid || !supabase || !isCurrent()) return;
     try {
       const { data } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", uid)
         .maybeSingle();
-      if (data) {
+      if (data && isCurrent()) {
         // The signup trigger creates a stub profile (name: "User", company: "").
         // Adopting every non-empty field from that stub would rename a user who
         // set up offline ("Ahmed", "Gulf Trading") back to "User" — the same
@@ -210,8 +209,27 @@ const norm = (c: Credential) =>
     ? { email: c.value.trim().toLowerCase() }
     : { phone: c.value.trim() };
 
+/** Only a successful server response can establish or change an account email. */
+function verifiedEmailIdentity(data: { user: User | null; session: Session | null } | null | undefined): { email: string; userId: string } {
+  const verified = data?.user ?? data?.session?.user;
+  if (!verified?.id || !verified.email ||
+    (data?.user && data.session && data.user.id !== data.session.user.id))
+    throw new Error("Sign-in did not confirm your Filey account. Please try again.");
+  return { userId: verified.id, email: verified.email.trim().toLowerCase() };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const local = isLocalMode();
+  const authAttemptRevision = useRef(0);
+  useEffect(() => () => { authAttemptRevision.current++; }, []);
+  const authAttempt = () => {
+    const revision = ++authAttemptRevision.current;
+    const isCurrent = () => revision === authAttemptRevision.current;
+    const check = () => {
+      if (!isCurrent()) throw new Error("Sign-in changed. Please try again.");
+    };
+    return { isCurrent, check };
+  };
   const pendingSignup = useRef<{
     client: ReturnType<typeof createSignupClient>;
     credential: Credential;
@@ -483,9 +501,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   },[session?.user?.id,profile?.org_id,local]);
 
-  // Warm the tier cache (free/lite/pro) so render paths can read it
-  // synchronously via currentTier(). Local mode resolves immediately.
+  // Local use has no paid feature gate and needs no plan request at startup.
+  // Hosted render paths can still read the warmed tier synchronously.
   useEffect(() => {
+    if (local) return;
     void entitlement(true).catch(() => {});
   }, [session?.user?.id, local, profile?.org_id]);
 
@@ -512,6 +531,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   const signInWithPassword = async (c: Credential, password: string) => {
+    const attempt = authAttempt();
     pendingSignup.current = null;
     const email = c.value.trim().toLowerCase();
     if (local) {
@@ -529,14 +549,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email,
             password,
           } as any);
+          attempt.check();
           if (error) throw error;
-          const uid = data.user?.id;
-          assertLocalAccount(uid ?? "");
-          if (uid) await rememberLocalCredential(email, uid, password);
-          if (uid) await pullCloudProfile(uid, email);
-          completeLocalSignIn(localUserFrom({ email, userId: uid ?? "" }));
+          const identity = verifiedEmailIdentity(data);
+          assertLocalAccount(identity.userId);
+          await rememberLocalCredential(identity.email, identity.userId, password);
+          attempt.check();
+          await pullCloudProfile(identity.userId, identity.email, attempt.isCurrent);
+          attempt.check();
+          completeLocalSignIn(localUserFrom(identity));
           return;
         } catch (e: any) {
+          attempt.check();
           // In local mode the device's own credential is authoritative.
           // If Supabase rejects (expired session, changed password, etc.),
           // fall through to the local hash instead of locking the user out.
@@ -576,6 +600,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       if (!(await verifyLocalPassword(email, password)))
         throw new Error("That email and password don't match this device's account.");
+      attempt.check();
       completeLocalSignIn(localUserFrom(getLocalCredential()));
       return;
     }
@@ -584,11 +609,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...norm(c),
       password,
     } as any);
+    attempt.check();
     if (error) throw error;
     // Remember the identity even in cloud mode: the user may switch this
     // device to offline later, and it must already know whose device it is.
-    if (data.user?.id && c.channel === "email")
-      await rememberLocalCredential(email, data.user.id, password);
+    if (c.channel === "email") {
+      const identity = verifiedEmailIdentity(data);
+      await rememberLocalCredential(identity.email, identity.userId, password);
+    }
   };
 
   const signInWithGoogle = async () => {
@@ -601,6 +629,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const finishSignup = async (password: string) => {
+    const revision = authAttemptRevision.current;
+    const isCurrent = () => revision === authAttemptRevision.current;
+    const check = () => {
+      if (!isCurrent()) throw new Error("Signup changed. Please try again.");
+    };
     const pending = pendingSignup.current;
     if (!supabase || !pending?.session) throw new Error("Verify your account before saving its password.");
     const { client, credential, session: verified } = pending;
@@ -611,24 +644,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Repeated signup for an unconfirmed account does not replace its old
     // password. Only set the chosen password after proof of email/phone ownership.
     const { error } = await client.auth.updateUser({ password });
+    check();
     if (error && error.code !== "same_password")
       throw new Error("Your account is verified, but we couldn't save your password. Please try Verify again.");
     const { data, error: sessionError } = await client.auth.getSession();
+    check();
     if (sessionError || !data.session || data.session.user.id !== verified.user.id)
       throw new Error("Your verification session expired. Start signup again.");
     if (pendingSignup.current !== pending) throw new Error("Signup changed. Please try again.");
     const { error: signInError } = await supabase.auth.setSession(data.session);
+    check();
     if (signInError) throw signInError;
     if (credential.channel === "email")
       await rememberLocalCredential(credential.value, verified.user.id, password);
+    check();
     pendingSignup.current = null;
     if (local) {
-      await pullCloudProfile(verified.user.id, credential.value.trim().toLowerCase());
+      await pullCloudProfile(verified.user.id, credential.value.trim().toLowerCase(), isCurrent);
+      check();
       completeLocalSignIn(localUserFrom({ email: credential.value.trim().toLowerCase(), userId: verified.user.id }));
     }
   };
 
   const signUpWithPassword = async (c: Credential, password: string) => {
+    const attempt = authAttempt();
     if (!supabase) throw new Error("Supabase not configured");
     // Must match Supabase's password_min_length, or the server rejects with a
     // raw "weak_password" error after the form has already accepted it.
@@ -645,6 +684,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ...norm(c),
       password,
     } as any);
+    attempt.check();
     if (error) throw error;
     // Signing up an address that already exists returns a decoy user with an
     // empty identities array (Supabase's enumeration guard) and no session.
@@ -659,16 +699,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const sendLoginOtp = async (c: Credential) => {
+    const attempt = authAttempt();
     pendingSignup.current = null;
     if (!supabase) throw new Error("Supabase not configured");
     const { error } = await supabase.auth.signInWithOtp({
       ...norm(c),
       options: { shouldCreateUser: false },
     } as any);
+    attempt.check();
     if (error) throw error;
   };
 
   const verifyOtp = async (c: Credential, token: string, purpose: "signup" | "login", password?: string) => {
+    const attempt = authAttempt();
     if (!supabase) throw new Error("Supabase not configured");
     if (purpose === "signup") {
       const pending = pendingSignup.current;
@@ -681,6 +724,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { data, error } = await pending.client.auth.verifyOtp({
           ...norm(c), token: token.trim(), type: c.channel === "phone" ? "sms" : "signup",
         } as any);
+        attempt.check();
         if (error) throw error;
         if (!data.session) throw new Error("Verification did not complete. Request a new code.");
         if (pendingSignup.current !== pending) throw new Error("Signup changed. Please try again.");
@@ -698,9 +742,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token: token.trim(),
       type,
     } as any);
+    attempt.check();
     if (error) throw error;
-    const uid =
-      data?.user?.id ?? data?.session?.user?.id ?? getLocalCredential()?.userId ?? "";
+    const identity = c.channel === "email" ? verifiedEmailIdentity(data) : null;
+    const uid = identity?.userId ?? data.user?.id ?? data.session?.user?.id;
+    if (!uid) throw new Error("Verification did not confirm your account. Request a new code.");
     // A code is proof of identity, so claim the device with it — in CLOUD mode
     // too. Otherwise anyone who only ever signs in by code has an unclaimed
     // device, and switching that device to offline strands them at the login
@@ -712,15 +758,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the address. A DIFFERENT account: re-claim outright, or the new owner
       // would inherit the previous one's password for offline sign-in.
       const cur = getLocalCredential();
-      const sameAccount = !!cur && (!cur.userId || !uid || cur.userId === uid);
-      if (sameAccount && hasLocalPassword()) updateLocalCredentialEmail(c.value);
-      else rememberLocalIdentity(c.value, uid);
+      const sameAccount = cur?.userId === uid;
+      if (sameAccount && hasLocalPassword()) updateLocalCredentialEmail(identity!.email);
+      else rememberLocalIdentity(identity!.email, uid);
     }
     if (local) {
       // Local mode doesn't follow the cloud session — the verified code IS
       // the sign-in. Mark the device signed in for the account behind it.
-      await pullCloudProfile(uid, c.value.trim().toLowerCase());
-      completeLocalSignIn(localUserFrom({ email: c.value.trim().toLowerCase(), userId: uid }));
+      if (!identity) throw new Error("Use your verified email account to open the local workspace.");
+      await pullCloudProfile(uid, identity.email, attempt.isCurrent);
+      attempt.check();
+      completeLocalSignIn(localUserFrom(identity));
     }
   };
 
@@ -738,6 +786,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    authAttemptRevision.current++;
     pendingSignup.current = null;
     if (local) {
       // End the on-device session AND the underlying cloud session. Without

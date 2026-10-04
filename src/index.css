@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./styles/shadcn-tailwind.css";
 
 /* Keep the existing JS design tokens (colors, shadows, gradients,
    keyframes, darkMode: "class") under Tailwind 4's CSS-first engine. */

@@ -111,10 +111,10 @@ describe("aiAutonomous loop", () => {
       })) as unknown as typeof fetch
     );
     const out = await aiAutonomous("Loop forever", { maxRounds: 3 });
-    // It must stop rather than loop, and it must account for itself: running
-    // out of steps after changing data and saying only "I couldn't finish" is
-    // how a user ends up not knowing what happened.
+    // Keep the recovery warning visible, with technical details in the journal.
     expect(out).toMatch(/ran out of steps|couldn't finish/i);
-    expect(out).toMatch(/recall/); // the step it actually took is named
+    expect(out).toMatch(/changes or files already created/i);
+    expect(out).not.toMatch(/recall/);
+    expect(listRuns()[0].reason).toBe("exhausted");
   });
 });

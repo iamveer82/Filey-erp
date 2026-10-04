@@ -38,6 +38,15 @@ Billable actions (`composio_execute`, `composio_connect`, `zernio_create_post`,
 `zernio_delete_post`) are counted in `audit_log` under `integration_action` and
 capped daily per user: 25 on the free tier, 2000 on a paid plan. Reads are free.
 
+The endpoint accepts POST JSON objects of at most **1 MiB**, including tool
+arguments; both announced and actually streamed bytes are checked before
+authentication or provider calls. Updated clients send `expected_org_id` from
+the reviewed workspace, preventing a delayed request from moving into another
+workspace selected in a different tab. Provider calls reject redirects while
+carrying credentials; provider/database errors return static messages. A failed
+mutation is never automatically repeated because its outcome may be uncertain.
+These hardening changes remain local and have not been deployed.
+
 Composio calls pass the caller's Supabase user id as the entity, so one platform
 key serves every customer and no one can reach another's connected accounts.
 

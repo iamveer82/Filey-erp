@@ -81,6 +81,8 @@ export default function CompanyMessages({
   recipientName,
   draft,
   onDraftChange,
+  sending = false,
+  onSendStateChange,
   active = true,
 }: {
   channel?: string;
@@ -90,13 +92,16 @@ export default function CompanyMessages({
   recipientName?: string;
   draft?: { text: string; files: File[] };
   onDraftChange?: (draft: { text: string; files: File[] }) => void;
+  sending?: boolean;
+  onSendStateChange?: (state: "sending" | "sent" | "failed", reply: boolean) => void;
   active?: boolean;
 } = {}) {
   const { user } = useAuth();
   const { toast, confirm } = useUI();
   const [all, setAll] = useState<OrgMessage[]>([]);
   const [text, setText] = useState(draft?.text || "");
-  const [busy, setBusy] = useState(false);
+  const [postingHere, setBusy] = useState(false);
+  const busy = postingHere || sending;
   const [loading, setLoading] = useState(true);
   const [replyTo, setReplyTo] = useState<number | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -203,11 +208,14 @@ export default function CompanyMessages({
   const post = async (body: string, parentId: number | null) => {
     const trimmed = body.trim();
     const attachments=parentId?replyFiles:files;
-    if ((!trimmed && !attachments.length) || posting.current) return;
+    if ((!trimmed && !attachments.length) || posting.current || sending) return;
     posting.current=true;
     setBusy(true);
+    onSendStateChange?.("sending", parentId !== null);
+    let sent = false;
     try {
       await messages.post(trimmed, parentId, channel, attachments,recipient);
+      sent = true;
       stickToBottom.current=true;
       setAtBottom(true);
       if (parentId) {
@@ -225,6 +233,7 @@ export default function CompanyMessages({
     } finally {
       posting.current=false;
       setBusy(false);
+      onSendStateChange?.(sent ? "sent" : "failed", parentId !== null);
     }
   };
 

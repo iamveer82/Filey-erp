@@ -27,6 +27,28 @@ async function refuses(url: string) {
 }
 
 describe("publicHttpUrl rejects non-public targets", () => {
+  it("does not dispatch an already stopped raw request", async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(httpFetch("https://example.com/action", { method: "POST", signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("passes Stop to the raw transport and rejects output received after cancellation", async () => {
+    const controller = new AbortController();
+    vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      expect(init?.redirect).toBe("error");
+      return { ok: true, status: 200, text: async () => { controller.abort(); return "late output"; } } as Response;
+    });
+    await expect(httpFetch("https://example.com/action", { method: "POST", signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry an ambiguous raw mutation inside an approved call", async () => {
+    await expect(httpFetch("https://example.com/action", { method: "POST", body: "approved action" })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("scheme and credential hygiene", async () => {
     await refuses("file:///etc/passwd");
     await refuses("ftp://example.com/x");

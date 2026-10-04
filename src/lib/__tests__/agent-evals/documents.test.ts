@@ -90,6 +90,17 @@ describe("pricing a line by the measure it is sold in", () => {
     });
   });
 
+  it("finishes after correcting a rejected measure without creating a duplicate", async () => {
+    scriptModel([
+      calls("create_invoice_draft", { ...RENNOX, items: [{ ...RENNOX.items[0], custom: { total_liters: "400L" } }] }),
+      calls("create_invoice_draft", RENNOX), says("Created the corrected draft."),
+    ]);
+    const { events } = await run("Invoice Rennox at 4.1 per litre using 400 litres.");
+    expect(events.find(event => event.type === "tool_result")).toMatchObject({ result: { code: "invalid_arguments", retry_safe: true } });
+    expect(events[events.length - 1]).toMatchObject({ reason: "answered" });
+    expect(await billing.listDocs("sales")).toHaveLength(1);
+  });
+
   it("still prices an ordinary line by quantity", async () => {
     scriptModel([
       calls("create_invoice_draft", {
@@ -129,9 +140,7 @@ describe("pricing a line by the measure it is sold in", () => {
     expect(q.items[0].custom?.total_liters).toBe("400");
   });
 
-  it("ignores a price_by naming a column no line carries", async () => {
-    // Left in, the formula multiplies by a missing value and every amount
-    // becomes zero — a silently empty invoice is worse than a wrong one.
+  it("refuses a price_by naming a missing column instead of silently changing the price", async () => {
     scriptModel([
       calls("create_invoice_draft", {
         customer_name: "Acme",
@@ -141,10 +150,7 @@ describe("pricing a line by the measure it is sold in", () => {
       says("ok"),
     ]);
     await run("invoice Acme");
-    const docs = await billing.listDocs("sales");
-    const doc = await billing.getDoc(Number(docs[0].id));
-    expect(doc.unit_price_formula ?? null).toBeNull();
-    expect(invoiceLineAmount(doc.items[0], doc.unit_price_formula)).toBe(100);
+    expect(await billing.listDocs("sales")).toHaveLength(0);
   });
 });
 

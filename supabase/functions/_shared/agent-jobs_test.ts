@@ -49,7 +49,7 @@ function fixture(failTable = "", rpcError = false) {
     rpc: (name: string, args: unknown) => {
       filters.push([name, args]);
       return Promise.resolve({
-        data: rpcError ? null : [{ number: "PO-1", supplier_name: "Supplier" }],
+        data: rpcError ? null : name === "filey_agent_workspace_allowed" ? true : [{ number: "PO-1", supplier_name: "Supplier" }],
         error: rpcError ? {} : null,
       });
     },
@@ -95,6 +95,7 @@ Deno.test("scheduled Telegram HTTP-200 rejection is not a sent message", async (
     await assertRejects(() =>
       tell(fixture().client, "Private briefing", {
         owner: "OWNER",
+        org: "ORG",
         bot: "fixture",
         chat: "42",
       })
@@ -103,7 +104,58 @@ Deno.test("scheduled Telegram HTTP-200 rejection is not a sent message", async (
     globalThis.fetch = old;
   }
   assertEquals(
-    await tell(fixture().client, "briefing", { owner: "OWNER", bot: "", chat: "" }),
+    await tell(fixture().client, "briefing", { owner: "OWNER", org: "ORG", bot: "", chat: "" }),
     "unconfigured"
   );
+});
+
+Deno.test("scheduled private delivery refuses revoked, changed or unreadable workspace authority before sending or logging", async () => {
+  const old = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async () => { sends++; return new Response('{"ok":true}'); };
+  try {
+    for (const result of [
+      { data: false, error: null }, // changed org/role or removed membership
+      { data: null, error: null },
+      { data: "true", error: null },
+      { data: true, error: { message: "private internal fixture" } },
+    ]) {
+      const calls: unknown[] = [];
+      const client = {
+        rpc: (name: string, args: unknown) => { calls.push([name, args]); return Promise.resolve(result); },
+        from: () => { throw new Error("Denied delivery must not create a log"); },
+      } as unknown as SupabaseClient;
+      await assertRejects(() => tell(client, "Private customer briefing", { owner: "OWNER", org: "ORIGINAL", bot: "fixture", chat: "42" }),
+        Error, "Scheduled delivery no longer has workspace access.");
+      assertEquals(calls, [["filey_agent_workspace_allowed", { p_owner: "OWNER", p_org: "ORIGINAL" }]]);
+    }
+    assertEquals(sends, 0);
+  } finally { globalThis.fetch = old; }
+});
+
+Deno.test("scheduled send captures the original identity and destination before awaited authority check", async () => {
+  const old = globalThis.fetch;
+  const config = { owner: "OWNER", org: "ORIGINAL", bot: "original-bot", chat: "42" };
+  const observed: unknown[] = [];
+  const client = {
+    rpc: async (name: string, args: unknown) => {
+      observed.push([name, args]);
+      await Promise.resolve();
+      Object.assign(config, { owner: "OTHER", org: "OTHER", bot: "other-bot", chat: "99" });
+      return { data: true, error: null };
+    },
+    from: () => ({ insert: async (row: unknown) => { observed.push(row); return { error: null }; } }),
+  } as unknown as SupabaseClient;
+  globalThis.fetch = async (url, init) => {
+    observed.push([String(url), JSON.parse(String(init?.body))]);
+    return new Response('{"ok":true,"result":{"message_id":1}}');
+  };
+  try {
+    assertEquals(await tell(client, "Private briefing", config), "sent");
+    assertEquals(observed[0], ["filey_agent_workspace_allowed", { p_owner: "OWNER", p_org: "ORIGINAL" }]);
+    assertStringIncludes(String((observed[1] as unknown[])[0]), "original-bot");
+    assertEquals(((observed[1] as unknown[])[1] as { chat_id: string }).chat_id, "42");
+    assertEquals((observed[2] as { user_id: string; external_id: string }).user_id, "OWNER");
+    assertEquals((observed[2] as { external_id: string }).external_id, "42");
+  } finally { globalThis.fetch = old; }
 });

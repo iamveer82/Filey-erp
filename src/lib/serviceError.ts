@@ -1,3 +1,34 @@
+const walletMessages = new Map([
+  [
+    "This request was already submitted. Refresh your balance before retrying.",
+    "This request was already submitted. Refresh your Coin balance before trying again.",
+  ],
+  [
+    "AI credits are paused while a payment dispute is reviewed.",
+    "Coin spending is paused while a payment dispute is reviewed.",
+  ],
+  [
+    "AI request limit reached. Wait a minute.",
+    "AI request limit reached. Wait a minute before trying again.",
+  ],
+  [
+    "Not enough available AI credits for this request. Add credits or lower the output limit.",
+    "Insufficient credit. Add Coin to continue.",
+  ],
+  [
+    "Insufficient credit. Add Coin to continue.",
+    "Insufficient credit. Add Coin to continue.",
+  ],
+  [
+    "Daily AI spending limit reached. Adjust it in AI Credits.",
+    "Coin spending is temporarily unavailable. Refresh your wallet and try again.",
+  ],
+  [
+    "Task spending limit reached. Adjust it in AI Credits or reduce the task.",
+    "Coin spending is temporarily unavailable. Refresh your wallet and try again.",
+  ],
+]);
+
 /** Translate service failures without exposing provider, SQL or runtime details. */
 export async function serviceError(error: unknown, fallback: string): Promise<Error> {
   const value = error as {
@@ -12,6 +43,8 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
     /* A gateway error may not have a JSON body. */
   }
   const status = value?.context?.status;
+  const walletMessage = walletMessages.get(detail);
+  if (walletMessage) return new Error(walletMessage);
   if (detail === "Connection lost")
     return new Error(
       "Connection lost. Refresh to check whether your request completed before trying again."
@@ -40,6 +73,16 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
       "Choose one AI credit pack or enter a custom amount.",
       "Custom AI credit amounts are not available yet.",
       "Filey AI has no available model for this request. Try a smaller conversation or use your own API key.",
+      "Workspace changed. Reopen Billing before continuing.",
+      "This account already owns Ultra.",
+      "This workspace already has a paid plan. Use Manage billing.",
+      "This workspace already includes cloud access through Ultra.",
+      "Only the workspace owner or an admin can manage billing.",
+      "No subscription on this workspace yet.",
+      "Verify your email before adding AI credits.",
+      "Balance too low",
+      "Choose an available AI credit pack.",
+      "Filey-funded AI is not available yet.",
     ].includes(detail)
   )
     return new Error(detail);
@@ -55,12 +98,12 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
     return new Error("Please sign in to your Filey account again, then try this action.");
   if (status === 429 || /^(Rate limit|Too many attempts)/i.test(detail))
     return new Error("Too many attempts. Please wait a few minutes and try again.");
-  if (
-    /^(This account already owns Ultra\.|This workspace already (has a paid plan|includes cloud access)|Only the workspace owner or an admin|No subscription on this workspace yet\.|Verify your email before|Balance too low|Insufficient AI credits|Your (daily|task) (budget|limit)|Choose an available AI credit pack\.|Filey-funded AI is not available yet\.|Sign in to|Your account changed\.|Your workspace changed\.)/.test(
-      detail
-    )
-  )
-    return new Error(detail);
+  // Do not forward the tail of a provider/database error just because its
+  // beginning resembles a friendly instruction.
+  if (/^Sign in to/.test(detail))
+    return new Error("Please sign in to your Filey account again, then try this action.");
+  if (/^Your (account|workspace) changed\./.test(detail))
+    return new Error("Your account or workspace changed. Reopen this section before trying again.");
   if (status === 403)
     return new Error(
       "You don’t have permission to do this. Ask your workspace owner for help."

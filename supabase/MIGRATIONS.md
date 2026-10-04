@@ -1,5 +1,232 @@
 # Supabase migrations — apply order & convention
 
+## Fresh installer and current upgrade distinction
+
+For an empty Supabase application database, run the complete current
+`schema.sql` as one transaction. It now includes the historical feature chain,
+workspace/channel RPCs, `org_channel_reads` and current authority definitions.
+See [BOOTSTRAP.md](BOOTSTRAP.md) for prerequisites, generated-source maintenance,
+repeatability and disposable PostgreSQL validation. This installation repair is
+local; no cloud project was changed for these tests.
+
+For an existing Filey database, apply only the missing reviewed dated upgrades.
+The canonical fresh installer intentionally refuses an existing untracked
+database. The older apply-order list below documents the upgrade history; do
+not replay the baseline or older authority functions over customer data.
+
+Final disposable fresh-install evidence on 4 October: **93 tables, 1,192
+columns, 143 named functions, zero checked issues**. The actual entire file
+committed from an empty public schema with Supabase-compatible prerequisites.
+Existing Auth accounts were provisioned once; later signups used the real
+trigger. Repeated installation and all 12 current upgrades applied twice preserved
+all saved fixture rows, ownership and funded wallet state. A deliberately
+deleted profile stayed deleted, a changed historical-source receipt failed
+closed, final-stage failure left no app objects, and both full and partial
+legacy installations were refused without altering their saved data. Evidence:
+`output/bootstrap-complete-tests.log` and `output/bootstrap-catalog.json`.
+This is local evidence, not a live-project readback.
+
+## Atomic workflows and numbering — pending, not applied
+
+For an existing database with the documented historical dependencies already
+installed, apply these current upgrades in order after the child, tool-job,
+device and public-document authority repairs documented here:
+
+1. `2026-10-04-atomic-document-save.sql`
+2. `2026-10-04-document-number-authority.sql`
+3. `2026-10-04-atomic-lead-setup.sql`
+4. `2026-10-04-atomic-business-workflows.sql`
+5. `2026-10-04-atomic-recurrence.sql`
+6. `2026-10-04-stripe-invoice-total-parity.sql`
+
+Publish the matching clients/handlers with their RPC contracts. The business
+upgrade adds scoped immutable replay receipts and atomic document, payment,
+stock, sales-order, advance and journal operations. Its narrow non-login,
+non-superuser, non-BYPASSRLS executor inherits authenticated RLS and cannot be
+assumed by API clients. Overdrawn historical author-specific advance pools cannot
+fund new allocations or deposit reductions; note-only edits and safe allocation
+release/cancellation remain available for reconciliation. Recurrence generation
+commits one numbered draft and
+schedule advance together; malformed hidden legacy lines require reconciliation
+instead of a partial copy. The Stripe parity upgrade requires the business
+calculator and changes settlement of existing checkouts to the current totals,
+including advances; it creates no new public checkout capability.
+
+The catalog checker now verifies 32 explicit new RPC signatures, source bodies,
+role/ACL contracts and private replay ledger permissions, including both safe
+advance overloads and the protected receipt-cost integrity helper. Twelve
+internal helper signatures are executable only by the dispatcher role; clients
+and the service role cannot call them directly to bypass replay receipts. Its 21
+regressions include the actual catalog export's source whitelist. Keep the
+separate payroll and subscription-claim serialization upgrades in the release
+chain too. Do not infer that the live schema or Edge deployments already match
+this list.
+
+## Atomic inquiry setup — pending, not applied
+
+Apply `2026-10-04-atomic-lead-setup.sql` after lead-requests, vouchers,
+lead-coupons and their lockdown migrations, then publish the matching
+`lead-contact` handler and request-ID client. The service-only invoker RPC
+validates bounded input and commits the inquiry, optional Freedom voucher,
+coupon and configured-owner notification together. A coupon failure leaves
+none of those rows behind. Stable request IDs replay the original saved
+coupon/expiry and reject a changed form. Enterprise inquiries create no
+license voucher. Repeated email delivery uses the saved lead ID as its provider
+idempotency key; accepted delivery is never automatically resent.
+
+The notification recipient is `platform_config.owner_uid`, not the first
+customer to sign up. On a new self-hosted installation, configure this marker
+to the actual platform administrator's Auth UUID using the database owner;
+never derive it from editable profile text or arbitrary signup order.
+Private contact replay records have no client grants. Existing leads, coupons
+and voucher redemptions are retained. Local PostgreSQL tests prove rollback,
+eight-way identical-request serialization, replay and role restrictions; no
+customer inquiry, email or cloud migration was performed for verification.
+
+## Public document privacy — pending, not applied
+
+Apply `2026-10-04-public-document-privacy.sql` after the generic document and
+customer-portal migrations and their organization columns. It replaces both
+active `get_shared_doc` and legacy `get_shared_invoice`. Public share-token
+output excludes member sharing IDs and ownership/share-token fields. Invoice,
+quotation and purchase-order lines must match their parent organization even
+when old/admin-created rows are malformed; missing organization identity fails
+closed. All other customer document fields, line calculation/format metadata
+and receipt output are preserved. These two token gates remain callable by
+anonymous and signed-in viewers; unshared and targeted-only documents remain
+private. No existing rows are rewritten. Disposable fixtures reproduce the
+original exact functions' leaks before checking repeat application and repaired
+customer-facing output. This upgrade and its canonical mirrors are local only.
+
+## Canonical invitation identity repair — local, not applied
+
+`schema.sql` now uses the verified `auth.users` email, expiring row-locked
+acceptance and existing-member role preservation from the current team
+migration. A forged editable profile email cannot join as an invited recipient
+on a fresh bootstrap. The canonical fragment is tested directly in disposable
+PostgreSQL. The subsequent fresh-installer reconciliation now embeds the
+team-workspaces, channel paging and channel-read migrations. Existing databases
+still need their documented missing upgrades; a local fixture does not verify
+the state of the deployed cloud project.
+
+## Document child authority — pending, not applied
+
+Apply `2026-10-04-document-child-authority.sql` after the shared-record and
+module permissions migrations. Order, quotation and purchase-order lines and
+purchase payments now inherit parent visibility. Only the parent author or a
+current workspace admin can mutate linked child rows; independently shared
+children cannot expose private or foreign-workspace parents. Existing nullable
+unattached rows remain private owner data. No saved rows are changed.
+
+## Tool job authority — pending, not applied
+
+Apply `2026-10-04-tool-job-authority.sql` after `tool-jobs.sql` and
+`2026-09-20-edge-rate-limits.sql`, and deploy its matching `run-tool` handler.
+Clients can create only pending, bounded specifications for supported engines
+without forged outputs. The database atomically admits 15 new jobs per user
+per hour for both engines; running a job does not count it again. Only trusted
+servers can update specifications, claims and results. Users can still read
+their own jobs and cancel pending jobs. Claimed jobs/results remain intact.
+The edge handler claims once and finishes only the exact active claim, with
+separate output paths per claim. Existing queue rows are not rewritten.
+
+## Atomic document save — pending, not applied
+
+Apply `2026-10-04-atomic-document-save.sql` after shared-record, module and
+document-child authority permissions and workspace membership read integrity.
+It extends the existing quote/PO
+transactional save contract to `invoice_docs` and its items, retains all allowed
+document/formatting/tax columns and strips caller-supplied ownership/sharing.
+A rejected line rolls back its header and all replacement lines. Updating a
+shared document requires its author or current workspace admin, including when
+the replacement header is empty. The invoker RPC remains subject to RLS,
+MFA/module gates and existing invoice creation limits. Install before publishing
+the matching MCP atomic save client; no existing records are rewritten.
+
+Replacement lines now retain the original parent author and workspace, including
+an administrator editing a staff member's draft. The private boolean integrity
+helper rejects hidden foreign/null-workspace lines and nondeletable historic
+creators before any destructive replacement. Same-workspace admins may
+reconcile old creators. Ordinary generic invoice and purchase-order saves are
+limited to draft-to-draft changes; finalized saves use the trusted transactional
+business dispatcher. Quotes retain their existing status workflow. This RPC
+restriction is not a blanket prohibition of authorized table REST/import/sync
+writes; those still use the existing RLS and trigger contracts.
+
+## Workspace device authority — pending, not applied
+
+Apply `2026-10-04-workspace-device-authority.sql` after cloud-device-limit and
+workspace-membership-read-integrity. Raw device fingerprints/session IDs are
+visible only to their owner or a current workspace administrator. All registry
+operations require actual membership; stale profiles cannot occupy old team
+slots. A known fingerprint cannot be reassigned to another user. The existing
+20-slot lock, same-owner renewals and revoked-session check remain intact.
+Publish the matching account-specific cloud fingerprint client at the same
+time, retaining each user's existing legacy device registrations.
+
+## AI credit payment safety — pending, not applied
+
+Apply `2026-10-03-ai-credit-payment-safety.sql` after the AI credit, top-up fee
+and video migrations. It adds atomic payment snapshot reconciliation, an ordered
+dispute timestamp and the final wallet definition. Known reversals are debited
+in the same transaction as their top-up, and malformed later reversals roll
+back the entire snapshot. Older or equal-time resolution events cannot clear a payment
+dispute; only a newer verified won event can restore spending. Provider reversal
+bookkeeping and failed AI hold releases remain supported. This adds no user
+refund, withdrawal or transfer endpoint.
+
+The same pending upgrade retires personal task/day spending budgets without
+rewriting stored limits or balances. Coin reservations still require available
+funds and retain request caps, rate limits, dispute blocks and replay protection.
+The public limits action is retired; funded videos do not enable Coin purchases.
+
+Deploy the matching `dodo` and `ai-credits` handlers with this migration.
+Checkout and published readiness now require both the Dodo API key and webhook
+verification key; secret presence does not prove webhook subscriptions, merchant
+identity, bank payout configuration or a completed real payment.
+
+## Current document and stocktake schema — applied 3 October 2026
+
+Applied to `voyrjqgaypiylwskkwpr` using the signed-in Dashboard SQL editor:
+
+1. `2026-10-01-packaging-lists.sql`
+2. `2026-10-03-letters.sql`
+3. `2026-10-03-stocktake-reliability.sql`
+4. `2026-10-03-document-setting-uniqueness.sql`
+
+The first three committed together. Apply Packaging before Letters: the latest
+settings access function must include both modules. The final corrective
+transaction removes the legacy unconditional `(user_id,key)` constraint or
+index regardless of its autogenerated name. It retains ordinary settings'
+per-user uniqueness and document collections' per-workspace uniqueness, with
+bounded lock/statement timeouts and no cascading drops. It fixes the production
+constraint named `app_settings_user_id_key_key`, which the earlier name-only
+drop missed. No business rows, ownership, grants or RLS policies were changed by
+this corrective migration.
+
+Final live readback passed: **88 tables, 1,155 columns, 85 functions, zero checked
+issues**. The runtime checker verifies current RPC/column requirements, all
+45 synced tables' RLS/revisions/realtime publication, exact current feature
+function bodies, document uniqueness, Letter validation and scoped stocktake
+receipt grants/policies. The strengthened checker reproduced the legacy-index
+failure before repair and passed afterward. Metadata-only evidence:
+`output/cloud-schema-2026-10-03.json` and
+`output/cloud-schema-check-2026-10-03.log`.
+
+**9 checker regressions and the full disposable PostgreSQL suite passed**,
+including both legacy constraint names, renamed/reversed standalone indexes,
+repeat application, unchanged stored rows, same-user documents in separate
+workspaces and retained ordinary-setting uniqueness. The stocktake tests also
+verify eight simultaneous retries produce one adjustment and one movement.
+No document or stocktake business RPC was called in production for testing.
+
+Local storage already supports the current collections in its existing
+JSON/SQLite key-value schema. **51 local tests and 20 disposable SQLite checks
+passed**, including upgrade/reopen preservation and current document/receipt
+formats. The customer store was inspected read-only; it required no column,
+`user_version`, or record rewrite. This schema update does not publish the
+pending app, web, desktop, hosted handler or sidecar changes.
+
 ## 23 September 2026 batch (voyrjqgaypiylwskkwpr)
 
 Applied with `supabase db query --linked -f <file>` (this CLI has no `db execute`):
@@ -50,14 +277,19 @@ missing checked requirements. Use `verify-runtime-schema.sql` with
 historical baseline on production: it contains legacy data backfills/deduplication.
 
 This project applies schema as a **baseline + additive idempotent migrations**.
-Every migration uses `create table if not exists` / `add column if not exists` /
-`drop policy if exists … create policy …`, so the whole set is safe to re-run.
+Replay migrations only in their reviewed order. Earlier migrations can replace
+newer function bodies or policies, even when individual statements are
+idempotent. Inspect production first and apply only the missing changes; never
+replay the historical baseline over an existing customer database.
 
-## Apply order (fresh DB or to catch up an existing one)
+## Historical apply order (existing database upgrade reference)
 
 Run in the Supabase Dashboard → SQL Editor (or `supabase db execute --file <f>`):
 
-1. `schema.sql` — baseline: all core tables, RLS, triggers, RPCs, `force_org_id`, atomic counters.
+1. The old baseline established the core tables, RLS, triggers, RPCs,
+   `force_org_id` and atomic counters. Current fresh databases use only the
+   complete canonical installer above. Do not replay its baseline over an
+   existing untracked database.
 2. Feature migrations (additive; order among these does not matter):
    - `follow-ups.sql` — `follow_ups`
    - `tool-jobs.sql` — `tool_jobs`
@@ -257,3 +489,85 @@ Apply `2026-10-01-stripe-subscription-integrity.sql` after the deployed workspac
 
 Applied to `voyrjqgaypiylwskkwpr`. Read-back verified the added observation
 column, denied client writes and service-only RPC execution.
+
+## Removed-member read integrity — pending 3 October 2026
+
+Apply `2026-10-03-workspace-membership-read-integrity.sql` after the team,
+Basic-web and workspace billing ACL migrations. A removed or departed member's
+profile can still select the former workspace; that stale selection must not
+authorize its roster, colleague profiles, organization or company/bank identity.
+The repaired read policies require actual membership. Personal profiles and
+the caller's other memberships/owned organizations remain readable. Current
+members retain shared identity access; only permitted Invoicing members see
+the monthly invoice counter. The cloud-access helper also checks membership.
+The audit trail includes complete private record snapshots, so reading it is
+reserved to current owners/admins. Members may still append events attributed
+to their own authenticated identity; removed members cannot append. Legacy
+`app_users` reads and writes require current membership as well. The audit trail
+remains append-only, and server audit triggers keep their existing authority.
+
+The migration is additive and repeatable, changes no customer rows and is
+included in `schema.sql`. `npm run test:rls:local` reproduces the prior disclosures
+in a disposable database, applies the repair twice and checks denied reads after
+removal/self-leaving, private invoice/payroll audit denial, own-event attribution,
+legacy-user writes, normal member/owner access, module restrictions and helper
+grants. This migration has **not been applied to production**; publishing and
+live schema changes remain on hold.
+
+## Atomic payroll posting — pending 4 October 2026
+
+Apply `2026-10-04-atomic-payroll.sql` before releasing the matching `hr.runPayroll`
+client. One invoker RPC now saves the payslip, both ledger entries and account
+balances in one transaction, bound to the reviewed account and workspace.
+It retains the existing pending-status posting behavior. A failed ledger leg
+rolls back the whole run, and competing runs cannot pay the same employee/period
+twice. Private period claims preserve existing duplicate history and remain
+reserved after payroll/employee deletion; authenticated users cannot rewrite
+claims or a posted payroll's identity/amounts. Status updates remain supported.
+
+`node scripts/test-rls-local.mjs --payroll` uses a disposable PostgreSQL cluster
+to check rollback, balances, concurrent attempts, hidden historic duplicates,
+actor/workspace/module boundaries, malformed periods and claim mutation denial.
+The migration is repeatable and included in `schema.sql`. No live schema changes
+have been made. Older cloud schemas fail closed instead of partially posting.
+
+## Paid entitlement claim serialization — pending 4 October 2026
+
+Apply `2026-10-04-subscription-claim-serialization.sql` after the billing integrity
+migration. Claiming distinct parked Pro purchases now locks and rechecks the
+eligible workspace before changing its subscription/customer binding. Concurrent
+admins cannot consume both paid entitlements for one workspace: the winning
+purchase is bound and the other remains unclaimed. Freedom claims retain their
+existing behavior. The migration is repeatable, changes no stored business rows
+and is included in `schema.sql`.
+
+`node scripts/test-rls-local.mjs --billing-claims` reproduces the old two-purchase
+race in a disposable PostgreSQL cluster and verifies the repair after applying
+it twice, including matching subscription/customer identity and denied anonymous
+execution. This migration has not been applied to production.
+
+## Cloud storage and scheduled-delivery privacy — pending 4 October 2026
+
+Apply `2026-10-04-cloud-storage-privacy.sql` after the storage/tool pipeline and
+`2026-09-30-tool-path-integrity.sql`. It forces the four intended-private buckets
+(`files`, `tool-inputs`, `tool-outputs`, `team-attachments`) to `public=false`,
+preserving object data, file limits and unrelated buckets. Retention is
+service-only, and cleanup verifies that each client-supplied run path belongs
+to that run's owner before deleting the output. This repairs both managed
+default client grants and a forged-path service-cleanup attack.
+
+Apply `2026-10-04-scheduled-agent-privacy.sql` after workspace membership helpers
+and before deploying the matching `agent-jobs` and `overdue-reminders` endpoints.
+Their final delivery check uses one service-only statement to confirm the
+original owner is still an admin of the original active workspace. Revocation,
+workspace changes and lookup failure stop delivery; no provider message is
+sent. The helper is intentionally inaccessible to anonymous/authenticated RPCs.
+
+Both migrations are repeatable and included in the canonical fresh installer.
+`node scripts/test-cloud-privacy-local.mjs` reproduces the old failures using
+synthetic users, applies the repairs twice, verifies private storage, direct
+attachments, job outputs, secret columns, MFA and public-share boundaries, and
+checks that repeated installation preserves the objects. The runtime catalog
+now includes private bucket flags and effective service-function grants. No
+production schema, Storage configuration or Edge deployment was changed or
+independently inspected during this review; release remains on hold.

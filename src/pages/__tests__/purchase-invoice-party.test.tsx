@@ -67,6 +67,7 @@ async function openPurchase() {
 }
 
 beforeEach(() => {
+  localStorage.clear(); localStorage.setItem("filey_data_mode", "local");
   vi.spyOn(window, "scrollTo").mockImplementation(() => {});
   vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Filey test company", currency: "AED", default_template: "classic" } as CompanyProfile);
   vi.spyOn(billing, "listDocs").mockResolvedValue([{ ...invoice, total: 105 }]);
@@ -108,6 +109,7 @@ describe("purchase invoice parties", () => {
     vi.mocked(billing.getCompany).mockResolvedValue({ name: "Indian company", currency: "INR", country_code: "IN", default_template: "classic" } as CompanyProfile);
     const view = render(<MemoryRouter><AuthProvider><UIProvider><Invoicing mode="purchase" /></UIProvider></AuthProvider></MemoryRouter>);
     await view.findByText("PINV-PARTY");
+    setCacheOrg("purchase-test-org", "purchase-test-user");
     fireEvent.click(view.getByRole("button", {name: "New purchase invoice"}));
     expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
     expect(view.getByText("Supplier Email / GSTIN", {selector: "label"})).toBeVisible();

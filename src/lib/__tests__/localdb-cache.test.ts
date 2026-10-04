@@ -16,6 +16,13 @@ const invoke = vi.fn(async (cmd: string, args: any) => {
     for (const [key, value] of args.entries) store.set(key, value);
     return null;
   }
+  if (cmd === "cache_compare_set_many") {
+    if (args.expected.some(([key, value]: [string, string | null]) => (store.get(key) ?? null) !== value)) return false;
+    for (const [key, value] of args.entries) {
+      if (value === null) store.delete(key); else store.set(key, value);
+    }
+    return true;
+  }
   return null;
 });
 
@@ -36,11 +43,57 @@ async function freshClient() {
 beforeEach(() => store.clear());
 
 describe("localdb desktop read cache", () => {
+  it("keeps a selected nested object isolated from a later unrelated save", async () => {
+    const client = await freshClient();
+    await client.from("widgets").insert([{ id: 1, custom: { rate: 10 } }, { id: 2, name: "Other" }]);
+    const selected = (await client.from("widgets").select().eq("id", 1).single()).data;
+    selected.custom.rate = 999;
+    expect(JSON.parse(store.get("localdb:widgets")!)[0].custom.rate).toBe(10);
+    await client.from("widgets").update({ name: "Renamed" }).eq("id", 2);
+    expect(JSON.parse(store.get("localdb:widgets")!)[0].custom.rate).toBe(10);
+  });
+
+  it("does not publish nested mutations from an aborted transaction", async () => {
+    const client = await freshClient();
+    const { withLocalTransaction } = await import("../localdb");
+    await client.from("widgets").insert({ id: 1, custom: { rate: 10 } });
+    await expect(withLocalTransaction(async staged => {
+      const row = (await staged.from("widgets").select().single()).data;
+      row.custom.rate = 999;
+      await staged.from("widgets").update({ name: "Abandoned" }).eq("id", 1);
+      throw new Error("Abandon changes");
+    })).rejects.toThrow("Abandon changes");
+    expect((await client.from("widgets").select().single()).data.custom.rate).toBe(10);
+    expect(JSON.parse(store.get("localdb:widgets")!)[0].custom.rate).toBe(10);
+  });
+
+  it("does not retain a caller's mutable input inside a committed memo", async () => {
+    const client = await freshClient();
+    const input = { id: 1, custom: { rate: 10 } };
+    await client.from("widgets").insert(input);
+    input.custom.rate = 999;
+    await client.from("widgets").insert({ id: 2, name: "Other" });
+    expect(JSON.parse(store.get("localdb:widgets")!)[0].custom.rate).toBe(10);
+  });
+
+  it("preserves blank array entries and literal prototype-shaped JSON keys during copies", async () => {
+    const client = await freshClient();
+    const fields = new Array(3); fields[0] = "First";
+    const custom = JSON.parse('{"__proto__":{"label":"Literal field"}}');
+    await client.from("widgets").insert({ id: 1, fields, custom });
+    const saved = JSON.parse(store.get("localdb:widgets")!)[0];
+    expect(saved.fields).toEqual(["First", null, null]);
+    const result = (await client.from("widgets").select().single()).data;
+    expect(Object.prototype.hasOwnProperty.call(result.custom, "__proto__")).toBe(true);
+    expect(result.custom.__proto__).toEqual({ label: "Literal field" });
+    expect(({} as Record<string, unknown>).label).toBeUndefined();
+  });
+
   it("keeps a workspace and its journal intact after a failed snapshot transaction, then retries", async () => {
     const client = await freshClient();
     const { replaceWorkspaceSnapshot, journalSnapshot } = await import("../localdb");
     await client.from("products").insert({id: 1, name: "Device product"});
-    await client.from("orders").insert({id: 2, name: "Device order"});
+    await client.from("orders").insert({id: 2, order_number: "DEVICE-2", name: "Device order"});
     const before = await journalSnapshot();
     const snapshot = new Map([
       ["products", [{id: 1, name: "Cloud product"}]],
@@ -48,7 +101,7 @@ describe("localdb desktop read cache", () => {
     ]);
     const savedInvoke = invoke.getMockImplementation()!;
     invoke.mockImplementation(async (cmd, args) => {
-      if (cmd === "cache_set_many") throw new Error("Disk full");
+      if (cmd === "cache_compare_set_many") throw new Error("Disk full");
       return savedInvoke(cmd, args);
     });
     try {
@@ -73,7 +126,7 @@ describe("localdb desktop read cache", () => {
     const before = await journalSnapshot();
     const savedInvoke = invoke.getMockImplementation()!;
     invoke.mockImplementation(async (cmd, args) => {
-      if (cmd === "cache_set_many") throw new Error("Disk full");
+      if (cmd === "cache_compare_set_many") throw new Error("Disk full");
       return savedInvoke(cmd, args);
     });
     try {
@@ -86,12 +139,24 @@ describe("localdb desktop read cache", () => {
     expect((await restarted.from("products").select().single()).data).toMatchObject({ name: "Local", sync_revision: 3 });
     expect((await (await import("../localdb")).journalSnapshot()).tables.products.changed).toEqual([1]);
   });
-  it("reads storage once, then serves repeat queries from memory", async () => {
+  it("revalidates storage and isolates results while reusing unchanged parsing and blob hydration", async () => {
     const c = await freshClient();
-    await c.from("widgets").insert([{ name: "A" }, { name: "B" }]);
-    const before = reads();
-    for (let i = 0; i < 5; i++) await c.from("widgets").select();
-    expect(reads()).toBe(before); // five queries, zero extra round trips
+    const raw = JSON.stringify([{ name: "A", logo: { __blob: "fixture-logo" } }, { name: "B" }]);
+    const logo = "logo".repeat(4096);
+    store.set("localdb:widgets", raw);
+    store.set("localdb:blob:fixture-logo", logo);
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      const before = reads();
+      const original = (await c.from("widgets").select()).data[0];
+      for (let i = 0; i < 5; i++) await c.from("widgets").select();
+      expect(reads()).toBe(before + 6);
+      const next = (await c.from("widgets").select()).data[0];
+      expect(next).not.toBe(original);
+      expect(next.logo).toBe(logo);
+      expect(parse.mock.calls.filter(([value]) => value === raw)).toHaveLength(1);
+      expect(invoke.mock.calls.filter(([cmd, args]) => cmd === "cache_get" && args.key === "localdb:blob:fixture-logo")).toHaveLength(1);
+    } finally { parse.mockRestore(); }
   });
 
   it("does not serve stale rows after an insert", async () => {

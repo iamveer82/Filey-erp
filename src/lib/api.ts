@@ -5,7 +5,7 @@ import { validateWorkItem, type WorkInput, type WorkItem } from "./workItems";
 import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured, supabase, invokeFn } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent, setWorkspaceTransition } from "./dataMode";
-import { applyRoundOff, r2 } from "./money";
+import { applyRoundOff, r2, isPostedInvoiceStatus } from "./money";
 import { isCreditNote } from "./einvoice";
 import {
   splitItemMeta,
@@ -15,7 +15,8 @@ import {
   netByTaxCategory,
 } from "./docItems";
 import { getExchangeRates, docAmountInAed, unratedCurrency } from "./exchange-rates";
-import { nextDocNumber } from "./docNumber";
+import { allocateDocumentNumber } from "./documentNumbers";
+import { generateRecurringInvoice } from "./recurrenceGeneration";
 import { checkFreeInvoiceCap } from "./license";
 import { localYmd, todayYmd } from "./format";
 import {
@@ -33,6 +34,14 @@ import { loadModuleAccess } from "./moduleAccess";
 import { validateExpense, type ExpenseDetails } from "./expenseDetails";
 import { localWorkspaceOwner } from "./localAuth";
 import { withTeamAttachments, validateTeamAttachments, type TeamAttachment } from "./teamAttachments";
+
+/** A confirmed rejection, unlike an unacknowledged stocktake response. */
+export class StocktakeChangedError extends Error {
+  constructor(message = "Stock changed after this count was opened. Reload stock and review the physical count before posting again.") {
+    super(message);
+    this.name = "StocktakeChangedError";
+  }
+}
 
 // ===== Types =====
 export interface Product {
@@ -422,6 +431,8 @@ export interface InvoicePayment {
   paid_at: string;
 }
 export interface InvoiceDoc {
+  /** Amount of customer advance credit applied in this document's currency. */
+  advance_applied?: number;
   einvoice?: import("./einvoice").EInvoiceDetails;
   original_invoice_number?: string | null;
   original_invoice_date?: string | null;
@@ -442,7 +453,7 @@ export interface InvoiceDoc {
   seller_email?: string;
   seller_phone?: string;
   logo?: string;
-  customer_id?: number;
+  customer_id?: number | null;
   customer_name: string;
   customer_address?: string;
   customer_trn?: string;
@@ -554,6 +565,13 @@ export function setCacheOrg(orgId?: string | null, userId?: string): void {
 /** A consumer must not use an anonymous/default cache for account data. */
 export function getCacheScope(): string | null {
   return activeCacheOrg.includes(":user:") ? activeCacheOrg : null;
+}
+
+/** The selected organization, excluding the temporary sign-in cache. */
+export function getCacheOrg(): string | null {
+  const scope = getCacheScope();
+  const org = scope?.slice(0, scope.lastIndexOf(":user:"));
+  return org && org !== "default" ? org : null;
 }
 
 async function cacheGet<T>(key: string): Promise<T | null> {
@@ -703,11 +721,22 @@ export function outboxOpIsDoomed(e: unknown): boolean {
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
-  if (flushing || !isConfigured || !onLine()) return;
+  if (flushing || !isConfigured || !onLine() || !getCacheScope() || !supabase) return;
   flushing = true;
   const identity = cacheIdentity;
   try {
     const list = await pendingCloudWrites();
+    if (!list.length) return;
+    // A restored account has a temporary default scope while its profile loads.
+    // Verify the real destination before replaying a previous workspace's saves.
+    const { data: auth, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (!auth.session) return;
+    const { data: orgId, error: orgError } = await supabase.rpc("current_org");
+    if (orgError) throw orgError;
+    assertWorkspaceCurrent();
+    if (identity !== cacheIdentity || isLocalMode()
+      || activeCacheOrg !== `${orgId || "default"}:user:${auth.session.user.id}`) return;
     for (const entry of list) {
       // The previous network request may have completed after a storage switch.
       // Never replay a queued cloud save through the local client or a new account.
@@ -717,12 +746,13 @@ export async function flushOutbox(): Promise<void> {
       try {
         op = JSON.parse(entry.op);
       } catch {
-        await outboxRemove(entry.id);
+        // Unreadable legacy entries have no provable owner. Preserve for recovery.
         continue;
       }
       // Older unscoped entries cannot safely be attributed to the current account.
       // Keep them available for explicit recovery instead of replaying into another company.
-      if (op._workspace !== activeCacheOrg) continue;
+      if (!op || typeof op !== "object" || op._workspace !== activeCacheOrg
+        || !["insert", "update", "delete"].includes(op.k)) continue;
       try {
         if (op.k === "insert") {
           const { error } = await sb().from(op.t).insert(op.row);
@@ -778,20 +808,25 @@ async function readCached<T>(
   run: () => Promise<T>,
   empty: T,
   tables?: readonly string[],
-  retry = true
+  retry = true,
+  fresh = false
 ): Promise<T> {
   assertWorkspaceCurrent();
-  if (isLocalMode()) return run(); // local store is the source of truth
-  const identity = cacheIdentity;
+  const identity = cacheIdentity, local = isLocalMode();
   const current = () => {
     assertWorkspaceCurrent();
-    if (identity !== cacheIdentity || isLocalMode()) throw new Error("Your workspace changed. Reopen this section.");
+    if (identity !== cacheIdentity || local !== isLocalMode()) throw new Error("Your workspace changed. Reopen this section.");
   };
-  // Membership itself is loaded by a separate RPC, never this cache. Restricted
-  // staff always read through RLS so a former role's cached rows cannot leak.
+  if (local) {
+    const data = await run(); // local store is the source of truth
+    current();
+    return data;
+  }
+  // Membership itself is loaded by a separate RPC, never this cache. Staff
+  // always read through RLS: unrestricted modules do not grant admin row access.
   const access = await loadModuleAccess();
   current();
-  if (!access.admin && access.modules !== null) {
+  if (!access.admin || fresh) {
     const data = await run();
     current();
     return data;
@@ -913,6 +948,138 @@ async function online<T>(run: () => Promise<T>, mutates = true): Promise<T> {
   return result;
 }
 
+type WorkflowResult = { id: number; payment_id?: number | null; removed?: number };
+type PendingWorkflow = { request: string; payload: Record<string, any>; activeUntil?: number; owner?: string; preflightChecked?: boolean };
+const workflowRenderer = crypto.randomUUID();
+async function workflowRegistry<T>(key: string, checkScope: () => void, change: (rows: Record<string, PendingWorkflow>) => T): Promise<T> {
+  return withLocalTransaction(async client => {
+    checkScope();
+    const found = await client.from("local_business_workflow_pending").select("*").eq("registry_key", key).maybeSingle();
+    if (found.error) throw found.error;
+    // Preserve requests created before the CAS-backed registry was introduced.
+    const raw = found.data ? null : await readDeviceValue(key); checkScope();
+    let rows: Record<string, PendingWorkflow>;
+    try { rows = found.data ? structuredClone(found.data.requests) : (raw ? JSON.parse(raw) : {}); } catch { throw new Error("Pending saves could not be read. Reopen Filey before retrying."); }
+    if (!rows || typeof rows !== "object" || Array.isArray(rows)) throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
+    const value = change(rows);
+    if (found.data) await sUpdate("local_business_workflow_pending", found.data.id, { requests: rows }, client);
+    else await sInsert("local_business_workflow_pending", { registry_key: key, requests: rows }, client);
+    checkScope();
+    return value;
+  }, { retrySafe: true });
+}
+function canonicalWorkflow(value: any): any {
+  if (Array.isArray(value)) return value.map(canonicalWorkflow);
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort()
+    .filter(key => value[key] !== undefined).map(key => [key, canonicalWorkflow(value[key])]));
+  return value;
+}
+/** A lost acknowledgement retains the same request and reviewed FX snapshot.
+ * Independent active calls have distinct identities. Only an unconfirmed retry
+ * reuses its receipt; callers can also supply an explicit request identity. */
+async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "advance" | "stock", action: string,
+  payload: Record<string, any>, localRun: (client: any, payload: Record<string, any>) => Promise<WorkflowResult>, requestId?: string,
+  requested?: Record<string, any>, preflight?: () => Promise<void>): Promise<WorkflowResult> {
+  const checkScope = workspaceGuard(), scope = activeCacheOrg, local = isLocalMode();
+  const capturedOrg = getCacheOrg(), capturedActor = getCacheScope()?.split(":user:").slice(-1)[0];
+  const normalize = (actual: Record<string, any>) => {
+    const value = { ...actual }; delete value.rates;
+    if (requested?.header) {
+      value.header = { ...value.header };
+      if (!requested.header.fx_rate) delete value.header.fx_rate;
+      if (!requested.header.tax_country_code) delete value.header.tax_country_code;
+    }
+    return value;
+  };
+  const logical = normalize(requested ?? payload);
+  const fingerprint = JSON.stringify(canonicalWorkflow(logical));
+  const storedKey = `business-workflow:${local ? "local" : "cloud"}:${scope}`;
+  const prefix = `${kind}:${action}:${fingerprint}:`;
+  let pending: PendingWorkflow | undefined;
+  let durableId = "";
+  try {
+    checkScope();
+    pending = await workflowRegistry(storedKey, checkScope, rows => {
+      // Simultaneous equal deltas/payments can be distinct intentional actions.
+      // Only an inactive unconfirmed request is a retry; active calls keep their
+      // own identity unless the caller explicitly supplies the same request ID.
+      if (!requestId && Object.entries(rows).some(([key, value]) => key.startsWith(prefix) && value?.owner !== workflowRenderer && value?.activeUntil && value.activeUntil > Date.now()))
+        throw new Error("An unconfirmed action is still active in another window. Reopen that window or retry after five minutes to recover its receipt.");
+      const prior = Object.entries(rows).find(([key, value]) => key.startsWith(prefix) && value &&
+        (requestId ? value.request === requestId : !(value.activeUntil && value.activeUntil > Date.now())));
+      const value: PendingWorkflow = prior?.[1] ?? { request: requestId || crypto.randomUUID(), payload: JSON.parse(JSON.stringify(payload)) };
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.request) || !value.payload || typeof value.payload !== "object")
+        throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
+      const previousLogical = normalize(value.payload);
+      if (JSON.stringify(canonicalWorkflow(previousLogical)) !== fingerprint) throw new Error("Pending changes differ from this request. Reopen the document before retrying.");
+      if (!prior && Object.keys(rows).length >= 64) throw new Error("Review the pending document actions before starting more. Reopen and retry any unconfirmed save or payment.");
+      durableId = prefix + value.request;
+      rows[durableId] = value;
+      value.activeUntil = Date.now() + 5 * 60_000; value.owner = workflowRenderer;
+      return value;
+    });
+    checkScope();
+    let result: WorkflowResult;
+    if (local) {
+      result = await withLocalTransaction(async client => {
+        checkScope();
+        const receiptKey = `${scope}:${pending!.request}`;
+        const previous = await client.from("local_business_workflow_requests").select("*").eq("request_key", receiptKey).maybeSingle();
+        if (previous.error) throw previous.error;
+        if (previous.data) {
+          if (previous.data.fingerprint !== fingerprint) throw new Error("This request was already used for different changes.");
+          return previous.data.result as WorkflowResult;
+        }
+        await assertLocalWorkflowAuthority(kind, action, pending!.payload, client, capturedActor);
+        const output = await localRun(client, pending!.payload);
+        checkScope();
+        await sInsert("local_business_workflow_requests", { request_key: receiptKey, fingerprint, result: output }, client);
+        return output;
+      });
+    } else {
+      if (!capturedOrg || !capturedActor) throw new Error("Reconnect your workspace account before saving.");
+      // A save whose acknowledgement was lost may itself have consumed the
+      // last allowed invoice. Recover its receipt before repeating that cap
+      // check, while a never-dispatched request must still pass the preflight.
+      if (preflight && !pending.preflightChecked) {
+        try { await preflight(); checkScope(); }
+        catch (error) {
+          await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; }).catch(() => {});
+          throw error;
+        }
+        await workflowRegistry(storedKey, checkScope, rows => { rows[durableId].preflightChecked = true; });
+      }
+      checkScope();
+      const { data, error } = await sb().rpc(kind === "order" ? "filey_order_workflow" : kind === "journal" ? "filey_journal_workflow" : kind === "advance" ? "filey_advance_workflow" : kind === "stock" ? "filey_stock_workflow" : "filey_business_workflow", {
+        ...(kind === "invoice" || kind === "po" ? { p_kind: kind } : {}), p_action: action, p_payload: pending.payload,
+        p_request: pending.request, p_actor: capturedActor, p_org: capturedOrg,
+      });
+      checkScope();
+      if (error) {
+        // A SQL rejection rolled back. Transport failures may arrive after a
+        // commit and retain the exact reviewed payload/FX for reconciliation.
+        if (error.code && !["PGRST000", "PGRST001", "PGRST002", "57014"].includes(error.code))
+          await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; });
+        if (["PGRST202", "42883"].includes(error.code)) throw new Error("This workflow needs the latest cloud database update. Nothing was posted.");
+        throw error;
+      }
+      result = data as WorkflowResult;
+    }
+    checkScope();
+    const validId = (value: unknown) => (typeof value === "number" || typeof value === "string") && String(value).trim() !== "" && Number.isSafeInteger(Number(value)) && Number(value) > 0;
+    if (!result || !validId(result.id) || (payload.id != null && Number(result.id) !== Number(payload.id)) ||
+      (["payment-add", "payment-remove"].includes(action) && !validId(result.payment_id)) ||
+      (result.payment_id != null && (!validId(result.payment_id) || (payload.payment_id != null && Number(result.payment_id) !== Number(payload.payment_id)))))
+      throw new Error("The action could not be confirmed. Reopen it and retry to recover the same receipt.");
+    await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; });
+    return { ...result, id: Number(result.id), ...(result.payment_id == null ? {} : { payment_id: Number(result.payment_id) }) };
+  } finally {
+    if (pending) await workflowRegistry(storedKey, checkScope, rows => {
+      const row = rows[durableId]; if (row?.owner === workflowRenderer) { delete row.activeUntil; delete row.owner; }
+    }).catch(() => {});
+  }
+}
+
 // ---- generic Supabase helpers ----
 async function sList<T>(
   table: string,
@@ -991,7 +1158,7 @@ async function sInsert(
 /** Quotes and POs share the same header/line save contract. */
 async function saveDocumentLines(
   table: "quotations" | "purchase_orders", itemTable: string, fk: string,
-  row: Record<string, unknown>, items: Record<string, unknown>[], id?: number
+  row: Record<string, unknown>, items: Record<string, unknown>[], id?: number, transaction: any = null
 ): Promise<number> {
   if (items.length > 500) throw new Error("A document supports at most 500 lines.");
   const mode = isLocalMode(), scope = activeCacheOrg;
@@ -1001,7 +1168,7 @@ async function saveDocumentLines(
     if (error) throw error;
     return Number(data);
   }
-  return withLocalTransaction(async (client) => {
+  const save = async (client: any) => {
     checkScope();
     const stale = id ? await sChildren<{ id: number }>(itemTable, fk, id, undefined, client) : [];
     const docId = id || await sInsert(table, row, client);
@@ -1010,7 +1177,8 @@ async function saveDocumentLines(
     await sDeleteMany(itemTable, stale.map((line) => line.id), client);
     checkScope();
     return docId;
-  });
+  };
+  return transaction ? save(transaction) : withLocalTransaction(save);
 }
 
 /** Rows per round trip. A 5000-row import in one request is a body big enough
@@ -1159,6 +1327,7 @@ type StockCtx = {
   ref?: string;
   note?: string;
   date?: string; // yyyy-mm-dd; defaults to now
+  workflow_kind?: string; workflow_id?: number; cost_before?: number;
 };
 
 /** Weighted-average unit cost after folding a receipt into current stock.
@@ -1185,8 +1354,8 @@ async function applyMovingAverageCost(
   recvQty: number,
   unitCost: number,
   client: any = null,
-): Promise<void> {
-  if (!productId || !(recvQty > 0) || !(unitCost > 0)) return;
+): Promise<number | undefined> {
+  if (!productId || !(recvQty > 0)) return;
   try {
     const db = client ?? sb();
     const { data, error } = await db
@@ -1197,11 +1366,12 @@ async function applyMovingAverageCost(
     if (error) throw error;
     const onHand = Math.max(0, Number(data?.quantity) || 0);
     const oldCost = Number(data?.cost_price) || 0;
-    const next = nextAvgCost(onHand, oldCost, recvQty, unitCost);
+    const next = unitCost > 0 ? nextAvgCost(onHand, oldCost, recvQty, unitCost) : oldCost;
     if (next !== oldCost) {
       const updated = await db.from("products").update({ cost_price: next }).eq("id", productId);
       if (updated.error) throw updated.error;
     }
+    return oldCost;
   } catch (e) {
     if (client && isLocalMode()) throw e;
     console.warn("Moving-average cost update failed", e);
@@ -1230,10 +1400,11 @@ async function adjustProductStock(
     // Local transactions stage this delta; the missing-cloud-RPC fallback is stepwise.
     const { data: row, error: fe } = await db
       .from("products")
-      .select("quantity")
+      .select("quantity,user_id,org_id")
       .eq("id", productId)
       .single();
     if (fe) throw new Error(`Could not read product stock: ${fe.message}`);
+    if (isLocalMode() && row && !localRowOwnedByActor(row)) throw new Error("Open cloud mode to change stock owned by another workspace author.");
     // NOT clamped at zero. Clamping loses the overshoot, and every stock move
     // here has a reverse: selling 5 from a stock of 3 clamped to 0, then
     // reverting that invoice added 5 back and left 5 on hand where 3 had been.
@@ -1256,6 +1427,7 @@ async function adjustProductStock(
       type: ctx?.type ?? "adjust",
       ref: ctx?.ref?.trim() || null,
       note: ctx?.note?.trim() || null,
+      workflow_kind: ctx?.workflow_kind ?? null, workflow_id: ctx?.workflow_id ?? null, cost_before: ctx?.cost_before ?? null,
       moved_at: ctx?.date
         ? new Date(`${ctx.date}T12:00:00`).toISOString()
         : new Date().toISOString(),
@@ -1362,11 +1534,11 @@ async function migrateLegacyStockIssues(): Promise<void> {
 }
 
 export const erp = {
-  products: () =>
+  products: (options?: { fresh?: boolean }) =>
     readCached<Product[]>(
       "erp_products",
       () => sList<Product>("products", [{ col: "name", asc: true }]),
-      [], ["products"]
+      [], ["products"], true, options?.fresh === true
     ),
   createProduct: (input: Omit<Product, "id" | "created_at">) => {
     const row = clean(input as Record<string, unknown>);
@@ -1385,10 +1557,10 @@ export const erp = {
   },
   updateStock: (productId: number, delta: number, note?: string) =>
     online(async () => {
-      // Atomic — avoids lost updates when two clients adjust stock at once.
-      await adjustProductStock(productId, delta, {
-        type: "adjust",
-        note: note ?? "Manual stock update",
+      if (!Number.isSafeInteger(productId) || productId <= 0 || !Number.isFinite(delta) || delta !== Number(delta.toFixed(3))) throw new Error("Choose a product and enter a quantity with at most three decimals.");
+      await businessWorkflow("stock", "adjust", { id: productId, delta, type: "adjust", note: note ?? "Manual stock update" }, async client => {
+        await adjustProductStock(productId, delta, { type: "adjust", note: note ?? "Manual stock update" }, client);
+        return { id: productId };
       });
     }),
   /** Record a manual stock entry: applies the delta to the product's stock
@@ -1405,16 +1577,80 @@ export const erp = {
     online(async () => {
       const q =
         type === "adjust" ? Number(qty) : Math.abs(Number(qty));
-      if (!Number.isFinite(q) || !Number.isInteger(productId) || productId <= 0)
+      if (!["in", "out", "adjust"].includes(type) || !Number.isFinite(q) || q !== Number(q.toFixed(3)) || !Number.isInteger(productId) || productId <= 0)
         throw new Error("Choose a product and enter a finite stock quantity.");
       if (q === 0) return;
       const delta = type === "out" ? -q : q;
-      await adjustProductStock(productId, delta, {
-        type,
-        ref: reference,
-        note,
-        date,
+      await businessWorkflow("stock", "adjust", clean({ id: productId, delta, type, ref: reference, note, date }), async client => {
+        await adjustProductStock(productId, delta, { type, ref: reference, note, date }, client);
+        return { id: productId };
       });
+    }),
+  /** An absolute physical count with a durable request receipt. Retrying the
+   *  same request confirms its result instead of applying its delta again. */
+  recordStocktake: (productId: number, counted: number, expected: number, requestId: string): Promise<number> =>
+    online(async () => {
+      const checkWorkspace = workspaceGuard();
+      const quantityValid = (n: number) => Number.isFinite(n) && Math.abs(n) < 100000000000
+        && Number(n.toFixed(3)) === n;
+      if (!Number.isSafeInteger(productId) || productId <= 0 || !quantityValid(counted)
+        || counted < 0 || !quantityValid(expected)
+        || typeof requestId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(requestId))
+        throw new Error("Enter a valid physical quantity with at most 3 decimal places.");
+      const delta = Number((counted - expected).toFixed(3));
+      if (!quantityValid(delta))
+        throw new Error("Enter a valid physical quantity with at most 3 decimal places.");
+      const client = sb(); // Enforce the active device owner before using its transaction client.
+      if (!isLocalMode()) {
+        const { data, error } = await client.rpc("filey_record_stocktake", {
+          p_id: productId, p_counted: counted, p_expected: expected, p_request: requestId,
+        });
+        checkWorkspace();
+        if (error) {
+          if (["PGRST202", "42883"].includes(error.code))
+            throw new Error("Stocktake posting needs the latest cloud database update. Your count was not posted.");
+          if (error.code === "40001") throw new StocktakeChangedError(error.message);
+          throw new Error(error.message || "Stocktake could not be confirmed. Retry the same count request.");
+        }
+        if ((typeof data !== "number" && typeof data !== "string") || String(data).trim() === ""
+          || !Number.isFinite(Number(data)) || Number(data) !== counted)
+          throw new Error("Stocktake could not be confirmed. Retry the same count request.");
+        return Number(data);
+      }
+      // Device receipts deliberately stay local; they are not pending cloud
+      // writes. The device workspace/account is part of the request key.
+      const receiptId = `${activeCacheOrg}:${requestId.toLowerCase()}`;
+      const result = await withLocalTransaction(async transaction => {
+        checkWorkspace();
+        const { data: product, error: readError } = await transaction.from("products")
+          .select("quantity").eq("id", productId).single();
+        if (readError) throw new Error("Product not found or stock access denied.");
+        checkWorkspace();
+        const { data: receipt, error: receiptError } = await transaction.from("local_stocktake_requests")
+          .select("*").eq("id", receiptId).maybeSingle();
+        if (receiptError) throw new Error(receiptError.message);
+        if (receipt) {
+          if (receipt.product_id !== productId || receipt.expected_quantity !== expected || receipt.counted_quantity !== counted)
+            throw new Error("This stocktake request was already used for a different count.");
+          checkWorkspace();
+          return counted;
+        }
+        const quantity = Number(product.quantity ?? 0);
+        if (!Number.isFinite(quantity)) throw new Error("Product stock could not be read. Reload stock before posting a count.");
+        if (quantity !== expected) throw new StocktakeChangedError();
+        await sUpdate("products", productId, { quantity: counted }, transaction);
+        if (delta !== 0) await sInsert("stock_movements", {
+          product_id: productId, qty: delta, type: "adjust", ref: "Stocktake",
+          note: `Counted ${counted}, book ${expected}`, moved_at: new Date().toISOString(),
+        }, transaction);
+        await sInsert("local_stocktake_requests", {
+          id: receiptId, product_id: productId, expected_quantity: expected, counted_quantity: counted,
+        }, transaction);
+        checkWorkspace();
+        return counted;
+      });
+      checkWorkspace();
+      return result;
     }),
   /** All stock movements, keyed by product id, oldest first (one read). */
   stockMovements: () =>
@@ -1453,58 +1689,18 @@ export const erp = {
       () => sList<Order>("orders", [{ col: "id", asc: false }]),
       [], ["orders"]
     ),
-  createOrder: (orderNumber: string, customerName: string, total: number) => {
-    const row = {
-      order_number: orderNumber,
-      customer_name: customerName,
-      status: "draft",
-      total,
-    };
-    return write({ k: "insert", t: "orders", row }, () =>
-      sInsert("orders", row), -1
-    );
-  },
+  createOrder: (orderNumber: string, customerName: string, total: number) =>
+    online(async () => (await businessWorkflow("order", "save", { header: { order_number: orderNumber, customer_name: customerName, status: "draft", total }, items: [] },
+      (client, payload) => localOrderWorkflow("save", payload, client))).id),
   createOrderWithItems: (
-    orderNumber: string,
-    customerName: string,
-    lines: { product_id: number; quantity: number; unit_price: number }[],
-    total: number,
-    customerId?: number
-  ) =>
-    online(async () => {
-      const orderId = await sInsert("orders", {
-        order_number: orderNumber,
-        customer_name: customerName,
-        customer_id: customerId ?? null,
-        status: "draft",
-        total,
-      });
-      if (lines.length) {
-        const { error: itemsErr } = await sb()
-          .from("order_items")
-          .insert(
-            lines.map((l) => ({
-              order_id: orderId,
-              product_id: l.product_id,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-            }))
-          );
-        if (itemsErr) throw itemsErr;
-        for (const l of lines) {
-          // Atomic decrement (clamped at 0 server-side).
-          await adjustProductStock(l.product_id, -l.quantity, {
-            type: "order",
-            ref: `Order #${orderId}`,
-          });
-        }
-      }
-      return orderId;
-    }),
+    orderNumber: string, customerName: string,
+    lines: { product_id: number; quantity: number; unit_price: number }[], total: number, customerId?: number
+  ) => online(async () => (await businessWorkflow("order", "save", {
+      header: { order_number: orderNumber, customer_name: customerName, customer_id: customerId ?? null, status: "draft", total }, items: lines },
+      (client, payload) => localOrderWorkflow("save", payload, client))).id),
   setOrderStatus: (orderId: number, status: string) =>
-    write({ k: "update", t: "orders", id: orderId, row: { status } }, () =>
-      sUpdate("orders", orderId, { status }), undefined
-    ),
+    online(async () => { await businessWorkflow("order", "status", { id: orderId, status },
+      (client, payload) => localOrderWorkflow("status", payload, client)); }),
   /** Fetch an order plus its line items (for editing). */
   getOrder: (orderId: number) =>
     online(async () => {
@@ -1527,104 +1723,13 @@ export const erp = {
   /** Update an order header + replace its line items, re-adjusting stock by
    *  the net delta (old qty restored, new qty removed) atomically per product. */
   updateOrder: (
-    orderId: number,
-    patch: {
-      customer_name?: string;
-      status?: string;
-      total: number;
-      customer_id?: number | null;
-    },
+    orderId: number, patch: { customer_name?: string; status?: string; total: number; customer_id?: number | null },
     lines: { product_id: number; quantity: number; unit_price: number }[]
-  ) =>
-    online(async () => {
-      const { data: oldItems, error: oe } = await sb()
-        .from("order_items")
-        .select("product_id,quantity")
-        .eq("order_id", orderId);
-      if (oe) throw oe;
-      const oldMap = new Map<number, number>();
-      for (const it of (oldItems ?? []) as {
-        product_id: number | null;
-        quantity: number;
-      }[]) {
-        if (it.product_id != null)
-          oldMap.set(it.product_id, (oldMap.get(it.product_id) ?? 0) + it.quantity);
-      }
-      const newMap = new Map<number, number>();
-      for (const l of lines)
-        newMap.set(l.product_id, (newMap.get(l.product_id) ?? 0) + l.quantity);
-
-      const headerRow = clean({
-        customer_name: patch.customer_name,
-        status: patch.status,
-        customer_id: patch.customer_id,
-        total: patch.total,
-      });
-      const { error: ue } = await sb()
-        .from("orders")
-        .update(headerRow)
-        .eq("id", orderId);
-      if (ue) throw ue;
-
-      const { error: de } = await sb()
-        .from("order_items")
-        .delete()
-        .eq("order_id", orderId);
-      if (de) throw de;
-      if (lines.length) {
-        const { error: ie } = await sb()
-          .from("order_items")
-          .insert(
-            lines.map((l) => ({
-              order_id: orderId,
-              product_id: l.product_id,
-              quantity: l.quantity,
-              unit_price: l.unit_price,
-            }))
-          );
-        if (ie) throw ie;
-      }
-
-      const ids = new Set<number>([...oldMap.keys(), ...newMap.keys()]);
-      for (const pid of ids) {
-        const delta = (oldMap.get(pid) ?? 0) - (newMap.get(pid) ?? 0);
-        if (delta !== 0) {
-          await adjustProductStock(pid, delta, {
-            type: "order",
-            ref: `Order #${orderId}`,
-            note: "Order edited",
-          });
-        }
-      }
-    }),
-  /** Delete an order, restoring any stock its line items had reserved. */
-  deleteOrder: (orderId: number) =>
-    online(async () => {
-      const { data: items, error: oe } = await sb()
-        .from("order_items")
-        .select("product_id,quantity")
-        .eq("order_id", orderId);
-      if (oe) throw oe;
-      for (const it of (items ?? []) as {
-        product_id: number | null;
-        quantity: number;
-      }[]) {
-        if (it.product_id != null && it.quantity) {
-          await adjustProductStock(it.product_id, it.quantity, {
-            type: "order",
-            ref: `Order #${orderId}`,
-            note: "Order deleted — stock restored",
-          });
-        }
-      }
-      const { error: de } = await sb()
-        .from("order_items")
-        .delete()
-        .eq("order_id", orderId);
-      if (de) throw de;
-      const { error: ee } = await sb().from("orders").delete().eq("id", orderId);
-      if (ee) throw ee;
-    }),
+  ) => online(async () => { await businessWorkflow("order", "save", { id: orderId, header: clean(patch), items: lines },
+    (client, payload) => localOrderWorkflow("save", payload, client)); }),
+  /** Deleting an order restores its reservation in the same commit. */
+  deleteOrder: (orderId: number) => online(async () => { await businessWorkflow("order", "delete", { id: orderId },
+    (client, payload) => localOrderWorkflow("delete", payload, client)); }),
   shareOrder: (orderId: number, shared: boolean) =>
     online(() =>
       shareWithItems("orders", "order_items", "order_id", orderId, shared)
@@ -1633,28 +1738,21 @@ export const erp = {
     readCached<ErpSummary>(
       "erp_summary",
       async () => {
-        const [products, orders, docs, items] = await Promise.all([
+        const [products, orders, docs] = await Promise.all([
           sList<Product>("products"),
           sList<Order>("orders"),
-          sList<any>("invoice_docs"),
-          sList<any>("invoice_doc_items"),
+          billing.listDocs(),
         ]);
-        const byDoc = new Map<number, any[]>();
-        for (const it of items) {
-          const a = byDoc.get(it.invoice_id) ?? [];
-          a.push(it);
-          byDoc.set(it.invoice_id, a);
-        }
         // Convert before summing: a $1,000 invoice added straight onto a
         // AED 1,000 one produces 2,000 of no currency at all.
         const rates = await getExchangeRates().catch(() => ({}));
         const unpaid = docs
-          .filter((d) => d.status !== "paid")
+          .filter((d) => isPostedStatus(d.status) && d.status !== "paid")
           .reduce(
             (s, d) =>
               s +
               docAmountInAed(
-                docTotal(d, byDoc.get(d.id) ?? []),
+                d.balance ?? 0,
                 d.currency,
                 d.fx_rate,
                 rates
@@ -1681,7 +1779,7 @@ export const erp = {
         inventory_value: 0,
         open_orders: 0,
         unpaid_invoices: 0,
-      }
+      }, ["products", "orders", "invoice_docs", "invoice_doc_items", "invoice_payments"]
     ),
 };
 
@@ -1806,7 +1904,7 @@ export const hr = {
     deductions: number,
     accountId?: number | null,
   ) => {
-    const net = basic + allowances - deductions;
+    const net = r2(basic + allowances - deductions);
     const row = {
       employee_id: employeeId,
       period: period.trim(),
@@ -1817,21 +1915,45 @@ export const hr = {
       status: "pending",
     };
     return online(async () => {
+      const checkWorkspace = workspaceGuard();
       if (
-        !Number.isInteger(employeeId) ||
+        !Number.isSafeInteger(employeeId) ||
         employeeId <= 0 ||
-        !row.period ||
-        [basic, allowances, deductions].some((value) => !Number.isFinite(value) || value < 0) ||
-        net < 0
+        !/^[1-9]\d{3}-(0[1-9]|1[0-2])$/.test(row.period) ||
+        [basic, allowances, deductions].some((value) => !Number.isFinite(value) || value < 0 || value >= 1e12 || r2(value) !== value) ||
+        net < 0 || net >= 1e12 ||
+        (accountId != null && (!Number.isSafeInteger(accountId) || accountId <= 0))
       )
-        throw new Error("Choose an employee and period, with valid non-negative pay amounts.");
+        throw new Error("Choose an employee, a YYYY-MM period, and non-negative pay amounts with at most 2 decimal places.");
       const key = `${activeCacheOrg}:${employeeId}:${row.period}`;
       if (pendingPayrollRuns.has(key))
         throw new Error("Payroll for this employee and period is already being recorded.");
       pendingPayrollRuns.add(key);
       try {
+        if (!isLocalMode()) {
+          const scope = getCacheScope(), org = getCacheOrg();
+          const actor = scope?.slice(scope.lastIndexOf(":user:") + 6);
+          if (!org || !actor) throw new Error("Reconnect your workspace account before recording payroll.");
+          const { data, error } = await sb().rpc("filey_run_payroll", {
+            p_employee: employeeId, p_period: row.period, p_basic: basic,
+            p_allowances: allowances, p_deductions: deductions,
+            p_account: accountId ?? null, p_date: todayYmd(), p_org: org, p_actor: actor,
+          });
+          checkWorkspace();
+          if (error) {
+            if (["PGRST202", "42883"].includes(error.code))
+              throw new Error("Payroll posting needs the latest cloud database update. Nothing was posted.");
+            throw new Error(error.message || "Payroll could not be confirmed. Check the existing payslips before trying again.");
+          }
+          if ((typeof data !== "number" && typeof data !== "string") || String(data).trim() === ""
+            || !Number.isSafeInteger(Number(data)) || Number(data) <= 0)
+            throw new Error("Payroll could not be confirmed. Check the existing payslips before trying again.");
+          return Number(data);
+        }
         const record = async (client: any) => {
+          checkWorkspace();
           const employee = await client.from("employees").select("id").eq("id", employeeId).single();
+          checkWorkspace();
           if (employee.error) throw employee.error;
           const existing = await client
             .from("payroll")
@@ -1892,7 +2014,8 @@ export const hr = {
           }
           return id;
         };
-        return await (isLocalMode() ? withLocalTransaction(record) : record(sb()));
+        sb(); // Enforce the signed-in device owner before using its transaction client.
+        return await withLocalTransaction(record);
       } finally {
         pendingPayrollRuns.delete(key);
       }
@@ -2127,65 +2250,18 @@ export const fin = {
       []
     ),
   createAccount: (input: Omit<Account, "id">) => {
+    if (!["asset", "liability", "equity", "revenue", "expense"].includes(input.account_type) || !Number.isFinite(Number(input.balance)) || Math.abs(Number(input.balance)) >= 1e12 || !input.name?.trim()) throw new Error("Enter a named account with a valid type and finite opening balance.");
     const row = clean(input as Record<string, unknown>);
     return write({ k: "insert", t: "accounts", row }, () =>
       sInsert("accounts", row), -1
     );
   },
-  updateAccount: (id: number, input: Partial<Omit<Account, "id">>) => {
-    const row = clean(input as Record<string, unknown>);
-    return write(
-      { k: "update", t: "accounts", id, row },
-      () => sUpdate("accounts", id, row),
-      undefined
-    );
-  },
+  updateAccount: (id: number, input: Partial<Omit<Account, "id">>) =>
+    online(async () => { await businessWorkflow("journal", "account-update", { id, header: clean(input) },
+      (client, payload) => localJournalWorkflow("account-update", payload, client)); }),
   deleteAccount: (id: number) =>
-    write(
-      { k: "delete", t: "accounts", id },
-      async () => {
-        // Reverse this account's effect on the running balances, then delete.
-        const { data, error } = await sb()
-          .from("accounts")
-          .select("balance,account_type")
-          .eq("id", id)
-          .single();
-        if (error) throw error;
-        const acct = data as { balance: number; account_type: string } | null;
-        if (acct) {
-          // Reset balance to zero by posting the opposite of the current balance.
-          const zeroingDelta =
-            acct.account_type === "revenue" || acct.account_type === "liability"
-              ? -Number(acct.balance)
-              : Number(acct.balance);
-          if (zeroingDelta !== 0) {
-            // Find a partner account to absorb the offset. Use Sales Revenue for
-            // revenue accounts, AR for assets, Operating Expenses for expenses.
-            let partnerId = -1;
-            if (acct.account_type === "revenue") {
-              partnerId = await findOrCreateSalesAccount();
-            } else if (acct.account_type === "expense") {
-              partnerId = await findOrCreateExpenseAccount();
-            } else {
-              partnerId = await findOrCreateArAccount();
-            }
-            if (partnerId > 0) {
-              await sInsert("transactions", {
-                account_id: partnerId,
-                txn_type: zeroingDelta > 0 ? "debit" : "credit",
-                amount: Math.abs(zeroingDelta),
-                description: "Account deletion adjustment",
-                txn_date: todayYmd(),
-                source: "system",
-              });
-              await adjustAccountBalance(partnerId, Math.abs(zeroingDelta));
-            }
-          }
-        }
-        await sDelete("accounts", id);
-      },
-      undefined
-    ),
+    online(async () => { await businessWorkflow("journal", "account-delete", { id },
+      (client, payload) => localJournalWorkflow("account-delete", payload, client)); }),
   expenses: () =>
     readCached<Expense[]>(
       "fin_expenses",
@@ -2339,17 +2415,10 @@ export const fin = {
       const date = new Date(`${txnDate}T00:00:00.000Z`);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(txnDate) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== txnDate)
         throw new Error("Enter a valid journal date.");
-      const id = await sInsert("transactions", row);
-      // Sign depends on the account's normal balance, not a fixed credit=+ rule:
-      // a debit grows an asset/expense but shrinks a liability/revenue.
-      const { data: acct } = await sb()
-        .from("accounts")
-        .select("account_type")
-        .eq("id", accountId)
-        .single();
-      const type = (acct as { account_type: string } | null)?.account_type ?? "asset";
-      await adjustAccountBalance(accountId, ledgerDelta(type, txnType, amount));
-      return id;
+      if (!Number.isSafeInteger(accountId) || accountId <= 0 || !["debit", "credit"].includes(txnType) || !Number.isFinite(amount) || amount <= 0 || amount !== r2(amount))
+        throw new Error("Choose an account, debit or credit, and a positive amount with at most two decimals.");
+      return (await businessWorkflow("journal", "post", row,
+        (client, payload) => localJournalWorkflow("post", payload, client))).id;
     });
   },
   updateTransaction: (
@@ -2362,93 +2431,14 @@ export const fin = {
       undefined
     ),
   deleteTransaction: (id: number) =>
-    write(
-      { k: "delete", t: "transactions", id },
-      async () => {
-        const { data, error } = await sb()
-          .from("transactions")
-          .select("account_id,txn_type,amount")
-          .eq("id", id)
-          .single();
-        if (error) throw error;
-        const t = data as {
-          account_id: number;
-          txn_type: string;
-          amount: number;
-        } | null;
-        if (t?.account_id) {
-          // Undo with the same type-aware delta the posting used, else asset/
-          // expense legs (e.g. an invoice's AR debit) reverse the wrong way.
-          const { data: a } = await sb()
-            .from("accounts")
-            .select("account_type")
-            .eq("id", t.account_id)
-            .single();
-          const type = (a as { account_type: string } | null)?.account_type ?? "asset";
-          await adjustAccountBalance(
-            t.account_id,
-            -ledgerDelta(type, t.txn_type, Number(t.amount))
-          );
-        }
-        await sDelete("transactions", id);
-      },
-      undefined
-    ),
-  /** Repair the ledger after the legacy duplicate-posting bug: drop exact
-   *  duplicate transactions (same account, type, amount, description and date —
-   *  e.g. an invoice leg posted more than once) and recompute every account
-   *  balance from the survivors so balances match the journal. Idempotent. */
-  repairLedger: () =>
-    online(async () => {
-      const txns = await sList<any>("transactions", [{ col: "id", asc: true }]);
-      const accts = await sList<Account>("accounts");
-      const typeById = new Map(accts.map((a) => [a.id, a.account_type]));
-      const deltaOf = (t: any): number =>
-        ledgerDelta(typeById.get(t.account_id) ?? "asset", t.txn_type, Number(t.amount));
-
-      // Sum the journal as it stands AND as it will stand once the duplicates
-      // are gone, in one pass. Only the DIFFERENCE is applied to each stored
-      // balance.
-      //
-      // Overwriting the balance with the survivors' sum — what this used to do
-      // — throws away everything an account holds that was never posted as a
-      // transaction, and the opening balance typed in when the account was
-      // created is exactly that: createAccount stores it on the row and posts
-      // no journal entry for it. A bank account opened at 50,000 was silently
-      // reset to zero, by a button whose own confirm dialog promises accounts
-      // are untouched. Repairing drift must not destroy the starting position.
-      const seen = new Set<string>();
-      const dupes: any[] = [];
-      const before = new Map<number, number>();
-      const after = new Map<number, number>();
-      for (const t of txns) {
-        const key = [
-          t.account_id ?? "",
-          t.txn_type,
-          Number(t.amount),
-          t.description ?? "",
-          t.txn_date ?? "",
-        ].join("|");
-        const dupe = seen.has(key);
-        if (dupe) dupes.push(t);
-        else seen.add(key);
-        if (!t.account_id) continue;
-        const d = deltaOf(t);
-        before.set(t.account_id, (before.get(t.account_id) ?? 0) + d);
-        if (!dupe) after.set(t.account_id, (after.get(t.account_id) ?? 0) + d);
-      }
-
-      for (const t of dupes) await sDelete("transactions", t.id);
-      for (const a of accts) {
-        // Whatever the balance holds beyond the journal is the opening
-        // position; it survives untouched.
-        const opening = Number(a.balance ?? 0) - (before.get(a.id) ?? 0);
-        await sUpdate("accounts", a.id, {
-          balance: r2(opening + (after.get(a.id) ?? 0)),
-        });
-      }
-      return { removed: dupes.length };
-    }),
+    online(async () => { await businessWorkflow("journal", "delete", { id },
+      (client, payload) => localJournalWorkflow("delete", payload, client)); }),
+  /** Source-linked duplicate recovery preserves all equal manual entries and opening balances. */
+  repairLedger: () => online(async () => {
+    const result = await businessWorkflow("journal", "repair", {},
+      (client, payload) => localJournalWorkflow("repair", payload, client));
+    return { removed: result.removed || 0 };
+  }),
   report: () =>
     readCached<FinanceReport>(
       "fin_report",
@@ -2647,9 +2637,10 @@ export async function importCrmRecords(table: string, rows: Record<string, unkno
   notifyDataChanged();
 }
 
-const leadConversions = new Map<number, Promise<number>>();
+const leadConversions = new Map<string, Promise<number>>();
 async function convertLead(leadId: number): Promise<number> {
-  const running = leadConversions.get(leadId);
+  const key = `${cacheIdentity}:${isLocalMode()}:${leadId}`;
+  const running = leadConversions.get(key);
   if (running) return running;
   const run = online(async () => {
     if (!isLocalMode()) {
@@ -2657,32 +2648,29 @@ async function convertLead(leadId: number): Promise<number> {
       if (error) throw error;
       return Number(data);
     }
-    const { data, error } = await sb().from("crm_leads").select("*").eq("id", leadId).single();
-    if (error) throw error;
-    const lead = data as Lead;
-    if (lead.converted_deal_id) return lead.converted_deal_id;
-    if (lead.status === "converted") throw new Error("This lead was already converted. Find its company and deal in CRM.");
-    const created: [string, number][] = [];
-    // ponytail: local storage has no multi-collection transaction; compensate
-    // failed writes. Move to a SQLite transaction if crash-atomic conversion is needed.
-    try {
-      const companyId = await sInsert("crm_customers", { name: lead.name, company: lead.company || lead.name, email: lead.email || null, phone: lead.phone || null, segment: "Converted lead" });
-      created.push(["crm_customers", companyId]);
-      const personId = await sInsert("crm_people", { company_id: companyId, name: lead.name, email: lead.email || null, phone: lead.phone || null, owner: lead.owner || null, is_primary: true });
-      created.push(["crm_people", personId]);
-      const dealId = await sInsert("crm_opportunities", { title: `${lead.company || lead.name} — new opportunity`, customer_name: lead.company || lead.name, customer_id: companyId, person_id: personId, stage: "qualification", value: lead.est_value || 0, probability: 20, owner: lead.owner || null });
-      created.push(["crm_opportunities", dealId]);
-      await sUpdate("crm_leads", leadId, { status: "converted", converted_company_id: companyId, converted_person_id: personId, converted_deal_id: dealId });
+    const checkWorkspace = workspaceGuard();
+    sb(); // Preserve the device owner's sign-in gate before staging its records.
+    const result = await withLocalTransaction(async client => {
+      checkWorkspace();
+      const { data, error } = await client.from("crm_leads").select("*").eq("id", leadId).single();
+      if (error) throw error;
+      checkWorkspace();
+      const lead = data as Lead;
+      if (lead.converted_deal_id) return lead.converted_deal_id;
+      if (lead.status === "converted") throw new Error("This lead was already converted. Find its company and deal in CRM.");
+      const companyId = await sInsert("crm_customers", { name: lead.name, company: lead.company || lead.name, email: lead.email || null, phone: lead.phone || null, segment: "Converted lead" }, client);
+      const personId = await sInsert("crm_people", { company_id: companyId, name: lead.name, email: lead.email || null, phone: lead.phone || null, owner: lead.owner || null, is_primary: true }, client);
+      const dealId = await sInsert("crm_opportunities", { title: `${lead.company || lead.name} — new opportunity`, customer_name: lead.company || lead.name, customer_id: companyId, person_id: personId, stage: "qualification", value: lead.est_value || 0, probability: 20, owner: lead.owner || null }, client);
+      await sUpdate("crm_leads", leadId, { status: "converted", converted_company_id: companyId, converted_person_id: personId, converted_deal_id: dealId }, client);
+      checkWorkspace();
       return dealId;
-    } catch (error) {
-      const rollback = await Promise.allSettled(created.reverse().map(([table, id]) => sDelete(table, id)));
-      if (rollback.some((r) => r.status === "rejected")) throw new Error("Lead conversion failed and some new records could not be removed. Review companies, contacts and deals before retrying.");
-      throw error;
-    }
+    });
+    checkWorkspace();
+    return result;
   });
-  leadConversions.set(leadId, run);
+  leadConversions.set(key, run);
   try { const id = await run; markWrite(); notifyDataChanged(); return id; }
-  finally { leadConversions.delete(leadId); }
+  finally { leadConversions.delete(key); }
 }
 
 export const crm = {
@@ -3267,14 +3255,14 @@ async function findOrCreateAccount(
 ): Promise<number> {
   const { data, error } = await (client ?? sb())
     .from("accounts")
-    .select("id,name")
+    .select("id,name,user_id,org_id")
     .eq("account_type", type);
   if (error) throw error;
   const list = (data as { id: number; name: string }[] | null) ?? [];
   // Match by name pattern only — no "first account of this type" fallback. That
   // fallback let e.g. the AP lookup grab an "Output VAT" liability (and vice
   // versa); a dedicated account is created instead when nothing matches.
-  const acct = list.find((a) => pattern.test(a.name));
+  const acct = list.find((a) => pattern.test(a.name) && (!isLocalMode() || localRowOwnedByActor(a)));
   if (acct) return acct.id;
   return sInsert("accounts", { code, name, account_type: type, balance: 0 }, client);
 }
@@ -3399,6 +3387,7 @@ async function reverseInvoiceTransactions(
     if (byId.error) throw byId.error;
     for (const t of (byId.data ?? []) as InvoiceTxn[]) rows.set(t.id, t);
   }
+  if ([...rows.values()].some(row => !row.invoice_id && row.ref === ref) && invoiceId && (await sList<any>("invoice_docs", undefined, "*", client)).filter(row => `${row.doc_type === "purchase" ? "Bill" : "Invoice"} ${row.number}` === ref).length > 1) throw new Error("Historic document references overlap. Reconcile the ledger before changing this document.");
   const txns = [...rows.values()].filter((t) => includePayments ||
     (t.source !== "payment" && !/ Payment(?: #\d+)?$/.test(t.ref ?? "")));
   await reverseTransactions(txns, client);
@@ -3409,43 +3398,34 @@ async function reverseInvoiceTransactions(
  *  invoice decremented stock (restore by +qty) and has a linked SO; a purchase
  *  invoice incremented stock (restore by -qty) and has no order. */
 async function reverseInvoiceOrderAndStock(
-  number: string,
-  items: { product_id?: number; qty: number; unit_price: number }[],
-  isPurchase = false,
-  client: any = null,
+  number: string, items: { product_id?: number; qty: number; unit_price: number }[],
+  isPurchase = false, client: any = null, invoiceId?: number,
 ) {
+  const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
+  const docs = await sList<any>("invoice_docs", undefined, "*", client);
+  const legacyAmbiguous = docs.filter(row => `${row.doc_type === "purchase" ? "Bill" : "Invoice"} ${row.number}` === ref).length > 1;
+  const stock = await client.from("stock_movements").select("*"); if (stock.error) throw stock.error;
+  const all: any[] = stock.data || [];
+  let movements = all.filter(row => row.workflow_kind === "invoice" && Number(row.workflow_id) === invoiceId);
+  if (!movements.length) {
+    movements = all.filter(row => !row.workflow_kind && row.ref === ref);
+    if (movements.length && legacyAmbiguous) throw new Error("Historic document references overlap. Reconcile stock before changing this document.");
+  }
   if (!isPurchase) {
-    const orderNumber = `SO-${number}`;
-    const { data: order, error } = await (client ?? sb())
-      .from("orders")
-      .select("id")
-      .eq("order_number", orderNumber)
-      .maybeSingle();
-    if (error) throw error;
-    if (order?.id) {
+    const orders = await sList<any>("orders", undefined, "*", client);
+    for (const order of orders.filter(row => Number(row.invoice_id) === invoiceId || (!row.invoice_id && row.order_number === `SO-${number}`))) {
+      if (!order.invoice_id && (legacyAmbiguous || (await sChildren<any>("order_items", "order_id", order.id, undefined, client)).length))
+        throw new Error("The historic order cannot be safely attributed to this invoice. Reconcile the link first.");
       await sDelete("orders", order.id, client);
     }
   }
-  const dir = isPurchase ? -1 : 1;
-  const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
-  const movements = await sChildren<{ product_id: number; qty: number }>("stock_movements", "ref", ref, undefined, client);
-  if (movements.length) {
-    const net = new Map<number, number>();
-    for (const m of movements) net.set(m.product_id, (net.get(m.product_id) ?? 0) + Number(m.qty));
-    for (const [productId, qty] of net) {
-      if (qty) await adjustProductStock(productId, -qty, {
-        type: isPurchase ? "purchase" : "sale", ref, note: "Posting reversed",
-      }, client);
-    }
-    return;
-  }
-  for (const it of items) {
-    if (!it.product_id || !it.qty) continue;
-    await adjustProductStock(it.product_id, dir * Math.abs(Number(it.qty)), {
-      type: isPurchase ? "purchase" : "sale",
-      ref: `${isPurchase ? "Bill" : "Invoice"} ${number}`,
-      note: "Posting reversed",
-    }, client);
+  const net = new Map<number, number>();
+  for (const m of movements) net.set(Number(m.product_id), (net.get(Number(m.product_id)) || 0) + Number(m.qty));
+  if (!movements.length) for (const item of items) if (item.product_id) net.set(item.product_id, (net.get(item.product_id) || 0) + Math.abs(Number(item.qty)) * (isPurchase ? 1 : -1));
+  for (const [productId, qty] of net) if (qty) {
+    if (isPurchase && qty > 0) await restoreLocalReceiptCost("invoice", Number(invoiceId), productId, all, client);
+    await adjustProductStock(productId, -qty, { type: isPurchase ? "purchase" : "sale", ref,
+      workflow_kind: "invoice", workflow_id: invoiceId, note: "Posting reversed" }, client);
   }
 }
 
@@ -3458,8 +3438,7 @@ async function reverseInvoiceOrderAndStock(
  * collecting payment — which moves the invoice to "paid" — reversed the very
  * postings the sale had created, emptying the books for work already invoiced.
  */
-const POSTED_STATUSES = new Set(["sent", "paid", "overdue"]);
-export const isPostedStatus = (status: unknown) => POSTED_STATUSES.has(String(status ?? ""));
+export const isPostedStatus = isPostedInvoiceStatus;
 
 async function propagateInvoice(
   doc: Record<string, unknown>,
@@ -3484,9 +3463,9 @@ async function propagateInvoice(
     // 1) Reverse any previous posting for this document. Only touch stock/orders
     //    if a prior posting actually existed (else first finalize would net to 0).
     const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
-    if (prior > 0) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client);
+    if (prior > 0) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client, id);
 
-    const { net: netDoc, tax: taxDoc, total: totalDoc } = docTotals(
+    const { tax: taxDoc, total: totalDoc } = docTotals(
       {
         tax_rate: Number(doc.tax_rate ?? 0),
         discount: Number(doc.discount ?? 0),
@@ -3508,11 +3487,12 @@ async function propagateInvoice(
     // The document's own frozen rate is the one that applied on the date of
     // supply, which is what the FTA asks for.
     const ledgerRates = await getExchangeRates().catch(() => ({}));
+    if (unratedCurrency(doc.currency as string, doc.fx_rate as number, ledgerRates)) throw new Error("Set a valid exchange rate before posting this currency.");
     const toBase = (v: number) =>
-      docAmountInAed(v, doc.currency as string, doc.fx_rate as number, ledgerRates);
-    const net = toBase(netDoc);
+      r2(docAmountInAed(v, doc.currency as string, doc.fx_rate as number, ledgerRates));
     const tax = toBase(taxDoc);
     const total = toBase(totalDoc);
+    const net = r2(total - tax);
     const txnDate = (doc.issue_date as string) || todayYmd();
 
     if (isCreditNote(String(doc.invoice_type_code ?? ""))) {
@@ -3544,8 +3524,8 @@ async function propagateInvoice(
         if (!it.product_id || !it.qty) continue;
         const qty = Math.abs(Number(it.qty));
         // Moving average first — needs the pre-receipt on-hand quantity.
-        await applyMovingAverageCost(it.product_id, qty, toBase(Number(it.unit_price) || 0), client);
-        await adjustProductStock(it.product_id, qty, { type: "purchase", ref }, client);
+        const costBefore = await applyMovingAverageCost(it.product_id, qty, toBase(Number(it.unit_price) || 0), client);
+        await adjustProductStock(it.product_id, qty, { type: "purchase", ref, workflow_kind: "invoice", workflow_id: id, cost_before: costBefore }, client);
       }
       if (total > 0) {
         const inventoryId = await findOrCreateInventoryAccount(client);
@@ -3604,14 +3584,14 @@ async function propagateInvoice(
       order_number: `SO-${number}`,
       customer_name: doc.customer_name ?? "—",
       customer_id: (doc.customer_id as number | undefined) ?? null,
-      status: "completed",
+      status: "completed", invoice_id: id || null,
       total,
     }, client);
     for (const it of items) {
       if (!it.product_id || !it.qty) continue;
       await adjustProductStock(it.product_id, -Math.abs(Number(it.qty)), {
         type: "sale",
-        ref,
+        ref, workflow_kind: "invoice", workflow_id: id,
       }, client);
     }
     // COGS: relieve Inventory at cost and book the cost of the sale. Only
@@ -3725,7 +3705,7 @@ async function unpropagateInvoice(
     const isPurchase = doc.doc_type === "purchase";
     const ref = `${isPurchase ? "Bill" : "Invoice"} ${number}`;
     const prior = await reverseInvoiceTransactions(id || undefined, ref, false, client);
-    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client);
+    if (prior > 0 || isPostedStatus(doc.status)) await reverseInvoiceOrderAndStock(number, isCreditNote(String(doc.invoice_type_code ?? "")) ? [] : items, isPurchase, client, id);
   } catch (e) {
     console.error("Invoice unpropagation failed:", e);
     throw e;
@@ -3758,24 +3738,24 @@ function purchaseTotals(doc: Pick<PurchaseOrder, "discount" | "tax_rate" | "unit
 
 /** Recalculate from saved lines: older PO totals sometimes excluded VAT.
  * This keeps Inventory net, Input VAT separate and Accounts Payable gross. */
-async function propagatePurchase(doc: Record<string, unknown>) {
+async function propagatePurchase(doc: Record<string, unknown>, client: any = null) {
   try {
     const number = String(doc.po_number ?? "").trim();
     if (!number) return;
     const ref = `PO ${number}`;
-    const items = await sChildren<PoItem>("purchase_order_items", "po_id", Number(doc.id));
+    const items = await sChildren<PoItem>("purchase_order_items", "po_id", Number(doc.id), undefined, client);
     const totals = purchaseTotals(doc as unknown as PurchaseOrder, items);
     const rates = await getExchangeRates().catch(() => ({}));
     const toBase = (value: number) => r2(docAmountInAed(value, doc.currency as string, doc.fx_rate as number, rates));
     const gross = toBase(totals.total);
     const tax = toBase(totals.tax);
     const net = r2(gross - tax);
-    await reverseInvoiceTransactions(undefined, ref);
+    await reversePurchaseTransactions(Number(doc.id), ref, client);
     if (gross <= 0) return;
     const txnDate =
       (doc.order_date as string) || todayYmd();
-    const inventoryId = await findOrCreateInventoryAccount();
-    const apId = await findOrCreateApAccount();
+    const inventoryId = await findOrCreateInventoryAccount(client);
+    const apId = await findOrCreateApAccount(client);
     // debit Inventory (net, ex-VAT)
     if (inventoryId > 0) {
       await sInsert("transactions", {
@@ -3784,14 +3764,14 @@ async function propagatePurchase(doc: Record<string, unknown>) {
         amount: net,
         description: `${ref} — Inventory`,
         ref,
-        source: "purchase",
+        source: "purchase", po_id: Number(doc.id),
         txn_date: txnDate,
-      });
-      await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net));
+      }, client);
+      await adjustAccountBalance(inventoryId, ledgerDelta("asset", "debit", net), client);
     }
     // debit Input VAT (recoverable) for the tax portion
     if (tax > 0) {
-      const vatId = await findOrCreateInputVatAccount();
+      const vatId = await findOrCreateInputVatAccount(client);
       if (vatId > 0) {
         await sInsert("transactions", {
           account_id: vatId,
@@ -3799,10 +3779,10 @@ async function propagatePurchase(doc: Record<string, unknown>) {
           amount: tax,
           description: `${ref} — Input VAT`,
           ref,
-          source: "purchase",
+          source: "purchase", po_id: Number(doc.id),
           txn_date: txnDate,
-        });
-        await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax));
+        }, client);
+        await adjustAccountBalance(vatId, ledgerDelta("asset", "debit", tax), client);
       }
     }
     // credit Accounts Payable (gross — net + recoverable VAT)
@@ -3813,30 +3793,297 @@ async function propagatePurchase(doc: Record<string, unknown>) {
         amount: gross,
         description: `${ref} — Accounts Payable`,
         ref,
-        source: "purchase",
+        source: "purchase", po_id: Number(doc.id),
         txn_date: txnDate,
-      });
-      await adjustAccountBalance(apId, ledgerDelta("liability", "credit", gross));
+      }, client);
+      await adjustAccountBalance(apId, ledgerDelta("liability", "credit", gross), client);
     }
   } catch (e) {
     console.error("Purchase propagation failed:", e);
+    throw e;
   }
 }
 
 /** Remove a purchase order's accounting footprint (reverted to draft/deleted). */
-async function unpropagatePurchase(doc: Record<string, unknown>) {
+async function unpropagatePurchase(doc: Record<string, unknown>, client: any = null) {
   try {
     const number = String(doc.po_number ?? "").trim();
     if (!number) return;
-    await reverseInvoiceTransactions(undefined, `PO ${number}`);
+    await reversePurchaseTransactions(Number(doc.id), `PO ${number}`, client);
   } catch (e) {
     console.error("Purchase unpropagation failed:", e);
+    throw e;
   }
 }
 
 /** A purchase order is "done" (posts to accounting) once received/completed. */
 const PO_DONE = (status: unknown) =>
   status === "received" || status === "completed";
+
+// Untagged historic device rows already live in the selected account partition.
+// Explicit organization tags must match before taking part in a private pool.
+function localRowInCurrentOrg(row: Record<string, any>): boolean {
+  return row.org_id == null || row.org_id === getCacheOrg();
+}
+function localRowOwnedByActor(row: Record<string, any>, actor = getCacheScope()?.split(":user:").slice(-1)[0]): boolean {
+  return localRowInCurrentOrg(row) && (row.user_id == null || row.user_id === actor);
+}
+function assertLocalCreditPools(rows: Record<string, any>[], partyType: string, partyId: number): void {
+  const balances = new Map<string, number>(), actor = getCacheScope()?.split(":user:").slice(-1)[0] || "legacy";
+  for (const row of rows) if (localRowInCurrentOrg(row) && row.party_type === partyType && Number(row.party_id) === Number(partyId)) {
+    const owner = String(row.user_id || actor);
+    balances.set(owner, (balances.get(owner) || 0) + Number(row.amount));
+  }
+  if ([...balances.values()].some(balance => balance < -.005))
+    throw new Error("Imported credit contains an overdrawn author pool. Open cloud mode to reconcile the allocations before spending or reducing deposits.");
+}
+/** Offline edits cannot borrow an administrator's cloud authority. Imported
+ * multi-author records are retained, but must be changed through cloud RLS. */
+async function assertLocalWorkflowAuthority(kind: string, action: string, payload: Record<string, any>, client: any, actor?: string): Promise<void> {
+  const assertOwner = (row: Record<string, any>) => {
+    if (!localRowOwnedByActor(row, actor)) throw new Error("This record belongs to another workspace author. Open cloud mode to change it with verified permissions.");
+  };
+  let id = Number(payload.id) || 0;
+  if ((kind === "invoice" || kind === "po") && action === "payment-remove") {
+    const payment = await client.from(kind === "po" ? "po_payments" : "invoice_payments").select("*").eq("id", payload.payment_id).single();
+    if (payment.error) throw payment.error;
+    assertOwner(payment.data); id = Number(payment.data[kind === "po" ? "po_id" : "invoice_id"]);
+  }
+  const table = ({ invoice: "invoice_docs", po: "purchase_orders", order: "orders", advance: "advances", stock: "products" } as Record<string, string>)[kind];
+  if (table && id) {
+    const parent = await client.from(table).select("*").eq("id", id).single();
+    if (parent.error) throw parent.error; assertOwner(parent.data);
+    const child = ({ invoice: ["invoice_doc_items", "invoice_id"], po: ["purchase_order_items", "po_id"], order: ["order_items", "order_id"] } as Record<string, string[]>)[kind];
+    if (child) for (const row of await sChildren<any>(child[0], child[1], id, undefined, client)) assertOwner(row);
+  }
+  if (kind === "journal" && action === "post") {
+    const account = await client.from("accounts").select("*").eq("id", payload.account_id).single();
+    if (account.error) throw account.error; assertOwner(account.data);
+  }
+  if (payload.header?.user_id || payload.header?.org_id) assertOwner(payload.header);
+}
+async function allocateLocalAdvance(doc: Record<string, any>, amount: number, client: any, previous: Record<string, any> | null = null): Promise<void> {
+  if (!localRowInCurrentOrg(doc)) throw new Error("Invoice not found in this workspace.");
+  if (!Number.isFinite(amount) || amount < 0) throw new Error("Enter a valid advance allocation.");
+  const tag = `applied:inv#${doc.id}`;
+  const scopedRows = (await sList<any>("advances", undefined, "*", client)).filter(localRowInCurrentOrg);
+  if (scopedRows.some(row => row.note === tag && !localRowOwnedByActor(row)))
+    throw new Error("This allocation was created by another workspace author. Open cloud mode to reconcile it before changing credit.");
+  const rows = scopedRows.filter(row => localRowOwnedByActor(row));
+  const base = r2(amount * (doc.currency === "AED" || !doc.currency ? 1 : Number(doc.fx_rate)));
+  const retain = previous != null && Number(previous.customer_id) === Number(doc.customer_id) &&
+    String(previous.currency || "AED") === String(doc.currency || "AED") && Number(previous.fx_rate || 0) === Number(doc.fx_rate || 0) &&
+    Number(previous.advance_applied || 0) === amount && rows.some(row => row.note === tag && row.party_type === "customer" &&
+      Number(row.party_id) === Number(doc.customer_id) && Number(row.amount) === -base);
+  const items = await sChildren<any>("invoice_doc_items", "invoice_id", doc.id, undefined, client);
+  if (amount > 0 && amount > docTotal({ ...doc, tax_rate: Number(doc.tax_rate || 0), discount: Number(doc.discount || 0) }, items) + .005) throw new Error("Advance allocation cannot exceed this invoice total.");
+  if (amount > 0) {
+    if (!retain) assertLocalCreditPools(scopedRows, "customer", Number(doc.customer_id));
+    if (!doc.customer_id || doc.doc_type === "purchase" || isCreditNote(doc.invoice_type_code)) throw new Error("Choose the customer before applying advance credit.");
+    const fx = doc.currency === "AED" || !doc.currency ? 1 : Number(doc.fx_rate);
+    if (!Number.isFinite(fx) || fx <= 0) throw new Error("Set a valid exchange rate before applying advance credit.");
+    const available = rows.filter(row => row.party_type === "customer" && Number(row.party_id) === Number(doc.customer_id) && row.note !== tag)
+      .reduce((sum, row) => sum + Number(row.amount), 0);
+    const base = r2(amount * fx);
+    if (!retain && base > available + .005) throw new Error("Insufficient customer advance credit. Refresh the available balance.");
+  }
+  const ledger = (await sChildren<InvoiceTxn>("transactions", "invoice_id", doc.id, undefined, client)).filter(localRowInCurrentOrg);
+  await reverseTransactions(ledger.filter(txn => txn.source === "advance_allocation"), client);
+  if (!retain) for (const row of rows) if (row.note === tag) await sDelete("advances", row.id, client);
+  if (!retain && amount > 0) await sInsert("advances", { party_type: "customer", party_id: doc.customer_id, party_name: doc.customer_name || "",
+    amount: -r2(amount * (doc.currency === "AED" || !doc.currency ? 1 : Number(doc.fx_rate))), note: tag, paid_at: todayYmd(), org_id: getCacheOrg() }, client);
+  if (amount > 0 && isPostedStatus(doc.status)) {
+    const base = r2(amount * (doc.currency === "AED" || !doc.currency ? 1 : Number(doc.fx_rate)));
+    const deposits = await findOrCreateAccount("liability", "2200", "Customer Advances", /customer advances|customer deposits/i, client);
+    const ar = await findOrCreateArAccount(client);
+    for (const [id, type, side] of [[deposits, "liability", "debit"], [ar, "asset", "credit"]]) {
+      await sInsert("transactions", { account_id: id, txn_type: side, amount: base, description: "Customer advance applied", ref: tag,
+        source: "advance_allocation", invoice_id: doc.id, txn_date: doc.issue_date || todayYmd() }, client);
+      await adjustAccountBalance(Number(id), ledgerDelta(String(type), String(side), base), client);
+    }
+  }
+}
+
+async function localAdvanceWorkflow(action: string, payload: Record<string, any>, client: any): Promise<WorkflowResult> {
+  let id = Number(payload.id) || 0;
+  const old = id ? await client.from("advances").select("*").eq("id", id).single() : null; if (old?.error) throw old.error;
+  if (old?.data && !localRowInCurrentOrg(old.data)) throw new Error("Advance not found in this workspace.");
+  if (old?.data && (Number(old.data.amount) < 0 || String(old.data.note || "").startsWith("applied:"))) throw new Error("Change the linked invoice to update an applied advance.");
+  const row = { ...old?.data, ...payload.header };
+  if (!["customer", "supplier"].includes(row.party_type) || !Number.isSafeInteger(Number(row.party_id)) || Number(row.party_id) <= 0 ||
+    !Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0 || Number(row.amount) !== r2(Number(row.amount)) ||
+    String(row.note || "").startsWith("applied:") || !row.paid_at || Number.isNaN(Date.parse(row.paid_at)))
+    throw new Error("Choose a party, a positive advance amount and valid date.");
+  const party = await client.from(row.party_type === "customer" ? "crm_customers" : "suppliers").select("id").eq("id", row.party_id).single(); if (party.error) throw party.error;
+  if (old?.data) {
+    const scopedRows = (await sList<any>("advances", undefined, "*", client)).filter(localRowInCurrentOrg);
+    const reduction = Number(old.data.amount) - (action === "delete" ? 0 : Number(row.amount));
+    if (reduction > 0) assertLocalCreditPools(scopedRows, row.party_type, Number(row.party_id));
+    const rows = scopedRows.filter(value => localRowOwnedByActor(value));
+    const available = rows.filter(value => value.party_type === row.party_type && Number(value.party_id) === Number(row.party_id)).reduce((sum, value) => sum + Number(value.amount), 0);
+    if (reduction > 0 && available - reduction < -.005) throw new Error("This advance is already allocated. Release the invoice allocation before reducing it.");
+    const txns = (await sList<any>("transactions", undefined, "*", client)).filter(txn => Number(txn.advance_id) === id);
+    await reverseTransactions(txns, client);
+  }
+  if (action === "delete") await sDelete("advances", id, client);
+  else {
+    const posted = action === "add" || Boolean(old?.data?.accounting_posted);
+    if (!id) id = await sInsert("advances", { ...row, accounting_posted: posted, org_id: getCacheOrg() }, client);
+    else await sUpdate("advances", id, { amount: row.amount, note: row.note, paid_at: row.paid_at }, client);
+    if (posted) {
+      const customer = row.party_type === "customer";
+      const account = await findOrCreateAccount(customer ? "liability" : "asset", customer ? "2200" : "1260",
+        customer ? "Customer Advances" : "Supplier Advances", customer ? /customer advances|customer deposits/i : /supplier advances|supplier prepayments/i, client);
+      const cash = await findOrCreateCashAccount(client);
+      for (const [target, type, side] of [[account, customer ? "liability" : "asset", customer ? "credit" : "debit"], [cash, "asset", customer ? "debit" : "credit"]]) {
+        await sInsert("transactions", { account_id: target, txn_type: side, amount: row.amount, description: `Advance #${id}`, ref: `Advance #${id}`,
+          source: "advance", advance_id: id, txn_date: row.paid_at }, client);
+        await adjustAccountBalance(Number(target), ledgerDelta(String(type), String(side), Number(row.amount)), client);
+      }
+    }
+  }
+  return { id };
+}
+
+async function localJournalWorkflow(action: string, payload: Record<string, any>, client: any): Promise<WorkflowResult> {
+  const id = Number(payload.id) || 0;
+  if (action === "post") {
+    const account = await client.from("accounts").select("*").eq("id", payload.account_id).single(); if (account.error) throw account.error;
+    const journal = await sInsert("transactions", payload, client);
+    await adjustAccountBalance(payload.account_id, ledgerDelta(account.data.account_type, payload.txn_type, payload.amount), client);
+    return { id: journal };
+  }
+  if (action === "delete") {
+    const txn = await client.from("transactions").select("*").eq("id", id).single(); if (txn.error) throw txn.error;
+    if (txn.data.invoice_id || txn.data.po_id || txn.data.advance_id || txn.data.source || txn.data.ref) throw new Error("Change the source document or payment to reverse these linked postings together.");
+    await reverseTransactions([txn.data], client); return { id };
+  }
+  if (action.startsWith("account-")) {
+    const account = await client.from("accounts").select("*").eq("id", id).single(); if (account.error) throw account.error;
+    const txns = await sChildren<any>("transactions", "account_id", id, undefined, client);
+    if (action === "account-delete") {
+      const expenses = await sChildren<any>("expenses", "account_id", id, undefined, client);
+      if (Number(account.data.balance) !== 0 || txns.length || expenses.length) throw new Error("An account with a balance or activity must be retained for the audit trail.");
+      await sDelete("accounts", id, client);
+    } else {
+      const patch = payload.header;
+      if ((patch.account_type != null && !["asset", "liability", "equity", "revenue", "expense"].includes(patch.account_type)) || (patch.balance != null && (!Number.isFinite(Number(patch.balance)) || Math.abs(Number(patch.balance)) >= 1e12))) throw new Error("Enter a valid account type and finite balance.");
+      if (txns.length && ((patch.account_type && patch.account_type !== account.data.account_type) || (patch.balance != null && Number(patch.balance) !== Number(account.data.balance))))
+        throw new Error("An active account type and balance are maintained by its journal. Record an adjustment instead.");
+      await sUpdate("accounts", id, patch, client);
+    }
+    return { id };
+  }
+  const txns = await sList<any>("transactions", [{ col: "id", asc: true }], "*", client), seen = new Set<string>(), dupes: any[] = [];
+  for (const txn of txns) {
+    if (!txn.source || !txn.ref || !(txn.invoice_id || txn.po_id || txn.advance_id || txn.workflow_payment_id) || (txn.source === "payment" && !txn.workflow_payment_id) || !localRowInCurrentOrg(txn)) continue;
+    const key = JSON.stringify([txn.org_id, txn.user_id, txn.invoice_id, txn.po_id, txn.advance_id, txn.workflow_payment_id, txn.ref, txn.source, txn.account_id, txn.txn_type, Number(txn.amount), txn.description, txn.txn_date]);
+    if (seen.has(key)) dupes.push(txn); else seen.add(key);
+  }
+  await reverseTransactions(dupes, client);
+  return { id: 1, removed: dupes.length };
+}
+
+async function reversePurchaseTransactions(id: number, ref: string, client: any): Promise<void> {
+  const rows = await sList<InvoiceTxn & { po_id?: number }>("transactions", undefined, "*", client);
+  const legacy = rows.filter(row => !row.po_id && !row.invoice_id && row.ref === ref && row.source !== "payment");
+  if (legacy.length && (await sList<any>("purchase_orders", undefined, "*", client)).filter(row => `PO ${row.po_number}` === ref).length > 1)
+    throw new Error("Historic document references overlap. Reconcile the ledger before changing this document.");
+  await reverseTransactions(rows.filter(row => (Number(row.po_id) === id || legacy.includes(row)) && row.source !== "payment"), client);
+}
+async function restoreLocalReceiptCost(kind: string, id: number, product: number, movements: any[], client: any): Promise<void> {
+  const first = movements.findIndex(row => Number(row.product_id) === product && row.workflow_kind === kind && Number(row.workflow_id) === id && Number(row.qty) > 0 && row.cost_before != null);
+  if (first < 0) throw new Error("This historic receipt needs cost reconciliation before reversal.");
+  if (movements.slice(first + 1).some(row => Number(row.product_id) === product && Number(row.qty) !== 0 && (row.workflow_kind !== kind || Number(row.workflow_id) !== id)))
+    throw new Error("Later stock movements use this receipt's cost. Reconcile them before reversing it.");
+  await sUpdate("products", product, { cost_price: Number(movements[first].cost_before) }, client);
+}
+async function changeLocalPurchaseStock(doc: Record<string, any>, items: PoItem[], receive: boolean, client: any): Promise<void> {
+  const ref = `PO ${doc.po_number}`;
+  // Device IDs are random; the persisted journal array preserves insertion
+  // order. Sorting by IDs would miss a later movement half of the time.
+  const stock = await client.from("stock_movements").select("*"); if (stock.error) throw stock.error;
+  const all: any[] = stock.data || [];
+  if (doc.stock_received) {
+    const movements = all.filter(row => row.workflow_kind === "po" && Number(row.workflow_id) === Number(doc.id));
+    const legacy = all.filter(row => !row.workflow_kind && row.ref === ref);
+    if (legacy.length && (await sList<any>("purchase_orders", undefined, "*", client)).filter(row => `PO ${row.po_number}` === ref).length > 1)
+      throw new Error("Historic document references overlap. Reconcile stock before changing this document.");
+    const footprint = new Map<number, number>();
+    for (const row of movements.length ? movements : legacy) footprint.set(Number(row.product_id), (footprint.get(Number(row.product_id)) || 0) + Number(row.qty));
+    if (!movements.length && !legacy.length) for (const it of items) if (it.product_id) footprint.set(it.product_id, (footprint.get(it.product_id) || 0) + Number(it.quantity));
+    for (const [id, qty] of footprint) if (qty) {
+      if (qty > 0) await restoreLocalReceiptCost("po", Number(doc.id), id, all, client);
+      await adjustProductStock(id, -qty, { type: "purchase", ref, workflow_kind: "po", workflow_id: Number(doc.id), note: "Purchase receipt reversed" }, client);
+    }
+  }
+  if (receive) {
+    const rates = await getExchangeRates().catch(() => ({}));
+    if (unratedCurrency(doc.currency, doc.fx_rate, rates)) throw new Error("Set a valid exchange rate before receiving this currency.");
+    for (const it of items) if (it.product_id) {
+      const qty = Number(it.quantity);
+      const costBefore = await applyMovingAverageCost(it.product_id, qty, docAmountInAed(Number(it.unit_cost), doc.currency, doc.fx_rate, rates), client);
+      await adjustProductStock(it.product_id, qty, { type: "purchase", ref, workflow_kind: "po", workflow_id: Number(doc.id), cost_before: costBefore }, client);
+    }
+  }
+  await sUpdate("purchase_orders", doc.id, { stock_received: receive }, client);
+}
+
+async function localPurchasePayment(doc: Record<string, any>, amount: number, method: string | null, paidAt: string,
+  rates: Record<string, number>, client: any): Promise<number> {
+  if (!PO_DONE(doc.status)) throw new Error("Receive this purchase order before recording a payment. Use a supplier advance for prepayments.");
+  if (!Number.isFinite(amount) || amount <= 0 || !paidAt || Number.isNaN(Date.parse(paidAt))) throw new Error("Enter a positive payment amount and valid date.");
+  if (unratedCurrency(doc.currency, doc.fx_rate, rates)) throw new Error("Set a valid exchange rate before recording a payment.");
+  const payment = await sInsert("po_payments", { po_id: doc.id, amount, method, paid_at: paidAt }, client);
+  const base = r2(docAmountInAed(amount, doc.currency, doc.fx_rate, rates));
+  const spot = unratedCurrency(doc.currency, null, rates) ? base : r2(docAmountInAed(amount, doc.currency, null, rates));
+  const ref = `PO payment #${payment}`;
+  const entries = [
+    { id: await findOrCreateCashAccount(client), type: "asset", side: "credit", amount: spot },
+    { id: await findOrCreateApAccount(client), type: "liability", side: "debit", amount: base },
+  ];
+  if (Math.abs(spot - base) >= .01) entries.push({ id: await findOrCreateFxAccount(client), type: "expense", side: spot > base ? "debit" : "credit", amount: Math.abs(spot - base) });
+  for (const entry of entries) {
+    await sInsert("transactions", { account_id: entry.id, txn_type: entry.side, amount: entry.amount, description: ref,
+      source: "payment", ref, po_id: doc.id, workflow_payment_id: payment, txn_date: paidAt }, client);
+    await adjustAccountBalance(entry.id, ledgerDelta(entry.type, entry.side, entry.amount), client);
+  }
+  return payment;
+}
+
+async function localOrderWorkflow(action: string, payload: Record<string, any>, client: any): Promise<WorkflowResult> {
+  let id = Number(payload.id) || 0;
+  const old = id ? await client.from("orders").select("*").eq("id", id).single() : null;
+  if (old?.error) throw old.error;
+  if (old?.data?.invoice_id) throw new Error("Change the linked invoice to update this generated order.");
+  const oldItems = id ? await sChildren<OrderItem>("order_items", "order_id", id, undefined, client) : [];
+  const items: OrderItem[] = action === "save" ? payload.items : oldItems;
+  if (!Array.isArray(items) || items.length > 500 || items.some(item => !Number.isInteger(Number(item.product_id)) || Number(item.product_id) <= 0 ||
+    !Number.isFinite(Number(item.quantity)) || Number(item.quantity) < 0 || !Number.isFinite(Number(item.unit_price)) || Number(item.unit_price) < 0))
+    throw new Error("Choose valid order products, quantities and prices (at most 500 lines).");
+  const header = payload.header || {};
+  const status = action === "delete" ? "cancelled" : action === "status" ? payload.status : header.status || old?.data?.status || "draft";
+  if (!["draft", "pending", "processing", "completed", "cancelled", "canceled", "shipped", "delivered", "confirmed"].includes(status)) throw new Error("Choose a valid order status.");
+  const total = items.length ? r2(items.reduce((sum, item) => sum + r2(Number(item.quantity) * Number(item.unit_price)), 0)) : Number(header.total || 0);
+  if (!Number.isFinite(total) || total < 0) throw new Error("Enter a valid order total.");
+  if (!id) id = await sInsert("orders", { ...header, status, total }, client);
+  const previous = new Map<number, number>();
+  const movements = (await sList<any>("stock_movements", undefined, "*", client)).filter(row => row.ref === `Order #${id}`);
+  for (const row of movements) previous.set(Number(row.product_id), (previous.get(Number(row.product_id)) || 0) - Number(row.qty));
+  if (!movements.length) for (const item of oldItems) if (item.product_id) previous.set(item.product_id, (previous.get(item.product_id) || 0) + Number(item.quantity));
+  const next = new Map<number, number>();
+  if (!["cancelled", "canceled"].includes(status)) for (const item of items) if (item.product_id) next.set(Number(item.product_id), (next.get(Number(item.product_id)) || 0) + Number(item.quantity));
+  for (const product of new Set([...previous.keys(), ...next.keys()])) await adjustProductStock(product,
+    (previous.get(product) || 0) - (next.get(product) || 0), { type: "order", ref: `Order #${id}` }, client);
+  if (action === "delete") { await sDeleteMany("order_items", oldItems.map(item => item.id!), client); await sDelete("orders", id, client); }
+  else if (action === "status") await sUpdate("orders", id, { status }, client);
+  else {
+    await sUpdate("orders", id, { ...header, status, total }, client);
+    await sDeleteMany("order_items", oldItems.map(item => item.id!), client);
+    await sInsertMany("order_items", items.map(item => ({ order_id: id, product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price })), client);
+  }
+  return { id };
+}
 
 export const billing = {
   listDocs: (docType: "sales" | "purchase" = "sales") =>
@@ -3982,8 +4229,9 @@ export const billing = {
       },
       null as unknown as InvoiceDoc
     ),
-  saveDoc: (input: InvoiceDocInput) =>
+  saveDoc: (input: InvoiceDocInput, requestId?: string) =>
     online(async () => {
+      const checkScope = workspaceGuard();
       const { items, id, ...docFields } = input;
       if (items.length > 500) throw new Error("A document supports at most 500 lines.");
       if (items.some((item) => !Number.isFinite(Number(item.qty)) || Number(item.qty) < 0 ||
@@ -4009,7 +4257,17 @@ export const billing = {
           console.warn("FX freeze skipped:", e);
         }
       }
-      const persist = async (client: any) => {
+      const storedItems = items.map((it, position) => clean({ description: it.description, qty: it.qty, unit_price: it.unit_price,
+        unit: it.unit || null, custom: it.custom || null, tax_category: it.tax_category || null, position, product_id: it.product_id ?? null }));
+      const requested = { id: id || null, header: clean(docFields as Record<string, unknown>), items: storedItems };
+      checkScope();
+      if (!isLocalMode()) {
+        const output = await businessWorkflow("invoice", "save", { id: id || null, header: row, items: storedItems }, async () => { throw new Error("Cloud workflow is required."); }, requestId, requested,
+          id ? undefined : () => checkFreeInvoiceCap(invoicesThisMonth));
+        return output.id;
+      }
+      const persist = async (client: any, reviewed: Record<string, any>) => {
+        const row = structuredClone(reviewed.header), items = reviewed.items as InvoiceDocInput["items"];
         let docId: number;
         // Ids of the lines this save replaces. They are NOT deleted here: this
         // used to wipe every item first and re-insert after, with no transaction
@@ -4024,6 +4282,10 @@ export const billing = {
           const previous = await client.from("invoice_docs").select("*").eq("id", id).single();
           if (previous.error) throw previous.error;
           previousDoc = previous.data;
+          const receipts = await sChildren<InvoicePayment>("invoice_payments", "invoice_id", id, undefined, client);
+          if (receipts.length && (String(row.currency || "AED") !== String(previousDoc?.currency || "AED") ||
+            Number(row.fx_rate || 0) !== Number(previousDoc?.fx_rate || 0) || (row.doc_type === "purchase") !== (previousDoc?.doc_type === "purchase") || !isPostedStatus(row.status)))
+            throw new Error("Remove the recorded payments before changing currency, document type or unposting.");
           if (isPostedStatus(previousDoc?.status) && isCreditNote(String(previousDoc?.invoice_type_code ?? "")) !== isCreditNote(String(row.invoice_type_code ?? "")))
             throw new Error("Create a separate credit note to correct a posted invoice.");
           if (row.einvoice || (previousDoc?.einvoice as { uuid?: string } | undefined)?.uuid) row.einvoice = { ...((row.einvoice ?? previousDoc?.einvoice) as object),
@@ -4041,10 +4303,9 @@ export const billing = {
           if (row.einvoice) row.einvoice = { ...(row.einvoice as object), uuid: crypto.randomUUID() };
           docId = await sInsert("invoice_docs", row, client);
         }
-        let insertedItemIds: number[] = [];
-        try {
+
           if (items.length) {
-            insertedItemIds = await sInsertMany(
+            await sInsertMany(
               "invoice_doc_items",
               items.map((it, i) => ({
                 invoice_id: docId,
@@ -4070,32 +4331,11 @@ export const billing = {
             if (error) throw error;
           }
           return { docId, previousDoc, previousItems };
-        } catch (error) {
-          // Device writes are staged by withLocalTransaction. Cloud retains a
-          // compensating path until invoice posting has a server transaction.
-          if (!isLocalMode()) {
-            try {
-              await sDeleteMany("invoice_doc_items", insertedItemIds, client);
-              if (previousDoc) {
-                await sUpdate("invoice_docs", docId, previousDoc, client);
-                if (previousItems.length) {
-                  const restored = await client
-                    .from("invoice_doc_items")
-                    .upsert(previousItems, { onConflict: "id" });
-                  if (restored.error) throw restored.error;
-                }
-              } else await sDelete("invoice_docs", docId, client);
-            } catch {
-              throw new Error(
-                "The invoice save failed and could not be fully restored. Reopen this invoice and check its lines before retrying.",
-              );
-            }
-          }
-          throw error;
-        }
+
       };
-      const saveAndPost = async (client: any) => {
-        const { docId, previousDoc, previousItems } = await persist(client);
+      const saveAndPost = async (client: any, reviewed: Record<string, any>) => {
+        const { docId, previousDoc, previousItems } = await persist(client, reviewed);
+        const row = reviewed.header, items = reviewed.items;
         // Keep the invoice, its lines, stock and ledger in the same local commit.
         // Reverse the PREVIOUS quantities and number before posting an edit.
         if (previousDoc) await unpropagateInvoice(previousDoc, previousItems, client);
@@ -4105,9 +4345,10 @@ export const billing = {
         } else {
           await unpropagateInvoice(docRow, items, client);
         }
-        return docId;
+        await allocateLocalAdvance(docRow, Number(row.advance_applied) || 0, client, previousDoc);
+        return { id: docId };
       };
-      return isLocalMode() ? withLocalTransaction(saveAndPost) : saveAndPost(sb());
+      return (await businessWorkflow("invoice", "save", { id: id || null, header: row, items: storedItems }, saveAndPost, requestId, requested)).id;
     }),
   // Appearance edits must not replace lines or reverse/repost stock and payments.
   updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature">>) =>
@@ -4117,15 +4358,16 @@ export const billing = {
       if (!Object.keys(fields).length) throw new Error("Choose an appearance change first.");
       await sUpdate("invoice_docs", docId, fields);
     }),
-  deleteDoc: (docId: number) =>
+  deleteDoc: (docId: number, requestId?: string) =>
     online(async () => {
-      const { data: doc, error } = await sb()
+      await businessWorkflow("invoice", "delete", { id: docId }, async client => {
+      const { data: doc, error } = await client
         .from("invoice_docs")
         .select("*")
         .eq("id", docId)
         .single();
       if (error) throw error;
-      const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId);
+      const items = await sChildren<any>("invoice_doc_items", "invoice_id", docId, undefined, client);
       await unpropagateInvoice(
         doc as Record<string, unknown>,
         items
@@ -4134,23 +4376,24 @@ export const billing = {
             qty: i.qty,
             unit_price: i.unit_price,
           }))
-      );
+      , client);
       // Reverse receipts while the foreign key still identifies their invoice.
-      await reverseInvoiceTransactions(docId, `Invoice ${doc.number} Payment`, true);
+      await reverseInvoiceTransactions(docId, `Invoice ${doc.number} Payment`, true, client);
       // Restore any advance credit this invoice had consumed — otherwise the
       // negative `applied:inv#<id>` ledger row outlives the invoice and the
       // customer's credit stays reduced by a document that no longer exists.
-      const advs = await sList<any>("advances");
-      for (const a of advs) if (a.note === `applied:inv#${docId}`) await sDelete("advances", a.id);
+      const advs = await sList<any>("advances", undefined, "*", client);
+      for (const a of advs) if (a.note === `applied:inv#${docId}`) await sDelete("advances", a.id, client);
       // Local storage has no FK cascades; explicitly clean child rows in both modes.
       for (const table of ["invoice_payments", "invoice_doc_items"]) {
-        const { error: childError } = await sb().from(table).delete().eq("invoice_id", docId);
+        const { error: childError } = await client.from(table).delete().eq("invoice_id", docId);
         if (childError) throw childError;
       }
-      await sDelete("invoice_docs", docId);
-      return undefined;
+      await sDelete("invoice_docs", docId, client);
+      return { id: docId };
+      }, requestId);
     }),
-  setStatus: (docId: number, status: string) =>
+  setStatus: (docId: number, status: string, requestId?: string) =>
     online(
       async () => {
         const change = async (client: any) => {
@@ -4165,8 +4408,12 @@ export const billing = {
             if (doc.doc_type === "purchase") throw new Error("Supplier credit notes must remain drafts until the supplier credit workflow is connected.");
             if (doc.einvoice?.credit_reason !== "VD" && (!doc.original_invoice_number || !doc.original_invoice_date)) throw new Error("Add the original invoice number and date before posting a credit note.");
           }
-          await sUpdate("invoice_docs", docId, { status }, client);
-          if (isPostedStatus(status) === isPostedStatus(doc.status)) return;
+          if (!isPostedStatus(status) && (await sChildren<InvoicePayment>("invoice_payments", "invoice_id", docId, undefined, client)).length)
+            throw new Error("Remove the recorded payments before unposting this document.");
+          const cancelled = ["cancelled", "canceled"].includes(status);
+          await sUpdate("invoice_docs", docId, { status, ...(cancelled ? { advance_applied: 0 } : {}) }, client);
+          if (cancelled) await allocateLocalAdvance({ ...doc, status, advance_applied: 0 }, 0, client, doc);
+          if (isPostedStatus(status) === isPostedStatus(doc.status)) return { id: docId };
           const docItems = items
             .map((i) => ({
               product_id: i.product_id ?? undefined,
@@ -4177,11 +4424,13 @@ export const billing = {
             }));
           if (isPostedStatus(status)) {
             await propagateInvoice(doc as Record<string, unknown>, docItems, client);
+            await allocateLocalAdvance({ ...doc, status }, Number(doc.advance_applied) || 0, client, doc);
           } else {
             await unpropagateInvoice(doc as Record<string, unknown>, docItems, client);
           }
+          return { id: docId };
         };
-        return isLocalMode() ? withLocalTransaction(change) : change(sb());
+        await businessWorkflow("invoice", "status", { id: docId, status }, change, requestId);
       }
     ),
   shareDoc: (docId: number, shared: boolean) =>
@@ -4260,13 +4509,20 @@ export const billing = {
     invoiceId: number,
     amount: number,
     method: string | null,
-    paidAt: string
+    paidAt: string,
+    requestId?: string
   ) =>
     online(async () => {
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+      const checkScope = workspaceGuard();
+      if (!Number.isFinite(amount) || amount <= 0 || amount >= 1e12 || amount !== r2(amount)) throw new Error("Enter a positive payment amount with at most two decimals.");
       if (!paidAt || Number.isNaN(Date.parse(paidAt))) throw new Error("Enter a valid payment date.");
       const payRates = await getExchangeRates().catch(() => ({}));
-      const record = async (client: any) => {
+      checkScope();
+      if (!isLocalMode()) {
+        return (await businessWorkflow("invoice", "payment-add", { id: invoiceId, amount, method: method ?? null, paid_at: paidAt, rates: payRates }, async () => { throw new Error("Cloud workflow is required."); }, requestId)).payment_id!;
+      }
+      const record = async (client: any, reviewed: Record<string, any>) => {
+        const recordRates = reviewed.rates as Record<string, number>;
         // Validate and read before inserting: a missing/inaccessible invoice must
         // never leave an orphan payment behind or turn a failed read into 'paid'.
         const [{ data: doc, error: docError }, items, pays] = await Promise.all([
@@ -4284,7 +4540,7 @@ export const billing = {
           );
         const isPurchase = docRow.doc_type === "purchase";
         const total = docTotal(docRow, items);
-        const paid = pays.reduce((sum, payment) => sum + Number(payment.amount), amount);
+        const paid = pays.reduce((sum, payment) => sum + Number(payment.amount), amount + Number(docRow.advance_applied || 0));
         const { data: pay, error: paymentError } = await client
           .from("invoice_payments")
           .insert({
@@ -4297,6 +4553,7 @@ export const billing = {
           .single();
         if (paymentError) throw paymentError;
         const paymentId = (pay as { id: number } | null)?.id;
+        if (!paymentId) throw new Error("Payment could not be confirmed.");
 
         // Auto-mark the invoice paid once the balance is cleared.
         const status = paid >= total - 0.005 ? "paid" : docRow.status === "paid" ? "sent" : docRow.status;
@@ -4312,7 +4569,8 @@ export const billing = {
         const docFx = (docRow as { fx_rate?: number } | null)?.fx_rate;
         // AR was raised at the rate on the date of supply, so it must be RELIEVED
         // at that same rate or the receivable never reaches zero.
-        const amountBase = docAmountInAed(amount, docCurrency, docFx, payRates);
+        if (unratedCurrency(docCurrency, docFx, recordRates)) throw new Error("Set a valid exchange rate before recording a payment.");
+        const amountBase = r2(docAmountInAed(amount, docCurrency, docFx, recordRates));
         // Cash, though, is worth what it was worth on the day it arrived. When
         // those differ the gap is a real gain or loss, not a rounding artefact —
         // it posts to Foreign Exchange Gain/Loss so the books still balance.
@@ -4321,9 +4579,9 @@ export const billing = {
         // "spot" passes the raw number through, which would read as a loss the
         // size of the whole invoice. No rate means no opinion: settle at the
         // document's own rate and post no difference.
-        const amountSpot = unratedCurrency(docCurrency, null, payRates)
+        const amountSpot = unratedCurrency(docCurrency, null, recordRates)
           ? amountBase
-          : docAmountInAed(amount, docCurrency, null, payRates);
+          : r2(docAmountInAed(amount, docCurrency, null, recordRates));
         const fxDiff = Number((amountSpot - amountBase).toFixed(2));
         const ref = `Invoice payment #${paymentId}`;
         const cashId = await findOrCreateCashAccount(client);
@@ -4398,11 +4656,11 @@ export const billing = {
             client,
           );
         }
-        return paymentId;
+        return { id: invoiceId, payment_id: paymentId };
       };
-      return isLocalMode() ? withLocalTransaction(record) : record(sb());
+      return (await businessWorkflow("invoice", "payment-add", { id: invoiceId, amount, method: method ?? null, paid_at: paidAt, rates: payRates }, record, requestId)).payment_id!;
     }),
-  removePayment: (id: number) =>
+  removePayment: (id: number, requestId?: string) =>
     online(async () => {
       const remove = async (client: any) => {
         const { data: p, error } = await client
@@ -4486,7 +4744,7 @@ export const billing = {
               client,
             );
             if (
-              remaining.reduce((sum, r) => sum + Number(r.amount), 0) <
+              remaining.reduce((sum, r) => sum + Number(r.amount), Number(docMeta.advance_applied || 0)) <
               docTotal(docMeta, items) - 0.005
             )
               await sUpdate("invoice_docs", invoiceId, { status: "sent" }, client);
@@ -4494,8 +4752,9 @@ export const billing = {
         } else {
           await sDelete("invoice_payments", id, client);
         }
+        return { id: invoiceId || id, payment_id: id };
       };
-      return isLocalMode() ? withLocalTransaction(remove) : remove(sb());
+      await businessWorkflow("invoice", "payment-remove", { payment_id: id }, remove, requestId);
     }),
   getCompany: () =>
     readCached<CompanyProfile>(
@@ -4740,74 +4999,20 @@ export const recurrences = {
   /** Generate any invoices whose recurrence is due; returns how many were created. */
   generateDue: () =>
     online(async () => {
-      const { data } = await sb()
-        .from("invoice_recurrence")
-        .select("*")
-        .eq("active", true);
-      const today = todayISO();
-      const due = ((data ?? []) as Recurrence[]).filter((r) => r.next_run <= today);
+      const checkScope = workspaceGuard();
+      const { data, error } = await sb().from("invoice_recurrence").select("*").eq("active", true);
+      if (error) throw error;
+      checkScope();
+      // The recurrence RPC uses a UTC calendar day, including Dubai midnight.
+      const today = new Date().toISOString().slice(0, 10);
+      const due = ((data ?? []) as Recurrence[]).filter(r => r.next_run <= today);
       let made = 0;
       for (const r of due) {
-        let base: InvoiceDoc | null = null;
-        try {
-          base = await billing.getDoc(r.base_invoice_id);
-        } catch (e: any) {
-          // Only "that invoice is gone" retires a recurrence. Any other
-          // failure — offline, RLS hiccup, timeout — is temporary, and
-          // cancelling on one silently ends a subscription the user set up,
-          // with no way back from the UI. Skip this run and try next time.
-          const gone =
-            e?.code === "PGRST116" || /no rows/i.test(e?.message ?? String(e));
-          if (!gone) continue;
-        }
-        if (!base) {
-          await sUpdate("invoice_recurrence", r.id, { active: false });
-          continue;
-        }
-        // Carry the WHOLE base document and override only what a new
-        // occurrence must change. Listing the fields by hand is how this
-        // drifted: unit_price_formula, each line's `custom` (manual amounts,
-        // per-line discounts and formulas) and round_off were all left behind,
-        // so a recurring invoice could bill a different figure than the
-        // invoice it recurs from — silently, every month.
-        const {
-          id: _id,
-          created_at: _created,
-          updated_at: _updated,
-          // Inheriting these would date the new invoice to the old cycle and
-          // re-link it to a quotation it did not come from.
-          due_date: _due,
-          quotation_id: _quote,
-          ...carried
-        } = base;
-        const input: InvoiceDocInput = {
-          ...carried,
-          number: `${base.number || "INV"}-${today.replace(/-/g, "")}`,
-          status: "draft",
-          issue_date: today,
-          items: base.items.map((it) => ({
-            description: it.description,
-            qty: it.qty,
-            unit_price: it.unit_price,
-            unit: it.unit,
-            custom: it.custom,
-            tax_category: it.tax_category,
-            product_id: it.product_id,
-          })),
-        };
-        await billing.saveDoc(input);
-        // Advance next_run past today: if the recurrence lagged several
-        // intervals (app unopened for a while), stepping one interval at a
-        // time would re-fire on every load and mint duplicate invoices with
-        // the same date-suffixed number. Missed occurrences are skipped, not
-        // back-filled — one invoice per catch-up.
         let next = addInterval(r.next_run, r.interval);
         while (next <= today) next = addInterval(next, r.interval);
-        await sUpdate("invoice_recurrence", r.id, {
-          next_run: next,
-          last_run: today,
-        });
-        made++;
+        checkScope();
+        if (await generateRecurringInvoice(r.id, r.next_run, today, next)) made++;
+        checkScope();
       }
       return made;
     }),
@@ -4999,10 +5204,16 @@ export const quotes = {
   convertToInvoice: (quotationId: number) =>
     online(async () => {
       if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
-      const client = sb(), local = isLocalMode(), scope = activeCacheOrg;
+      const client = sb(), local = isLocalMode(), scope = activeCacheOrg, checkScope = workspaceGuard();
       const company = await billing.getCompany();
-      const { pickDocNumber, loadDocFormats } = await import("./numberFormat");
+      const { loadDocFormats } = await import("./numberFormat");
       const formats = await loadDocFormats();
+      // Number allocation owns its own local commit. Reserve before opening
+      // the document transaction to avoid nesting the device write queue.
+      const numbers = await sList<{ number: string }>("invoice_docs", undefined, "number");
+      checkScope();
+      const reservedNumber = await allocateDocumentNumber("invoice", numbers.map(row => row.number), formats);
+      checkScope();
       const convert = async (tx: { from: (table: string) => any }) => {
         if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
         const { data: q, error } = await tx.from("quotations").select("*").eq("id", quotationId).single();
@@ -5012,10 +5223,9 @@ export const quotes = {
         const qd = q as QuotationDoc;
         const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [{ col: "position", asc: true }], tx);
         if (!items.length || items.length > 500) throw new Error("A quotation needs between 1 and 500 lines before conversion.");
-        const numbers = await sList<{ number: string }>("invoice_docs", undefined, "number", tx);
         const due = new Date(); due.setDate(due.getDate() + 30);
         const header = {
-          number: pickDocNumber("invoice", numbers.map(row => row.number), formats),
+          number: reservedNumber,
           status: "draft", doc_type: "invoice", quotation_id: quotationId,
           template: qd.template || company.default_template || "minimal",
           accent: qd.accent || company.default_accent || "#0A0A0A",
@@ -5216,6 +5426,7 @@ export const pos = {
    *  Returns the created PO numbers. */
   createDraftsFromLowStock: () =>
     online(async () => {
+      const checkScope = workspaceGuard();
       const [products, sups, existing] = await Promise.all([
         sList<Product>("products"),
         sList<Supplier>("suppliers"),
@@ -5226,6 +5437,7 @@ export const pos = {
       );
       if (!low.length) return [] as string[];
       const company = await billing.getCompany().catch(() => null);
+      checkScope();
       const bySupplier = new Map<number, Product[]>();
       for (const p of low) {
         const sid = p.supplier_id ?? 0;
@@ -5246,7 +5458,9 @@ export const pos = {
           unit_cost: Number(p.cost_price) || 0,
           unit: p.unit,
         }));
-        const num = nextDocNumber({ prefix: "PO", existing: existingNums });
+        checkScope();
+        const num = await allocateDocumentNumber("purchase_order", existingNums);
+        checkScope();
         existingNums.push(num);
         await pos.save({
           po_number: num,
@@ -5365,8 +5579,9 @@ export const pos = {
       },
       null as unknown as PurchaseOrder
     ),
-  save: (input: PoInput) =>
+  save: (input: PoInput, requestId?: string) =>
     online(async () => {
+      const checkScope = workspaceGuard();
       const { items, id, ...fields } = input;
       const total = purchaseTotals(input, items).total;
       const row = clean({ ...fields, total } as Record<string, unknown>);
@@ -5379,35 +5594,51 @@ export const pos = {
         if (company.country_code) row.tax_country_code = company.country_code;
       }
       validateCountry(row.tax_country_code as string | undefined, row.template as string | undefined);
-      const poId = await saveDocumentLines("purchase_orders", "purchase_order_items", "po_id", row,
-        items.map(it => ({
+      const storedItems = items.map(it => ({
           product_id: it.product_id ?? null, description: it.description, quantity: it.quantity,
           unit_cost: it.unit_cost, unit: it.unit ?? null, custom: it.custom ?? null,
-        })), id);
-      // Post to Accounting once the PO is received/done; clear it otherwise.
-      const saved = { ...row, id: poId };
-      if (PO_DONE((row as Record<string, unknown>).status))
-        await propagatePurchase(saved);
-      else await unpropagatePurchase(saved);
-      return poId;
+        }));
+      checkScope();
+      return (await businessWorkflow("po", "save", { id: id || null, header: row, items: storedItems }, async (client, reviewed) => {
+        const row = reviewed.header, storedItems = reviewed.items;
+        if (id) {
+          const old = await client.from("purchase_orders").select("*").eq("id", id).single(); if (old.error) throw old.error;
+          const existingPayments = await sChildren<PoPayment>("po_payments", "po_id", id, undefined, client);
+          if (existingPayments.length && ((row.currency || "AED") !== (old.data.currency || "AED") || Number(row.fx_rate || 0) !== Number(old.data.fx_rate || 0) || !PO_DONE(row.status))) throw new Error("Remove the recorded payments before changing currency or unposting.");
+          const oldItems = await sChildren<PoItem>("purchase_order_items", "po_id", id, undefined, client);
+          await unpropagatePurchase(old.data, client);
+          await changeLocalPurchaseStock(old.data, oldItems, false, client);
+        }
+        const poId = await saveDocumentLines("purchase_orders", "purchase_order_items", "po_id", row, storedItems, id, client);
+        const saved = { ...row, id: poId, stock_received: false };
+        if (PO_DONE(row.status)) {
+          await changeLocalPurchaseStock(saved, storedItems, true, client);
+          await propagatePurchase(saved, client);
+        }
+        return { id: poId };
+      }, requestId, { id: id || null, header: clean({ ...fields, total }), items: storedItems })).id;
     }),
-  setStatus: (poId: number, status: string) =>
-    write(
-      { k: "update", t: "purchase_orders", id: poId, row: { status } },
-      async () => {
-        const { data: doc, error } = await sb()
+  setStatus: (poId: number, status: string, requestId?: string) =>
+    online(async () => {
+      await businessWorkflow("po", "status", { id: poId, status }, async client => {
+        const { data: doc, error } = await client
           .from("purchase_orders")
           .select("*")
           .eq("id", poId)
           .single();
         if (error) throw error;
-        await sUpdate("purchase_orders", poId, { status });
+        if (!PO_DONE(status) && (await sChildren<PoPayment>("po_payments", "po_id", poId, undefined, client)).length) throw new Error("Remove the recorded payments before unposting this document.");
+        await sUpdate("purchase_orders", poId, { status }, client);
         const po = { ...(doc as Record<string, unknown>), status };
-        if (PO_DONE(status)) await propagatePurchase(po);
-        else await unpropagatePurchase(po);
-      },
-      undefined
-    ),
+        if (PO_DONE(status) !== PO_DONE(doc.status)) {
+          const items = await sChildren<PoItem>("purchase_order_items", "po_id", poId, undefined, client);
+          await changeLocalPurchaseStock(doc, items, PO_DONE(status), client);
+          if (PO_DONE(status)) await propagatePurchase(po, client);
+          else await unpropagatePurchase(po, client);
+        }
+        return { id: poId };
+      }, requestId);
+    }),
   shareDoc: (poId: number, shared: boolean) =>
     online(() =>
       shareWithItems(
@@ -5431,54 +5662,38 @@ export const pos = {
     return (data as { share_token: string }).share_token;
   },
   /** Receive items into stock: increments products.quantity by each line. */
-  receive: (poId: number) =>
+  receive: (poId: number, requestId?: string) =>
     online(async () => {
-      const po = await pos.get(poId);
-      if (String(po.status).toLowerCase() === "received" || (po as unknown as { stock_received?: boolean }).stock_received) {
-        await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
-        return;
-      }
-      if (!isLocalMode()) {
-        const rates = await getExchangeRates();
-        const fx = docAmountInAed(1, po.currency, undefined, rates);
-        const { error } = await sb().rpc("filey_receive_purchase_order", { p_id: poId, p_fx: fx });
-        if (error) throw error;
-        await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
-        return;
-      }
-      // Same rule as a supplier bill: stock is valued in the base currency, so
-      // a PO raised in USD converts before it moves the average cost.
-      const poRates = await getExchangeRates().catch(() => ({}));
-      const poCurrency = (po as unknown as { currency?: string }).currency;
-      const poFx = (po as unknown as { fx_rate?: number }).fx_rate;
-      for (const it of po.items) {
-        if (!it.product_id) continue;
-        const qty = Math.abs(Number(it.quantity));
-        // Moving average first — needs the pre-receipt on-hand quantity.
-        await applyMovingAverageCost(
-          it.product_id,
-          qty,
-          docAmountInAed(Number(it.unit_cost) || 0, poCurrency, poFx, poRates)
-        );
-        await adjustProductStock(it.product_id, qty, {
-          type: "purchase",
-          ref: po.po_number ? `PO ${po.po_number}` : `PO #${poId}`,
-        });
-      }
-      await sUpdate("purchase_orders", poId, { status: "received", stock_received: true });
-      // Receiving = done → post Purchases / Accounts Payable to Accounting.
-      await propagatePurchase({ ...(po as unknown as Record<string, unknown>), status: "received" });
+      const checkScope = workspaceGuard();
+      const rates = await getExchangeRates().catch(() => ({}));
+      checkScope();
+      await businessWorkflow("po", "receive", { id: poId, rates }, async client => {
+        const doc = await client.from("purchase_orders").select("*").eq("id", poId).single(); if (doc.error) throw doc.error;
+        if (!PO_DONE(doc.data.status)) {
+          const items = await sChildren<PoItem>("purchase_order_items", "po_id", poId, undefined, client);
+          await changeLocalPurchaseStock(doc.data, items, true, client);
+          await sUpdate("purchase_orders", poId, { status: "received", stock_received: true }, client);
+          await propagatePurchase({ ...doc.data, status: "received" }, client);
+        }
+        return { id: poId };
+      }, requestId);
     }),
   remove: (poId: number) =>
-    write({ k: "delete", t: "purchase_orders", id: poId }, async () => {
-      const { data: doc } = await sb()
-        .from("purchase_orders")
-        .select("*")
-        .eq("id", poId)
-        .single();
-      if (doc) await unpropagatePurchase(doc as Record<string, unknown>);
-      await sDelete("purchase_orders", poId);
-    }, undefined),
+    online(async () => {
+      await businessWorkflow("po", "delete", { id: poId }, async client => {
+        const doc = await client.from("purchase_orders").select("*").eq("id", poId).single(); if (doc.error) throw doc.error;
+        const items = await sChildren<PoItem>("purchase_order_items", "po_id", poId, undefined, client);
+        await unpropagatePurchase(doc.data, client);
+        await changeLocalPurchaseStock(doc.data, items, false, client);
+        const payments = await sChildren<PoPayment>("po_payments", "po_id", poId, undefined, client);
+        const ledger = await sList<InvoiceTxn & { po_id?: number }>("transactions", undefined, "*", client);
+        await reverseTransactions(ledger.filter(txn => Number(txn.po_id) === poId && txn.source === "payment"), client);
+        await sDeleteMany("po_payments", payments.map(p => p.id), client);
+        await sDeleteMany("purchase_order_items", items.map(it => Number(it.id)), client);
+        await sDelete("purchase_orders", poId, client);
+        return { id: poId };
+      });
+    }),
   /* ---- payments ---- */
   /** All PO payments in one query — dashboard aggregates payable per PO. */
   allPayments: () =>
@@ -5520,16 +5735,30 @@ export const pos = {
       },
       []
     ),
-  addPayment: (poId: number, amount: number, method?: string | null, paidAt?: string) =>
-    write(
-      { k: "insert", t: "po_payments", row: { po_id: poId, amount, method: method || null, paid_at: paidAt || todayYmd() } },
-      () => sInsert("po_payments", { po_id: poId, amount, method: method || null, paid_at: paidAt || todayYmd() }),
-      -1
-    ),
-  removePayment: (paymentId: number) =>
-    write({ k: "delete", t: "po_payments", id: paymentId }, () =>
-      sDelete("po_payments", paymentId), undefined
-    ),
+  addPayment: (poId: number, amount: number, method?: string | null, paidAt?: string, requestId?: string) =>
+    online(async () => {
+      const checkScope = workspaceGuard();
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a payment amount greater than zero.");
+      const date = paidAt || todayYmd();
+      if (Number.isNaN(Date.parse(date))) throw new Error("Enter a valid payment date.");
+      const rates = await getExchangeRates().catch(() => ({}));
+      checkScope();
+      const result = await businessWorkflow("po", "payment-add", { id: poId, amount, method: method || null, paid_at: date, rates }, async (client, reviewed) => {
+        const doc = await client.from("purchase_orders").select("*").eq("id", poId).single(); if (doc.error) throw doc.error;
+        return { id: poId, payment_id: await localPurchasePayment(doc.data, amount, method || null, date, reviewed.rates, client) };
+      }, requestId);
+      return result.payment_id!;
+    }),
+  removePayment: (paymentId: number, requestId?: string) =>
+    online(async () => {
+      await businessWorkflow("po", "payment-remove", { payment_id: paymentId }, async client => {
+        const pay = await client.from("po_payments").select("*").eq("id", paymentId).single(); if (pay.error) throw pay.error;
+        const rows = await sList<InvoiceTxn>("transactions", undefined, "*", client);
+        await reverseTransactions(rows.filter(txn => txn.ref === `PO payment #${paymentId}` && txn.source === "payment"), client);
+        await sDelete("po_payments", paymentId, client);
+        return { id: Number(pay.data.po_id), payment_id: paymentId };
+      }, requestId);
+    }),
 };
 
 // ===== Advances (party-level prepayment credit) =====
@@ -5554,20 +5783,33 @@ export const advances = {
       () => sList<Advance>("advances", [{ col: "paid_at", asc: false }]),
       []
     ),
-  forParty: (partyType: "customer" | "supplier", partyId: number) =>
+  forParty: (partyType: "customer" | "supplier", partyId: number, invoiceId?: number) =>
     readCached<Advance[]>(
-      `advances:${partyType}:${partyId}`,
+      `advances:${partyType}:${partyId}:${invoiceId || "own"}`,
       async () => {
-        const { data, error } = await sb()
-          .from("advances")
-          .select("*")
-          .eq("party_type", partyType)
-          .eq("party_id", partyId)
-          .order("paid_at", { ascending: false });
-        if (error) throw error;
-        return (data ?? []) as Advance[];
-      },
-      []
+        const current = workspaceGuard(), local = isLocalMode();
+        let owner = getCacheScope()?.split(":user:").slice(-1)[0];
+        if (invoiceId) {
+          const parent = await sb().from("invoice_docs").select("user_id,org_id,customer_id").eq("id", invoiceId).single();
+          current(); if (parent.error) throw parent.error;
+          if (!parent.data || (local ? !localRowInCurrentOrg(parent.data) : parent.data.org_id !== getCacheOrg()) || Number(parent.data.customer_id) !== Number(partyId))
+            throw new Error("The invoice customer or workspace changed. Reopen this invoice.");
+          owner = parent.data.user_id || owner;
+          if (local && !localRowOwnedByActor(parent.data)) throw new Error("Open cloud mode to check credit for another workspace author.");
+        }
+        if (!local) {
+          const access = await loadModuleAccess(); current();
+          const actor = getCacheScope()?.split(":user:").slice(-1)[0];
+          if (!owner || owner !== actor && !access.admin) throw new Error("Invoice advance access denied.");
+        }
+        current();
+        let query = sb().from("advances").select("*").eq("party_type", partyType).eq("party_id", partyId);
+        if (!local) query = query.eq("user_id", owner).eq("org_id", getCacheOrg());
+        const { data, error } = await query.order("paid_at", { ascending: false });
+        current(); if (error) throw error;
+        if (local) assertLocalCreditPools(data || [], partyType, partyId);
+        return (local ? (data || []).filter((row: Record<string, any>) => localRowOwnedByActor(row, owner)) : data || []) as Advance[];
+      }, []
     ),
   add: (input: {
     party_type: "customer" | "supplier";
@@ -5585,18 +5827,14 @@ export const advances = {
       note: input.note || null,
       paid_at: input.paid_at || todayYmd(),
     };
-    return write({ k: "insert", t: "advances", row }, () =>
-      sInsert("advances", row), -1
-    );
+    return online(async () => (await businessWorkflow("advance", "add", { header: row },
+      (client, payload) => localAdvanceWorkflow("add", payload, client))).id);
   },
-  remove: (id: number) =>
-    write({ k: "delete", t: "advances", id }, () =>
-      sDelete("advances", id), undefined
-    ),
+  remove: (id: number) => online(async () => { await businessWorkflow("advance", "delete", { id },
+    (client, payload) => localAdvanceWorkflow("delete", payload, client)); }),
   update: (id: number, patch: Partial<Pick<Advance, "amount" | "note" | "paid_at">>) =>
-    write({ k: "update", t: "advances", id, row: patch }, () =>
-      sUpdate("advances", id, patch), undefined
-    ),
+    online(async () => { await businessWorkflow("advance", "update", { id, header: clean(patch) },
+      (client, payload) => localAdvanceWorkflow("update", payload, client)); }),
   /** Apply (consume) advance credit against a specific invoice. Idempotent per
    *  invoice id: replaces any prior consumption for that invoice, so re-saving
    *  with a new amount rebalances cleanly. Stored as a NEGATIVE ledger entry so
@@ -5609,24 +5847,13 @@ export const advances = {
     amount: number
   ) =>
     online(async () => {
-      const tag = `applied:inv#${invoiceId}`;
-      const rows = await sList<Advance>("advances", [{ col: "id", asc: true }]);
-      // Matched on the tag alone, not the party. The tag already names one
-      // invoice, so scoping the purge by party_id only meant that changing an
-      // invoice's customer stranded the old consumption on the old customer —
-      // credit permanently eaten by an invoice that is no longer theirs.
-      for (const r of rows)
-        if (r.party_type === "customer" && r.note === tag)
-          await sDelete("advances", r.id);
-      if (amount > 0)
-        await sInsert("advances", {
-          party_type: "customer",
-          party_id: partyId,
-          party_name: partyName,
-          amount: -Math.abs(amount),
-          note: tag,
-          paid_at: todayYmd(),
-        });
+      await businessWorkflow("invoice", "advance", { id: invoiceId, amount, party_id: partyId }, async client => {
+        const invoice = await client.from("invoice_docs").select("*").eq("id", invoiceId).single(); if (invoice.error) throw invoice.error;
+        if (Number(invoice.data.customer_id) !== Number(partyId)) throw new Error("The customer changed. Reopen this invoice before allocating credit.");
+        await allocateLocalAdvance({ ...invoice.data, customer_name: partyName }, amount, client, invoice.data);
+        await sUpdate("invoice_docs", invoiceId, { advance_applied: amount }, client);
+        return { id: invoiceId };
+      });
     }),
   /** Net advance credit currently available for a customer (sum of all their
    *  ledger entries — positive deposits minus negative consumptions). */
@@ -5641,7 +5868,7 @@ export const advances = {
     partyId: number,
     invoiceId?: number
   ): Promise<number> => {
-    const rows = await advances.forParty("customer", partyId);
+    const rows = await advances.forParty("customer", partyId, invoiceId);
     // `tag &&` is load-bearing. A deposit entered without a note is stored with
     // note = null, and on a NEW invoice there is no id, so the tag was null
     // too — `a.note === tag` matched every plain deposit and excluded it. The

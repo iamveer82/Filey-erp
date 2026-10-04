@@ -44,3 +44,12 @@ it("does not resurrect an unmigrated base64 file after its deletion", async () =
   expect(await readBlobBytes(path)).toBeNull();
   expect(invoke.mock.calls.some(([command]) => command === "blob_write")).toBe(false);
 });
+
+it.each(["{broken", "null", '{"b64":42}', "[]"])("preserves corrupt legacy bytes instead of reporting a missing file: %s", async (raw) => {
+  const { readBlobBytes } = await import("../localdb");
+  const path = "owner/file-one/invoice.pdf";
+  state.values.set(`fileblob:${path}`, raw);
+  await expect(readBlobBytes(path)).rejects.toThrow("stored data has been preserved");
+  expect(state.values.get(`fileblob:${path}`)).toBe(raw);
+  expect(invoke.mock.calls.some(([command]) => ["blob_write", "cache_set"].includes(command))).toBe(false);
+});

@@ -8,9 +8,10 @@ import {
   rememberLocalIdentity,
   setLocalSignedIn,
 } from "./localAuth";
-import { autoSyncEnabled, getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, setMigrating, syncCycle } from "./sync";
+import { getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, setMigrating, syncCycle } from "./sync";
 import { migrateCloudToLocal } from "./migrate";
 import { journalSnapshot } from "./localdb";
+import { withCloudTransfer } from "./cloudTransfer";
 
 let switching = false;
 
@@ -28,8 +29,6 @@ export async function switchWorkspace(
   if (typeof navigator !== "undefined" && !navigator.onLine)
     throw new Error("Connect to the internet to finish saving your data before switching.");
   switching = true;
-  const wasAutoSync = autoSyncEnabled();
-  let completed = false;
   let locked = false;
   try {
     // The sync engine owns its own lock. Pause background scheduling instead
@@ -47,12 +46,15 @@ export async function switchWorkspace(
     let localProfile: Profile | null = null;
     if (target === "cloud") {
       onProgress?.("Saving your device changes to Filey Cloud…");
-      let synced = await syncCycle(supabase, { manual: true });
-      const failures = getSyncStatus().failures;
-      // Enabling cloud chooses this device's edited versions. Unchanged
-      // records and cloud-only records keep their cloud versions.
-      if (!synced && failures?.length && failures.every(f => f.kind === "conflict" || f.kind === "record"))
-        synced = await resolveSyncConflicts(true, supabase, { pendingOnly: true });
+      const synced = await withCloudTransfer(supabase, user.id, async transfer => {
+        let synced = await syncCycle(supabase, { manual: true, transfer });
+        const failures = getSyncStatus().failures;
+        // Enabling cloud chooses this device's edited versions. Unchanged
+        // records and cloud-only records keep their cloud versions.
+        if (!synced && failures?.length && failures.every(f => f.kind === "conflict" || f.kind === "record"))
+          synced = await resolveSyncConflicts(true, supabase, { pendingOnly: true, transfer });
+        return synced;
+      });
       if (!synced) throw new Error("Couldn't finish saving to Filey Cloud. Your device data is safe. Check your connection and try again.");
       setMigrating(true);
       locked = true;
@@ -98,10 +100,8 @@ export async function switchWorkspace(
       setLocalSignedIn(true);
     }
     setDataMode(target);
-    completed = true;
   } finally {
     if (locked) setMigrating(false);
     switching = false;
-    if (!completed) setAutoSyncEnabled(wasAutoSync);
   }
 }

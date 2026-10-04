@@ -53,6 +53,14 @@ fly deploy
 ## Notes
 
 - The service-role key bypasses RLS — keep it server-only, never in the app.
+- Authenticated worker requests refuse redirects and have a 30-second request
+  deadline. Converter children receive only runtime/locale variables and their
+  own temporary home/cache paths; Supabase and provider credentials are excluded.
+  Failed jobs and worker logs do not include converter stderr or document text.
+- This environment filtering is not an OS sandbox. The current Docker image
+  runs the supervisor and converters under one OS identity. Before processing
+  hostile documents in production, validate separate converter privileges and
+  filesystem/network isolation with the actual Linux converters and host runtime.
 - Outputs are written to `{user_id}/{job_id}/...` in `tool-outputs`, so each
   user can read their own results under existing storage RLS.
 - Scale out by running more instances; the atomic claim (status guard)

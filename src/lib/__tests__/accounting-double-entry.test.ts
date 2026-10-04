@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { fin, billing, erp, advances } from "../api";
+import { fin, billing, erp, advances, setCacheOrg } from "../api";
+import { localClient } from "../localdb";
 import { todayYmd } from "../format";
 
 // Money path: every posting must keep total debits == total credits, and the
@@ -9,7 +10,9 @@ import { todayYmd } from "../format";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg(null); setCacheOrg("accounting-test-org", "accounting-test-owner");
 });
+afterEach(() => setCacheOrg(null));
 
 const sums = async () => {
   const txns = await fin.transactions();
@@ -130,7 +133,7 @@ describe("accounting double-entry", () => {
     expect(bal(/sales revenue/i)).toBeCloseTo(100); // revenue unaffected
   });
 
-  it("repairLedger removes duplicates and recomputes balances", async () => {
+  it("repairLedger preserves legitimate equal manual entries", async () => {
     const id = (await fin.createAccount({
       code: "1700",
       name: "Van",
@@ -138,15 +141,28 @@ describe("accounting double-entry", () => {
       balance: 0,
     } as never)) as number;
     await fin.postTransaction(id, "debit", 300, "Van purchase");
-    await fin.postTransaction(id, "debit", 300, "Van purchase"); // identical → dup
+    await fin.postTransaction(id, "debit", 300, "Van purchase"); // same details can be a second real purchase
     expect((await fin.accounts()).find((a) => a.id === id)?.balance).toBeCloseTo(600);
 
     const { removed } = await fin.repairLedger();
-    expect(removed).toBeGreaterThanOrEqual(1);
-    expect((await fin.accounts()).find((a) => a.id === id)?.balance).toBeCloseTo(300);
+    expect(removed).toBe(0);
+    expect((await fin.accounts()).find((a) => a.id === id)?.balance).toBeCloseTo(600);
+  });
+
+  it("repairLedger removes a duplicate from the same source and preserves opening balances", async () => {
+    const id = await fin.createAccount({ code: "1000", name: "Accounts Receivable", account_type: "asset", balance: 50 });
+    const invoiceId = await billing.saveDoc({ number: "INV-REPAIR", status: "sent", currency: "AED", tax_rate: 0, discount: 0,
+      customer_name: "Acme", items: [{ description: "Service", qty: 1, unit_price: 100 }] } as never);
+    const original = (await localClient.from("transactions").select().eq("invoice_id", invoiceId).eq("account_id", id).single()).data;
+    const { id: _duplicateId, ...duplicate } = original;
+    await localClient.from("transactions").insert(duplicate);
+    await localClient.from("accounts").update({ balance: 250 }).eq("id", id);
+    expect((await fin.repairLedger()).removed).toBe(1);
+    expect((await fin.accounts()).find(row => row.id === id)?.balance).toBe(150);
   });
 
   it("deleting an invoice restores the advance credit it consumed", async () => {
+    await localClient.from("crm_customers").insert({ id: 1, name: "Acme" });
     await advances.add({
       party_type: "customer",
       party_id: 1,

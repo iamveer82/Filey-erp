@@ -11,13 +11,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import AgentChat from "../AgentChat";
 import { runTool } from "../../lib/aiTools";
+import * as aiTools from "../../lib/aiTools";
 import { setDataMode } from "../../lib/dataMode";
 import * as ai from "../../lib/ai";
 import { gateFor, getAgentMode } from "../../lib/agentMode";
 import { isCapabilityEnabled, setCapabilityEnabled } from "../../lib/capabilities";
-import { setCacheOrg } from "../../lib/api";
+import { billing, setCacheOrg } from "../../lib/api";
 import * as computer from "../../lib/computerUse";
-import { saveChats, type Chat } from "../../lib/aiChats";
+import { loadChats, saveChats, type Chat } from "../../lib/aiChats";
 import * as voice from "../../lib/voice";
 import { agentStorageScope } from "../../lib/agentStorage";
 
@@ -67,6 +68,24 @@ it("keeps phone Enter for a new line and sends using the arrow, with a compact c
   expect(screen.getByRole("button", { name: "Copy reply" })).not.toHaveTextContent("Copy");
   fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
   expect(screen.getByRole("menuitem", { name: "Coin wallet" })).toBeInTheDocument();
+});
+
+it("keeps the draft and offers the wallet when Coin cannot cover the request", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield await Promise.reject(new Error("Insufficient credit. Add Coin to continue."));
+    return "";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const input = screen.getByRole("textbox", { name: "Message Filey AI" });
+  fireEvent.change(input, { target: { value: "Prepare my invoice" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Insufficient credit. Add Coin to continue.");
+  expect(screen.getByRole("link", { name: "Add Coin" }))
+    .toHaveAttribute("href", "/settings?section=credits");
+  expect(input).toHaveValue("Prepare my invoice");
+  expect(stream).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
 });
 
 it("follows large streamed updates, preserves a reader's position on completion, and lets them jump back", async () => {
@@ -286,6 +305,80 @@ it("opens the memory dialog and closes it with Escape", async () => {
   }
 });
 
+it("settles an earlier approval safely when another sensitive action requests approval", async () => {
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
+  await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-NO-RECORD" }); });
+  await screen.findByRole("dialog", { name: "Approve action" });
+  await act(async () => { second = runTool("mark_invoice_paid", { invoice_number: "SECOND-NO-RECORD" }); });
+  await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
+  const dialog = screen.getByRole("dialog", { name: "Approve action" });
+  expect(dialog).toHaveTextContent("SECOND-NO-RECORD");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+  await expect(second).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
+});
+
+it("requires a fresh click when a pending pointer gesture's approval is replaced", async () => {
+  const read = vi.spyOn(billing, "listDocs").mockResolvedValue([
+    { id: 2, number: "SECOND-INVOICE" },
+  ] as Awaited<ReturnType<typeof billing.listDocs>>);
+  const write = vi.spyOn(billing, "setStatus").mockResolvedValue(undefined);
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
+  await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-INVOICE" }); });
+  const firstAllow = within(await screen.findByRole("dialog", { name: "Approve action" })).getByRole("button", { name: "Allow" });
+  fireEvent.pointerDown(firstAllow, { pointerId: 1, button: 0 });
+  await act(async () => { second = runTool("mark_invoice_paid", { invoice_number: "SECOND-INVOICE" }); });
+  await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
+  const dialog = screen.getByRole("dialog", { name: "Approve action" });
+  const secondAllow = within(dialog).getByRole("button", { name: "Allow" });
+  expect(secondAllow).not.toBe(firstAllow);
+  expect(firstAllow.isConnected).toBe(false);
+  fireEvent.pointerUp(firstAllow, { pointerId: 1, button: 0 });
+  fireEvent.click(firstAllow);
+  await act(async () => {});
+  expect(read).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+  expect(dialog).toHaveTextContent("SECOND-INVOICE");
+  fireEvent.click(secondAllow);
+  await expect(second).resolves.toEqual({ ok: true, message: "SECOND-INVOICE marked paid." });
+  expect(write).toHaveBeenCalledExactlyOnceWith(2, "paid");
+});
+
+it("ignores an old approval callback while its replacement is waiting to render", async () => {
+  const read = vi.spyOn(billing, "listDocs").mockResolvedValue([
+    { id: 2, number: "SECOND-INVOICE" },
+  ] as Awaited<ReturnType<typeof billing.listDocs>>);
+  const write = vi.spyOn(billing, "setStatus").mockResolvedValue(undefined);
+  const register = aiTools.setToolConfirm;
+  let requests = 0;
+  vi.spyOn(aiTools, "setToolConfirm").mockImplementation(handler => register((...args) => {
+    requests++;
+    return handler(...args);
+  }));
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
+  await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-INVOICE" }); });
+  const firstAllow = within(await screen.findByRole("dialog", { name: "Approve action" })).getByRole("button", { name: "Allow" });
+  await act(async () => {
+    second = runTool("mark_invoice_paid", { invoice_number: "SECOND-INVOICE" });
+    // React batches this replacement. The displayed button still has A's
+    // callback while the synchronous pending ref already belongs to B.
+    for (let tick = 0; tick < 30 && requests < 2; tick++) await Promise.resolve();
+    expect(requests).toBe(2);
+    expect(screen.getByRole("dialog", { name: "Approve action" })).toHaveTextContent("FIRST-INVOICE");
+    fireEvent.click(firstAllow);
+  });
+  await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
+  expect(read).not.toHaveBeenCalled();
+  expect(write).not.toHaveBeenCalled();
+  const replacement = screen.getByRole("dialog", { name: "Approve action" });
+  expect(replacement).toHaveTextContent("SECOND-INVOICE");
+  fireEvent.click(within(replacement).getByRole("button", { name: "Allow" }));
+  await expect(second).resolves.toEqual({ ok: true, message: "SECOND-INVOICE marked paid." });
+  expect(write).toHaveBeenCalledExactlyOnceWith(2, "paid");
+});
+
 it("denies a waiting sensitive tool when the approval dialog is closed", async () => {
   render(
     <MemoryRouter>
@@ -411,22 +504,26 @@ it("starts desktop computer access automatically for an approved task without an
   expect(disable).toHaveBeenCalled();
 });
 
-it("keeps autonomous plan and tool results with the reply and passes history to follow-ups", async () => {
+it("keeps action receipts without tool traces in chat and passes results to follow-ups", async () => {
+  let finish!: () => void;
+  const done = new Promise<void>(resolve => { finish = resolve; });
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi
     .spyOn(ai, "aiAutonomousStream")
     .mockImplementation(async function* () {
       yield {
         type: "plan" as const,
-        steps: [{ step: "Review invoices", status: "completed" as const }],
+        steps: [{ step: "Review invoices", status: "in_progress" as const }],
       };
-      yield { type: "tool_call" as const, id: "read-1", name: "list_invoices", args: {} };
+      yield { type: "tool_call" as const, id: "read-1", name: "list_invoices", args: { internal_field: "private-argument" } };
+      await done;
       yield {
         type: "tool_result" as const,
         id: "read-1",
         name: "list_invoices",
-        result: { count: 0 },
+        result: { count: 0, internal_result: "private-result" },
       };
+      yield { type: "plan" as const, steps: [{ step: "Review invoices", status: "completed" as const }] };
       yield {
         type: "done" as const,
         text: "Review finished.",
@@ -445,11 +542,19 @@ it("keeps autonomous plan and tool results with the reply and passes history to 
     target: { value: "Review invoices" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  expect(await screen.findByRole("status", { name: "Task progress" })).toHaveTextContent("Working…");
+  expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
+  for (const technical of ["list_invoices", "list invoices", "private-argument", "private-result"])
+    expect(screen.queryByText(new RegExp(technical))).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Actions this turn")).not.toBeInTheDocument();
+  await act(async () => { finish(); });
   expect(await screen.findByText("Review finished.")).toBeInTheDocument();
-  expect(screen.getByLabelText("Task progress")).toHaveTextContent("1 of 1 complete");
-  expect(screen.getByLabelText("Actions this turn")).toHaveTextContent(
-    "list invoices · completed"
-  );
+  for (const technical of ["list_invoices", "list invoices", "private-argument", "private-result"])
+    expect(screen.queryByText(new RegExp(technical))).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Task progress")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Actions this turn")).not.toBeInTheDocument();
+  const receipt = loadChats().flatMap(chat => chat.turns).find(turn => turn.text === "Review finished.")?.run;
+  expect(receipt).toMatchObject({ actions: [{ id: "read-1", name: "list_invoices", status: "completed" }], outcome: "finished" });
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), {
     target: { value: "Continue" },
   });
@@ -463,12 +568,13 @@ it("keeps autonomous plan and tool results with the reply and passes history to 
 });
 
 it("passes the chosen effort into the agent and remembers it for this workspace", async () => {
-  vi.spyOn(ai, "getAiConfig").mockReturnValue({ provider: "openai", model: "gpt-5.2", baseUrl: "https://api.openai.com/v1", apiKey: "test" });
+  ai.setAiConfig({ provider: "openai", model: "gpt-5.2", baseUrl: "https://api.openai.com/v1", apiKey: "test" });
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
     yield { type: "text" as const, text: "Ready." }; return "Ready.";
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Reasoning effort: Default" })).toHaveAttribute("title", "gpt-5.2 · Default effort");
   fireEvent.click(screen.getByRole("button", { name: "Reasoning effort: Default" }));
   fireEvent.change(screen.getByRole("slider", { name: "Reasoning effort" }), { target: { value: "4" } });
   expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", "Extra high");
@@ -477,4 +583,31 @@ it("passes the chosen effort into the agent and remembers it for this workspace"
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(stream).toHaveBeenCalled());
   expect(stream.mock.calls[0][1]?.effort).toBe("xhigh");
+});
+
+it("offers and preserves supported reasoning levels for default Filey AI", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "text" as const, text: "Managed reply." }; return "Managed reply.";
+  });
+  const view = render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const effort = screen.getByRole("button", { name: "Reasoning effort: Default" });
+  expect(effort).toHaveTextContent("Filey AI");
+  expect(effort).toHaveAttribute("title", "Filey AI · Default effort");
+  expect(screen.queryByText("filey-ai")).not.toBeInTheDocument();
+  fireEvent.click(effort);
+  expect(screen.getByText("Filey AI", { selector: "p" })).toHaveAttribute("title", "Filey AI");
+  expect(document.body).not.toHaveTextContent(/filey-ai|DeepSeek|deepseek-flash/);
+  const slider = screen.getByRole("slider", { name: "Reasoning effort" });
+  expect(slider).toHaveAttribute("max", "3");
+  fireEvent.change(slider, { target: { value: "2" } });
+  expect(slider).toHaveAttribute("aria-valuetext", "High");
+  fireEvent.keyDown(slider, { key: "Escape" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Review this draft." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Managed reply.");
+  expect(stream.mock.calls[0][1]?.effort).toBe("high");
+  view.unmount();
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  expect(screen.getByRole("button", { name: "Reasoning effort: High" })).toBeInTheDocument();
 });

@@ -1,10 +1,13 @@
+import { withCloudTransfer } from "./cloudTransfer";
+import * as localSync from "./sync";
+import { transferSyncNow as syncNow, transferPullNow as pullNow, transferSyncCycle as syncCycle, transferResolveConflicts as resolveSyncConflicts, transferPushCollection as pushCollection } from "./__tests__/cloud-transfer-fixture";
 // Auto-sync: journal records local writes per row; syncNow pushes the changed
 // rows to a (fake) cloud client — upserts by id, deletes deleted ids, strips
 // ownership, flags org sharing; pullNow brings cloud rows down into clean
 // collections.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { localClient, journalSnapshot, journalVersion, journalCommit, replaceColl } from "./localdb";
-import { syncNow, pullNow, syncCycle, resolveSyncConflicts, listSyncConflicts, cleanRowForPush, getSyncStatus, pushCollection, isMigrating, inRealOrg } from "./sync";
+import { listSyncConflicts, cleanRowForPush, getSyncStatus, isMigrating, inRealOrg } from "./sync";
 import { claimLocalWorkspace, rememberLocalIdentity, setLocalSignedIn } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 
@@ -26,12 +29,12 @@ it("does not seed or transfer data when automatic sync is off", async () => {
   localStorage.setItem("filey_auto_sync", "off");
   await localClient.from("products").insert({ name: "Local only" });
   const { client, calls } = fakeCloud();
-  expect(await syncCycle(client)).toBe(false);
+  expect(await localSync.syncCycle(client)).toBe(false);
   expect(calls).toEqual([]);
   expect(localStorage.getItem("filey_cloud_seeded")).toBeNull();
 });
 
-it("allows an explicit one-time sync while keeping automatic sync off", async () => {
+it("allows a confirmed workspace transfer while keeping automatic sync off", async () => {
   localStorage.setItem("filey_auto_sync", "off");
   const { client } = fakeCloud();
   expect(await syncCycle(client, { manual: true })).toBe(true);
@@ -44,10 +47,9 @@ it("refuses to sync device data into another account", async () => {
   setLocalSignedIn(true);
   await localClient.from("products").insert({ name: "Private local product" });
   const { client, calls } = fakeCloud();
-  expect(await syncNow(client, { manual: true })).toBe(false);
-  expect(await pullNow(client)).toBe(false);
+  await expect(syncNow(client, { manual: true })).rejects.toThrow("another account");
+  await expect(pullNow(client)).rejects.toThrow("another account");
   expect(calls).toEqual([]);
-  expect(getSyncStatus().error).toContain("another account");
 });
 
 it("reconciles clean tables after partial upload failure without hiding pending records", async () => {
@@ -306,24 +308,26 @@ describe("syncNow", () => {
     expect(j.tables.products?.changed).toEqual([1]);
   });
 
-  it("reserves transfers before authentication so simultaneous calls cannot race", async () => {
-    for (const transfer of [syncNow, pullNow]) {
+  it("reserves an authorized transfer before authentication so simultaneous calls cannot race", async () => {
+    for (const operation of [localSync.syncNow, localSync.pullNow]) {
       const { client } = fakeCloud();
-      const session = await client.auth.getSession();
-      let finish!: (value: typeof session) => void;
-      let first = true;
-      client.auth.getSession = () => {
-        if (!first) return Promise.resolve(session);
-        first = false;
-        return new Promise((resolve) => { finish = resolve; });
-      };
-      const pending = transfer(client);
-      expect(isMigrating()).toBe(true);
-      expect(await syncNow(client)).toBe(false);
-      expect(await pullNow(client)).toBe(false);
-      finish(session);
-      expect(await pending).toBe(true);
-      expect(isMigrating()).toBe(false);
+      await withCloudTransfer(client, UID, async transfer => {
+        const session = await client.auth.getSession();
+        let finish!: (value: typeof session) => void;
+        let first = true;
+        client.auth.getSession = () => {
+          if (!first) return Promise.resolve(session);
+          first = false;
+          return new Promise(resolve => { finish = resolve; });
+        };
+        const pending = operation(client, { transfer });
+        expect(isMigrating()).toBe(true);
+        expect(await localSync.syncNow(client, { transfer })).toBe(false);
+        expect(await localSync.pullNow(client, { transfer })).toBe(false);
+        finish(session);
+        expect(await pending).toBe(true);
+        expect(isMigrating()).toBe(false);
+      });
     }
   });
 
@@ -338,7 +342,7 @@ describe("syncNow", () => {
     await localClient.from("products").insert({ name: "A" });
     const { client, calls } = fakeCloud();
     client.auth.getSession = async () => ({ data: { session: null } });
-    expect(await syncNow(client)).toBe(false);
+    await expect(syncNow(client)).rejects.toThrow("account changed");
     expect(calls).toHaveLength(0);
     const j = await journalSnapshot();
     expect(j.tables.products).toBeTruthy(); // still pending
@@ -350,7 +354,7 @@ describe("syncNow", () => {
     await localClient.from("products").insert({ name: "A" });
     localStorage.setItem("filey_auto_sync", "off");
     const { client, calls } = fakeCloud();
-    expect(await syncNow(client)).toBe(false);
+    expect(await localSync.syncNow(client)).toBe(false);
     expect(calls).toHaveLength(0);
   });
 
@@ -366,10 +370,8 @@ describe("syncNow", () => {
     await localClient.from("products").insert({ name: "A" });
     const { client } = fakeCloud();
     client.auth.getSession = async () => ({ data: { session: null } });
-    expect(await syncNow(client, { manual: true })).toBe(false);
-    const s = getSyncStatus();
-    expect(s.state).toBe("error");
-    expect(s.error ?? "").toMatch(/sign in/i);
+    await expect(syncNow(client, { manual: true })).rejects.toThrow("account changed");
+    expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
   });
 });
 
@@ -628,36 +630,33 @@ describe('expired session', () => {
   // headroom the opening check buys. The token used to be read once, so when it
   // died partway the rest of the run failed as "JWT expired" — a message that
   // names the first table in PUSH_TABLES and nothing about signing in.
-  it('stops with a sign-in message when the session dies mid-push', async () => {
+  it('stops and preserves records when the session dies before a transfer request', async () => {
     await localClient.from('products').insert({ name: 'Widget' });
-    await localClient.from('customers').insert({ name: 'Acme' });
-    const { client } = fakeCloud();
-    // Alive for the opening check, gone by the time the first table is done.
-    let calls = 0;
-    client.auth.getSession = async () =>
-      ({ data: { session: calls++ < 1 ? { user: { id: UID }, expires_at: Math.floor(Date.now() / 1000) + 3600 } : null } }) as any;
-
-    expect(await syncNow(client, { manual: true })).toBe(false);
-    const s = getSyncStatus();
-    expect(s.state).toBe('error');
-    expect(s.error ?? '').toMatch(/sign in/i);
+    const { client, calls } = fakeCloud();
+    await withCloudTransfer(client, UID, async transfer => {
+      client.auth.getSession = async () => ({ data: { session: null } });
+      expect(await localSync.syncNow(client, { manual: true, transfer })).toBe(false);
+      expect(calls).toEqual([]);
+      expect(getSyncStatus().error).toMatch(/account changed/i);
+      expect((await journalSnapshot()).tables.products.changed).toEqual([1]);
+    });
   });
 });
 
 // Auto-sync flipped from opt-out to opt-in. Upgrading must not silently stop
 // backing up an install that had simply left the old default alone.
-describe("auto-sync opt-in upgrade", () => {
+describe("legacy auto-sync privacy upgrade", () => {
   const reimport = async () => {
     vi.resetModules();
     return import("./sync");
   };
 
-  it("keeps sync on for an install that had already seeded to cloud", async () => {
+  it("does not re-enable uploads for an install that had already seeded to cloud", async () => {
     localStorage.clear();
     localStorage.setItem("filey_cloud_seeded", "1");
     const { autoSyncEnabled } = await reimport();
-    expect(localStorage.getItem("filey_auto_sync")).toBe("on");
-    expect(autoSyncEnabled()).toBe(true);
+    expect(localStorage.getItem("filey_auto_sync")).toBeNull();
+    expect(autoSyncEnabled()).toBe(false);
   });
 
   it("leaves a fresh install opted out", async () => {

@@ -12,13 +12,14 @@ vi.mock("../supabase", () => ({
   isConfigured: true,
   supabase: null,
   sb: () => ({
-    auth: { getSession: async () => ({ data: { session: state.signedIn ? { user: { id: "owner" } } : null } }) },
+    auth: { getSession: async () => ({ data: { session: state.signedIn ? { user: { id: "owner" }, access_token: "fixture-owner-token" } : null } }) },
     from: (table: string) => {
       let start = 0;
       const query = {
         select: () => query,
         eq: () => query,
         order: () => query,
+        setHeader: () => query,
         range: (offset: number) => {
           start = offset;
           state.pages.push({ table, start });
@@ -36,6 +37,7 @@ vi.mock("../supabase", () => ({
     },
   }),
 }));
+vi.mock("../api", () => ({ getCacheScope: () => "org:user:owner" }));
 vi.mock("../auth", () => ({ useAuth: () => ({ user: { id: "owner" } }) }));
 vi.mock("../ui", () => ({ useUI: () => ({ toast: {}, confirm: vi.fn(), prompt: vi.fn() }) }));
 

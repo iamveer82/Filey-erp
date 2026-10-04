@@ -21,8 +21,9 @@ export function nativeAppRoute(value: string): string | null {
     if (!["/", "/settings", "/reset-password"].includes(path)) return null;
     const input = new URLSearchParams(route.split("?")[1] ?? "");
     const output = new URLSearchParams();
-    for (const name of path === "/reset-password" ? ["token_hash", "email"] : path === "/settings" ? ["section", "checkout", "credit_checkout", "plan"] : []) {
+    for (const name of path === "/reset-password" ? ["token_hash", "email"] : path === "/settings" ? ["section", "checkout", "credit_checkout", "credit_order", "plan"] : []) {
       const entry = input.get(name);
+      if (name === "credit_order" && (entry?.length !== 36 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry))) continue;
       if (entry) output.set(name, entry);
     }
     return `${path}${output.size ? `?${output}` : ""}`;

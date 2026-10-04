@@ -50,6 +50,8 @@ export default function Team() {
   const [busy, setBusy] = useState(false);
   // Keep unsent messages and attachments while browsing conversations; never upload drafts.
   const drafts = useRef<Record<string, { text: string; files: File[] }>>({});
+  // Sends survive feed remounts when the user changes conversations.
+  const [sends, setSends] = useState<Record<string, { pending: boolean; version: number }>>({});
   const draftKey = recipient ? `person:${recipient}` : `channel:${active}`;
 
   const load = async () => {
@@ -376,12 +378,21 @@ export default function Team() {
           )}
           {view === "channels" || (person && !local) ? (
             <CompanyMessages
-              key={recipient || active}
+              key={`${draftKey}:${sends[draftKey]?.version || 0}`}
               channel={recipient ? "general" : active}
               recipient={recipient}
               recipientName={person?.name || person?.email}
               draft={drafts.current[draftKey]}
               onDraftChange={(draft) => { drafts.current[draftKey] = draft; }}
+              sending={sends[draftKey]?.pending || false}
+              onSendStateChange={(state, reply) => {
+                if (state === "sent" && !reply) drafts.current[draftKey] = { text: "", files: [] };
+                setSends(previous => ({ ...previous, [draftKey]: {
+                  pending: state === "sending",
+                  // Refresh a remounted feed and its draft after the original send succeeds.
+                  version: (previous[draftKey]?.version || 0) + (state === "sent" ? 1 : 0),
+                } }));
+              }}
               active={mobileConversation}
               focusMessage={focusMessage}
               onRead={refreshUnread}

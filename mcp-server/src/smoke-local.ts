@@ -11,6 +11,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createLocalClient, readLocalIdentity } from "./localdb.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "filey-mcp-"));
 const dbFile = path.join(dir, "filey-erp.db");
@@ -92,7 +96,8 @@ function seed(): void {
   ]);
   // Acme has a part payment on file: aging must count its BALANCE (315 − 15 =
   // 300), not the billed total — mirrors src/lib/aiTools.ts receivables_aging.
-  put("invoice_payments", [{ id: 200, org_id: ORG, invoice_id: 10, amount: 15 }]);
+  put("invoice_payments", [{ id: 200, org_id: ORG, invoice_id: 10, amount: 15 },
+    { id: 201, org_id: "other-org", invoice_id: 10, amount: 9999 }]);
   put("products", [
     { id: 1, org_id: ORG, name: "Bolt M8", sku: "B8", quantity: 3, reorder_level: 10, unit_price: 2 },
     { id: 2, org_id: ORG, name: "Nut M8", sku: "N8", quantity: 900, reorder_level: 10, unit_price: 1 },
@@ -189,25 +194,18 @@ async function main(): Promise<void> {
   assert.deepEqual(aging.buckets["90+"].invoices, ["INV-2025-A0003"]);
   assert.equal(aging.buckets.current.total, 0);
 
-  noError(await call("get_financial_summary"), "get_financial_summary");
+  const financial = noError(await call("get_financial_summary"), "get_financial_summary");
+  assert.equal(financial.outstanding_receivables, 457.5, "summary subtracts payments in the current workspace");
+  assert.equal(financial.overdue_receivables, 457.5, "overdue summary agrees with aging");
 
-  // Confirm-gated flow — the pending action row must carry expires_at (the new
-  // schema's partial unique index lives on live pending codes).
+  // Stdio has no paired actor. Do not create unusable, unbound approval codes.
   const reminder = noError(
     await call("request_payment_reminder", { invoice_number: "INV-2025-A0001" }),
     "request_payment_reminder"
   );
-  assert.match(reminder.approval_code, /^\d{4}$/, "4-digit approval code");
-  const actions = readColl("agent_pending_actions");
-  const pending = actions.find((a: any) => a.code === reminder.approval_code);
-  assert.ok(pending, "pending action stored with the returned code");
-  assert.equal(pending.status, "pending");
-  const expectedExpiry = new Date(Date.now() + 24 * 86_400_000).getTime();
-  const actualExpiry = new Date(pending.expires_at).getTime();
-  assert.ok(
-    Math.abs(expectedExpiry - actualExpiry) < 60_000,
-    "expires_at is created_at + ~24h"
-  );
+  assert.equal(reminder.status, "requires_channel_proposal");
+  assert.equal(reminder.approval_code, undefined);
+  assert.deepEqual(readColl("agent_pending_actions"), []);
 
   // Write — lands in the app's own store, stamped and journalled for sync.
   const created = noError(
@@ -238,6 +236,269 @@ async function main(): Promise<void> {
   );
   assert.ok(journal?.tables?.invoice_docs?.changed?.includes(14), "row marked dirty for cloud sync");
 
+  noError(await call("create_draft_quote", { customer_name: "Acme", items: [{ description: "Quote line", unit_price: 7 }] }), "quote");
+  const quoteLine = readColl("quotation_items")[0];
+  assert.equal(quoteLine.product, "Quote line", "quotation schema uses product");
+  assert.equal(quoteLine.rate, 7, "quotation schema uses rate");
+  assert.equal(quoteLine.unit_price, undefined);
+  noError(await call("create_draft_po", { supplier_name: "Supplier", items: [{ description: "PO line", unit_cost: 9 }] }), "purchase order");
+  assert.equal(readColl("purchase_order_items")[0].unit_cost, 9);
+
+  const writer = new DatabaseSync(dbFile);
+  const setRaw = (key: string, raw: string) => writer.prepare("INSERT INTO kv_cache (key,value,updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, raw);
+  const raw = (key: string): string | undefined => (writer.prepare("SELECT value FROM kv_cache WHERE key=?").get(key) as any)?.value;
+  const local = createLocalClient(dbFile, { userId: USER, orgId: ORG });
+  setRaw("localdb:scope_check", JSON.stringify([{ id: 1, org_id: ORG }, { id: 2, org_id: "other-org" }, { id: 3 }]));
+  assert.deepEqual((await local.from("scope_check").select("id").eq("org_id", ORG)).data.map((r: any) => r.id), [1, 3]);
+  assert.ok((await local.from("scope_check").select().maybeSingle()).error, "ambiguous single-row lookups fail");
+  // Visibility is an implicit boundary, not an optional caller query filter.
+  // Cached role strings never grant authority to another user's private rows.
+  setRaw("localdb:privacy_check", JSON.stringify([
+    { id: 1, org_id: ORG, user_id: USER, private_text: "own document" },
+    { id: 2, org_id: ORG, user_id: "other-user", private_text: "foreign private document" },
+    { id: 3, org_id: ORG, user_id: "other-user", shared: true },
+    { id: 4, org_id: ORG, user_id: "other-user", shared_with: [USER] },
+    { id: 5, org_id: "other-org", user_id: USER, shared: true, shared_with: [USER] },
+    { id: 6 }, // genuinely untagged historical local record
+    { id: 7, org_id: ORG }, // historical workspace record without an author
+    { id: 8, user_id: "other-user", shared: true }, // no proof of shared org
+    { id: 9, user_id: USER },
+    { id: 10, org_id: ORG, user_id: "other-user", shared_with: ["someone-else"] },
+  ]));
+  assert.deepEqual((await local.from("privacy_check").select("id")).data.map((r: any) => r.id), [1, 3, 4, 6, 7, 9]);
+  assert.equal((await local.from("privacy_check").select().eq("id", 2).maybeSingle()).data, null, "an exact private-row ID is not an access grant");
+  assert.deepEqual((await local.from("privacy_check").select("id").or("id.eq.2,id.eq.5")).data, [], "or/projection cannot bypass identity visibility");
+  const unsigned = createLocalClient(dbFile);
+  assert.deepEqual((await unsigned.from("privacy_check").select("id")).data.map((r: any) => r.id), [6], "no selected profile sees only genuinely untagged rows");
+  unsigned.close();
+  const privateHeadsBefore = raw("localdb:invoice_docs")!;
+  const privateItemsBefore = raw("localdb:invoice_doc_items")!;
+  try {
+    setRaw("localdb:invoice_docs", JSON.stringify([...JSON.parse(privateHeadsBefore),
+      { id: 950, org_id: ORG, user_id: "other-user", number: "PRIVATE-BOUNDARY", customer_name: "synthetic-private-customer", tax_rate: 5 },
+      { id: 951, org_id: ORG, user_id: "other-user", number: "SHARED-BOUNDARY", shared_with: [USER], tax_rate: 5 }]));
+    setRaw("localdb:invoice_doc_items", JSON.stringify([...JSON.parse(privateItemsBefore),
+      { id: 9500, org_id: ORG, user_id: USER, shared: true, invoice_id: 950, description: "synthetic-private-line", qty: 1, unit_price: 999 },
+      { id: 9510, org_id: ORG, user_id: "other-user", invoice_id: 951, description: "synthetic-shared-line", qty: 2, unit_price: 10 },
+      { id: 9511, org_id: "other-org", user_id: USER, invoice_id: 951, description: "foreign-org-line", qty: 1, unit_price: 999 }]));
+    const deniedInvoice = await call("get_invoice", { number: "PRIVATE-BOUNDARY" });
+    assert.ok(deniedInvoice.error?.includes("not found"), "actual MCP tools cannot fetch another author's private invoice");
+    assert.ok(!JSON.stringify(deniedInvoice).includes("synthetic-private-customer"));
+    assert.deepEqual((await local.from("invoice_doc_items").select().eq("invoice_id", 950)).data, [], "owned/shared children do not grant a private parent");
+    const sharedInvoice = noError(await call("get_invoice", { number: "SHARED-BOUNDARY" }), "targeted shared invoice");
+    assert.equal(sharedInvoice.items.length, 1, "shared parent lines inherit visibility without leaking foreign-org children");
+    assert.equal(sharedInvoice.items[0].description, "synthetic-shared-line");
+    assert.equal(sharedInvoice.total, 21, "targeted invoice shares preserve correct totals");
+  } finally {
+    setRaw("localdb:invoice_docs", privateHeadsBefore);
+    setRaw("localdb:invoice_doc_items", privateItemsBefore);
+  }
+  const owned = await local.from("owned_check").insert({ org_id: "forged-org", user_id: "forged-user" }).select().single();
+  assert.equal(owned.data.org_id, ORG);
+  assert.equal(owned.data.user_id, USER);
+
+  for (const damaged of ["{bad", "{}", "[null]", ""]) {
+    setRaw("localdb:damaged", damaged);
+    assert.ok((await local.from("damaged").select()).error);
+    assert.ok((await local.from("damaged").insert({ name: "must not overwrite" })).error);
+    assert.equal(raw("localdb:damaged"), damaged);
+  }
+  const journalBefore = raw("syncjournal")!;
+  for (const damaged of ["{bad", '{"v":1,"tables":{"products":{"changed":null,"deleted":[]}}}']) {
+    setRaw("syncjournal", damaged);
+    assert.ok((await local.from("journal_check").insert({ name: "must roll back" })).error);
+    assert.equal(raw("localdb:journal_check"), undefined);
+    assert.equal(raw("syncjournal"), damaged);
+  }
+  setRaw("syncjournal", journalBefore);
+  const headsBefore = raw("localdb:invoice_docs");
+  const itemsBefore = raw("localdb:invoice_doc_items");
+  setRaw("localdb:invoice_doc_items", "{damaged");
+  const failed = await call("create_draft_invoice", { customer_name: "Rollback", items: [{ description: "invalid storage", unit_price: 1 }] });
+  assert.ok(failed.error, "failed lines reject the document");
+  assert.equal(raw("localdb:invoice_docs"), headsBefore, "header is rolled back with rejected lines");
+  assert.equal(raw("syncjournal"), journalBefore, "journal is rolled back with rejected lines");
+  setRaw("localdb:invoice_doc_items", itemsBefore!);
+
+  // Explicit per-line VAT receives the document discount, and mixed-rate penny
+  // allocations agree with the shared frontend calculation.
+  const calculationHead = { id: 90, org_id: ORG, number: "CALC", tax_rate: 5, discount: 50 };
+  setRaw("localdb:invoice_docs", JSON.stringify([...readColl("invoice_docs"), calculationHead]));
+  setRaw("localdb:invoice_doc_items", JSON.stringify([...readColl("invoice_doc_items"),
+    { id: 900, org_id: ORG, invoice_id: 90, qty: 1, unit_price: 100, custom: { __tax_pct: "10" } }]));
+  const calculation = noError(await call("get_invoice", { number: "CALC" }), "discounted line VAT");
+  assert.equal(calculation.net, 50);
+  assert.equal(calculation.tax, 5);
+  assert.equal(calculation.total, 55);
+  // Cancelled documents never become sales; credit notes reduce sales rather
+  // than increase them. Different currencies never share an aggregate.
+  setRaw("localdb:invoice_docs", JSON.stringify([...readColl("invoice_docs"),
+    { id: 91, org_id: ORG, number: "CREDIT", customer_name: "Acme Trading", status: "sent", doc_type: "invoice", invoice_type_code: "381", currency: "AED", issue_date: daysAgo(0), tax_rate: 5 },
+    { id: 92, org_id: ORG, number: "CANCELLED", customer_name: "Acme Trading", status: "cancelled", doc_type: "invoice", currency: "AED", issue_date: daysAgo(0), tax_rate: 5 },
+    { id: 93, org_id: ORG, number: "USD-OVERDUE", customer_name: "US Customer", status: "overdue", doc_type: "invoice", currency: "USD", issue_date: daysAgo(0), due_date: daysAgo(10), tax_rate: 5 }]));
+  setRaw("localdb:invoice_doc_items", JSON.stringify([...readColl("invoice_doc_items"),
+    { id: 901, org_id: ORG, invoice_id: 91, qty: 1, unit_price: 100 },
+    { id: 902, org_id: ORG, invoice_id: 92, qty: 1, unit_price: 9999 },
+    { id: 903, org_id: ORG, invoice_id: 93, qty: 1, unit_price: 20 }]));
+  const mixedSales = noError(await call("run_report", { report: "sales_by_month" }), "posted sales by currency");
+  assert.equal(mixedSales.months, undefined, "mixed currencies have no misleading flat sales total");
+  assert.equal(mixedSales.by_currency.find((entry: any) => entry.currency === "AED").months.reduce((sum: number, month: any) => sum + month.total, 0), 367.5);
+  assert.equal(mixedSales.by_currency.find((entry: any) => entry.currency === "USD").months[0].total, 21);
+  const mixedCustomers = noError(await call("run_report", { report: "top_customers" }), "posted customers by currency");
+  assert.equal(mixedCustomers.customers, undefined);
+  assert.equal(mixedCustomers.by_currency.find((entry: any) => entry.currency === "AED").customers[0].total, 210);
+  const mixedSummary = noError(await call("get_financial_summary"), "receivables by currency");
+  assert.equal(mixedSummary.outstanding_receivables, undefined);
+  assert.equal(mixedSummary.receivables_by_currency.find((entry: any) => entry.currency === "AED").outstanding, 457.5);
+  assert.equal(mixedSummary.receivables_by_currency.find((entry: any) => entry.currency === "USD").outstanding, 21);
+  const mixedAging = noError(await call("run_report", { report: "receivables_aging" }), "aging by currency");
+  assert.equal(mixedAging.buckets, undefined);
+  assert.equal(mixedAging.by_currency.find((entry: any) => entry.currency === "AED").buckets["1-30"].total, 300);
+  assert.equal(mixedAging.by_currency.find((entry: any) => entry.currency === "USD").buckets["1-30"].total, 21);
+  setRaw("localdb:profiles", JSON.stringify([{ id: USER, org_id: ORG }, { id: "user-2", org_id: "other-org" }]));
+  assert.throws(() => readLocalIdentity(dbFile), /FILEY_LOCAL_USER_ID/);
+  process.env.FILEY_LOCAL_USER_ID = "user-2";
+  assert.deepEqual(readLocalIdentity(dbFile), { userId: "user-2", orgId: "other-org" });
+  delete process.env.FILEY_LOCAL_USER_ID;
+
+  // Separate SQLite connections race from separate threads; every insert and
+  // every journal entry must survive, with unique IDs.
+  const workerCode = `const { parentPort, workerData } = require('node:worker_threads');
+    import(workerData.module).then(({ createLocalClient }) => {
+      const client = createLocalClient(workerData.file);
+      parentPort.once('message', async () => {
+        for (let index=0; index<50; index++) {
+          const result = await client.from('concurrent').insert({ worker: workerData.worker, index });
+          if (result.error) throw Error(result.error.message);
+        }
+        client.close(); parentPort.postMessage('done');
+      });
+      parentPort.postMessage('ready');
+    });`;
+  const workers = [1, 2].map(worker => new Worker(workerCode, { eval: true,
+    workerData: { file: dbFile, module: new URL('./localdb.js', import.meta.url).href, worker } }));
+  const ready = workers.map(worker => new Promise<void>((resolve, reject) => {
+    worker.once('error', reject); worker.once('message', () => resolve());
+  }));
+  await Promise.all(ready);
+  const done = workers.map(worker => new Promise<void>((resolve, reject) => {
+    worker.once('error', reject); worker.once('message', () => resolve());
+  }));
+  workers.forEach(worker => worker.postMessage('start'));
+  await Promise.all(done);
+  await Promise.all(workers.map(worker => worker.terminate()));
+  const concurrent = readColl("concurrent");
+  assert.equal(concurrent.length, 100);
+  assert.equal(new Set(concurrent.map(row => row.id)).size, 100);
+  assert.equal(JSON.parse(raw("syncjournal")!).tables.concurrent.changed.length, 100);
+
+  // A real second OS process writes through the shipped MCP SQLite client.
+  // This process exercises the desktop's BEGIN IMMEDIATE compare/write contract;
+  // native Rust and frontend tests separately verify the actual IPC primitive.
+  const runProcess = promisify(execFile);
+  const peerInsert = async (collection: string, payload: Record<string, unknown>) => {
+    const source = `import {createLocalClient} from ${JSON.stringify(new URL("./localdb.js", import.meta.url).href)};
+      const client=createLocalClient(process.argv[1]);
+      const result=await client.from(process.argv[2]).insert(JSON.parse(process.argv[3])).select().single();
+      client.close(); if(result.error)throw Error(result.error.message); console.log(JSON.stringify(result.data));`;
+    const result = await runProcess(process.execPath, ["--input-type=module", "-e", source, dbFile, collection, JSON.stringify(payload)], { timeout: 15000 });
+    return JSON.parse(result.stdout.trim());
+  };
+  const readValue = (key: string): string | null => raw(key) ?? null;
+  const compareWrite = (expected: Map<string, string | null>, writes: Map<string, string | null>): boolean => {
+    writer.exec("BEGIN IMMEDIATE");
+    try {
+      for (const [key, value] of expected) if (readValue(key) !== value) { writer.exec("ROLLBACK"); return false; }
+      for (const [key, value] of writes) {
+        assert.ok(expected.has(key), "every desktop write is bound to its original read");
+        if (value === null) writer.prepare("DELETE FROM kv_cache WHERE key=?").run(key);
+        else setRaw(key, value);
+      }
+      writer.exec("COMMIT"); return true;
+    } catch (error) { writer.exec("ROLLBACK"); throw error; }
+  };
+  const staleDesktop = new Map([["localdb:products", readValue("localdb:products")], ["syncjournal", readValue("syncjournal")], ["localdb:orphan", null]]);
+  const external = await peerInsert("products", { id: 2 ** 52 + 100, name: "Independent MCP process", quantity: 20, sync_revision: 7 });
+  assert.equal(compareWrite(staleDesktop, new Map([["localdb:products", "[]"], ["syncjournal", '{"v":0,"tables":{}}'], ["localdb:orphan", "stale header"]])), false);
+  assert.equal(raw("localdb:orphan"), undefined, "failed stale batch cannot leave another collection behind");
+  assert.ok(readColl("products").some(row => row.id === external.id), "MCP record survives stale desktop collection replacement");
+  const refreshed = new Map([["localdb:products", readValue("localdb:products")], ["syncjournal", readValue("syncjournal")]]);
+  const desktopId = external.id + 1;
+  const freshJournal = JSON.parse(refreshed.get("syncjournal")!);
+  freshJournal.v++; freshJournal.tables.products.changed.push(desktopId);
+  assert.equal(compareWrite(refreshed, new Map([
+    ["localdb:products", JSON.stringify([...readColl("products"), { id: desktopId, name: "Desktop refreshed", quantity: 1 }])],
+    ["syncjournal", JSON.stringify(freshJournal)],
+  ])), true);
+  const deletionSnapshot = new Map([["localdb:products", readValue("localdb:products")], ["syncjournal", readValue("syncjournal")]]);
+  const afterRefresh = await peerInsert("products", { name: "MCP after desktop" });
+  assert.ok(Number.isSafeInteger(afterRefresh.id) && afterRefresh.id !== desktopId);
+  assert.equal(compareWrite(deletionSnapshot, new Map([["localdb:products", "[]"], ["syncjournal", JSON.stringify(freshJournal)]])), false);
+  const beforeDelete = new Map([["localdb:products", readValue("localdb:products")], ["syncjournal", readValue("syncjournal")]]);
+  const deletedJournal = JSON.parse(beforeDelete.get("syncjournal")!);
+  deletedJournal.v++; deletedJournal.tables.products.deleted.push(external.id);
+  deletedJournal.tables.products.deletedRevisions = { [String(external.id)]: 7 };
+  assert.equal(compareWrite(beforeDelete, new Map([
+    ["localdb:products", JSON.stringify(readColl("products").filter(row => row.id !== external.id))],
+    ["syncjournal", JSON.stringify(deletedJournal)],
+  ])), true);
+  const finalPeer = await peerInsert("products", { name: "MCP preserves tombstone" });
+  const finalProducts = readColl("products");
+  assert.equal(new Set(finalProducts.map(row => row.id)).size, finalProducts.length, "independent writers preserve unique IDs");
+  assert.ok(!finalProducts.some(row => row.id === external.id), "later MCP writes cannot resurrect desktop deletion");
+  const finalEntry = JSON.parse(raw("syncjournal")!).tables.products;
+  assert.ok(finalEntry.changed.includes(desktopId) && finalEntry.changed.includes(finalPeer.id));
+  assert.ok(finalEntry.deleted.includes(external.id));
+  assert.equal(finalEntry.deletedRevisions[String(external.id)], 7);
+
+  // Desktop and MCP share the same private reservation collection, even before
+  // either has saved its draft. Reservations never enter the sync journal.
+  const reserveArgs = { p_kind: "invoice", p_pattern: "INV-{YYYY}-A{0001}", p_year: new Date().getFullYear(),
+    p_actor: USER, p_org: ORG, p_request: crypto.randomUUID() };
+  const ledger = readColl("document_number_reservations");
+  ledger.push({ id: "desktop-held", scope: `${ORG}:user:${USER}`, namespace: "invoice", request_id: crypto.randomUUID(),
+    pattern: reserveArgs.p_pattern, year: reserveArgs.p_year, number: `INV-${reserveArgs.p_year}-A0042` });
+  setRaw("localdb:document_number_reservations", JSON.stringify(ledger));
+  const journalAtReservation = raw("syncjournal");
+  const reserved = await local.rpc("filey_reserve_document_number", reserveArgs);
+  assert.equal(reserved.error, null); assert.equal(reserved.data, `INV-${reserveArgs.p_year}-A0043`);
+  assert.deepEqual(await local.rpc("filey_reserve_document_number", reserveArgs), reserved, "request replay returns the identical number");
+  assert.ok((await local.rpc("filey_reserve_document_number", { ...reserveArgs, p_year: reserveArgs.p_year + 1 })).error);
+  assert.ok((await local.rpc("filey_reserve_document_number", { ...reserveArgs, p_actor: "other-account" })).error);
+  assert.equal(raw("syncjournal"), journalAtReservation, "private number reservations do not make cloud tables dirty");
+  const peerReserve = async (request: string) => {
+    const source = `import {createLocalClient} from ${JSON.stringify(new URL("./localdb.js", import.meta.url).href)};
+      const client=createLocalClient(process.argv[1],JSON.parse(process.argv[2]));
+      const result=await client.rpc('filey_reserve_document_number',JSON.parse(process.argv[3]));
+      client.close();if(result.error)throw Error(result.error.message);console.log(JSON.stringify(result.data));`;
+    const result = await runProcess(process.execPath, ["--input-type=module", "-e", source, dbFile,
+      JSON.stringify({ userId: USER, orgId: ORG }), JSON.stringify({ ...reserveArgs, p_request: request })], { timeout: 15000 });
+    return JSON.parse(result.stdout.trim());
+  };
+  const beforePeers = new Map([["localdb:document_number_reservations", readValue("localdb:document_number_reservations")]]);
+  const concurrentNumbers = await Promise.all(Array.from({ length: 4 }, () => peerReserve(crypto.randomUUID())));
+  assert.equal(new Set(concurrentNumbers).size, 4, "four real MCP processes reserve unique unsaved draft numbers");
+  assert.equal(compareWrite(beforePeers, beforePeers), false, "desktop cannot restore an old reservation ledger over new MCP reservations");
+  assert.equal(raw("syncjournal"), journalAtReservation);
+  const beforeDuplicate = raw("localdb:invoice_docs");
+  assert.ok((await local.from("invoice_docs").insert({ number: " inv-2025-a0001 " })).error, "manual duplicate number is rejected case/whitespace insensitively");
+  assert.equal(raw("localdb:invoice_docs"), beforeDuplicate);
+  setRaw("localdb:id_exhaustion", JSON.stringify([{ id: Number.MAX_SAFE_INTEGER }]));
+  assert.ok((await local.from("id_exhaustion").insert({ name: "not allocated" })).error);
+  assert.equal(readColl("id_exhaustion").length, 1, "unsafe numeric IDs never reach records or journal");
+  assert.equal(raw("syncjournal"), journalAtReservation);
+  const completeLedger = raw("localdb:document_number_reservations")!;
+  const exhaustedLedger = [...JSON.parse(completeLedger), { id: "exhausted", org_id: ORG, user_id: USER, namespace: "invoice",
+    request_id: crypto.randomUUID(), pattern: reserveArgs.p_pattern, year: reserveArgs.p_year,
+    number: `INV-${reserveArgs.p_year}-A${Number.MAX_SAFE_INTEGER}` }];
+  setRaw("localdb:document_number_reservations", JSON.stringify(exhaustedLedger));
+  assert.ok((await local.rpc("filey_reserve_document_number", { ...reserveArgs, p_request: crypto.randomUUID() })).error,
+    "a 16-digit exhausted counter must fail rather than be ignored and restart at one");
+  assert.equal(raw("localdb:document_number_reservations"), JSON.stringify(exhaustedLedger));
+  setRaw("localdb:document_number_reservations", completeLedger);
+  local.close();
+  writer.close();
+
   console.log("LOCAL SMOKE OK — all checks passed against a throwaway database.");
 }
 
@@ -245,6 +506,7 @@ async function main(): Promise<void> {
  *  lifetime, and Windows refuses to unlink an open file. It's a temp dir. */
 function cleanup(): void {
   try {
+    assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {
     /* the OS reclaims it */

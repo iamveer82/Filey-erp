@@ -1,9 +1,10 @@
+import { transferSyncNow as syncNow } from "./cloud-transfer-fixture";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { localClient, journalSnapshot, replaceColl } from "../localdb";
 import { saveAsset, deleteAsset, listAssets, legacyAssets } from "../assets";
 import { listFiles, listFolders } from "../files";
 import { sb } from "../supabase";
-import { syncNow } from "../sync";
+
 
 const identity = vi.hoisted(() => ({ scope: "org:user:owner" }));
 vi.mock("../api", () => ({ getCacheScope: () => identity.scope }));

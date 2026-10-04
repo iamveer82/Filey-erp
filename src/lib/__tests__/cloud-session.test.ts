@@ -41,6 +41,20 @@ it("does not add refresh calls for healthy requests", async () => {
   expect(f.auth.refreshSession).not.toHaveBeenCalled();
 });
 
+it.each(["/auth/v1/token", "/rest/v1/invoice_docs", "/storage/v1/object/files/owner/private.pdf", "/functions/v1/send-email"])(
+  "refuses redirect/cookie/referrer/cache overrides for sensitive cloud requests: %s", async (path) => {
+    const f = fixture(), send = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true }));
+    await sessionFetch(url, () => f.client, send)(`${url}${path}`, {
+      ...init, redirect: "follow", credentials: "include", cache: "force-cache", referrerPolicy: "unsafe-url",
+    });
+    expect(send.mock.calls[0][1]).toMatchObject({
+      redirect: "error", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", body: init.body,
+    });
+    expect(new Headers(send.mock.calls[0][1]?.headers).get("Authorization")).toBe("Bearer old");
+    expect(f.auth.refreshSession).not.toHaveBeenCalled();
+  },
+);
+
 it.each([401, 403, 500])("does not replay permissions, business or server errors (%s)", async status => {
   const f = fixture(), send = vi.fn<typeof fetch>().mockResolvedValue(failure(status, "Access denied"));
   await sessionFetch(url, () => f.client, send)(`${url}/rest/v1/invoice_docs`, init);

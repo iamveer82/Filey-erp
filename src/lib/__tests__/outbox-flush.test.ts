@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // A table whose name starts with "doomed" always fails with a unique-violation;
 // "flaky" fails with a network error; everything else succeeds.
 const attempted: string[] = [];
-const state = vi.hoisted(() => ({ afterWrite: () => {} }));
+const state = vi.hoisted(() => ({ afterWrite: () => {}, userId: "owner", orgId: "default" }));
 vi.mock("../supabase", () => {
   const result = (t: string) =>
     t.startsWith("doomed")
@@ -18,7 +18,10 @@ vi.mock("../supabase", () => {
         : { error: null };
   return {
     isConfigured: true,
-    supabase: {},
+    supabase: {
+      auth: { getSession: async () => ({ data: { session: { user: { id: state.userId } } }, error: null }) },
+      rpc: async () => ({ data: state.orgId, error: null }),
+    },
     sb: () => ({
       from(t: string) {
         const done = () => {
@@ -44,7 +47,7 @@ const queue = (ops: { k: string; t: string; id?: number; row?: unknown }[]) =>
     JSON.stringify(
       ops.map((op, i) => ({
         id: i + 1,
-        op: JSON.stringify({ ...op, _workspace: "default" }),
+        op: JSON.stringify({ ...op, _workspace: "default:user:owner" }),
       }))
     )
   );
@@ -55,7 +58,8 @@ beforeEach(() => {
   localStorage.setItem("filey_data_mode", "cloud");
   attempted.length = 0;
   state.afterWrite = () => {};
-  setCacheOrg(null);
+  state.userId = "owner"; state.orgId = "default";
+  setCacheOrg(null); setCacheOrg("default", "owner");
 });
 
 describe("outboxOpIsDoomed", () => {
@@ -73,6 +77,20 @@ describe("outboxOpIsDoomed", () => {
 });
 
 describe("flushOutbox", () => {
+  it("preserves queued writes until the real account and workspace match the restored scope", async () => {
+    queue([{ k: "insert", t: "products", row: { name: "Old solo workspace" } }]);
+    setCacheOrg(null);
+    await flushOutbox();
+    expect(attempted).toEqual([]);
+    setCacheOrg(null, "owner");
+    state.orgId = "new-company";
+    await flushOutbox();
+    expect(attempted).toEqual([]);
+    state.orgId = "default"; state.userId = "someone-else";
+    await flushOutbox();
+    expect(attempted).toEqual([]);
+    expect(remaining()).toHaveLength(1);
+  });
   it.each(["mode", "account"])("stops replay when the %s changes during the previous request", async kind => {
     queue([
       { k: "insert", t: "products", row: { name: "First" } },
@@ -143,11 +161,17 @@ describe("flushOutbox", () => {
     expect(remaining()).toHaveLength(2);
   });
 
-  it("discards an entry whose payload is not readable", async () => {
-    localStorage.setItem("outbox", JSON.stringify([{ id: 1, op: "{not json" }]));
+  it("preserves an unreadable legacy entry for explicit recovery", async () => {
+    localStorage.setItem("outbox", JSON.stringify([
+      { id: 1, op: "{not json" },
+      { id: 2, op: "null" },
+      { id: 3, op: JSON.stringify({ k: "unknown", t: "products", id: 1, _workspace: "default:user:owner" }) },
+      { id: 4, op: JSON.stringify({ k: "insert", t: "products", row: { name: "Valid" }, _workspace: "default:user:owner" }) },
+    ]));
 
     await flushOutbox();
 
-    expect(remaining()).toEqual([]);
+    expect(remaining()).toHaveLength(3);
+    expect(attempted).toEqual(["products"]);
   });
 });

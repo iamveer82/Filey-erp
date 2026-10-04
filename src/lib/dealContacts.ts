@@ -11,7 +11,7 @@
 // migration lands; every reader here defaults missing fields, so old rows keep
 // working unchanged.
 
-import { loadColl, replaceColl } from "./localdb";
+import { loadColl, withLocalTransaction } from "./localdb";
 
 const COLL = "crm_deal_contacts";
 
@@ -46,12 +46,6 @@ function normalize(r: Row): DealContact | null {
   };
 }
 
-async function persist(rows: DealContact[]): Promise<void> {
-  // replaceColl writes whole-array and skips the push journal — exactly right
-  // for a collection the cloud doesn't know about.
-  await replaceColl(COLL, rows as unknown as Row[]);
-}
-
 /** Roles for one deal, or all of them when no id is given. */
 export async function listDealContacts(dealId?: number): Promise<DealContact[]> {
   const rows = await loadColl(COLL);
@@ -77,28 +71,15 @@ export async function setDealContact(
   const cleanRole = role.trim();
   if (!cleanRole) throw new Error("Pick a role for this contact.");
 
-  const all = (await loadColl(COLL))
-    .map(normalize)
-    .filter((r): r is DealContact => r !== null);
-  const existing = all.find(
-    (r) => r.deal_id === dealId && r.person_id === personId
-  );
-  let row: DealContact;
-  if (existing) {
-    row = { ...existing, role: cleanRole };
-    Object.assign(existing, row);
-  } else {
-    row = {
-      id: all.reduce((m, r) => Math.max(m, r.id), 0) + 1,
-      deal_id: dealId,
-      person_id: personId,
-      role: cleanRole,
-      created_at: new Date().toISOString(),
-    };
-    all.push(row);
-  }
-  await persist(all);
-  return row;
+  return withLocalTransaction(async (client) => {
+    const existing = await client.from(COLL).select().eq("deal_id", dealId).eq("person_id", personId).maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    const result = existing.data
+      ? await client.from(COLL).update({ role: cleanRole }).eq("id", existing.data.id).select().single()
+      : await client.from(COLL).insert({ deal_id: dealId, person_id: personId, role: cleanRole }).select().single();
+    if (result.error) throw new Error(result.error.message);
+    return normalize(result.data)!;
+  });
 }
 
 /** Detach a contact from a deal. */
@@ -106,20 +87,24 @@ export async function removeDealContact(
   dealId: number,
   personId: number
 ): Promise<void> {
-  const all = (await loadColl(COLL))
-    .map(normalize)
-    .filter((r): r is DealContact => r !== null);
-  await persist(all.filter((r) => !(r.deal_id === dealId && r.person_id === personId)));
+  await withLocalTransaction(async (client) => {
+    const result = await client.from(COLL).delete().eq("deal_id", dealId).eq("person_id", personId);
+    if (result.error) throw new Error(result.error.message);
+  });
 }
 
 /** Drop every role row pointing at deals that no longer exist. Cheap hygiene:
  *  called after deal deletes so stale links can't resurface a ghost. */
 export async function pruneDealContacts(aliveIds: number[]): Promise<number> {
   const alive = new Set(aliveIds.map(Number));
-  const all = (await loadColl(COLL))
-    .map(normalize)
-    .filter((r): r is DealContact => r !== null);
-  const kept = all.filter((r) => alive.has(r.deal_id));
-  if (kept.length !== all.length) await persist(kept);
-  return all.length - kept.length;
+  return withLocalTransaction(async (client) => {
+    const result = await client.from(COLL).select();
+    if (result.error) throw new Error(result.error.message);
+    const removed = result.data.map(normalize).filter((r: DealContact | null): r is DealContact => r !== null && !alive.has(r.deal_id));
+    if (removed.length) {
+      const deleted = await client.from(COLL).delete().in("id", removed.map((r: DealContact) => r.id));
+      if (deleted.error) throw new Error(deleted.error.message);
+    }
+    return removed.length;
+  });
 }

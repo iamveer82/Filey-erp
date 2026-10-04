@@ -40,7 +40,13 @@ import QR from "qrcode";
 
 // Pairing keys are private to this OS user on platforms with POSIX permissions.
 process.umask(0o077);
-const { stateDir, ownerNumber } = bridgeLaunch();
+const { stateDir, ownerNumber, checkMedia } = bridgeLaunch();
+// Exercise the installed native dependencies without pairing, sockets, clock
+// requests or access to an existing WhatsApp session.
+if (checkMedia) {
+  await (await import('./check-media.mjs')).checkMedia();
+  process.exit(0);
+}
 // Self-chat arrives as append too. Only accept live entries from this process
 // lifetime; synchronized history must never execute old business requests.
 const clockReady = whatsappClock();
@@ -76,11 +82,8 @@ const REPLY_TIMEOUT_MS = 240_000;
 /** Silence reads as "it's broken", so say something while the agent works. */
 const ACK_AFTER_MS = 2_000;
 /** The app's replies open with this line (waFormat in src/lib/waAgent.ts); the
- *  bridge's own messages wear it too so everything from Filey looks the same.
- *  Bold + underlined: WhatsApp has no underline markup, so each letter carries
- *  the combining low line (U+0332) — how underlined text is typed on WhatsApp. */
-const underline = (s) => [...s].map((c) => (c === " " ? c : c + "\u0332")).join("");
-const HEADER = `*${underline("Filey Agent")}*`;
+ *  bridge's own messages use the same bold heading and solid separator. */
+const HEADER = "*Filey Agent*\n────────────";
 
 /** The live socket (set in start()); the stdin `send` handler uses it for
  *  proactive owner notifications. */
@@ -494,7 +497,9 @@ async function start() {
       const text = textOf(m);
       // IDs protect current sends; the marker also protects restored self-chat
       // answers whose IDs are no longer in the bounded in-memory set.
-      if (m.key.fromMe && text.startsWith(HEADER)) continue;
+      // Recognize old combining underlines too, so replies from before an
+      // update cannot become new self-chat tasks.
+      if (m.key.fromMe && text.split("\n", 1)[0].replace(/[\u0332*_\u26a1]/g, "").trim().toLowerCase() === "filey agent") continue;
 
       // WhatsApp may re-deliver a message using its phone JID and its LID.
       // Both are the same authenticated owner and must execute only once.

@@ -8,13 +8,13 @@ import BloubBot from "./BloubBot";
 const GROUPS = [
   { title: "Assistant", ids: ["agent"] },
   { title: "Business", ids: ["overview", "reports"] },
-  { title: "Sales", ids: ["orders", "invoicing", "quoting", "crm", "customers", "follow-ups", "marketing"] },
+  { title: "Sales", ids: ["orders", "invoicing", "packaging-list", "quoting", "crm", "customers", "follow-ups", "marketing"] },
   { title: "Purchases", ids: ["suppliers", "purchase", "purchase-orders", "purchase-invoices"] },
   { title: "Inventory", ids: ["inventory"] },
   { title: "Accounting", ids: ["people", "accounting", "bank-accounts", "cheques", "payment-receipts", "declaration"] },
   { title: "Service", ids: ["projects", "helpdesk"] },
   { title: "Team", ids: ["team", "comms"] },
-  { title: "Tools", ids: ["tools", "files", "email-templates", "delivery-challans"] },
+  { title: "Tools", ids: ["tools", "letters", "files", "email-templates", "delivery-challans"] },
   { title: "System", ids: ["settings", "integrations"] },
 ];
 

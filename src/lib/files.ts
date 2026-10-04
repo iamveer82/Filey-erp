@@ -7,6 +7,7 @@ import { errMsg } from "./format";
 import { useLiveSync } from "./realtime";
 import { validateDocumentUpload } from "./documentUpload";
 import { getCacheScope } from "./api";
+import { fileOperation } from "./fileWorkspace";
 
 /** Never carry a pending file operation into a different account or store. */
 function fileWorkspace() {
@@ -95,8 +96,7 @@ const newId = () =>
 
 async function userId(): Promise<string | null> {
   if (!isConfigured) return null;
-  const { data } = await sb().auth.getSession();
-  return data.session?.user?.id ?? null;
+  try { return (await fileOperation()).uid; } catch { return null; }
 }
 
 /** True when saving to the cloud is possible (configured + signed in). */
@@ -108,33 +108,33 @@ export async function canSaveFiles(): Promise<boolean> {
  *  a caller can reference it later (a cheque photo, for instance, is attached
  *  to its record by id rather than re-found by name). */
 export async function saveOutput(out: OutFile, tool?: string, expectedUserId?: string): Promise<string> {
-  const current = fileWorkspace();
-  const uid = await userId();
-  current();
+  const name = out.name, bytes = out.bytes.slice();
+  const operation = await fileOperation(), { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to save files to your account.");
   if (expectedUserId && uid !== expectedUserId) throw new Error("Your account changed. Generate the document again before saving it.");
   const id = newId();
-  const mime = mimeOf(out.name);
-  const path = `${uid}/${id}/${safeName(out.name)}`;
-  const blob = new Blob([out.bytes.slice()], { type: mime });
-  const up = await sb().storage
+  const mime = mimeOf(name);
+  const path = `${uid}/${id}/${safeName(name)}`;
+  const blob = new Blob([bytes], { type: mime });
+  const up = await operation.storage
     .from(BUCKET)
     .upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
-  current();
-  const ins = await sb().from("user_files").insert({
+  await operation.assertSession();
+  const ins = await operation.pin(operation.client.from("user_files").insert({
     id,
     owner: uid,
-    name: out.name,
+    name,
     mime,
-    size: out.bytes.length,
+    size: bytes.length,
     storage_path: path,
     tool: tool ?? null,
-  });
-  current();
+    ...(!operation.local && operation.org !== "default" ? { org_id: operation.org } : {}),
+  }));
+  await operation.assertSession();
   if (ins.error) {
     // Roll back the orphaned object if the metadata row failed.
-    await sb().storage.from(BUCKET).remove([path]);
+    await operation.storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
   return id;
@@ -173,20 +173,18 @@ export async function autoSaveDocument(
 }
 
 export async function listFiles(): Promise<SavedFile[]> {
-  const current = fileWorkspace();
-  const uid = await userId();
-  current();
+  const operation = await fileOperation(), { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to access your files.");
   const files: SavedFile[] = [];
   for (let offset = 0; ; offset += 500) {
-    let query = sb()
+    let query = operation.client
       .from("user_files")
       .select("id,name,mime,size,storage_path,tool,folder_id,created_at")
       .order("created_at", { ascending: false })
       .order("id", { ascending: true });
     if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
-    const { data, error } = await query;
-    current();
+    const { data, error } = await operation.pin(query);
+    await operation.assertSession();
     if (error) throw error;
     files.push(...(data ?? []).map((r) => ({
       id: r.id as string,
@@ -204,9 +202,9 @@ export async function listFiles(): Promise<SavedFile[]> {
 
 /** Read one linked receipt without downloading the user's whole file library. */
 export async function getSavedFile(id: string): Promise<SavedFile> {
-  const current = fileWorkspace();
-  const { data, error } = await sb().from("user_files").select("*").eq("id", id).single();
-  current();
+  const operation = await fileOperation();
+  const { data, error } = await operation.pin(operation.client.from("user_files").select("*").eq("id", id).single());
+  await operation.assertSession();
   if (error || !data) throw new Error("This attachment is unavailable or you do not have access to it.");
   return { id: data.id, name: data.name, mime: data.mime, size: Number(data.size), storagePath: data.storage_path,
     tool: data.tool ?? null, folderId: data.folder_id ?? null, createdAt: Date.parse(data.created_at) };
@@ -215,20 +213,18 @@ export async function getSavedFile(id: string): Promise<SavedFile> {
 /* ---------------- User folders ---------------- */
 
 export async function listFolders(): Promise<UserFolder[]> {
-  const current = fileWorkspace();
-  const uid = await userId();
-  current();
+  const operation = await fileOperation(), { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to access your folders.");
   const folders: UserFolder[] = [];
   for (let offset = 0; ; offset += 500) {
-    let query = sb()
+    let query = operation.client
       .from("user_folders")
       .select("id,name,parent_id,created_at")
       .order("name", { ascending: true })
       .order("id", { ascending: true });
     if (!isLocalMode()) query = query.eq("owner", uid).range(offset, offset + 499);
-    const { data, error } = await query;
-    current();
+    const { data, error } = await operation.pin(query);
+    await operation.assertSession();
     if (error) throw error;
     folders.push(...(data ?? []).map((r) => ({
       id: r.id as string,
@@ -244,15 +240,15 @@ export async function createFolder(
   name: string,
   parentId: string | null
 ): Promise<void> {
-  const current = fileWorkspace();
-  const uid = await userId();
-  current();
+  const operation = await fileOperation(), { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to create folders.");
   const n = name.trim();
   if (!n) throw new Error("Folder name cannot be empty.");
-  const { error } = await sb()
+  const { error } = await operation.pin(operation.client
     .from("user_folders")
-    .insert({ id: newId(), owner: uid, name: n, parent_id: parentId });
+    .insert({ id: newId(), owner: uid, name: n, parent_id: parentId,
+      ...(!operation.local && operation.org !== "default" ? { org_id: operation.org } : {}) }));
+  await operation.assertSession();
   if (error) throw error;
 }
 
@@ -260,7 +256,9 @@ export async function renameFolder(id: string, name: string): Promise<void> {
   const n = name.trim();
   if (!n) throw new Error("Folder name cannot be empty.");
   if (!isConfigured) return;
-  const { error } = await sb().from("user_folders").update({ name: n }).eq("id", id);
+  const operation = await fileOperation();
+  const { error } = await operation.pin(operation.client.from("user_folders").update({ name: n }).eq("id", id));
+  await operation.assertSession();
   if (error) throw error;
 }
 
@@ -269,7 +267,9 @@ export async function renameFolder(id: string, name: string): Promise<void> {
  *  backstop. */
 export async function deleteFolder(id: string): Promise<void> {
   if (!isConfigured) return;
-  const { error } = await sb().from("user_folders").delete().eq("id", id);
+  const operation = await fileOperation();
+  const { error } = await operation.pin(operation.client.from("user_folders").delete().eq("id", id));
+  await operation.assertSession();
   if (error) throw error;
 }
 
@@ -279,10 +279,12 @@ export async function moveFile(
   folderId: string | null
 ): Promise<void> {
   if (!isConfigured) return;
-  const { error } = await sb()
+  const operation = await fileOperation();
+  const { error } = await operation.pin(operation.client
     .from("user_files")
     .update({ folder_id: folderId })
-    .eq("id", fileId);
+    .eq("id", fileId));
+  await operation.assertSession();
   if (error) throw error;
 }
 
@@ -292,10 +294,12 @@ export async function moveFolder(
   parentId: string | null
 ): Promise<void> {
   if (!isConfigured) return;
-  const { error } = await sb()
+  const operation = await fileOperation();
+  const { error } = await operation.pin(operation.client
     .from("user_folders")
     .update({ parent_id: parentId })
-    .eq("id", id);
+    .eq("id", id));
+  await operation.assertSession();
   if (error) throw error;
 }
 
@@ -304,9 +308,9 @@ export async function moveFolder(
  * the desktop CSP and in WebView2's PDF viewer. Caller must revokeObjectURL. */
 export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
   if (!isConfigured) return null;
-  const current = fileWorkspace();
-  const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
-  current();
+  const path = f.storagePath, operation = await fileOperation();
+  const { data, error } = await operation.storage.from(BUCKET).download(path);
+  await operation.assertSession();
   if (error) throw new Error(error.message || "Could not open this file.");
   return data ? URL.createObjectURL(data) : null;
 }
@@ -315,13 +319,13 @@ export async function fileObjectUrl(f: SavedFile): Promise<string | null> {
  * through a blob: URL + fetch() (which the webview CSP blocks on connect-src). */
 export async function fileBytes(f: SavedFile): Promise<Uint8Array | null> {
   if (!isConfigured) return null;
-  const current = fileWorkspace();
-  const { data, error } = await sb().storage.from(BUCKET).download(f.storagePath);
-  current();
+  const path = f.storagePath, operation = await fileOperation();
+  const { data, error } = await operation.storage.from(BUCKET).download(path);
+  await operation.assertSession();
   if (error) throw new Error(error.message || "Could not open this file.");
   if (!data) return null;
   const bytes = new Uint8Array(await data.arrayBuffer());
-  current();
+  await operation.assertSession();
   return bytes;
 }
 
@@ -329,11 +333,11 @@ export async function fileBytes(f: SavedFile): Promise<Uint8Array | null> {
  * the file's display name — used by the explicit Download action. */
 export async function downloadUrl(f: SavedFile): Promise<string | null> {
   if (!isConfigured) return null;
-  const current = fileWorkspace();
-  const { data, error } = await sb().storage
+  const path = f.storagePath, name = f.name, operation = await fileOperation();
+  const { data, error } = await operation.storage
     .from(BUCKET)
-    .createSignedUrl(f.storagePath, 300, { download: f.name });
-  current();
+    .createSignedUrl(path, 300, { download: name });
+  await operation.assertSession();
   if (error) throw new Error(error.message || "Could not create a download link.");
   return data?.signedUrl ?? null;
 }
@@ -349,7 +353,9 @@ export async function renameFile(f: SavedFile, newName: string): Promise<string>
     name = `${name}.${ext}`;
   }
   if (!isConfigured) return name;
-  const { error } = await sb().from("user_files").update({ name }).eq("id", f.id);
+  const id = f.id, operation = await fileOperation();
+  const { error } = await operation.pin(operation.client.from("user_files").update({ name }).eq("id", id));
+  await operation.assertSession();
   if (error) throw error;
   return name;
 }
@@ -360,11 +366,11 @@ export async function shareFileLink(
   expiresSec = 604800
 ): Promise<string | null> {
   if (!isConfigured) return null;
-  const current = fileWorkspace();
-  const { data } = await sb().storage
+  const path = f.storagePath, operation = await fileOperation();
+  const { data } = await operation.storage
     .from(BUCKET)
-    .createSignedUrl(f.storagePath, expiresSec);
-  current();
+    .createSignedUrl(path, expiresSec);
+  await operation.assertSession();
   return data?.signedUrl ?? null;
 }
 
@@ -387,6 +393,7 @@ export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
   { key: "quotation", label: "Quotations", route: "/quoting" },
   { key: "receipt", label: "Payment Receipts", route: "/payment-receipts" },
   { key: "challan", label: "Delivery Challans", route: "/delivery-challans" },
+  { key: "packing-list", label: "Packing Lists", route: "/packaging-list" },
   { key: "lpo", label: "Purchase Orders", route: "/purchase-orders" },
   { key: "expense-receipt", label: "Expense Receipts", route: "/purchase" },
   { key: "declaration", label: "Declaration Letters", route: "/declaration" },
@@ -399,35 +406,35 @@ export function folderOf(f: SavedFile): string {
 
 /** Upload a user-selected file directly to My Files. */
 export async function uploadUserFile(file: File, tool?: string, folderId?: string | null): Promise<string> {
-  const current = fileWorkspace();
+  const name = file.name;
   const documentType = COMPANY_DOCUMENT_TYPES.find(t => t.key === tool);
   const documentMime = documentType ? validateDocumentUpload(file) : undefined;
-  const uid = await userId();
-  current();
+  const operation = await fileOperation(), { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to upload files.");
   const id = newId();
   const mime = documentMime || file.type || mimeOf(file.name);
-  const path = `${uid}/${id}/${safeName(file.name)}`;
+  const path = `${uid}/${id}/${safeName(name)}`;
   const buf = await file.arrayBuffer();
-  current();
+  await operation.assertSession();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  const up = await operation.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
-  current();
-  const ins = await sb().from("user_files").insert({
+  await operation.assertSession();
+  const ins = await operation.pin(operation.client.from("user_files").insert({
     id,
     owner: uid,
-    name: file.name,
+    name,
     folder_id: folderId ?? null,
     mime,
     size: bytes.length,
     storage_path: path,
     tool: tool ?? null,
-  });
-  current();
+    ...(!operation.local && operation.org !== "default" ? { org_id: operation.org } : {}),
+  }));
+  await operation.assertSession();
   if (ins.error) {
-    await sb().storage.from(BUCKET).remove([path]);
+    await operation.storage.from(BUCKET).remove([path]);
     throw ins.error;
   }
   return id;
@@ -435,29 +442,29 @@ export async function uploadUserFile(file: File, tool?: string, folderId?: strin
 
 export async function deleteFile(f: SavedFile): Promise<void> {
   if (!isConfigured) throw new Error("File storage is not configured.");
-  const current = fileWorkspace();
-  const { data: removed, error } = await sb().from("user_files").delete().eq("id", f.id).select("id");
+  const id = f.id, path = f.storagePath, operation = await fileOperation();
+  const { data: removed, error } = await operation.pin(operation.client.from("user_files").delete().eq("id", id).select("id"));
   if (error) throw error;
-  current();
+  await operation.assertSession();
   // RLS can acknowledge a DELETE while matching no accessible row. That is
   // not permission to remove an object's bytes from another workspace.
-  if (!Array.isArray(removed) || removed.length !== 1 || removed[0].id !== f.id)
+  if (!Array.isArray(removed) || removed.length !== 1 || removed[0].id !== id)
     throw new Error("File not found or access denied. Refresh your files.");
-  const parts = f.storagePath.split("/");
-  const fileId = encodeURIComponent(f.id).replace(/\./g, "%2E");
-  const dedicated = (parts.length === 3 && parts[1] === f.id)
+  const parts = path.split("/");
+  const fileId = encodeURIComponent(id).replace(/\./g, "%2E");
+  const dedicated = (parts.length === 3 && parts[1] === id)
     || (parts.length === 5 && parts[1] === "synced" && parts[2] === fileId && /^[a-f0-9]{64}$/.test(parts[3]));
   // Older synced objects were shared by content, even across workspaces. RLS
   // cannot prove they are unreferenced, so retain them rather than break another
   // file. New uploads bind their object to this file's ID.
   if (!dedicated) return;
-  const { data: references, error: lookupError } = await sb().from("user_files")
-    .select("id").eq("storage_path", f.storagePath).limit(1);
-  current();
+  const { data: references, error: lookupError } = await operation.pin(operation.client.from("user_files")
+    .select("id").eq("storage_path", path).limit(1));
+  await operation.assertSession();
   if (lookupError) throw new Error("The file entry was removed, but its stored copy could not be checked.");
   if (references?.length) return;
-  const { error: storageError } = await sb().storage.from(BUCKET).remove([f.storagePath]);
-  current();
+  const { error: storageError } = await operation.storage.from(BUCKET).remove([path]);
+  await operation.assertSession();
   if (storageError) throw new Error("The file entry was removed, but its stored copy could not be deleted.");
 }
 
@@ -467,31 +474,30 @@ export async function deleteFile(f: SavedFile): Promise<void> {
  * short-lived signed URL the preview can use. The path is what gets persisted in
  * app_settings so the image follows the user across devices and sessions. */
 export async function uploadCompanyAsset(file: File): Promise<{ path: string; url: string }> {
-  const current = fileWorkspace();
+  const operation = await fileOperation();
   // Local mode: embed the image directly as a data: URL stored in app_settings.
   // Avoids the Storage path + signed-URL round-trip (disk write, keyring-encrypted
   // read), which can silently fail to resolve offline and leaves the stamp blank.
   // Stamp/signature/logo PNGs are small enough to live in settings.
   if (isLocalMode()) {
     const dataUrl = await fileToDataUrl(file);
-    current();
+    await operation.assertSession();
     return { path: dataUrl, url: dataUrl };
   }
-  const uid = await userId();
-  current();
+  const { uid } = operation;
   if (!uid || !isConfigured) throw new Error("Sign in to upload company assets.");
   const id = newId();
   const mime = file.type || mimeOf(file.name);
   const path = `${uid}/company/${id}/${safeName(file.name)}`;
   const buf = await file.arrayBuffer();
-  current();
+  await operation.assertSession();
   const bytes = new Uint8Array(buf);
   const blob = new Blob([bytes], { type: mime });
-  const up = await sb().storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
+  const up = await operation.storage.from(BUCKET).upload(path, blob, { contentType: mime, upsert: false });
   if (up.error) throw up.error;
-  current();
-  const { data: urlData, error: urlErr } = await sb().storage.from(BUCKET).createSignedUrl(path, 300);
-  current();
+  await operation.assertSession();
+  const { data: urlData, error: urlErr } = await operation.storage.from(BUCKET).createSignedUrl(path, 300);
+  await operation.assertSession();
   if (urlErr) throw urlErr;
   return { path, url: urlData?.signedUrl ?? "" };
 }
@@ -499,11 +505,11 @@ export async function uploadCompanyAsset(file: File): Promise<{ path: string; ur
 /** Re-create a signed URL for a previously-uploaded company asset path. */
 export async function companyAssetUrl(path: string, expiresSec = 300): Promise<string | null> {
   if (!isConfigured) return null;
-  const current = fileWorkspace();
-  const { data, error } = await sb().storage.from(BUCKET).createSignedUrl(path, expiresSec);
-  current();
+  const operation = await fileOperation();
+  const { data, error } = await operation.storage.from(BUCKET).createSignedUrl(path, expiresSec);
+  await operation.assertSession();
   if (error) {
-    console.warn("Failed to create signed URL for company asset", path, error.message);
+    console.warn("Could not open the company image. Reconnect or try again.");
     return null;
   }
   return data?.signedUrl ?? null;

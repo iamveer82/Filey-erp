@@ -35,6 +35,7 @@ export interface Step {
   name: string;
   args: Record<string, unknown>;
   ok: boolean;
+  invalidArguments?: boolean;
   /** Short human line for the run summary. */
   note: string;
 }
@@ -47,11 +48,12 @@ export interface GuardDecision {
 export interface AgentGuard {
   /** Called before executing. Returns a canned result to skip execution. */
   before(name: string, args: Record<string, unknown>): GuardDecision;
-  /** Called after executing, with whatever the tool returned. */
-  after(name: string, args: Record<string, unknown>, result: unknown): void;
+  /** validationRejected is set only by trusted validation before dispatch. */
+  after(name: string, args: Record<string, unknown>, result: unknown, validationRejected?: boolean): void;
   /** What happened this run, for the "I couldn't finish" case — a list of
    *  steps taken is worth more to a user than an apology. */
   steps(): Step[];
+  unresolvedFailures(): Step[];
   summary(): string;
 }
 
@@ -119,10 +121,18 @@ export function coachResult(result: unknown, roundsLeft: number): unknown {
 export function createGuard(): AgentGuard {
   const seen = new Map<string, unknown>();
   const log: Step[] = [];
+  const unresolvedFailures = () => [...new Map(log.map(step => [keyOf(step.name, step.args), step])).values()].filter(step => {
+    if (step.ok) return false;
+    if (!step.invalidArguments) return true;
+    // ponytail: bounded run history; index rejected calls by target if task budgets grow.
+    const target = ["invoice_number", "id", "record_id", "customer_name", "employee_name", "name"].find(key => step.args[key] !== undefined);
+    if (!target) return true; // No record identity: another success cannot prove this request was corrected.
+    return !log.slice(log.indexOf(step) + 1).some(next => next.ok && next.name === step.name && next.args[target] === step.args[target]);
+  });
 
   return {
     before(name, args) {
-      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time"].includes(name)) return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "agent_computer" || name === "browser") &&
@@ -137,7 +147,7 @@ export function createGuard(): AgentGuard {
       if (isReadOnly(name))
         // Already answered this exact question — hand back the same answer
         // rather than spending a round on it.
-        return { short: prior };
+        return toolFailure(prior) ? {} : { short: prior };
       // A write. Refuse, and say what happened the first time so the model can
       // move on instead of concluding the call failed and trying again.
       return {
@@ -149,7 +159,7 @@ export function createGuard(): AgentGuard {
         },
       };
     },
-    after(name, args, result) {
+    after(name, args, result, validationRejected = false) {
       const k = keyOf(name, args);
       const failed = !!toolFailure(result);
       if (!failed && !isReadOnly(name)) {
@@ -158,15 +168,16 @@ export function createGuard(): AgentGuard {
           if (isReadOnly(key.split(":")[0])) seen.delete(key);
       }
       seen.set(k, result);
-      log.push({ name, args, ok: !failed, note: shortNote(name, result) });
+      log.push({ name, args, ok: !failed, ...(validationRejected ? { invalidArguments: true } : {}), note: shortNote(name, result) });
     },
     steps() {
       return [...log];
     },
+    unresolvedFailures,
     summary() {
       if (!log.length) return "";
       const done = log.filter((s) => s.ok).map((s) => s.note);
-      const failed = log.filter((s) => !s.ok).map((s) => s.note);
+      const failed = unresolvedFailures().map((s) => s.note);
       const parts: string[] = [];
       if (done.length) parts.push(`Done: ${done.join("; ")}`);
       if (failed.length) parts.push(`Failed: ${failed.join("; ")}`);

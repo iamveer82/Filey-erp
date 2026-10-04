@@ -30,16 +30,10 @@ import { stopAgentComputer } from "./agentComputer";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
 import { runRemoteAgentTurn, clearRemoteAgentTurns, clearRemoteAgentConversation } from "./remoteAgentTurn";
 
-/** WhatsApp has no underline markup — the combining low line (U+0332) after
- *  each character is how underlined text is typed on WhatsApp, and every
- *  client renders it. */
-const underline = (s: string) =>
-  [...s].map((ch) => (ch === " " ? ch : ch + "\u0332")).join("");
-
 /** Every message Filey sends on WhatsApp opens with this line, so an answer is
- *  recognisable as the agent's at a glance in a thread of your own messages —
- *  bold + underlined, the way reference agents sign their replies. */
-export const WA_HEADER = `*${underline("Filey Agent")}*`;
+ *  recognisable in a self-chat. WhatsApp has no native underline; a short
+ *  box-drawing separator avoids the gaps between combining underlined letters. */
+export const WA_HEADER = "*Filey Agent*\n────────────";
 
 /** Put the header on a reply (once) — the model is asked for it, and this makes
  *  sure it is there, in the exact house style, even when the model forgets or
@@ -53,7 +47,9 @@ export function waFormat(text: string): string {
     .replace(/[\u0332*_\u26a1]/g, "")
     .trim()
     .toLowerCase();
-  const body = bare === "filey agent" ? rest.join("\n").trim() : t;
+  const body = bare === "filey agent"
+    ? rest.join("\n").trim().replace(/^─+[ \t]*(?:\r?\n|$)/, "").trim()
+    : t;
   return body ? `${WA_HEADER}\n\n${body}` : WA_HEADER;
 }
 

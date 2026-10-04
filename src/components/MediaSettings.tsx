@@ -113,7 +113,7 @@ function MediaProvider({ kind }: { kind: MediaKind }) {
   return (
     <SettingsSection
       title={`${label} generation`}
-      description={`${label}s appear directly in your Filey AI conversation. Your provider bills your own key; Filey credits are not used.`}
+      description={`${label}s appear directly in your Filey AI conversation. Your provider bills your own key; Filey Coin is not used.${kind === "video" ? " Add a video API key to get started." : ""}`}
     >
       <fieldset disabled={busy} className="min-w-0 space-y-4">
         <div className="space-y-2">

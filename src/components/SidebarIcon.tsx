@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
  * The same filled icon family used by piratuks/invoice-builder's sidebar.
  */
 const icons: Record<string, ReactNode> = {
+  packing: <><path d="M0 0h24v24H0z" fill="none"/><path d="m12 2 9 5v10l-9 5-9-5V7l9-5zm0 2.3L6.1 7.6 12 11l5.9-3.4L12 4.3zM5 9.4v6.4l6 3.3v-6.4L5 9.4zm14 0-6 3.3v6.4l6-3.3V9.4z"/></>,
   overview: <><rect fill="none" height="24" width="24"/><g><path d="M14.67,5v6.5H9.33V5H14.67z M15.67,11.5H21V5h-5.33V11.5z M14.67,19v-6.5H9.33V19H14.67z M15.67,12.5V19H21v-6.5H15.67z M8.33,12.5H3V19h5.33V12.5z M8.33,11.5V5H3v6.5H8.33z"/></g></>,
   reports: <><path d="M0 0h24v24H0z" fill="none"/><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></>,
   orders: <><path d="M0 0h24v24H0z" fill="none"/><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49c.08-.14.12-.31.12-.48 0-.55-.45-1-1-1H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></>,

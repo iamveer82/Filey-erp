@@ -78,11 +78,13 @@ it("resolves secret references privately and redacts echoed values and encoded f
 
 it("quarantines unowned legacy credentials instead of claiming them for the current user", async () => {
   localStorage.setItem("filey.ai.config",JSON.stringify({apiKey:"legacy-fixture",model:"old"}));
+  localStorage.setItem("filey_reach_config",JSON.stringify({apiKey:"legacy-jina-key",enabled:false}));
   localStorage.setItem("filey.secret.portal","legacy-password");
   await quarantineLegacyCredentials();
   expect(localStorage.getItem("filey.ai.config")).toBe('{"model":"old"}');
+  expect(localStorage.getItem("filey_reach_config")).toBe('{"enabled":false}');
   expect(localStorage.getItem("filey.secret.portal")).toBeNull();
-  expect([...vault.keys()]).toEqual(["legacy:filey.ai.config","legacy:filey.secret.portal"]);
+  expect([...vault.keys()]).toEqual(["legacy:filey.ai.config","legacy:filey_reach_config","legacy:filey.secret.portal"]);
 });
 
 it("keeps browser keys only for the current session and clears them on sign-out", async () => {

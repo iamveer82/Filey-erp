@@ -114,10 +114,10 @@ it("can identify an older receipt without removing the other legacy payment", as
 
 it("does not delete the invoice when ledger cleanup fails", async () => {
   const id = await billing.saveDoc(invoice());
-  const realFrom = localClient.from.bind(localClient);
-  const spy = vi.spyOn(localClient, "from").mockImplementation((table) => {
-    if (table === "transactions") return { select: () => ({ eq: async () => ({ data: null, error: new Error("Ledger unavailable") }) }) } as never;
-    return realFrom(table);
+  const get = Storage.prototype.getItem;
+  const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
+    if (key === "localdb:transactions") throw new Error("Ledger unavailable");
+    return get.call(this, key);
   });
   try { await expect(billing.deleteDoc(id)).rejects.toThrow("Ledger unavailable"); }
   finally { spy.mockRestore(); }

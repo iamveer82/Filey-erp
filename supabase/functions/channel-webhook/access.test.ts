@@ -1,6 +1,6 @@
 // Runnable check for owner pinning + pairing:  deno test supabase/functions/channel-webhook/
 import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { channelCredentials, ownerRefusal, tryPair } from "./access.ts";
+import { channelActorAllowed, channelCredentials, ownerRefusal, tryPair } from "./access.ts";
 import type { InboundMsg } from "./parse.ts";
 
 const tg = (over: Partial<InboundMsg> = {}): InboundMsg => ({
@@ -18,6 +18,28 @@ Deno.test("revoked channel refuses owner traffic even if legacy environment pins
     const message = tg({ channel, userId:"42" });
     const reply = await ownerRefusal(message,{ ...io({ TELEGRAM_OWNER_CHAT_ID:"42", WHATSAPP_OWNER_PHONE:"42",SLACK_OWNER_USER_ID:"42" }), disabled:true });
     assertEquals(reply,"This channel is disconnected. Reconnect it in Filey.");
+  }
+});
+
+Deno.test("actor authority reads fresh disconnect and re-pair state on every check", async () => {
+  for (const channel of ["telegram", "whatsapp", "slack"] as const) {
+    let connection = { enabled: true, owner_ref: "42", credentials: {} };
+    let lookups = 0, failed = false;
+    const query = { select: () => query, eq: () => query, maybeSingle: () => {
+      lookups++;
+      return Promise.resolve({ data: connection, error: failed ? { message: "unavailable" } : null });
+    } };
+    const client = { from: () => query };
+    const actor = tg({ channel, userId: "42" });
+    const legacy = { env: (key: string) => ({ TELEGRAM_OWNER_CHAT_ID: "42", WHATSAPP_OWNER_PHONE: "42", SLACK_OWNER_USER_ID: "42" })[key] };
+    assertEquals(await channelActorAllowed(client, "OWNER", actor, legacy), true);
+    connection = { ...connection, enabled: false };
+    assertEquals(await channelActorAllowed(client, "OWNER", actor, legacy), false);
+    connection = { ...connection, enabled: true, owner_ref: "43" };
+    assertEquals(await channelActorAllowed(client, "OWNER", actor, legacy), false);
+    failed = true;
+    assertEquals(await channelActorAllowed(client, "OWNER", actor, legacy), false);
+    assertEquals(lookups, 4);
   }
 });
 
