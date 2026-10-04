@@ -58,7 +58,7 @@ export function AgentEffortControl(props: {
       <span className="composer-detail">Reasoning</span>
       <span className="composer-detail text-muted-foreground">{enabled ? "On" : "Off"}</span>
       <span aria-hidden="true" className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors motion-reduce:transition-none", enabled ? "bg-foreground" : "bg-muted-foreground/40")}>
-        <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-background transition-transform motion-reduce:transition-none", enabled ? "translate-x-3.5" : "translate-x-0.5")} />
+        <span className={cn("absolute left-0 top-0.5 h-3 w-3 rounded-full bg-background transition-transform motion-reduce:transition-none", enabled ? "translate-x-3.5" : "translate-x-0.5")} />
       </span>
     </button>;
   }
