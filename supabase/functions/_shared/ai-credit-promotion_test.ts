@@ -1,7 +1,7 @@
 // Every customer/coupon/payment/database operation below is synthetic.
 // deno-lint-ignore-file require-await
 import { createCreditCheckout, reconcileCreditPayment } from "./ai-credit-payments.ts";
-import { PROMOTION_OPENED, PROMOTION_UNAVAILABLE, publicTestPromotion, testPromotionForUser } from "./ai-credit-promotion.ts";
+import { dodoCheckoutUrl, PROMOTION_OPENED, PROMOTION_UNAVAILABLE, publicTestPromotion, testPromotionForUser } from "./ai-credit-promotion.ts";
 import { fixtureJwt } from "./test-auth-fixture.ts";
 
 function assert(ok: unknown, message = "Assertion failed"): asserts ok {
@@ -47,19 +47,27 @@ function checkoutFixture(config: ReturnType<typeof promotion>) {
   const db = { from: (table: string) => {
     assert(table === "ai_credit_orders", "Opening a checkout must never grant wallet credit");
     return {
-      select: () => ({ or: () => ({ limit: async () => ({ data: state.duplicate ? [{ id: "fixture" }] : [], error: null }) }) }),
+      select: () => ({ or: () => ({ limit: async () => ({ data: state.duplicate ? [{ id: "fixture" }] : state.orders, error: null }) }) }),
       insert: async (row: Record<string, unknown>) => {
         if (state.duplicate) return { error: { code: "23505", message: "private duplicate fixture" } };
-        state.orders.push(row); return { error: null };
+        state.orders.push({ payment_id: null, paid_cents: null, refunded_micros: 0, disputed: false,
+          checkout_session_id: null, checkout_url: null, ...row }); return { error: null };
       },
       update: (patch: Record<string, unknown>) => {
         const filters: Record<string, unknown> = {};
         const builder = { eq: (key: string, value: unknown) => { filters[key] = value; return builder; },
           is: (key: string, value: unknown) => { filters[key] = value; return builder; },
           select: () => builder, single: async () => {
-            assert(filters.user_id === userId && filters.payment_id === null);
+            assert(filters.user_id === userId && filters.payment_id === null && filters.paid_cents === null &&
+              filters.checkout_session_id === null && filters.checkout_url === null && filters.product_id === config.product_id &&
+              filters.promotion_id === config.id && filters.promotion_discount_id === config.discount_id &&
+              filters.promotion_customer_id === config.customer_id && filters.promotion_discount_code === config.discount_code &&
+              filters.promotion_email === config.email && filters.promotion_expires_at === config.expires_at &&
+              filters.expected_paid_cents === 0 && filters.credits_micros === 5_000_000 && filters.service_fee_cents === 50 &&
+              filters.refunded_micros === 0 && filters.disputed === false);
             const row = state.orders.find((entry) => entry.id === filters.id);
-            assert(row); if (state.saveFails) return { error: { message: "private save fixture" }, data: null };
+            assert(row); if (state.saveFails || Object.entries(filters).some(([key, value]) => row[key] !== value))
+              return { error: { message: "private save fixture" }, data: null };
             Object.assign(row, patch); return { data: { id: row.id }, error: null };
           } };
         return builder;
@@ -95,11 +103,11 @@ Deno.test("promotion checkout fixes customer/coupon/session and claims one order
     const order = state.orders[0], checkout = state.checkouts[0];
     assert(result.order_id === order.id && order.expected_paid_cents === 0 && order.credits_micros === 5_000_000 &&
       order.service_fee_cents === 50 && order.promotion_id === promotionId && order.promotion_discount_id === config.discount_id &&
-      order.promotion_email === user.email && order.checkout_session_id === result.session_id);
+      order.promotion_email === user.email && order.checkout_session_id === result.session_id && order.checkout_url === result.url);
     assert(JSON.stringify(checkout.customer) === JSON.stringify({ customer_id: config.customer_id }) &&
       JSON.stringify(checkout.discount_codes) === JSON.stringify([config.discount_code]));
     const flags = checkout.feature_flags as Record<string, unknown>;
-    assert(flags.allow_discount_code === false && flags.allow_customer_editing_email === false && flags.always_create_new_customer === false);
+    assert(flags.allow_discount_code === true && flags.allow_customer_editing_email === false && flags.always_create_new_customer === false);
     assert(JSON.stringify(checkout.product_cart) === JSON.stringify([{ product_id: config.product_id, quantity: 1, amount: 550 }]),
       "The full five-Coin plus fee total is discounted, never a fabricated paid receipt");
     state.duplicate = true;
@@ -117,6 +125,72 @@ Deno.test("promotion checkout fixes customer/coupon/session and claims one order
       assert(reason === PROMOTION_UNAVAILABLE && state.checkouts.length === 1);
     }
     assert(state.reads === before, "Wrong owner, amount or promotion must fail before provider reads");
+  } finally { restore(); }
+});
+
+Deno.test("saved private promotion resumes the same unpaid link without a provider call or second claim", async () => {
+  const { config, restore } = environment();
+  try {
+    const { state, dodo, db } = checkoutFixture(config);
+    const first = await createCreditCheckout(dodo, db, user, undefined, 500, promotionId);
+    const before = state.reads;
+    for (let i = 0; i < 3; i++) {
+      assert(JSON.stringify(await createCreditCheckout(dodo, db, user, undefined, 500, promotionId)) === JSON.stringify(first));
+    }
+    const offer = await publicTestPromotion(db, user);
+    assert(offer?.id === promotionId && !JSON.stringify(offer).includes(first.url) &&
+      state.checkouts.length === 1 && state.orders.length === 1 && state.reads === before,
+      "A ready checkout must resume its persisted identity and keep its URL private");
+  } finally { restore(); }
+});
+
+Deno.test("unknown, paid, foreign-owner or changed promotion claims never resume or silently reopen", async () => {
+  const { config, restore } = environment();
+  try {
+    for (const patch of [{ id: "invalid" }, { user_id: "30000000-0000-4000-8000-000000000002" },
+      { product_id: "pdt_other" }, { credits_micros: 10_000_000 }, { service_fee_cents: 0 }, { expected_paid_cents: 550 },
+      { promotion_id: "70000000-0000-4000-8000-000000000002" }, { promotion_discount_id: "dsc_other" },
+      { promotion_customer_id: "cus_other" }, { promotion_discount_code: "OTHER" }, { promotion_email: "other@fixture.test" },
+      { promotion_expires_at: new Date(Date.parse(config.expires_at) + 1_000).toISOString() },
+      { checkout_session_id: null }, { checkout_url: null }, { checkout_url: "https://dodopayments.com.evil.test/checkout" },
+      { payment_id: "pay_already" }, { paid_cents: 0 }, { refunded_micros: 1 }, { disputed: true }]) {
+      const { state, dodo, db } = checkoutFixture(config);
+      await createCreditCheckout(dodo, db, user, undefined, 500, promotionId);
+      Object.assign(state.orders[0], patch);
+      const before = state.reads;
+      let reason = "";
+      try { await createCreditCheckout(dodo, db, user, undefined, 500, promotionId); }
+      catch (error) { reason = (error as Error).message; }
+      assert(reason === PROMOTION_OPENED && state.checkouts.length === 1 && state.orders.length === 1 && state.reads === before);
+      assert(await publicTestPromotion(db, user) === undefined);
+    }
+  } finally { restore(); }
+});
+
+Deno.test("private checkout links are validated and persisted under an unchanged unpaid binding before exposure", async () => {
+  const { config, restore } = environment();
+  try {
+    for (const url of [null, "http://checkout.dodopayments.com/a", "https://dodopayments.com.evil.test/a",
+      "https://user:secret@checkout.dodopayments.com/a", "https://checkout.dodopayments.com:8443/a",
+      "https://checkout.dodopayments.com/a\n", "https://checkout.dodopayments.com/" + "a".repeat(2_048)]) {
+      assert(dodoCheckoutUrl(url) === null);
+      const { state, dodo, db } = checkoutFixture(config);
+      dodo.checkoutSessions.create = (async () => ({ checkout_url: url, session_id: "session_fixture" })) as unknown as typeof dodo.checkoutSessions.create;
+      let rejected = false;
+      try { await createCreditCheckout(dodo, db, user, undefined, 500, promotionId); } catch { rejected = true; }
+      assert(rejected && state.orders[0].checkout_url === null && state.orders[0].checkout_session_id === null);
+    }
+    for (const change of [{ payment_id: "pay_changed" }, { checkout_session_id: "session_changed" },
+      { promotion_customer_id: "cus_changed" }, { disputed: true }]) {
+      const { state, dodo, db } = checkoutFixture(config);
+      dodo.checkoutSessions.create = (async () => {
+        Object.assign(state.orders[0], change);
+        return { checkout_url: "https://checkout.dodopayments.com/fixture", session_id: "session_fixture" };
+      }) as unknown as typeof dodo.checkoutSessions.create;
+      let rejected = false;
+      try { await createCreditCheckout(dodo, db, user, undefined, 500, promotionId); } catch { rejected = true; }
+      assert(rejected && state.orders[0].checkout_url === null, "Late provider response cannot overwrite changed order authority");
+    }
   } finally { restore(); }
 });
 
@@ -248,9 +322,9 @@ Deno.test("promotion status reveals only the verified owner's public offer and h
   try {
     let reads = 0, opened = false;
     const db = { from: (table: string) => { assert(table === "ai_credit_orders"); return {
-      select: (columns: string) => { assert(columns === "id"); return { or: (filter: string) => {
+      select: (columns: string) => { assert(columns.includes("checkout_url") && columns.includes("user_id")); return { or: (filter: string) => {
         assert(filter === `promotion_id.eq.${config.id},promotion_discount_id.eq.${config.discount_id}`);
-        return { limit: async (limit: number) => { assert(limit === 1); reads++; return { data: opened ? [{ id: "fixture" }] : [], error: null }; } };
+        return { limit: async (limit: number) => { assert(limit === 2); reads++; return { data: opened ? [{ id: "fixture" }] : [], error: null }; } };
       } }; },
     }; } } as unknown as Parameters<typeof publicTestPromotion>[0];
     const offer = await publicTestPromotion(db, user);
@@ -270,7 +344,7 @@ Deno.test("the actual wallet status exposes a promotion only before its private 
     if (url.pathname === "/rest/v1/rpc/filey_take_rate_limit") return Response.json(true);
     if (url.pathname === "/rest/v1/rpc/filey_ai_wallet") return Response.json({ balance_micros: 0 });
     if (url.pathname === "/rest/v1/ai_credit_ledger") return Response.json([]);
-    if (url.pathname === "/rest/v1/ai_credit_orders") { reads++; assert(url.searchParams.get("select") === "id"); return Response.json(opened ? [{ id: "fixture" }] : []); }
+    if (url.pathname === "/rest/v1/ai_credit_orders") { reads++; assert(url.searchParams.get("select")?.includes("checkout_url")); return Response.json(opened ? [{ id: "fixture" }] : []); }
     throw new Error(`No provider call permitted: ${url.href}`);
   }) as typeof fetch;
   try {

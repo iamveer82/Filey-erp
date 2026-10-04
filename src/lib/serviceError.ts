@@ -83,6 +83,10 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
       "Balance too low",
       "Choose an available AI credit pack.",
       "Filey-funded AI is not available yet.",
+      "Coin payments are not available yet.",
+      "This AI credit pack is not configured correctly.",
+      "This Coin promotion is not available for this account or amount.",
+      "This Coin promotion has already been opened. Complete your original checkout.",
     ].includes(detail)
   )
     return new Error(detail);

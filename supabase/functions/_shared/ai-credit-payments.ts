@@ -1,8 +1,8 @@
 import { appCheckoutReturn } from "./checkout-return.ts";
 import { creditGateway } from "./ai-credit-gateway.ts";
-import { isAuthorizedZeroCreditOrder, normalizeEmail, PROMOTION_OPENED, PROMOTION_UNAVAILABLE,
-  testPromotionClaimed, testPromotionForUser, verifyTestPromotion } from "./ai-credit-promotion.ts";
-import type DodoPayments from "https://esm.sh/dodopayments@2.50.0?target=deno";
+import { dodoCheckoutUrl, isAuthorizedZeroCreditOrder, normalizeEmail, PROMOTION_OPENED, PROMOTION_UNAVAILABLE,
+  resumableTestPromotion, testPromotionOrders, testPromotionForUser, verifyTestPromotion } from "./ai-credit-promotion.ts";
+import type DodoPayments from "npm:dodopayments@2.50.0";
 import type { SupabaseClient, User } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   creditPacks,
@@ -50,7 +50,14 @@ export async function createCreditCheckout(
   const productId = pack.id;
   if (promotion && (pack.cents !== 500 || productId !== promotion.product_id))
     throw new Error(PROMOTION_UNAVAILABLE);
-  if (promotion && await testPromotionClaimed(db, promotion)) throw new Error(PROMOTION_OPENED);
+  if (promotion) {
+    const orders = await testPromotionOrders(db, promotion);
+    if (orders.length) {
+      const saved = orders.length === 1 ? resumableTestPromotion(orders[0], promotion) : null;
+      if (saved) return saved;
+      throw new Error(PROMOTION_OPENED);
+    }
+  }
   const product = await dodo.products.retrieve(productId);
   const price = product.price;
   if (
@@ -96,7 +103,10 @@ export async function createCreditCheckout(
     ],
     customer: promotion ? { customer_id: promotion.customer_id } : { email: user.email },
     billing_currency: "USD",
-    feature_flags: { allow_discount_code: false, allow_currency_selection: false,
+    // Dodo rejects preapplied discount_codes when this flag is false. Only
+    // this verified private promotion enables it; receipts still require its
+    // exact saved coupon, customer and zero-paid amount before granting Coin.
+    feature_flags: { allow_discount_code: !!promotion, allow_currency_selection: false,
       ...(promotion ? { allow_customer_editing_email: false, always_create_new_customer: false } : {}) },
     ...(promotion ? { discount_codes: [promotion.discount_code] } : {}),
     metadata: { type: "ai_credits", credit_order: id, user_id: user.id,
@@ -104,16 +114,24 @@ export async function createCreditCheckout(
     return_url: appCheckoutReturn({ section: "credits", credit_checkout: "returned", credit_order: id }),
     cancel_url: appCheckoutReturn({ section: "credits", credit_checkout: "cancelled", credit_order: id }),
   }, promotion ? { maxRetries: 0, timeout: 15_000 } : undefined);
-  if (!session.checkout_url) throw new Error("Dodo did not return a checkout URL.");
+  const checkoutUrl = dodoCheckoutUrl(session.checkout_url);
+  if (!checkoutUrl) throw new Error("Dodo did not return a valid checkout URL.");
   if (promotion) {
     if (typeof session.session_id !== "string" || session.session_id.length < 2 || session.session_id.length > 200 ||
       /[^A-Za-z0-9_-]/.test(session.session_id)) throw new Error(PROMOTION_UNAVAILABLE);
     const { data, error: saveError } = await db.from("ai_credit_orders")
-      .update({ checkout_session_id: session.session_id }).eq("id", id).eq("user_id", user.id).is("payment_id", null)
+      .update({ checkout_session_id: session.session_id, checkout_url: checkoutUrl })
+      .eq("id", id).eq("user_id", user.id).eq("product_id", productId)
+      .eq("promotion_id", promotion.id).eq("promotion_discount_id", promotion.discount_id)
+      .eq("promotion_discount_code", promotion.discount_code).eq("promotion_customer_id", promotion.customer_id)
+      .eq("promotion_email", promotion.email).eq("promotion_expires_at", promotion.expires_at)
+      .eq("expected_paid_cents", 0).eq("credits_micros", 5_000_000).eq("service_fee_cents", TOPUP_FEE_CENTS)
+      .eq("refunded_micros", 0).eq("disputed", false)
+      .is("payment_id", null).is("paid_cents", null).is("checkout_session_id", null).is("checkout_url", null)
       .select("id").single();
     if (saveError || data?.id !== id) throw saveError ?? new Error(PROMOTION_UNAVAILABLE);
   }
-  return { url: session.checkout_url, session_id: session.session_id, order_id: id };
+  return { url: checkoutUrl, session_id: session.session_id, order_id: id };
 }
 
 /** Provider state is authoritative. Reconcile all succeeded refunds together so

@@ -49,6 +49,22 @@ it("also translates a known wallet denial returned without an HTTP context", asy
 });
 
 it.each([
+  "Coin payments are not available yet.",
+  "This AI credit pack is not configured correctly.",
+  "This Coin promotion is not available for this account or amount.",
+  "This Coin promotion has already been opened. Complete your original checkout.",
+])("preserves the exact first-party checkout instruction %s", async (message) => {
+  expect((await serviceError({
+    message: "Edge Function returned a non-2xx status code",
+    context: { status: 400, json: async () => ({ error: message }) },
+  }, "Checkout unavailable.")).message).toBe(message);
+  expect((await serviceError(new Error(message), "Checkout unavailable.")).message).toBe(message);
+  expect((await serviceError({
+    context: { status: 400, json: async () => ({ error: `${message} SQL SELECT private_rows` }) },
+  }, "Checkout unavailable.")).message).toBe("Checkout unavailable.");
+});
+
+it.each([
   "Not enough available AI credits for this request. Add credits or lower the output limit. SQL SELECT private_rows",
   "Insufficient credit. Add Coin to continue. SQL SELECT private_rows",
   "Database exception: Authorization Bearer secret-fixture",
