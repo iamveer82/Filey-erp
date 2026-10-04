@@ -117,21 +117,16 @@ export function Switch({
       disabled={disabled || busy}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        "relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        checked ? "bg-foreground" : "bg-border",
         disabled || busy ? "cursor-not-allowed opacity-60" : "cursor-pointer",
         className
       )}
     >
       <span
         aria-hidden="true"
-        className={cn(
-          "pointer-events-none block h-5 w-5 rounded-full shadow transition-transform",
-          checked ? "bg-background" : "bg-foreground",
-          checked ? "translate-x-5" : "translate-x-0.5"
-        )}
-      />
+        className={cn("pointer-events-none relative flex h-6 w-11 items-center rounded-full transition-colors", checked ? "bg-foreground" : "bg-border")}
+      ><span className={cn("block h-5 w-5 rounded-full shadow transition-transform", checked ? "bg-background translate-x-5" : "bg-foreground translate-x-0.5")} /></span>
     </button>
   );
 }
@@ -440,7 +435,7 @@ export function DataTable<T>({
   const [running, setRunning] = useState(false);
   const [localSort, setLocalSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const sort = controlledSort === undefined ? localSort : controlledSort;
-  const [editing, setEditing] = useState<{ row: string | number; col: string } | null>(
+  const [editing, setEditing] = useState<{ row: string | number; col: string; record: T; originalValue: string } | null>(
     null
   );
   const [editVal, setEditVal] = useState("");
@@ -532,12 +527,17 @@ export function DataTable<T>({
   const renderCell = (c: typeof columns[number], row: T, k: string | number, full = false) => {
     const isEditing = !!c.editable && editing?.row === k && editing?.col === c.key;
     const commit = async () => {
-      if (!c.editable || savingRef.current) return;
+      if (!c.editable || !editing || savingRef.current) return;
+      if (editVal === editing.originalValue) { setEditing(null); return; }
+      if (c.editable.value(row) !== editing.originalValue) {
+        setActionError("This value changed while you were editing. Your draft is kept. Cancel this edit to review the latest value.");
+        return;
+      }
       savingRef.current = true;
       setEditSaving(true);
       setActionError("");
       try {
-        await c.editable.onSave(row, editVal);
+        await c.editable.onSave(editing.record, editVal);
         setEditing(null);
       } catch (error) {
         setActionError(error instanceof Error ? error.message : "The change could not be saved. Your entry is still here; try again.");
@@ -552,14 +552,18 @@ export function DataTable<T>({
       ? <div className="filey-cell-text" title={typeof text === "string" ? text : undefined}>{value}</div>
       : value;
     if (compact && c.truncate && !full) return content;
-    if (isEditing) return <input autoFocus aria-label={`Edit ${c.label}`} aria-invalid={!!actionError}
+    if (isEditing) return <div className="flex min-w-0 flex-wrap items-center gap-1"><input autoFocus aria-label={`Edit ${c.label}`} aria-invalid={!!actionError}
       type={c.editable?.type ?? "text"} value={editVal} disabled={editSaving}
       onChange={e => setEditVal(e.target.value)} onClick={e => e.stopPropagation()}
-      onBlur={commit} onKeyDown={e => { if (e.key === "Enter") void commit(); else if (e.key === "Escape") setEditing(null); }}
-      className="input h-8 w-full text-sm" />;
+      onBlur={() => { if (!actionError) void commit(); }} onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (e.key === "Enter") void commit(); else if (!savingRef.current) { setEditing(null); setActionError(""); } } }}
+      className="input h-8 min-w-0 flex-1 basis-24 text-sm" />{actionError && <>
+        <button type="button" disabled={editSaving} className="btn-ghost text-xs" aria-label={`Retry saving ${c.label}`} onClick={() => void commit()}>Retry</button>
+        <button type="button" disabled={editSaving} className="btn-ghost text-xs" aria-label={`Cancel editing ${c.label}`} onClick={() => { if (!savingRef.current) { setEditing(null); setActionError(""); } }}>Cancel</button>
+      </>}</div>;
     if (c.editable) return <button type="button" title="Edit value"
+      disabled={editSaving || running}
       className="-mx-1 block w-full cursor-text rounded px-1 text-left hover:bg-hover"
-      onClick={e => { e.stopPropagation(); setEditVal(c.editable!.value(row)); setActionError(""); setEditing({ row: k, col: c.key }); }}
+      onClick={e => { e.stopPropagation(); if (savingRef.current) return; const originalValue = c.editable!.value(row); setEditVal(originalValue); setActionError(""); setEditing({ row: k, col: c.key, record: row, originalValue }); }}
     >{content}</button>;
     return content;
   };
@@ -572,6 +576,7 @@ export function DataTable<T>({
           <div className="flex items-center gap-1.5 flex-wrap">
             {bulkActions!.map((a) => (
               <button
+                type="button"
                 key={a.label}
                 disabled={running}
                 onClick={() => runBulk(a)}
@@ -588,6 +593,7 @@ export function DataTable<T>({
             ))}
           </div>
           <button
+            type="button"
             onClick={() => setSel(new Set())}
             className="ml-auto text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer"
           >
@@ -662,6 +668,7 @@ export function DataTable<T>({
                     className="th"
                   >
                     <button
+                      type="button"
                       onClick={() => toggleSort(c.key)}
                       className="inline-flex items-center gap-1 cursor-pointer hover:text-foreground"
                     >
@@ -768,6 +775,7 @@ export function DataTable<T>({
           </span>
           <div className="flex items-center gap-1.5">
             <button
+              type="button"
               className="btn-ghost h-7 px-2 text-[12.5px]"
               disabled={safePage === 0}
               onClick={() => setPage(safePage - 1)}
@@ -778,6 +786,7 @@ export function DataTable<T>({
               {safePage + 1} / {pageCount}
             </span>
             <button
+              type="button"
               className="btn-ghost h-7 px-2 text-[12.5px]"
               disabled={safePage >= pageCount - 1}
               onClick={() => setPage(safePage + 1)}
@@ -794,12 +803,15 @@ export function DataTable<T>({
 export function Modal({
   open,
   onClose,
+  onCloseAutoFocus,
   title,
   children,
   size = "md",
 }: {
   open: boolean;
   onClose: () => void;
+  /** Runs after the default trigger focus restoration. */
+  onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>["onCloseAutoFocus"];
   title: string;
   children: ReactNode;
   size?: "md" | "lg" | "xl" | "2xl" | "3xl" | "full" | "document";
@@ -823,6 +835,7 @@ export function Modal({
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           if (returnFocus.current?.isConnected) returnFocus.current.focus();
+          onCloseAutoFocus?.(event);
         }}
         className={cn("flex flex-col gap-0 overflow-hidden p-0", widthClass)}
       >

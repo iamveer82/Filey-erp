@@ -19,8 +19,10 @@ export type DocNumberKind =
   | "quote"
   | "purchase_order"
   | "delivery_challan"
+  | "packaging_list"
   | "payment_receipt"
   | "declaration_letter"
+  | "letter"
   | "sales_order";
 
 export interface DocNumberSpec {
@@ -37,8 +39,10 @@ export const DOC_NUMBER_KINDS: DocNumberSpec[] = [
   { kind: "quote", label: "Quotations", prefix: "QT", placeholder: "QT-DLS-{001}-26" },
   { kind: "purchase_order", label: "Purchase orders", prefix: "PO", placeholder: "PO-{001}-26" },
   { kind: "delivery_challan", label: "Delivery challans", prefix: "DC", placeholder: "DC-{001}-26" },
+  { kind: "packaging_list", label: "Packing lists", prefix: "PL", placeholder: "PL-{001}-26" },
   { kind: "payment_receipt", label: "Payment receipts", prefix: "REC", placeholder: "REC-{001}-26" },
   { kind: "declaration_letter", label: "Declaration letters", prefix: "DL", placeholder: "DL-{001}-26" },
+  { kind: "letter", label: "Letters", prefix: "LTR", placeholder: "LTR-{001}-26" },
   { kind: "sales_order", label: "Sales orders", prefix: "SO", placeholder: "SO-{001}-26" },
 ];
 

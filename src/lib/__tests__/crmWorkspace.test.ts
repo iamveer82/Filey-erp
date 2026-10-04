@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setDataMode } from "../dataMode";
-import { crm, persistCrmRecord, importCrmRecords } from "../api";
-import { localClient } from "../localdb";
+import { crm, persistCrmRecord, importCrmRecords, setCacheOrg } from "../api";
+import { localClient, journalSnapshot } from "../localdb";
 import * as supabaseModule from "../supabase";
 import { toCsv, parseCsvObjects } from "../csv";
 import {
@@ -23,6 +23,52 @@ beforeEach(() => {
   setDataMode("local");
 });
 afterEach(() => vi.restoreAllMocks());
+
+it("keeps the device owner's sign-in gate for local lead conversion", async () => {
+  await localClient.from("crm_leads").insert({ id: 1, name: "Private lead" });
+  localStorage.setItem("filey_local_workspace_owner", "alice");
+  await expect(crm.convertLead(1)).rejects.toThrow("Sign in to the device workspace");
+  expect((await localClient.from("crm_leads").select().single()).data.status).toBeUndefined();
+  expect((await localClient.from("crm_customers").select()).data).toEqual([]);
+});
+
+it("does not convert an old workspace's lead after the pending lookup changes identity", async () => {
+  setCacheOrg("org", "alice");
+  const leadId = await crm.createLead({ name: "Private lead", company: "Alice company", est_value: 0 });
+  const before = await journalSnapshot();
+  const read = Storage.prototype.getItem;
+  const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key) {
+    const value = read.call(this, key);
+    if (key === "localdb:crm_leads") setCacheOrg("other-org", "bob");
+    return value;
+  });
+  await expect(crm.convertLead(leadId)).rejects.toThrow("workspace changed");
+  spy.mockRestore();
+  for (const table of ["crm_customers", "crm_people", "crm_opportunities"])
+    expect((await localClient.from(table).select()).data).toEqual([]);
+  expect((await localClient.from("crm_leads").select().single()).data.status).toBeUndefined();
+  expect(await journalSnapshot()).toEqual(before);
+});
+
+it("preserves the lead and all linked collections after a failed conversion commit, then retries once", async () => {
+  const leadId = await crm.createLead({ name: "Prospect", company: "New business", est_value: 0 });
+  const before = await journalSnapshot();
+  const write = Storage.prototype.setItem;
+  let failed = false;
+  const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+    if (key === "localdb:crm_opportunities" && !failed) { failed = true; throw new Error("Quota exceeded"); }
+    return write.call(this, key, value);
+  });
+  await expect(crm.convertLead(leadId)).rejects.toThrow("Quota exceeded");
+  spy.mockRestore();
+  for (const table of ["crm_customers", "crm_people", "crm_opportunities"])
+    expect((await localClient.from(table).select()).data).toEqual([]);
+  expect(await journalSnapshot()).toEqual(before);
+  await crm.convertLead(leadId);
+  for (const table of ["crm_customers", "crm_people", "crm_opportunities"])
+    expect((await localClient.from(table).select()).data).toHaveLength(1);
+  expect((await localClient.from("crm_leads").select().single()).data.status).toBe("converted");
+});
 
 it("rejects stale board moves and edits, and reopens tasks correctly after refresh", async () => {
   const company = await persistCrmRecord("crm_customers", { company: "Example" });

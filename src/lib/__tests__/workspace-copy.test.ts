@@ -73,7 +73,7 @@ it("reuses unchanged bodies on repeat downloads and copies every synchronized ta
 
 it("rolls back browser records and the sync queue together when storage fills, then allows retry", async () => {
   await localClient.from("products").insert({id: 1, name: "Keep product"});
-  await localClient.from("orders").insert({id: 2, name: "Keep order"});
+  await localClient.from("orders").insert({id: 2, order_number: "KEEP-2", name: "Keep order"});
   const before = await journalSnapshot();
   const write = Storage.prototype.setItem;
   let failed = false;

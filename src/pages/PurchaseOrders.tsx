@@ -57,6 +57,8 @@ import {
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import FitPreview from "../components/FitPreview";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
@@ -258,17 +260,21 @@ export default function PurchaseOrders() {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, rows.map((r) => r.po_number), docFmts));
       setParams({}, { replace: true });
+      void newPo();
     }
   }, [params, company, form, setParams, rows]);
 
   const newPo = async () => {
     if (!company) return;
-    const f = blankForm(company, rows.map((r) => r.po_number), docFmts);
-    // The section's preset wins over the profile-wide default template.
-    f.template = await startingTemplate("po", company.default_template, f.template);
-    setForm(f);
+    const scope = agentStorageScope();
+    try {
+      const f = blankForm(company, rows.map((r) => r.po_number), docFmts);
+      f.po_number = await allocateDocumentNumber("purchase_order", rows.map(r => r.po_number), docFmts);
+      f.template = await startingTemplate("po", company.default_template, f.template);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setForm(f);
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const onSaved = () => loadRows();
@@ -852,14 +858,17 @@ async function duplicatePo(
   formats?: DocFormats
 ) {
   try {
+    const scope = agentStorageScope();
     const po = await pos.get(id);
     const supps = await suppliersApi.list();
     const f = poDocToForm(po, supps.find((s) => s.id === po.supplier_id), company);
+    const po_number = await allocateDocumentNumber("purchase_order", existing, formats);
+    requireAgentStorageScope(scope ?? "signed-out");
     setForm({
       ...f,
       id: undefined,
       status: "draft",
-      po_number: pickDocNumber("purchase_order", existing, formats),
+      po_number,
       order_date: today(),
       shared: false,
       share_token: undefined,
@@ -1021,6 +1030,7 @@ function Editor({
     setForm({
       ...form,
       customColumns: form.customColumns.filter((c) => c.key !== key),
+      unit_price_formula: form.unit_price_formula?.a === key ? null : form.unit_price_formula,
       items: form.items.map((it) => {
         const c = { ...it.custom };
         delete c[key];
@@ -1054,22 +1064,23 @@ function Editor({
     });
   };
 
-  const duplicate = () => {
+  const duplicate = async () => {
     if (!company) return;
+    const scope = agentStorageScope();
+    try {
+    const po_number = await allocateDocumentNumber("purchase_order", rows.map(r => r.po_number), docFmts);
+    requireAgentStorageScope(scope ?? "signed-out");
     const next: Form = {
       ...form,
       id: undefined,
       status: "draft",
-      po_number: pickDocNumber(
-        "purchase_order",
-        rows.map((r) => r.po_number),
-        docFmts
-      ),
+      po_number,
       shared: false,
       share_token: undefined,
     };
     setForm(next);
     toast.success("Duplicated into a new draft PO.");
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const handleSave = async () => {

@@ -19,6 +19,30 @@ export const num = (v: unknown, d = 0): number => {
 
 const MAX_CODE_ATTEMPTS = 5;
 
+const unconfirmedWrite = {
+  error: "Save was not confirmed. Check Filey before retrying; a record may already have been saved. Do not repeat this write automatically.",
+  code: "unconfirmed_write",
+  retry_safe: false,
+} as const;
+
+/** An insert can commit before its response is lost. Only a usable row ID
+ *  is a receipt; transport failure or malformed success is not a safe retry. */
+// deno-lint-ignore no-explicit-any
+async function insertRecord(client: any, table: string, row: Record<string, unknown>): Promise<{ id: string | number } | typeof unconfirmedWrite> {
+  try {
+    const { data, error } = await client.from(table).insert(row).select("id").single();
+    const id = data?.id;
+    if (error || !(typeof id === "string" && id.trim() || typeof id === "number" && Number.isSafeInteger(id) && id > 0)) {
+      console.error("channel record save", table, error?.code ?? "invalid_result");
+      return unconfirmedWrite;
+    }
+    return { id };
+  } catch {
+    console.error("channel record save", table, "response_unconfirmed");
+    return unconfirmedWrite;
+  }
+}
+
 /** Insert a pending action under a fresh CSPRNG approval code, retrying when
  *  the draw collides with another LIVE code for this user (the partial unique
  *  index from 2026-08-22-agent-hardening.sql makes the DB the tiebreaker).
@@ -31,18 +55,23 @@ export async function insertPendingAction(
   client: any,
   // deno-lint-ignore no-explicit-any
   base: any,
-): Promise<{ ok: true; code: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; code: string } | { ok: false; error: string; code?: string; retry_safe?: false }> {
   let lastMsg = "could not allocate an approval code";
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const code = randomCode(4);
-    const { error } = await client.from("agent_pending_actions").insert({
-      ...base,
-      code,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    });
-    if (!error) return { ok: true, code };
-    lastMsg = String(error.message ?? error);
-    if ((error as { code?: string }).code !== "23505") return { ok: false, error: lastMsg };
+    try {
+      const { error } = await client.from("agent_pending_actions").insert({
+        ...base,
+        code,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+      if (!error) return { ok: true, code };
+      lastMsg = String(error.message ?? error);
+      // Only a confirmed unique-code collision is safe to try again.
+      if ((error as { code?: string }).code !== "23505") return { ok: false, ...unconfirmedWrite };
+    } catch {
+      return { ok: false, ...unconfirmedWrite };
+    }
   }
   return { ok: false, error: lastMsg };
 }
@@ -79,7 +108,7 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
     const { data: existing, error: se } = await client
       .from("agent_memories")
       .select("id,text")
-      .eq("user_id", ownerId);
+      .eq("user_id", ownerId).eq("org_id", org);
     if (se) return { error: se.message }; // e.g. table missing — fail soft
     const key = text.toLowerCase();
     // deno-lint-ignore no-explicit-any
@@ -91,6 +120,7 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
         .from("agent_memories")
         .update({ text, updated_at: new Date().toISOString(), ...(tag ? { tag } : {}) })
         .eq("user_id", ownerId)
+        .eq("org_id", org)
         .eq("id", dupe.id);
       if (ue) return { error: ue.message };
       return { remembered: true, refreshed: true, id: dupe.id };
@@ -101,15 +131,16 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
       .insert({ user_id: ownerId, org_id: org, text, tag });
     if (ie) return { error: ie.message };
 
-    // Prune: keep the 200 most recently updated memories per user.
+    // Prune only this workspace; another company's facts are independent.
     const { data: ids } = await client
       .from("agent_memories")
       .select("id")
       .eq("user_id", ownerId)
+      .eq("org_id", org)
       .order("updated_at", { ascending: false });
     const stale = (ids ?? []).slice(200).map((r: { id: string }) => r.id);
     if (stale.length) {
-      await client.from("agent_memories").delete().eq("user_id", ownerId).in("id", stale);
+      await client.from("agent_memories").delete().eq("user_id", ownerId).eq("org_id", org).in("id", stale);
     }
     return { remembered: true };
   } catch (e) {
@@ -120,12 +151,13 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
 /** recall { query? } — rank up to 200 owner-scoped memories locally, return 8.
  *  Fails SOFT with { error } if the table doesn't exist yet. */
 // deno-lint-ignore no-explicit-any
-export async function recallMemories(client: any, ownerId: string, input: any): Promise<unknown> {
+export async function recallMemories(client: any, org: string, ownerId: string, input: any): Promise<unknown> {
   try {
     const q = client
       .from("agent_memories")
       .select("id,text,tag,updated_at")
       .eq("user_id", ownerId)
+      .eq("org_id", org)
       .order("updated_at", { ascending: false })
       .limit(200);
     const term = String(input?.query ?? "").trim();
@@ -182,7 +214,7 @@ export async function proposePaymentReminder(client: any, org: string, ownerId: 
       due_date: inv.due_date,
     },
   });
-  if (!res.ok) return { error: res.error };
+  if (!res.ok) return res;
   return {
     proposed: "send_payment_reminder",
     invoice: inv.number,
@@ -213,14 +245,21 @@ export async function runWriteTool(
     case "create_draft_quote":
     case "create_draft_po": {
       const kind = name === "create_draft_invoice" ? "invoice" : name === "create_draft_quote" ? "quote" : "po";
-      const { data, error } = await client.rpc("filey_channel_create_draft", {
-        p_owner: ownerId, p_org: org, p_kind: kind, p_input: input,
-      });
-      if (error || data?.created !== "draft" || !data?.id || !data?.number) {
-        console.error("channel draft save", error?.code ?? "invalid_result");
-        return { error: "I couldn't save that draft. Retry or create it in Filey. No partial draft was saved." };
+      // An atomic save can commit before its response is lost. Never turn an
+      // unconfirmed RPC into a claim that nothing was saved or a safe retry.
+      try {
+        const { data, error } = await client.rpc("filey_channel_create_draft", {
+          p_owner: ownerId, p_org: org, p_kind: kind, p_input: input,
+        });
+        if (error || data?.created !== "draft" || !data?.id || !data?.number) {
+          console.error("channel draft save", error?.code ?? "invalid_result");
+          return unconfirmedWrite;
+        }
+        return data;
+      } catch {
+        console.error("channel draft save", "response_unconfirmed");
+        return unconfirmedWrite;
       }
-      return data;
     }
     case "add_customer": {
       const row = {
@@ -231,10 +270,10 @@ export async function runWriteTool(
         phone: input?.phone ? String(input.phone).slice(0, 50) : null,
       };
       if (!row.name) return { error: "customer name is required" };
-      const { data, error } = await client.from("crm_customers").insert(row).select("id").single();
-      if (error) return { error: error.message };
-      await logAgentAction(client, ownerId, name, `crm_customers:${data.id}`, row.name);
-      return { created: "customer", name: row.name };
+      const result = await insertRecord(client, "crm_customers", row);
+      if ("error" in result) return result;
+      await logAgentAction(client, ownerId, name, `crm_customers:${result.id}`, row.name);
+      return { created: "customer", id: result.id, name: row.name };
     }
 
     case "add_product": {
@@ -248,10 +287,10 @@ export async function runWriteTool(
         reorder_level: Math.max(num(input?.reorder_level), 0),
       };
       if (!row.name) return { error: "product name is required" };
-      const { data, error } = await client.from("products").insert(row).select("id").single();
-      if (error) return { error: error.message };
-      await logAgentAction(client, ownerId, name, `products:${data.id}`, row.name);
-      return { created: "product", name: row.name, note: "Stock starts at 0 — receive stock in Filey." };
+      const result = await insertRecord(client, "products", row);
+      if ("error" in result) return result;
+      await logAgentAction(client, ownerId, name, `products:${result.id}`, row.name);
+      return { created: "product", id: result.id, name: row.name, note: "Stock starts at 0 — receive stock in Filey." };
     }
 
     case "log_expense": {
@@ -270,16 +309,16 @@ export async function runWriteTool(
       };
       if (!row.category) return { error: "category is required" };
       if (!(row.amount > 0)) return { error: "amount must be greater than zero" };
-      const { data, error } = await client.from("expenses").insert(row).select("id").single();
-      if (error) return { error: error.message };
+      const result = await insertRecord(client, "expenses", row);
+      if ("error" in result) return result;
       await logAgentAction(
         client,
         ownerId,
         name,
-        `expenses:${data.id}`,
+        `expenses:${result.id}`,
         `${row.category} — ${row.amount} on ${row.expense_date}`,
       );
-      return { created: "expense", id: data.id, category: row.category, amount: row.amount };
+      return { created: "expense", id: result.id, category: row.category, amount: row.amount };
     }
 
     default:
@@ -319,7 +358,7 @@ export async function proposeConnectChannel(client: any, ownerId: string, input:
       app_secret: String(input?.app_secret ?? "").trim() || null,
     },
   });
-  if (!res.ok) return { error: res.error };
+  if (!res.ok) return res;
   return {
     proposed: "connect_channel",
     provider,
@@ -369,7 +408,7 @@ export async function proposeSendMessage(client: any, org: string, ownerId: stri
     action: "send_message",
     payload: { channel, to, who, text, ...approvalBinding(source) },
   });
-  if (!res.ok) return { error: res.error };
+  if (!res.ok) return res;
   return {
     proposed: "send_message",
     channel,

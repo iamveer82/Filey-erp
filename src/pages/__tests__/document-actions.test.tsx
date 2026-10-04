@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor, cleanup, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, cleanup, within, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { notifyDataChanged } from "../../lib/realtime";
 import { AuthProvider } from "../../lib/auth";
-import { billing, erp, hr, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary } from "../../lib/api";
+import { billing, erp, hr, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type Payroll, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary } from "../../lib/api";
 import * as filesApi from "../../lib/files";
 import * as pdfTools from "../../lib/pdfTools";
 import * as emailApi from "../../lib/email";
@@ -13,6 +13,7 @@ import * as csvApi from "../../lib/csv";
 import * as localPaths from "../../lib/localPaths";
 import * as invoiceXml from "../../lib/einvoiceXml";
 import * as exchangeRates from "../../lib/exchange-rates";
+import * as documentMessage from "../../lib/documentMessage";
 import Inventory from "../Inventory";
 import PaymentReceipt from "../PaymentReceipt";
 import PayslipPage from "../PayslipPage";
@@ -140,18 +141,22 @@ describe("invoice editor actions", () => {
     for (const name of ["Save", "Download PDF", "Company", "WhatsApp", "Messages", "Email", "Mark as done"])
       expect(actions.getByRole("button", { name })).toBeVisible();
     expect(actions.queryByRole("button", { name: "More" })).toBeNull();
-    const check = actions.getByRole("button", { name: "Check e-invoice" });
+    const check = actions.getByRole("button", { name: "Check E-invoice" });
     expect(check).toHaveClass("btn-primary");
     fireEvent.click(check);
-    const review = within(await view.findByRole("dialog", { name: "Check e-invoice" }));
-    expect(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })).toHaveLength(2);
-    fireEvent.change(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })[0], { target: { value: "123456789012345" } });
-    expect(review.getAllByRole("textbox", { name: "Corporate Tax TRN" })[0]).toHaveValue("123456789012345");
+    const review = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    expect(review.getAllByRole("tab")).toHaveLength(5);
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
+    fireEvent.change(review.getByRole("textbox", { name: "Own FTA-issued TRN" }), { target: { value: "123456789012345" } });
+    fireEvent.change(review.getByLabelText(/^Seller street address/), { target: { value: "Edited invoice seller address" } });
+    expect(review.getByRole("textbox", { name: "Own FTA-issued TRN" })).toHaveValue("123456789012345");
     expect(review.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
     fireEvent.click(review.getByRole("button", { name: "Back to invoice" }));
-    await waitFor(() => expect(view.queryByRole("dialog", { name: "Check e-invoice" })).toBeNull());
-    fireEvent.click(actions.getByRole("button", { name: "Check e-invoice" }));
-    expect(within(await view.findByRole("dialog", { name: "Check e-invoice" })).getAllByRole("textbox", { name: "Corporate Tax TRN" })[0]).toHaveValue("123456789012345");
+    await waitFor(() => expect(view.queryByRole("dialog", { name: "Check E-invoice" })).toBeNull());
+    fireEvent.click(actions.getByRole("button", { name: "Check E-invoice" }));
+    const reopened = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    expect(reopened.getByRole("textbox", { name: "Own FTA-issued TRN" })).toHaveValue("123456789012345");
+    expect(reopened.getByLabelText(/^Seller street address/)).toHaveValue("Edited invoice seller address");
     expect(save).not.toHaveBeenCalled();
   });
 
@@ -174,6 +179,29 @@ describe("invoice editor actions", () => {
       items: expect.arrayContaining([expect.objectContaining({ tax_category: "AE", custom: expect.objectContaining({
         einvoice_nature: "DL8.48.8.2", einvoice_gtin: "012345678905",
       }) })]),
+    })));
+  });
+
+  it("jumps from a classification issue to its actual editable line field and preserves the correction", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice,
+      items: [{ ...invoice.items[0], unit: "pcs", custom: { einvoice_item_type: "G" } }] });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Items/ }), { button: 0, ctrlKey: false });
+    fireEvent.click(review.getByRole("button", { name: /Edit:.*HS classification code/ }));
+    const hsCode = await view.findByRole("textbox", { name: "HS classification code for line 1" });
+    await waitFor(() => expect(hsCode).toHaveFocus());
+    expect(view.getByRole("tabpanel")).toHaveAccessibleName("Items 1");
+    fireEvent.change(hsCode, { target: { value: "847130" } });
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      items: expect.arrayContaining([expect.objectContaining({ custom: expect.objectContaining({ einvoice_item_type: "G", einvoice_hs_code: "847130" }) })]),
     })));
   });
 
@@ -215,6 +243,70 @@ describe("invoice editor actions", () => {
     })));
   });
 
+  it("exposes pricing beside VAT and shows missing numeric measures before a custom calculation is saved", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice,
+      custom_columns: [{ key: "liters", label: "Total litres" }],
+      items: [{ description: "Oil", qty: 20, unit_price: 4.1, custom: {} }],
+    });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.mouseDown(await view.findByRole("tab", { name: /Items/ }), { button: 0, ctrlKey: false });
+    const toolbar = within(view.getByRole("group", { name: "Invoice line controls" }));
+    expect(toolbar.getByLabelText("Document tax rate percent")).toBeVisible();
+    expect(toolbar.getByRole("checkbox", { name: "Line details" })).toBeVisible();
+    expect(view.queryByRole("button", { name: "Line options" })).toBeNull();
+    fireEvent.keyDown(toolbar.getByRole("combobox", { name: "Invoice pricing calculation" }), { key: "Enter" });
+    fireEvent.keyDown(await view.findByRole("option", { name: "Total litres × unit price" }), { key: "Enter" });
+    const measure = view.getByRole("textbox", { name: "Total litres for line 1" });
+    expect(measure).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(measure, { target: { value: "400kg" } });
+    expect(measure).toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(measure, { target: { value: "400" } });
+    expect(measure).not.toHaveAttribute("aria-invalid");
+    expect(within(measure.closest("tr")!).getByText(/1,640\.00/)).toBeVisible();
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      unit_price_formula: { a: "liters", b: "unit_price" },
+      items: [expect.objectContaining({ qty: 20, unit_price: 4.1, custom: expect.objectContaining({ liters: "400" }) })],
+    })));
+  });
+
+  it("restores quantity pricing when its custom column is removed and keeps unrelated formulas and manual amounts", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice,
+      custom_columns: [{ key: "liters", label: "Total litres" }, { key: "length", label: "Length" }],
+      unit_price_formula: { a: "liters", b: "unit_price" },
+      items: [
+        { description: "Oil", qty: 20, unit_price: 4.1, custom: { liters: "400", __calc_mode: "formula", __formula_a: "liters", __formula_b: "unit_price" } },
+        { description: "Manual service", qty: 1, unit_price: 75, custom: { liters: "1", __calc_mode: "manual", __manual_amount: "75" } },
+        { description: "Wire", qty: 2, unit_price: 10, custom: { length: "9", __calc_mode: "formula", __formula_a: "length", __formula_b: "unit_price" } },
+      ],
+    });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.mouseDown(await view.findByRole("tab", { name: /Items/ }), { button: 0, ctrlKey: false });
+    fireEvent.click(view.getAllByTitle("Remove column")[0]);
+    expect(view.getByRole("combobox", { name: "Invoice pricing calculation" })).toHaveTextContent("Quantity × unit price");
+    expect(within(view.getByRole("textbox", { name: "Description for line 1" }).closest("tr")!).getByText(/82\.00/)).toBeVisible();
+    expect(view.getByLabelText("Line amount for line 2")).toHaveValue(75);
+    expect(view.getByRole("combobox", { name: "Calculation for line 3" })).toHaveTextContent("Length × unit price");
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const payload = save.mock.calls[0][0];
+    expect(payload.unit_price_formula).toBeNull();
+    expect(payload.custom_columns).toEqual([{ key: "length", label: "Length" }]);
+    expect(payload.items[0].custom).not.toHaveProperty("__formula_a");
+    expect(payload.items[1].custom).toMatchObject({ __calc_mode: "manual", __manual_amount: "75" });
+    expect(payload.items[2].custom).toMatchObject({ length: "9", __calc_mode: "formula", __formula_a: "length" });
+  });
+
   it.each(["canceled", "failed"] as const)("does not report XML export success when native saving is %s", async (outcome) => {
     const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
     vi.spyOn(invoiceXml, "validateEInvoice").mockReturnValue({ errors: [], warnings: [] });
@@ -229,7 +321,7 @@ describe("invoice editor actions", () => {
     setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "More actions" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-    fireEvent.click(await view.findByRole("button", { name: "Check e-invoice" }));
+    fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
     fireEvent.click(await view.findByRole("button", { name: "Save & export XML" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("INV-AUDIT.xml", new TextEncoder().encode("<Invoice />"), "application/xml"));
     if (outcome === "failed") expect(await view.findByText("Folder is read-only")).toBeTruthy();
@@ -240,6 +332,32 @@ describe("invoice editor actions", () => {
 });
 
 describe("receipt actions", () => {
+  it("does not copy an app login link or claim sharing success after public sharing fails", async () => {
+    vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
+    vi.spyOn(documentMessage, "receiptPublicLink").mockRejectedValue(new Error("Public sharing is unavailable"));
+    const view = wrap(<PaymentReceipt />);
+    await view.findByText("RCPT-AUDIT");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Copy link" }));
+    expect(await view.findByText("Public sharing is unavailable")).toBeTruthy();
+    expect(view.queryByText("Public receipt link copied")).toBeNull();
+  });
+
+  it("keeps the latest selected receipt when a slower earlier load finishes", async () => {
+    const second = { ...receipt, id: 9, number: "RCPT-SECOND", amount: 200 };
+    vi.spyOn(receipts, "list").mockResolvedValue([receiptRow, { ...second, payment_date: "2026-09-07" }]);
+    let finishFirst!: (row: ReceiptDoc) => void;
+    const first = new Promise<ReceiptDoc>(resolve => { finishFirst = resolve; });
+    vi.spyOn(receipts, "get").mockImplementation(id => id === 7 ? first : Promise.resolve(second));
+    const view = wrap(<PaymentReceipt />);
+    fireEvent.click(await view.findByText("RCPT-AUDIT"));
+    fireEvent.click(view.getByText("RCPT-SECOND"));
+    await view.findByDisplayValue("200");
+    await act(async () => { finishFirst(receipt); await first; });
+    expect(view.getByDisplayValue("200")).toBeTruthy();
+    expect(view.queryByDisplayValue("120")).toBeNull();
+  });
+
   it("refreshes available receipts without resetting unsaved receipt edits", async () => {
     const list = vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
     vi.spyOn(receipts, "get").mockResolvedValue(receipt);
@@ -333,6 +451,32 @@ it("blocks payroll posting after a history read failure until the history is ref
   expect(post).not.toHaveBeenCalled();
 });
 
+it("exports the recorded payslip amounts after the employee's salary changes", async () => {
+  vi.spyOn(hr, "employees").mockResolvedValue([{ id: 1, name: "Test employee", salary: 6000 } as Employee]);
+  vi.spyOn(hr, "payroll").mockResolvedValue([{
+    id: 1, employee_id: 1, employee_name: "Test employee", period: "2026-06",
+    basic: 5000, allowances: 250, deductions: 50, net_pay: 5200, status: "paid",
+  } as Payroll]);
+  const post = vi.spyOn(hr, "runPayroll").mockResolvedValue(1);
+  const download = vi.spyOn(pdfTools, "downloadElementAsPdf").mockResolvedValue(true);
+  const page = render(<MemoryRouter initialEntries={["/people/1/payslip"]}><UIProvider><Routes><Route path="/people/:id/payslip" element={<PayslipPage />} /></Routes></UIProvider></MemoryRouter>);
+  fireEvent.change(await page.findByLabelText("Month"), { target: { value: "2026-06" } });
+  expect(page.getByLabelText(/Basic Salary/)).toHaveValue(5000);
+  expect(page.getByLabelText(/Allowances/)).toHaveValue(250);
+  expect(page.getByLabelText(/Allowances/)).toBeDisabled();
+  expect(page.getByLabelText(/Deductions/)).toHaveValue(50);
+  expect(page.getByLabelText(/Deductions/)).toBeDisabled();
+  fireEvent.click(page.getByRole("button", { name: "Download PDF" }));
+  await waitFor(() => expect(download).toHaveBeenCalledOnce());
+  const sheet = download.mock.calls[0][0] as HTMLElement;
+  expect(sheet.textContent).toContain("5,200.00");
+  expect(sheet.textContent).not.toContain("6,000.00");
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.change(page.getByLabelText("Month"), { target: { value: "" } });
+  expect(page.getByRole("button", { name: "Download PDF" })).toBeDisabled();
+  expect(page.getByRole("button", { name: "Save payslip" })).toBeDisabled();
+});
+
 describe("quotation actions", () => {
   beforeEach(() => {
     vi.spyOn(quotes, "listDocs").mockResolvedValue([{ ...quotation, total: 100 }]);
@@ -409,6 +553,7 @@ it("keeps a failed challan save open without a success toast or PDF archive", as
   const view = wrap(<DeliveryChallan />);
   const create = await view.findByRole("button", { name: "Assign driver" });
   await waitFor(() => expect(create).not.toBeDisabled());
+  setCacheOrg("document-test-org", "document-test-user");
   fireEvent.click(create);
   fireEvent.click(await view.findByRole("button", { name: "Save" }));
   expect(await view.findByText("Device storage is full")).toBeTruthy();

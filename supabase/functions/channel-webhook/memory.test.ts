@@ -53,6 +53,7 @@ Deno.test("a correction replaces only a memory belonging to the owner", async ()
     ["user_id", "owner"],
     ["user_id", "owner"],
   ]);
+  assertEquals(filters.filter(([key]) => key === "org_id"), [["org_id", "org"], ["org_id", "org"]]);
 
   const foreign = await rememberMemory(client, "org", "owner", {
     text: "wrong",

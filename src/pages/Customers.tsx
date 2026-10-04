@@ -1,4 +1,6 @@
 import EInvoicePartyFields from "../components/EInvoicePartyFields";
+import CustomerOpeningBalanceFields from "../components/CustomerOpeningBalanceFields";
+import { customerOpeningBalanceInputs, readCustomerOpeningBalance, type CustomerOpeningBalance } from "../lib/customerOpeningBalance";
 import { readEInvoiceParty } from "../lib/einvoice";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -641,7 +643,12 @@ function customerQuickView(
     },
     {
       label: "Opening balance (AED)",
-      value: c.opening_balance != null ? num(c.opening_balance) : undefined,
+      value: c.opening_balance != null ? (
+        <span className={cn(c.opening_balance > 0 ? "text-success" : c.opening_balance < 0 ? "text-danger" : "text-foreground")}>
+          {num(Math.abs(c.opening_balance))}
+          {c.opening_balance !== 0 && <span className="ml-2 text-xs">{c.opening_balance > 0 ? "Credit / Receivable" : "Debit / Payable"}</span>}
+        </span>
+      ) : undefined,
     },
     {
       label: "Created",
@@ -693,7 +700,7 @@ function CustomerModal({
     email: string;
     phone: string;
     credit_limit: string;
-    opening_balance: string;
+    opening_balance: CustomerOpeningBalance;
     custom_fields: Record<string, string>;
   };
   const blank: FormState = {
@@ -707,7 +714,7 @@ function CustomerModal({
     email: "",
     phone: "",
     credit_limit: "",
-    opening_balance: "",
+    opening_balance: customerOpeningBalanceInputs(),
     custom_fields: {},
   };
   const [f, setF] = useState<FormState>(blank);
@@ -740,7 +747,7 @@ function CustomerModal({
         email: edit.email ?? "",
         phone: edit.phone ?? "",
         credit_limit: edit.credit_limit != null ? String(edit.credit_limit) : "",
-        opening_balance: edit.opening_balance != null ? String(edit.opening_balance) : "",
+        opening_balance: customerOpeningBalanceInputs(edit.opening_balance),
         custom_fields: edit.custom_fields ?? {},
       };
       setF(next);
@@ -751,6 +758,7 @@ function CustomerModal({
   }, [open, edit]);
 
   const nameErr = !f.name.trim();
+  const openingBalance = readCustomerOpeningBalance(f.opening_balance);
 
   /** Run validation on every custom field. Returns the first error
    * message, or null when all required + types are OK. */
@@ -767,7 +775,7 @@ function CustomerModal({
   const save = async () => {
     if (saving || customLoading || customLoadError) return;
     setTouched(true);
-    if (nameErr) return;
+    if (nameErr || openingBalance.value === null) return;
     if (customErr) {
       toast.error(customErr);
       return;
@@ -787,8 +795,7 @@ function CustomerModal({
         country_subdivision: f.country_subdivision || undefined,
         country_code: f.country_code.trim() || undefined,
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
-        opening_balance:
-          f.opening_balance.trim() === "" ? undefined : Number(f.opening_balance),
+        opening_balance: openingBalance.value,
         phone_e164: e164 ?? undefined,
         custom_fields:
           Object.keys(f.custom_fields || {}).length > 0
@@ -905,7 +912,7 @@ function CustomerModal({
           <summary className="cursor-pointer font-medium mb-3">Electronic invoicing identity</summary>
           <EInvoicePartyFields value={readEInvoiceParty(f.custom_fields?.einvoice_identity)} onChange={identity => setF({ ...f, custom_fields: { ...f.custom_fields, einvoice_identity: JSON.stringify(identity) } })} />
         </details>}
-        {/* Credit & balance (Vyapar parity). Opening balance: + = they owe you. */}
+        {/* Opening balances retain their existing signed accounting meaning. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Credit limit (AED)">
             <input
@@ -918,16 +925,9 @@ function CustomerModal({
               placeholder="e.g. 100000"
             />
           </Field>
-          <Field label="Opening balance (AED)">
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              value={f.opening_balance}
-              onChange={(e) => setF({ ...f, opening_balance: e.target.value })}
-              placeholder="+ receivable / − payable"
-            />
-          </Field>
+          <div className="sm:col-span-2">
+            <CustomerOpeningBalanceFields value={f.opening_balance} onChange={opening_balance => setF({ ...f, opening_balance })} error={touched ? openingBalance.error : null} />
+          </div>
         </div>
       </div>
 

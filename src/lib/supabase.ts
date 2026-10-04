@@ -96,7 +96,7 @@ function transientStatus(error: unknown): boolean {
 export async function invokeFn(
   client: SupabaseClient,
   name: string,
-  options?: { body?: unknown },
+  options?: { body?: unknown; headers?: Record<string, string>; signal?: AbortSignal },
   retries = 0
 ): Promise<{ data: unknown; error: unknown }> {
   let last: { data: unknown; error: unknown } = { data: null, error: null };

@@ -262,4 +262,15 @@ describe("totals across currencies", () => {
     const summary = await erp.summary();
     expect(summary.unpaid_invoices).toBeCloseTo(367.25, 2);
   });
+
+  it("counts only the unpaid sales balance, excluding drafts and supplier bills", async () => {
+    const invoice = { status: "sent", currency: "USD", fx_rate: 3.6725, tax_rate: 0,
+      discount: 0, customer_name: "Export Co", items: [{ description: "work", qty: 1, unit_price: 100 }] };
+    const id = await billing.saveDoc({ ...invoice, number: "INV-PARTIAL" } as never);
+    await billing.saveDoc({ ...invoice, number: "INV-DRAFT", status: "draft" } as never);
+    await billing.saveDoc({ ...invoice, number: "SUPPLIER-BILL", doc_type: "purchase" } as never);
+    expect((await erp.summary()).unpaid_invoices).toBeCloseTo(367.25, 2);
+    await billing.addPayment(id, 25, "bank", "2026-10-04");
+    expect((await erp.summary()).unpaid_invoices).toBeCloseTo(75 * 3.6725, 2);
+  });
 });

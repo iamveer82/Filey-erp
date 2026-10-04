@@ -1,10 +1,9 @@
 import {
-  useEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { Dialog, DialogContent, DialogTitle } from "./Dialog";
 import {
   MoreHorizontal,
   Eye,
@@ -128,47 +127,39 @@ export function QuickViewModal({
   onEdit?: () => void;
   onPrint?: () => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  const returnFocus = useRef<HTMLElement | null>(null);
 
   if (!open || !data) return null;
   // Portaled for the same reason as the row menu above: this dialog is rendered
   // from inside the table, and WebView2 composites a `fixed` overlay into the
   // scrolling table's layer and then only repaints part of it.
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/50 backdrop-blur-sm p-4 print:hidden"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        className="materialize-surface w-full max-w-2xl rounded-xl border border-border bg-card shadow-2xl overflow-hidden"
+  return (
+    <Dialog open={open} onOpenChange={next => { if (!next) onClose(); }}>
+      <DialogContent
+        showClose={false}
+        aria-describedby={undefined}
+        onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement | null; }}
+        onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus({ preventScroll: true }); }}
+        className="flex max-w-2xl flex-col gap-0 overflow-hidden p-0 print:hidden"
       >
-        <div className="px-5 py-4 border-b border-border flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
+        <div className="px-5 py-4 border-b border-border flex flex-wrap items-start justify-between gap-3">
+          <div className="flex-1 min-w-0 basis-[12rem]">
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="text-[15px] font-semibold text-foreground">
+              <DialogTitle className="text-[15px] break-words [overflow-wrap:anywhere]">
                 {data.title}
-              </div>
+              </DialogTitle>
               {data.badge}
             </div>
             {data.subtitle && (
-              <div className="text-[12.5px] text-muted-foreground mt-0.5">
+              <div className="text-[12.5px] text-muted-foreground mt-0.5 break-words [overflow-wrap:anywhere]">
                 {data.subtitle}
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">
             {onPrint && (
               <button
+                type="button"
                 onClick={onPrint}
                 className="btn-ghost text-[12.5px]"
               >
@@ -177,6 +168,7 @@ export function QuickViewModal({
             )}
             {onEdit && (
               <button
+                type="button"
                 onClick={onEdit}
                 className="btn-ghost text-[12.5px]"
               >
@@ -184,6 +176,7 @@ export function QuickViewModal({
               </button>
             )}
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close"
               className="btn-ghost h-10 w-10 p-0"
@@ -193,16 +186,16 @@ export function QuickViewModal({
           </div>
         </div>
 
-        <div className="p-5 max-h-[70vh] overflow-y-auto">
+        <div className="min-h-0 p-5 overflow-y-auto overscroll-contain">
           {data.meta && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
               {data.meta.map((m, i) => (
-                <div key={i}>
+                <div key={i} className="min-w-0">
                   <div className="text-[11.5px] text-muted-foreground">
                     {m.label}
                   </div>
-                  <div className="text-[13px] font-medium text-foreground mt-0.5">
-                    {m.value || "—"}
+                  <div className="text-[13px] font-medium text-foreground mt-0.5 break-words [overflow-wrap:anywhere]">
+                    {m.value ?? "—"}
                   </div>
                 </div>
               ))}
@@ -211,8 +204,8 @@ export function QuickViewModal({
 
           {data.items && data.items.length > 0 && (
             <div className="rounded-lg border border-border overflow-hidden">
-              <table className="w-full text-[13px]">
-                <thead>
+              <table role="table" className="block w-full text-[13px] sm:table">
+                <thead className="hidden sm:table-header-group">
                   <tr className="text-left text-muted-foreground border-b border-border bg-hover/30">
                     <th className="px-4 py-2 font-medium text-[11.5px]">
                       Description
@@ -228,17 +221,20 @@ export function QuickViewModal({
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="block sm:table-row-group">
                   {data.items.map((it, i) => (
-                    <tr key={i} className="border-b border-border last:border-0">
-                      <td className="px-4 py-2 text-foreground">{it.desc}</td>
-                      <td className="px-4 py-2 text-right text-foreground">
+                    <tr key={i} role="row" className="grid grid-cols-3 border-b border-border last:border-0 sm:table-row">
+                      <td role="cell" className="col-span-3 block px-4 py-2 text-foreground break-words [overflow-wrap:anywhere] sm:table-cell">{it.desc}</td>
+                      <td role="cell" className="block min-w-0 px-3 py-2 text-right text-foreground break-words tabular-nums sm:table-cell sm:px-4">
+                        <span className="mb-1 block text-[11px] text-muted-foreground sm:hidden">Qty</span>
                         {it.qty}
                       </td>
-                      <td className="px-4 py-2 text-right text-foreground">
+                      <td role="cell" className="block min-w-0 px-3 py-2 text-right text-foreground break-words tabular-nums sm:table-cell sm:px-4">
+                        <span className="mb-1 block text-[11px] text-muted-foreground sm:hidden">Unit price</span>
                         {Number(it.price || 0).toFixed(2)}
                       </td>
-                      <td className="px-4 py-2 text-right text-foreground">
+                      <td role="cell" className="block min-w-0 px-3 py-2 text-right text-foreground break-words tabular-nums sm:table-cell sm:px-4">
+                        <span className="mb-1 block text-[11px] text-muted-foreground sm:hidden">Amount</span>
                         {Number(
                           it.amount ?? Number(it.qty || 0) * Number(it.price || 0)
                         ).toFixed(2)}
@@ -268,7 +264,7 @@ export function QuickViewModal({
               <div className="text-[11.5px] font-medium text-muted-foreground mb-1">
                 Notes
               </div>
-              <div className="text-[13px] text-foreground whitespace-pre-wrap">
+              <div className="text-[13px] text-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                 {data.notes}
               </div>
             </div>
@@ -276,9 +272,8 @@ export function QuickViewModal({
 
           {data.footer}
         </div>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
 

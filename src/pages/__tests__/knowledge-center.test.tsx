@@ -50,3 +50,13 @@ it("explains desktop credential storage and the browser key lifetime", () => {
   expect(screen.getByText(/Web and mobile keys stay in memory until the page reloads/)).toBeInTheDocument();
   expect(screen.queryByText(/without application-level encryption/)).toBeNull();
 });
+
+it("keeps the local-editions guide link and explains free offline use without promising free hosted services", () => {
+  open("/docs?article=local-editions");
+  expect(screen.getByRole("heading", { name: "Free offline Filey and optional cloud upgrades" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=datamode");
+  expect(screen.getByText(/All core local modules, documents and invoices are free/)).toHaveTextContent("Local PDFs have no Filey branding");
+  expect(screen.getByText(/Create and verify a free Filey account online/)).toHaveTextContent("remembered online password sign-in on this device");
+  expect(screen.getByText(/Use the same account if you later choose Pro or Ultra/)).toHaveTextContent("Paid upgrades are optional");
+  expect(screen.getByText(/Hosted cloud quotas and provider charges are separate/)).toHaveTextContent("does not include unlimited hosted email, SMS, or external AI usage");
+});

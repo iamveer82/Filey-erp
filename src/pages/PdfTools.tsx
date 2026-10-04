@@ -106,7 +106,8 @@ function PdfToolWorkspace({
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; operation.current?.abort(); }; }, []);
   const editorRef = useRef<PdfEditorHandle>(null);
   const actionLabel = toolAction(tool);
-  const canSave = !isLocalMode() && isConfigured && !!user && outs.length > 0;
+  const local = isLocalMode();
+  const canSave = isConfigured && !!user && outs.length > 0;
   const locked = running || savingFiles || downloading;
   const checkScope = () => {
     if (!mounted.current || scope.current !== agentStorageScope()) throw new Error("Workspace changed. Open this tool again before saving output.");
@@ -297,7 +298,7 @@ function PdfToolWorkspace({
         </div>
         <div className="tool-result-files">{outs.map((output, index) => <div key={index} className="flex items-center gap-3 py-3"><FileText size={18} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{output.name}</p><p className="text-xs text-muted-foreground">{fileSize(output.bytes.byteLength)}</p></div><button type="button" className="btn-ghost" disabled={locked} aria-label={"Download " + output.name} onClick={() => void downloadOutputs([output])}><Download size={15} /><span className="hidden sm:inline">Download</span></button></div>)}</div>
         {compatible.length > 0 && <div className="tool-continue"><div><h3>Keep working on these files</h3><p>Pass your results straight to the next tool.</p></div><SelectMenu id="next-file-tool" ariaLabel="Next tool" className="tool-next-menu" value={nextTool} disabled={locked} onChange={setNextTool} placeholder="Choose next tool…" searchPlaceholder="Find a tool…" options={compatible.map(candidate => ({ value: candidate.id, label: candidate.name }))} /><button type="button" className="btn-ghost" disabled={locked || !nextTool} onClick={() => { const next = compatible.find(candidate => candidate.id === nextTool); if (next) onContinue(next, outputFiles); }}>Continue <ArrowRight size={15} /></button></div>}
-        <div className="tool-result-actions"><button type="button" className="btn-ghost" disabled={locked} onClick={() => { setOuts([]); setProgress(""); }}>Adjust again</button><button type="button" className="btn-ghost" disabled={locked} onClick={() => updateFiles([])}><RotateCcw size={15} />Start again</button>{canSave && <button type="button" className="btn-ghost" disabled={locked} onClick={saveToMyFiles}>{savingFiles ? <Loader2 size={15} className="animate-spin" /> : <FolderPlus size={15} />}Save to My Files</button>}<span>{canSave ? "Save to My Files uploads a copy to your cloud workspace." : "Results stay here until you leave this tool."}</span></div>
+        <div className="tool-result-actions"><button type="button" className="btn-ghost" disabled={locked} onClick={() => { setOuts([]); setProgress(""); }}>Adjust again</button><button type="button" className="btn-ghost" disabled={locked} onClick={() => updateFiles([])}><RotateCcw size={15} />Start again</button>{canSave && <button type="button" className="btn-ghost" disabled={locked} onClick={saveToMyFiles}>{savingFiles ? <Loader2 size={15} className="animate-spin" /> : <FolderPlus size={15} />}Save to My Files</button>}<span>{canSave ? local ? "Save to My Files keeps a copy on this device." : "Save to My Files uploads a copy to your cloud workspace." : "Results stay here until you leave this tool."}</span></div>
       </section>}
       {!outs.length && !!files.length && tool.interactive !== "merge" && <div className="tool-file-list" aria-label="Selected files">
         {files.map((file, index) => <div className="tool-file-row" key={index}>

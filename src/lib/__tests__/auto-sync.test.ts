@@ -28,9 +28,8 @@ vi.mock("../supabase", () => ({
   },
 }));
 
-import { localClient } from "../localdb";
-import { startAutoSync } from "../sync";
-import { PUSH_TABLES } from "../syncTables";
+import { localClient, journalSnapshot } from "../localdb";
+import { autoSyncEnabled, startAutoSync, scheduleSync } from "../sync";
 
 let stop = () => {};
 beforeEach(() => {
@@ -43,33 +42,47 @@ beforeEach(() => {
 });
 afterEach(() => { stop(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("coalesces saves, preserves pending full checks, and stops polling on cleanup", async () => {
+it("keeps local saves private despite legacy flags, startup, reconnect and focus", async () => {
+  // jsdom schedules its own zero-delay StorageEvent notifications. Exclude
+  // only that implementation detail; sync must create no timeout or interval.
+  const timeouts = vi.spyOn(globalThis, "setTimeout");
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  const scheduled = () => timeouts.mock.calls.filter(([callback, delay]) =>
+    !(delay === 0 && typeof callback === "function" && callback.name === "bound _dispatchStorageEvent"));
   stop = startAutoSync();
+  expect(autoSyncEnabled()).toBe(false);
+  expect(localStorage.getItem("filey_auto_sync")).toBe("off");
+  expect(scheduled()).toEqual([]);
+  expect(intervals).not.toHaveBeenCalled();
   await localClient.from("products").insert({ id: 1, name: "First" });
   await vi.advanceTimersByTimeAsync(1000);
-  // A save during startup must not cancel the initial all-table reconciliation.
-  expect(PUSH_TABLES.every(t => cloud.reads.includes(t))).toBe(true);
-  cloud.reads.length = 0; cloud.writes.length = 0;
   await localClient.from("products").insert({ id: 2, name: "Second" });
   await localClient.from("products").update({ name: "Latest" }).eq("id", 2);
   await vi.advanceTimersByTimeAsync(1000);
-  expect(cloud.writes).toEqual(["products"]);
-  expect(cloud.reads.filter(t => t !== "profiles")).toEqual(["products"]);
-  cloud.reads.length = 0;
   window.dispatchEvent(new Event("online"));
   await vi.advanceTimersByTimeAsync(1000);
-  expect(PUSH_TABLES.every(t => cloud.reads.includes(t))).toBe(true);
-  cloud.reads.length = 0;
   window.dispatchEvent(new Event("focus"));
   await vi.advanceTimersByTimeAsync(1000);
-  expect(PUSH_TABLES.every(t => cloud.reads.includes(t))).toBe(true);
-  cloud.reads.length = 0;
+  document.dispatchEvent(new Event("visibilitychange"));
+  scheduleSync(1, true);
+  expect(scheduled()).toEqual([]);
+  expect(intervals).not.toHaveBeenCalled();
   vi.spyOn(document, "hidden", "get").mockReturnValue(true);
   await vi.advanceTimersByTimeAsync(300_000);
   expect(cloud.reads).toEqual([]);
+  expect(cloud.writes).toEqual([]);
+  expect((await localClient.from("products").select().order("id")).data).toMatchObject([
+    { id: 1, name: "First" }, { id: 2, name: "Latest" },
+  ]);
+  expect((await journalSnapshot()).tables.products.changed).toEqual([1, 2]);
   stop();
   window.dispatchEvent(new Event("online"));
   window.dispatchEvent(new Event("focus"));
+  window.dispatchEvent(new Event("filey:local-write"));
   await vi.advanceTimersByTimeAsync(300_000);
   expect(cloud.reads).toEqual([]);
+  expect(cloud.writes).toEqual([]);
+  expect(scheduled()).toEqual([]);
+  expect(intervals).not.toHaveBeenCalled();
+  expect((await journalSnapshot()).tables.products.changed).toEqual([1, 2]);
 });

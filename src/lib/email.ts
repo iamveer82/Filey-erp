@@ -1,5 +1,9 @@
 import { supabase, invokeFn } from "./supabase";
 import { checkEmailDailyCap, bumpEmailCount } from "./license";
+import { isLocalMode } from "./dataMode";
+import { sendPersonalEmail } from "./localEmail";
+import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
+import { getCacheScope } from "./api";
 
 export interface EmailAttachment {
   /** File name shown in the email, e.g. "INV-1001.pdf". */
@@ -52,57 +56,105 @@ export async function edgeErrorMessage(error: unknown): Promise<string> {
   return `Could not send email. ${msg}`;
 }
 
-/** Send one HTML email through Resend via the Supabase `send-email` Edge
- * Function (from noreply@gofiley.com). The API key stays server-side. Every
- * user — free-cloud and paid-offline alike — has cloud API access, so this is
- * the only send path (no local SMTP). */
+/** Local mode uses the user's personal Resend connection. Cloud mode keeps the
+ * hosted sender and its server-enforced quota. Neither path falls back to the other. */
 export async function sendEmail(msg: EmailMessage): Promise<void> {
   if (!msg.to.trim()) throw new Error("No recipient email address.");
-  if (!supabase)
-    throw new Error("Email is not available — sign in to send.");
-
-  // Per-tier daily cap (cloud sends are also capped server-side in the
-  // send-email edge fn).
-  await checkEmailDailyCap();
-
-  const { data, error } = (await invokeFn(supabase, "send-email", {
-    body: {
-      requestId: crypto.randomUUID(),
-      to: msg.to,
-      subject: msg.subject,
-      html: msg.html,
-      attachments: msg.attachments,
-    },
-  }, 2)) as { data: { error?: string } | null; error: unknown };
-
-  const failure = error
-    ? await edgeErrorMessage(error)
-    : // A non-2xx arrives as `error`, but the function can also answer 200
-      // with an error body; treat that as a failure rather than reporting a
-      // phantom send.
-      (data?.error ?? null);
-
-  // Record the attempt either way. Filey could always send email but kept no
-  // record, so "did we ever send them that invoice" had no answer. Logging the
-  // failures too is the point — a silent bounce is exactly what you go looking
-  // for. Best-effort: a logging problem must never fail a real send.
-  void logEmail({
-    to_email: msg.to,
-    subject: msg.subject,
-    entity_type: msg.entityType,
-    entity_id: msg.entityId,
-    status: failure ? "failed" : "sent",
-    error: failure ?? undefined,
-  }).catch(() => {});
-
-  if (failure) throw new Error(failure);
-
-  await bumpEmailCount().catch((error) => console.warn("Email sent; local usage counter could not refresh", error));
+  if (isLocalMode()) return sendPersonalEmail(msg);
+  const reviewed = structuredClone(msg);
+  const context = await hostedEmailContext();
+  try {
+    // Keep the hosted tier guard; local personal sends never reach it.
+    await checkEmailDailyCap();
+    await context.verify();
+    const { data, error } = await hostedEmailRequest(context, {
+      requestId: crypto.randomUUID(), to: reviewed.to, subject: reviewed.subject,
+      html: reviewed.html, attachments: reviewed.attachments,
+    }, 2);
+    const failure = error ? await edgeErrorMessage(error) : (data as { error?: string } | null)?.error ?? null;
+    await context.verify();
+    // The fixed cloud client/JWT and explicit author/org prevent a delayed log
+    // from switching to local storage or the next signed-in account.
+    await logHostedEmail(context, {
+      to_email: reviewed.to, subject: reviewed.subject, entity_type: reviewed.entityType,
+      entity_id: reviewed.entityId, status: failure ? "failed" : "sent", error: failure ?? undefined,
+    }).catch(() => {});
+    await context.verify();
+    if (failure) throw new Error(failure);
+    await bumpEmailCount(context.assertCurrent).catch(() => {});
+    await context.verify();
+  } finally { context.dispose(); }
 }
 
-/** Written as a separate import so email.ts does not pull the whole api module
- *  at load time — it is imported by the agent tools and the campaign sender. */
-async function logEmail(row: {
+interface HostedEmailContext {
+  client: NonNullable<typeof supabase>; user: string; org: string; token: string;
+  signal: AbortSignal; assertCurrent: () => void; verify: () => Promise<void>; dispose: () => void;
+}
+
+/** Capture account, organization and mode before the first asynchronous step. */
+async function hostedEmailContext(): Promise<HostedEmailContext> {
+  if (!supabase) throw new Error("Email is not available — sign in to send.");
+  const client = supabase, scope = agentStorageScope(), account = getCacheScope();
+  if (!scope || !account || isLocalMode()) throw new Error("Sign in to your cloud workspace before sending email.");
+  const split = account.lastIndexOf(":user:"), user = account.slice(split + 6), org = account.slice(0, split);
+  const controller = new AbortController();
+  const assertCurrent = () => {
+    if (isLocalMode() || scope !== agentStorageScope() || controller.signal.aborted)
+      throw new Error("Your workspace changed. Review the email again before sending.");
+  };
+  const initial = await client.auth.getSession();
+  assertCurrent();
+  const session = initial.data.session;
+  if (initial.error || !session?.access_token?.trim() || session.user.id !== user)
+    throw new Error("Your account changed. Sign in again before sending email.");
+  const stale = () => { try { assertCurrent(); } catch { controller.abort(); } };
+  const events = [AGENT_STORAGE_EVENT, "filey:workspace-changed", "filey:workspace-transition", "storage"];
+  events.forEach(event => window.addEventListener(event, stale));
+  const { data: { subscription } } = client.auth.onAuthStateChange((_event, next) => {
+    if (next?.user.id !== user) controller.abort();
+  });
+  const verify = async () => {
+    assertCurrent();
+    const current = await client.auth.getSession();
+    assertCurrent();
+    if (current.error || current.data.session?.user.id !== user) {
+      controller.abort();
+      throw new Error("Your account changed. Review the email again before sending.");
+    }
+  };
+  return { client, user, org, token: session.access_token, signal: controller.signal, assertCurrent, verify,
+    dispose: () => { events.forEach(event => window.removeEventListener(event, stale)); subscription.unsubscribe(); } };
+}
+
+function transientEmailError(error: unknown): boolean {
+  if (!error) return false;
+  const detail = error as { context?: { status?: number }; message?: string };
+  return detail.context?.status === undefined ? /fetch|network|timeout/i.test(detail.message ?? "") : [404, 408, 500, 502, 503, 504].includes(detail.context.status);
+}
+
+async function hostedEmailRequest(context: HostedEmailContext, body: Record<string, unknown>, retries: number) {
+  for (let attempt = 0; ; attempt++) {
+    await context.verify();
+    const result = await invokeFn(context.client, "send-email", { body: { ...body, expected_org_id: context.org },
+      headers: { Authorization: `Bearer ${context.token}` }, signal: context.signal }, 0);
+    await context.verify();
+    if (!result.error || attempt >= retries || !transientEmailError(result.error)) return result;
+    await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+    // Recheck identity before retry; never refresh this action into another JWT.
+  }
+}
+
+export async function checkHostedEmailConnection(): Promise<{ configured?: boolean; from?: string | null; error?: string }> {
+  const context = await hostedEmailContext();
+  try {
+    const result = await hostedEmailRequest(context, { action: "status" }, 0);
+    if (result.error) throw new Error(await edgeErrorMessage(result.error));
+    await context.verify();
+    return result.data as { configured?: boolean; from?: string | null; error?: string };
+  } finally { context.dispose(); }
+}
+
+async function logHostedEmail(context: HostedEmailContext, row: {
   to_email: string;
   subject: string;
   entity_type?: string;
@@ -110,8 +162,12 @@ async function logEmail(row: {
   status: "sent" | "failed";
   error?: string;
 }): Promise<void> {
-  const { emailLog } = await import("./api");
-  await emailLog.record(row);
+  await context.verify();
+  const result = await context.client.from("email_messages").insert({ ...row, user_id: context.user,
+    org_id: context.org === "default" ? null : context.org }).setHeader("Authorization", `Bearer ${context.token}`).abortSignal(context.signal);
+  if (result.error) throw result.error;
+  await context.verify();
+  window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["email_messages"] } }));
 }
 
 /** Send a document-summary email through Resend for the list-row "Email"

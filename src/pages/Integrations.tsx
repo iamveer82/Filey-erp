@@ -72,6 +72,7 @@ import {
   type BridgeState,
 } from "../lib/waBridge";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "../lib/agentStorage";
+import { isLocalMode } from "../lib/dataMode";
 import { waLogList } from "../lib/waLog";
 
 /* ── Integrations ──────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ export default function Integrations() {
   const [active, setActive] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<KeySource>("none");
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [authorization, setAuthorization] = useState<{ slug: string; url: string } | null>(null);
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState("");
   const [found, setFound] = useState<ToolkitInfo[]>([]);
@@ -153,14 +155,27 @@ export default function Integrations() {
   const [refreshing, setRefreshing] = useState(true);
   const reachOn = reachReady();
   const [socialOn, setSocialOn] = useState(false);
+  const [workspace, setWorkspace] = useState(agentStorageScope);
+  const [keySetupOpen, setKeySetupOpen] = useState(false);
 
   const requestGeneration = useRef(0);
-  const current = (scope: string | null) => scope === agentStorageScope();
+  const searchGeneration = useRef(0);
+  const connectionGeneration = useRef(0);
+  const current = (scope: string | null) => scope !== null && scope === agentStorageScope();
+  const changeProviderSource = (next: KeySource) => {
+    ++requestGeneration.current; ++searchGeneration.current; ++connectionGeneration.current;
+    setSource(next); setActive(new Set()); setFound([]); setConnecting(null); setAuthorization(null);
+    setSearching(false); setRefreshing(false); setMsg("");
+  };
   const refresh = useCallback(async () => {
     const scope = agentStorageScope();
     const generation = ++requestGeneration.current;
     const valid = () => generation === requestGeneration.current && scope === agentStorageScope();
     setRefreshing(true);
+    if (!scope) {
+      setSource("none"); setActive(new Set()); setSocialOn(false); setRefreshing(false);
+      return;
+    }
     try {
       const keySource = await composioKeySource();
       if (!valid()) return;
@@ -176,10 +191,10 @@ export default function Integrations() {
       }
       const accounts = await listAccounts().catch(() => []);
       if (valid()) setSocialOn(accounts.length > 0);
-    } catch (e) {
+    } catch {
       if (!valid()) return;
       setActive(new Set()); setSocialOn(false);
-      setMsg("Could not verify connected apps: " + (e instanceof Error ? e.message : String(e)));
+      setMsg("Could not verify connected apps. Check your connection and try again.");
     } finally {
       if (valid()) setRefreshing(false);
     }
@@ -190,23 +205,31 @@ export default function Integrations() {
     const changed = () => {
       if (scope === agentStorageScope()) return;
       scope = agentStorageScope();
-      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setConnecting(null); setSearching(false);
+      ++searchGeneration.current; ++connectionGeneration.current;
+      setWorkspace(scope); setKeySetupOpen(false); setMsg(""); setSearch("");
+      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setConnecting(null); setAuthorization(null); setSearching(false);
       void refresh();
     };
-    window.addEventListener(AGENT_STORAGE_EVENT, changed);
+    const events = [AGENT_STORAGE_EVENT, "filey:workspace-changed", "filey:workspace-transition", "storage"];
+    for (const event of events) window.addEventListener(event, changed);
     void refresh();
     // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    return () => { ++requestGeneration.current; window.removeEventListener(AGENT_STORAGE_EVENT, changed); };
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++requestGeneration.current; ++searchGeneration.current; ++connectionGeneration.current;
+      for (const event of events) window.removeEventListener(event, changed);
+    };
   }, [refresh]);
 
   const runSearch = async () => {
     const scope = agentStorageScope();
+    const generation = ++searchGeneration.current;
+    const valid = () => generation === searchGeneration.current && current(scope);
     const q = search.trim();
-    if (!q) return setFound([]);
+    if (!q) { setFound([]); setSearching(false); return; }
     if (source === "none") {
       setMsg(
-        "Showing matching built-in apps. Configure a provider to search its full catalogue."
+        "Showing matching built-in apps. Add your Composio key to search the full app directory."
       );
       return;
     }
@@ -214,48 +237,60 @@ export default function Integrations() {
     setMsg("");
     try {
       const results = await composioSearchToolkits(q, 12);
-      if (current(scope)) setFound(results);
-    } catch (e) {
-      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
+      if (valid()) setFound(results);
+    } catch {
+      if (valid()) setMsg("Could not search Composio apps. Check your connection and try again.");
     } finally {
-      if (current(scope)) setSearching(false);
+      if (valid()) setSearching(false);
     }
   };
 
   const connect = async (slug: string) => {
     const scope = agentStorageScope();
+    const generation = ++connectionGeneration.current;
+    const valid = () => generation === connectionGeneration.current && current(scope);
     setConnecting(slug);
+    setAuthorization(null);
     setMsg("");
     try {
       const link = await composioConnect(slug);
-      if (!current(scope)) return;
+      if (!valid()) return;
       if (link.error) throw new Error(link.error.message);
       if (!link.redirect_url || !link.connected_account_id)
         throw new Error("Composio did not return a connection link.");
+      setAuthorization({ slug, url: link.redirect_url });
       // OAuth consent opens in the real browser on desktop; in a browser build
       // there is no opener plugin, and a new tab is the same thing.
       if (isNativeApp()) await openNativeExternal(link.redirect_url);
       else if (hasDesktop) await openUrl(link.redirect_url);
-      else window.open(link.redirect_url, "_blank", "noopener");
+      else window.open(link.redirect_url, "_blank", "noopener,noreferrer");
+      if (!valid()) return;
       setMsg(
         `Authorize ${slug} in the browser window - this flips to Connected when you're done.`
       );
       const id = link.connected_account_id;
       for (let i = 0; i < 40; i++) {
         await new Promise((r) => setTimeout(r, 3000));
-        if (!current(scope)) return;
+        if (!valid()) return;
         const st = await composioStatus(id);
-        if (!current(scope)) return;
+        if (!valid()) return;
         if ((st?.status ?? "").toUpperCase() === "ACTIVE") {
           setActive((prev) => new Set(prev).add(slug));
+          setAuthorization(null);
           setMsg(`${slug} connected ✓ - the Filey AI agent can now use it.`);
-          break;
+          return;
+        }
+        if (["FAILED", "EXPIRED", "INACTIVE"].includes((st?.status ?? "").toUpperCase())) {
+          setMsg("The app authorization was not completed. Try connecting again.");
+          setAuthorization(null);
+          return;
         }
       }
-    } catch (e) {
-      if (current(scope)) setMsg(e instanceof Error ? e.message : String(e));
+      if (valid()) setMsg("Authorization is still pending. Finish in the browser, then refresh connected apps.");
+    } catch {
+      if (valid()) setMsg("Could not connect this app. Check your Composio setup and try again.");
     } finally {
-      if (current(scope)) setConnecting(null);
+      if (valid()) setConnecting(null);
     }
   };
 
@@ -500,10 +535,11 @@ export default function Integrations() {
               Setup guide
             </Link>
           </section>
-          <div key={agentStorageScope() ?? "signed-out"} className="mb-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+          <div key={workspace ?? "signed-out"} className="mb-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
             <ComposioProvider
+              scope={workspace}
               source={source}
-              onSourceChange={setSource}
+              onSourceChange={changeProviderSource}
               onSaved={refresh}
             />
             <ZernioProvider />
@@ -550,6 +586,12 @@ export default function Integrations() {
               {msg}
             </p>
           )}
+          {authorization && !hasDesktop && !isNativeApp() && (
+            <p className="mb-4 text-[13px] text-muted-foreground">
+              If the sign-in window did not open, {" "}
+              <a className="font-medium text-foreground underline underline-offset-4" href={authorization.url} target="_blank" rel="noopener noreferrer">authorize {authorization.slug} here</a>.
+            </p>
+          )}
 
           <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1 [&>button]:min-h-11 [&>button]:shrink-0 md:[&>button]:min-h-10" aria-label="Filter integrations">
             {categories.map((c) => (
@@ -559,13 +601,28 @@ export default function Integrations() {
             ))}
           </div>
 
-          {source === "none" && !refreshing && (
-            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl bg-hover px-4 py-3">
+          <section aria-label="Composio setup" className="mb-5 overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex flex-wrap items-center gap-3 p-4">
               <Plug size={18} className="shrink-0 text-muted-foreground" />
-              <p className="min-w-48 flex-1 text-[13px] text-muted-foreground">Built-in connections work independently. Add a provider to link other apps.</p>
-              <button className="btn-ghost" onClick={() => setTab("providers")}>Provider setup</button>
+              <div className="min-w-48 flex-1">
+                <h2 className="text-sm font-semibold">Connect your apps with Composio</h2>
+                <p className="mt-1 text-[13px] text-muted-foreground">Use your own Composio account to connect Gmail, Slack, Notion and other apps. Built-in connections work separately.</p>
+              </div>
+              <button
+                className="btn-secondary"
+                aria-expanded={keySetupOpen}
+                aria-controls="composio-key-setup"
+                onClick={() => setKeySetupOpen(open => !open)}
+              >
+                {source === "own" ? "Manage Composio key" : "Use your own Composio key"}
+              </button>
             </div>
-          )}
+            {keySetupOpen && (
+              <div id="composio-key-setup" className="border-t border-border">
+                <ComposioProvider key={workspace ?? "signed-out"} scope={workspace} source={source} onSourceChange={changeProviderSource} onSaved={refresh} />
+              </div>
+            )}
+          </section>
           {[
             { title: "In Filey", items: filtered.filter(i => !i.slug) },
             { title: "Connected apps", items: filtered.filter(i => i.slug && i.connected) },
@@ -619,7 +676,7 @@ export default function Integrations() {
                     </button>
                   ) : i.slug ? (
                     <>
-                      {source === "none" ? <button className="btn-ghost" onClick={() => setTab("providers")}>Set up</button> : <button
+                      {source === "none" ? <button className="btn-ghost" onClick={() => setKeySetupOpen(true)}>Set up</button> : <button
                         className="btn-ghost"
                         onClick={() => connect(i.slug!)}
                         disabled={connecting === i.slug}
@@ -692,60 +749,140 @@ function AppLogo({ slug, logo }: { slug: string; logo?: string }) {
 
 /* ── Composio: the key behind every app card above ──────────────────────── */
 function ComposioProvider({
+  scope,
   source,
   onSourceChange,
   onSaved,
 }: {
+  scope: string | null;
   source: KeySource;
   onSourceChange: (s: KeySource) => void;
-  onSaved: () => void;
+  onSaved: () => Promise<void>;
 }) {
+  const { confirm } = useUI();
   const [key, setKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "saving" | "checking" | "removing">("idle");
+  const [checked, setChecked] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [msg, setMsg] = useState("");
+  const operation = useRef(0);
+  const mounted = useRef(false);
+  const localBrowser = !hasDesktop && isLocalMode();
+  const available = !!scope && (hasDesktop || (cloudConfigured && !localBrowser));
+  const own = hasKey || source === "own";
+  const busy = phase !== "idle";
+  const current = (generation: number) => mounted.current && generation === operation.current && scope !== null && scope === agentStorageScope();
 
   useEffect(() => {
-    // Desktop keeps the key on the device; the browser's lives in the cloud,
-    // where it can be seen to exist but never read back.
-    (hasDesktop ? hasOwnComposioKey() : hasCloudKey("composio"))
-      .then(setHasKey)
-      .catch(() => setHasKey(false));
-  }, []);
+    mounted.current = true;
+    const generation = ++operation.current;
+    if (!available) setLoading(false);
+    else void (hasDesktop ? hasOwnComposioKey() : hasCloudKey("composio"))
+      .then(exists => { if (current(generation)) setHasKey(exists); })
+      .catch(() => {
+        if (!current(generation)) return;
+        setFailed(true);
+        setMsg("Could not verify your saved integration key. Try refreshing connected apps.");
+      })
+      .finally(() => { if (current(generation)) setLoading(false); });
+    return () => {
+      mounted.current = false;
+      // This is an operation counter, not a DOM ref.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++operation.current;
+    };
+    // The provider is remounted for each account and storage-mode scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, scope]);
 
   const save = async () => {
-    setBusy(true);
+    if (busy || !available || scope !== agentStorageScope()) return;
+    const value = key.trim();
+    if (!value || /\s/.test(value)) {
+      setFailed(true);
+      setMsg("Enter a valid API key without spaces or line breaks.");
+      return;
+    }
+    const generation = ++operation.current;
+    setPhase("saving");
+    setFailed(false);
+    setChecked(false);
     setMsg("");
+    let saved = false;
     try {
-      await setComposioKey(key);
+      await setComposioKey(value);
+      if (!current(generation)) return;
+      saved = true;
       setHasKey(true);
       setKey("");
-      // Prove the key before claiming it works — a typo used to surface later
-      // as "the integrations are broken".
+      setEditing(false);
+      onSourceChange("own");
+      setPhase("checking");
+      setMsg("Key saved. Checking the connection…");
       await composioList();
-      setMsg("Key works. Connect the apps you want below.");
-      void composioKeySource().then(onSourceChange);
-      onSaved();
-    } catch (e) {
-      setMsg(`That key didn't work: ${e instanceof Error ? e.message : String(e)}`);
+      if (!current(generation)) return;
+      setChecked(true);
+      setMsg("Connection verified. Choose an app below and click Connect.");
+      await onSaved();
+    } catch {
+      if (!current(generation)) return;
+      setFailed(true);
+      setMsg(saved
+        ? "Key saved, but Composio could not verify it. Check the key or your connection, then try again."
+        : "Could not save your key. Check your connection and try again.");
     } finally {
-      setBusy(false);
+      if (current(generation)) setPhase("idle");
+    }
+  };
+
+  const check = async () => {
+    if (busy || !available || scope !== agentStorageScope()) return;
+    const generation = ++operation.current;
+    setPhase("checking"); setFailed(false); setChecked(false); setMsg("");
+    try {
+      await composioList();
+      if (!current(generation)) return;
+      setChecked(true);
+      setMsg("Connection verified. Choose an app below and click Connect.");
+      await onSaved();
+    } catch {
+      if (!current(generation)) return;
+      setFailed(true);
+      setMsg("Composio could not verify the connection. Check the key or your connection, then try again.");
+    } finally {
+      if (current(generation)) setPhase("idle");
     }
   };
 
   const removeKey = async () => {
-    setBusy(true);
+    if (busy || !available || scope !== agentStorageScope()) return;
+    const generation = ++operation.current;
+    const approved = await confirm({
+      title: "Remove Composio key?",
+      message: "Filey will stop using this key. This does not revoke app authorizations in your Composio account.",
+      confirmLabel: "Remove key",
+      danger: true,
+    });
+    if (!approved || !current(generation)) return;
+    setPhase("removing"); setFailed(false);
     setMsg("");
     try {
       await clearComposioKey();
+      if (!current(generation)) return;
       setHasKey(false);
-      setMsg("Your key was removed - integrations fall back to your Filey plan.");
-      void composioKeySource().then(onSourceChange);
-      onSaved();
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setKey(""); setEditing(false); setChecked(false);
+      onSourceChange("none");
+      setMsg("Your key was removed. App authorizations remain in your Composio account.");
+      await onSaved();
+    } catch {
+      if (!current(generation)) return;
+      setFailed(true);
+      setMsg("Could not remove your key. Check your connection and try again.");
     } finally {
-      setBusy(false);
+      if (current(generation)) setPhase("idle");
     }
   };
 
@@ -757,8 +894,9 @@ function ComposioProvider({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-[14px] font-semibold text-foreground">Connected apps</p>
-            <KeyBadge source={source} own={hasKey} />
+            <p className="text-[14px] font-semibold text-foreground">Your Composio connection</p>
+            <KeyBadge source={source} own={own} />
+            {checked && <Badge tone="success">Verified</Badge>}
           </div>
           <p className="text-[13px] text-muted-foreground mt-1">
             Composio links your app accounts so Filey AI can work with them.
@@ -766,58 +904,70 @@ function ComposioProvider({
         </div>
       </div>
 
-      <details className="mt-3 group">
-        <summary className="min-h-10 cursor-pointer text-[13px] font-medium text-muted-foreground hover:text-foreground list-none inline-flex items-center gap-2">
-          <ChevronDown size={12} className="transition-transform group-open:rotate-180" />
-          {hasKey ? "Manage your key" : "Use my own Composio key"}
-        </summary>
-        {!hasDesktop && !cloudConfigured ? (
-          <p className="mt-2 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[12px] font-medium text-warning">
-            Your own key needs the desktop app or a signed-in cloud workspace.
-          </p>
-        ) : (
+      {localBrowser ? (
+        <div className="mt-3 text-sm text-muted-foreground">
+          <p>Local mode keeps your settings on this device. Personal Composio keys are available in the Filey desktop app, or in a signed-in cloud workspace.</p>
+          <Link className="btn-secondary mt-3" to="/settings?section=datamode">Choose cloud mode</Link>
+        </div>
+      ) : !available ? (
+        <p className="mt-3 text-sm text-muted-foreground">Sign in to a cloud workspace or use the Filey desktop app to add your own Composio key.</p>
+      ) : loading ? (
+        <p role="status" className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 size={14} /> Checking saved key…</p>
+      ) : (
           <div className="mt-2">
-            <p className="text-[11.5px] text-muted-foreground">
+            <p className="text-xs leading-relaxed text-muted-foreground">
               {hasDesktop
-                ? "Kept in this device's encrypted store; calls go straight to Composio, unmetered by Filey."
-                : "Kept in your workspace — replaceable, never readable; calls spend your key, not your plan."}
+                ? "Saved in this device's encrypted credential store. Requests use your Composio account."
+                : "Saved securely for your account in the cloud. Filey's server uses it for requests; the app cannot read the saved key."}
+              {" "}Your provider's charges and limits apply.
             </p>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+            <p className="mt-2 text-xs text-muted-foreground">Create a project API key in Composio: Platform → Settings → API Keys.</p>
+            <a className="inline-flex min-h-10 items-center gap-2 text-xs underline underline-offset-4" href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer">Open Composio dashboard <ExternalLink size={12} /></a>
+            {(!own || editing) && (
+            <form className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={event => { event.preventDefault(); void save(); }}>
               <label className="field flex-1">
                 <span className="label">Composio API key</span>
                 <input
                   type="password"
                   autoComplete="new-password"
+                  spellCheck={false}
                   disabled={busy}
                   className="input"
-                  placeholder={hasKey ? "•••••••• (saved - paste to replace)" : "ak_…"}
+                  placeholder={own ? "Paste a replacement key" : "Paste your Composio API key"}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
                 />
               </label>
               <button
                 className="btn-primary"
-                onClick={save}
+                type="submit"
                 disabled={busy || !key.trim()}
               >
-                {busy ? "Checking…" : "Save & check"}
+                {phase === "saving" ? "Saving key…" : phase === "checking" ? "Checking connection…" : "Save & check"}
               </button>
-            </div>
-            {hasKey && (
+            </form>
+            )}
+            {own && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="btn-secondary" onClick={check} disabled={busy}>
+                  {phase === "checking" ? <Loader2 size={14} /> : <RefreshCw size={14} />}
+                  {phase === "checking" ? "Checking connection…" : "Check connection"}
+                </button>
+                <button className="btn-ghost" onClick={() => { setEditing(!editing); setKey(""); }} disabled={busy}>{editing ? "Cancel replacement" : "Replace key"}</button>
               <button
-                className="btn-ghost mt-2 text-danger"
+                className="btn-ghost text-danger"
                 onClick={removeKey}
                 disabled={busy}
               >
-                Remove key
+                {phase === "removing" ? "Removing key…" : "Remove key"}
               </button>
+              </div>
             )}
           </div>
-        )}
-      </details>
+      )}
 
       {msg && (
-        <p role="status" className="mt-2 text-[12px] font-medium text-muted-foreground">
+        <p role={failed ? "alert" : "status"} className={cn("mt-3 text-xs leading-relaxed", failed ? "text-danger" : "text-muted-foreground")}>
           {msg}
         </p>
       )}

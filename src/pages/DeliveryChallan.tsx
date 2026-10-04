@@ -21,6 +21,8 @@ import {
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
   PageHeader,
   Modal,
@@ -198,13 +200,26 @@ export default function DeliveryChallan() {
   const editRecord = (r: DcRecord) =>
     setForm(formFromRecord(r, records.map((x) => x.number)));
 
-  const duplicateRecord = (r: DcRecord) => {
+  const createRecord = async () => {
+    const scope = agentStorageScope();
+    try {
+      const next = blankDc(records.map(r => r.number));
+      next.number = await allocateDocumentNumber("delivery_challan", records.map(r => r.number), dcFormats);
+      requireAgentStorageScope(scope ?? "signed-out"); setForm(next);
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+  };
+  const duplicateRecord = async (r: DcRecord) => {
+    const scope = agentStorageScope();
+    try {
     const existing = records.map((x) => x.number);
+    const number = await allocateDocumentNumber("delivery_challan", existing, dcFormats);
+    requireAgentStorageScope(scope ?? "signed-out");
     setForm({
       ...formFromRecord(r, existing),
-      number: dcNumber(existing),
+      number,
       issue_date: today(),
     });
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const shareDc = async (kind: ShareKind, r: DcRecord) => {
@@ -289,7 +304,7 @@ export default function DeliveryChallan() {
         action={
           <button
             className="btn-primary"
-            onClick={() => setForm(blankDc(records.map((r) => r.number)))}
+            onClick={createRecord}
             disabled={loading || !!loadError}
           >
             <Plus size={16} /> Assign driver

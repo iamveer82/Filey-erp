@@ -1,0 +1,234 @@
+{
+  "audit": "2026-10-04 atomic business workflow completion",
+  "checkout": "C:/Users/iamvi/.codex/worktrees/filey-ui-refinement/Filey-erp",
+  "version": "3.0.10",
+  "sourceFrozen": true,
+  "generatedAt": "2026-10-04T06:54:37.344Z",
+  "manualFullReadFiles": [
+    {
+      "path": "supabase/2026-10-04-atomic-business-workflows.sql",
+      "lineCount": 905,
+      "sha256": "2e93b6652afa8b0dd28718579e5729ceed4ed44569b73d0f7b19c0e76f466617"
+    },
+    {
+      "path": "scripts/test-business-workflows-local.mjs",
+      "lineCount": 86,
+      "sha256": "244fb61ed09a0dc20e481cb6419683b23e6cb55e4a8bf80b8614f1d11b267327"
+    },
+    {
+      "path": "scripts/fixtures/business-workflow-assertions.sql",
+      "lineCount": 211,
+      "sha256": "78352068629aa580ee780282df9554f58b5aafd50af2682bc8f93eb9a90840ea"
+    },
+    {
+      "path": "scripts/fixtures/business-advance-ownership.sql",
+      "lineCount": 165,
+      "sha256": "d1fb07a9d6e29bcd680320af5e29d1b341a5ed1deeef866e296079637318d90b"
+    },
+    {
+      "path": "scripts/fixtures/business-legacy-credit-pools.sql",
+      "lineCount": 49,
+      "sha256": "545efa596e520d61809d2176e2a4d7bf77e3277f25f9d532cc52d66928460fa7"
+    }
+  ],
+  "targetedManualReview": [
+    {
+      "path": "src/lib/api.ts",
+      "lineCount": 6770,
+      "sha256": "80a550581c6e94114e1aedf719c1fefbaf1c70d9c73983472c9d86b26f304103",
+      "regions": [
+        {
+          "start": 954,
+          "end": 1083,
+          "purpose": "durable CAS pending registry, actor/workspace checks, idempotent dispatcher",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 1381,
+          "end": 1535,
+          "purpose": "stock mutation; fallback/transaction and local creator boundary",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 2245,
+          "end": 2481,
+          "purpose": "journal/account operation integration",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 3249,
+          "end": 4088,
+          "purpose": "account lookup, invoice/PO posting/reversal, allocation, local authority/helpers",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 4088,
+          "end": 4976,
+          "purpose": "invoice lifecycle/payment workflow integration",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 5423,
+          "end": 5779,
+          "purpose": "purchase-order lifecycle/payments/receiving integration",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        },
+        {
+          "start": 5779,
+          "end": 5883,
+          "purpose": "advance CRUD/credit preview, parent-author and organization scope",
+          "scopeNote": "targeted review of relevant functions; broad range is navigation context, not a full read of every line"
+        }
+      ],
+      "namedAdditionalPaths": [
+        {
+          "name": "ERP order save/status/delete and low-stock purchase-order number allocation",
+          "start": 1536,
+          "end": 1787,
+          "scopeNote": "targeted workflow methods only"
+        },
+        {
+          "name": "recurring generation delegation and UTC calendar",
+          "start": 5000,
+          "end": 5031
+        },
+        {
+          "name": "quotation conversion and scoped new number allocation",
+          "start": 5204,
+          "end": 5268
+        }
+      ]
+    }
+  ],
+  "regressionFiles": [
+    {
+      "path": "src/lib/__tests__/business-workflows.test.ts",
+      "lineCount": 124,
+      "sha256": "814f264c6e2c421d2bdf1780c176fd26f6c96c8c336dbfcd2a17ce0aae081731",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/local-business-workflows.test.ts",
+      "lineCount": 156,
+      "sha256": "0bd33caff7e907897b050077ca5a7ba2dd0d8522649831c0f5882b84888269b6",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/accounting-double-entry.test.ts",
+      "lineCount": 189,
+      "sha256": "6c4e91e26a943377bed10df2945df503f3befbe647dc27d1ebb882a4ac2628bf",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/advance-credit.test.ts",
+      "lineCount": 121,
+      "sha256": "34c8590be3ce42850806476acabdce1a7ec8cc9da10ff662c422a0f194965a9b",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/repair-ledger.test.ts",
+      "lineCount": 198,
+      "sha256": "fd82887f3d4f504e6a74b0c906c27b2762cdf81ce53804e38334d79706788720",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/local-transactions.test.ts",
+      "lineCount": 190,
+      "sha256": "44026aaf3d0ca7626aee9d111cef5c3ce079cce1b1d10ae2906a9496eaea585a",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    },
+    {
+      "path": "src/lib/__tests__/local-schema-upgrade.test.ts",
+      "lineCount": 110,
+      "sha256": "c66f27ed909db1d4a9b2bb1499f0d6fffd0d97fd127f188b4a59543a1e6dde42",
+      "review": "targeted regression review and focused execution; no whole-repository coverage claim"
+    }
+  ],
+  "verification": {
+    "focusedFrontend": {
+      "files": 7,
+      "tests": 56,
+      "passed": true,
+      "log": "output/business-workflow-focused-final.log"
+    },
+    "actualPostgres": {
+      "runner": "scripts/test-business-workflows-local.mjs",
+      "passed": true,
+      "log": "output/business-workflow-final-negative-sql.log",
+      "baselineLogs": [
+        "output/business-advance-ownership-baseline.log",
+        "output/business-hidden-cost-baseline.log",
+        "output/business-workflow-final-negative-sql.log"
+      ],
+      "additionalCases": [
+        "Hidden historic later stock receipt-cost guard",
+        "API role denial for internal posting/entry/advance RPCs and all mutator ACLs",
+        "Authenticated normal dispatcher continues to work",
+        "Matching-author legacy borrowing reproduced at -40 only in rolled-back synthetic transaction",
+        "Negative per-author pools deny new spending/reduction without partial effects or receipts",
+        "Note-only invoice/deposit edits preserve existing allocation; safe release/cancellation restores positive own funds"
+      ]
+    },
+    "typecheck": {
+      "passed": true,
+      "log": "output/business-workflow-typecheck-final.log"
+    },
+    "targetedLint": {
+      "passed": true,
+      "log": "output/business-workflow-lint-final.log"
+    },
+    "parentConsolidatedFrontend": {
+      "files": 350,
+      "tests": 2594,
+      "passed": true,
+      "seconds": 291.91,
+      "log": "output/completion-frontend-final.log",
+      "provenance": "root agent reported; not independently rerun by this owner",
+      "status": "final current-source consolidated result",
+      "apiSha256": "80a550581c6e94114e1aedf719c1fefbaf1c70d9c73983472c9d86b26f304103"
+    },
+    "currentFinalFrontend": {
+      "status": "passed; parent-run final consolidated result",
+      "files": 350,
+      "tests": 2594,
+      "seconds": 291.91,
+      "apiSha256": "80a550581c6e94114e1aedf719c1fefbaf1c70d9c73983472c9d86b26f304103"
+    },
+    "parentLint": {
+      "errors": 0,
+      "warnings": 601,
+      "provenance": "root agent reported; current-source full lint"
+    },
+    "parentConsolidatedBackend": {
+      "businessWorkflowExitCode": 0,
+      "stripeExitCode": 0,
+      "fullRlsExitCode": 0,
+      "canonicalSha256": "e97f8dd64af6de799f2e349ce829ed0636174551933040bd43b85fd13087f345",
+      "migrationSha256": "2e93b6652afa8b0dd28718579e5729ceed4ed44569b73d0f7b19c0e76f466617",
+      "provenance": "root agent reported; not independently rerun by this owner"
+    },
+    "parentBootstrap": {
+      "tables": 93,
+      "columns": 1192,
+      "namedFunctions": 143,
+      "catalogIssues": 0,
+      "checkerTests": 21,
+      "passed": true,
+      "provenance": "bootstrap owner reported; not independently rerun by this owner"
+    },
+    "parentBuild": {
+      "productionBuild": true,
+      "routeGraph": true,
+      "typeScript": true,
+      "provenance": "root agent reported"
+    }
+  },
+  "pendingMigration": "supabase/2026-10-04-atomic-business-workflows.sql",
+  "limits": [
+    "No live service, schema, provider, payment, message or customer operation",
+    "Historical ambiguous/hidden source footprints require reconciliation; no backfill",
+    "Credit is scoped to source invoice author even for admin actions",
+    "Offline another-author business mutation is refused; cloud mode required",
+    "Hosted installer/device/provider paths still need deployment verification"
+  ]
+}

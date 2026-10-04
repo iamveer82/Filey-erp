@@ -71,12 +71,21 @@ let nextId = 1;
 export function UIProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<(Toast & { expiresAt: number })[]>([]);
   const [confirmState, setConfirmState] = useState<
-    (ConfirmOpts & { resolve: (v: boolean) => void; returnFocus: Element | null }) | null
+    (ConfirmOpts & { id: number; resolve: (v: boolean) => void; returnFocus: Element | null }) | null
   >(null);
   const [promptState, setPromptState] = useState<
-    (PromptOpts & { resolve: (v: string | null) => void }) | null
+    (PromptOpts & { id: number; resolve: (v: string | null) => void }) | null
   >(null);
   const promptInput = useRef<HTMLInputElement>(null);
+  const pendingConfirm = useRef<((value: boolean) => void) | null>(null);
+  const pendingPrompt = useRef<((value: string | null) => void) | null>(null);
+  const cancelPending = useCallback(() => {
+    pendingConfirm.current?.(false);
+    pendingPrompt.current?.(null);
+    pendingConfirm.current = null;
+    pendingPrompt.current = null;
+  }, []);
+  useEffect(() => cancelPending, [cancelPending]);
 
   const dismiss = useCallback((id: number) => {
     setToasts((t) => t.filter((x) => x.id !== id));
@@ -115,37 +124,47 @@ export function UIProvider({ children }: { children: ReactNode }) {
 
   const confirm = useCallback(
     (opts: ConfirmOpts) =>
-      new Promise<boolean>((resolve) => setConfirmState({ ...opts, resolve, returnFocus: document.activeElement })),
-    []
+      new Promise<boolean>((resolve) => {
+        cancelPending();
+        pendingConfirm.current = resolve;
+        setPromptState(null);
+        setConfirmState({ ...opts, id: nextId++, resolve, returnFocus: document.activeElement });
+      }),
+    [cancelPending]
   );
 
   const prompt = useCallback(
     (opts: PromptOpts) =>
-      new Promise<string | null>((resolve) => setPromptState({ ...opts, resolve })),
-    []
+      new Promise<string | null>((resolve) => {
+        cancelPending();
+        pendingPrompt.current = resolve;
+        setConfirmState(null);
+        setPromptState({ ...opts, id: nextId++, resolve });
+      }),
+    [cancelPending]
   );
 
   const notice = useCallback(
     (opts?: { title?: string; message?: string }) =>
-      new Promise<void>((resolve) =>
-        setConfirmState({
+      confirm({
           title: opts?.title ?? SORRY_TITLE,
           message: opts?.message ?? SORRY_MESSAGE,
           confirmLabel: "OK",
           hideCancel: true,
-          resolve: () => resolve(),
-          returnFocus: document.activeElement,
-        })
-      ),
-    []
+        }).then(() => undefined),
+    [confirm]
   );
 
   const closeConfirm = (v: boolean) => {
+    if (!confirmState || pendingConfirm.current !== confirmState.resolve) return;
     confirmState?.resolve(v);
+    pendingConfirm.current = null;
     setConfirmState(null);
   };
   const closePrompt = (v: string | null) => {
+    if (!promptState || pendingPrompt.current !== promptState.resolve) return;
     promptState?.resolve(v);
+    pendingPrompt.current = null;
     setPromptState(null);
   };
 
@@ -166,20 +185,17 @@ export function UIProvider({ children }: { children: ReactNode }) {
       {children}
 
       {/* toasts */}
-      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+      <div className="fixed top-4 left-4 right-4 z-[100] flex flex-col gap-2 max-w-sm sm:left-auto">
         {toasts.map((t) => {
           const clickable = !!t.to;
+          const message = <>{t.title && <span className="block text-foreground font-medium">{t.title}</span>}<span className="block text-foreground/90 font-normal break-words [overflow-wrap:anywhere]">{t.message}</span></>;
           return (
             <div
               key={t.id}
               role="status"
-              onClick={() => {
-                if (t.to) window.location.hash = `#${t.to}`;
-                if (clickable) dismiss(t.id);
-              }}
               className={`flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm font-medium animate-fade-up ${
                 TOAST_STYLE[t.kind]
-              } ${clickable ? "cursor-pointer hover:" : ""}`}
+              }`}
             >
               {t.avatar ? (
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-ink text-[11px] font-medium">
@@ -188,19 +204,15 @@ export function UIProvider({ children }: { children: ReactNode }) {
               ) : (
                 <span className="mt-px shrink-0">{TOAST_ICON[t.kind]}</span>
               )}
-              <span className="min-w-0">
-                {t.title && <span className="block text-ink font-medium">{t.title}</span>}
-                <span className="block text-ink/90 dark:text-white/80 font-normal break-words">
-                  {t.message}
-                </span>
-              </span>
+              {clickable ? <a href={`#${t.to}`} onClick={() => dismiss(t.id)} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{message}</a> : <span className="min-w-0 flex-1">{message}</span>}
               <button
+                type="button"
                 aria-label="Dismiss"
                 onClick={(e) => {
                   e.stopPropagation();
                   dismiss(t.id);
                 }}
-                className="ml-auto text-brand-400 hover:text-ink cursor-pointer shrink-0"
+                className="-my-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
               >
                 <X size={14} />
               </button>
@@ -210,7 +222,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       </div>
 
       {confirmState && (
-        <Dialog open onOpenChange={open => { if (!open) closeConfirm(false); }}>
+        <Dialog key={confirmState.id} open onOpenChange={open => { if (!open) closeConfirm(false); }}>
           <DialogContent role="alertdialog" showClose={false} className="max-w-md" aria-describedby={confirmState.message ? "filey-confirm-description" : undefined}
             onCloseAutoFocus={event => {
               event.preventDefault();
@@ -228,7 +240,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
         </Dialog>
       )}
       {promptState && (
-        <Modal open title={promptState.title} onClose={() => closePrompt(null)}>
+        <Modal key={promptState.id} open title={promptState.title} onClose={() => closePrompt(null)}>
           <form onSubmit={(e) => { e.preventDefault(); closePrompt(promptInput.current?.value ?? ""); }}>
             <label className="label" htmlFor="filey-prompt">{promptState.label || promptState.title}</label>
             <input id="filey-prompt" ref={promptInput} autoFocus className="input mt-1" placeholder={promptState.placeholder} defaultValue={promptState.defaultValue} />

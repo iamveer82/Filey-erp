@@ -52,6 +52,23 @@ describe("recordRun", () => {
     expect(listRuns()).toHaveLength(1);
   });
 
+  it("keeps a request failure even when completed tools succeeded", () => {
+    recordRun({ goal: "prepare and send the invoice", reason: "error", failures: [] });
+    expect(listRuns()).toHaveLength(1);
+    expect(journalDigest()).toContain("request failed before completion");
+  });
+
+  it("does not treat a clean user stop as a failure", () => {
+    recordRun({ goal: "prepare the invoice", reason: "stopped", failures: [] });
+    expect(listRuns()).toEqual([]);
+  });
+
+  it("describes a stopped run with earlier tool failures accurately", () => {
+    recordRun({ goal: "prepare the invoice", reason: "stopped", failures: [{ tool: "get_invoice", error: "not found" }] });
+    expect(journalDigest()).toContain("stopped before completion");
+    expect(journalDigest()).not.toContain("finished with tool errors");
+  });
+
   it("keeps a run that finished but had tool errors", () => {
     recordRun({
       goal: "email the overdue list",

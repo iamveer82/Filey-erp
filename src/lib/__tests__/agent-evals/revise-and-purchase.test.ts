@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setDataMode } from "../../dataMode";
 import { setAgentMode } from "../../agentMode";
-import { billing, pos } from "../../api";
+import { billing, crm, pos, quotes, setCacheOrg } from "../../api";
 import { TOOLS } from "../../aiTools";
 import { invoiceLineAmount } from "../../money";
 
@@ -11,6 +11,7 @@ import { invoiceLineAmount } from "../../money";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg("test-org", "test-user");
   setAgentMode("auto");
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -22,6 +23,21 @@ const tool = (name: string) => {
 };
 
 describe("purchase orders", () => {
+  it("reports the same discounted and taxed amounts saved by quotations and purchase orders", async () => {
+    const result = await tool("create_quote").run({ customer_name: "Mary", items: [
+      { description: "Service", qty: 1, rate: 100, custom: { __disc_pct: "20", __tax_pct: "5" } },
+    ] }) as { number: string; total: number; lines: { amount: number }[] };
+    expect(result).toMatchObject({ total: 84, lines: [{ amount: 80 }] });
+    const savedQuote = (await quotes.listDocs()).find(doc => doc.number === result.number)!;
+    expect(savedQuote.total).toBe(result.total);
+    const fullQuote = await quotes.getDoc(savedQuote.id);
+    expect(fullQuote.items[0]).toMatchObject({ discount: 20, tax: 5 });
+    const purchase = await tool("create_purchase_order").run({ supplier_name: "Mark", items: [
+      { description: "Service", qty: 1, unit_price: 100, custom: { __tax_pct: "5" } },
+    ] }) as { number: string; total: number };
+    expect(purchase.total).toBe(105);
+    expect((await pos.list()).find(doc => doc.po_number === purchase.number)?.total).toBe(purchase.total);
+  });
   it("prices by the measure the supplier quotes", async () => {
     const res = (await tool("create_purchase_order").run({
       supplier_name: "Gulf Lubricants",
@@ -108,6 +124,16 @@ describe("revising a draft", () => {
     const doc = await billing.getDoc(Number(docs[0].id));
     expect(doc.customer_name).toBe("Rennox Trading LLC");
     expect(doc.items).toHaveLength(1);
+  });
+
+  it("persists an explicit unlink when changing a saved buyer to an unsaved one", async () => {
+    const made = await draft();
+    const docs = await billing.listDocs("sales");
+    const doc = await billing.getDoc(Number(docs[0].id));
+    const savedCustomer = await crm.createCustomer({ name: "Saved Mary" } as Parameters<typeof crm.createCustomer>[0]);
+    await billing.saveDoc({ ...doc, customer_name: "Saved Mary", customer_id: savedCustomer });
+    await tool("revise_invoice").run({ invoice_number: made.number, customer_name: "Unsaved Mark" });
+    expect(await billing.getDoc(doc.id)).toMatchObject({ customer_name: "Unsaved Mark", customer_id: null });
   });
 
   it("can drop a formula and go back to qty × price", async () => {

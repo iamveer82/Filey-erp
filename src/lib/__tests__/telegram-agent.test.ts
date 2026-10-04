@@ -101,6 +101,27 @@ it("never reports an unconfirmed document response as accepted or retries its se
   expect(mocks.delivered.mock.calls[0][0]).not.toContain("accepted by Telegram");
 });
 
+it("does not resend an accepted output retained for a later approval", async () => {
+  await pair();
+  const file = { name: "invoice.pdf", path: "generated-path", telegramRecipients: undefined as string[] | undefined };
+  mocks.run.mockResolvedValueOnce({ text: "Invoice ready; approve the email", files: [file], delivered: mocks.delivered });
+  await feed([message(11, "Export and email invoice")]);
+  expect(file.telegramRecipients).toEqual(["42"]);
+  mocks.run.mockResolvedValueOnce({ text: "Email accepted", files: [file], delivered: mocks.delivered });
+  await feed([message(12, "YES")]);
+  expect(mocks.native.mock.calls.filter(([, args]) => args.method === "sendDocument")).toHaveLength(1);
+  expect(mocks.delivered).toHaveBeenLastCalledWith("Email accepted");
+});
+
+it("keeps Telegram output receipts scoped to the recipient", async () => {
+  await pair();
+  const file = { name: "invoice.pdf", path: "generated-path", telegramRecipients: ["77"] };
+  mocks.run.mockResolvedValueOnce({ text: "Invoice ready", files: [file], delivered: mocks.delivered });
+  await feed([message(11, "Export invoice")]);
+  expect(mocks.native.mock.calls.filter(([, args]) => args.method === "sendDocument")).toHaveLength(1);
+  expect(file.telegramRecipients).toEqual(["77", "42"]);
+});
+
 it("stops an active task immediately and closes its isolated agent browser", async () => {
   await pair();
   mocks.run.mockImplementationOnce(({ signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true })));

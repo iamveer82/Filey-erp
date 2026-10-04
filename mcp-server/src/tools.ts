@@ -25,6 +25,9 @@ const Limit = z
  * "not a purchase", with NULL matched explicitly because SQL `<>` drops NULLs.
  */
 const SALES_ONLY = "doc_type.is.null,doc_type.neq.purchase";
+const POSTED = ["sent", "paid", "overdue"];
+const credit = (document: any) => ["381", "81"].includes(String(document.invoice_type_code ?? ""));
+const currencyOf = (document: any) => String(document.currency || "AED").toUpperCase();
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -43,10 +46,6 @@ async function audit(ctx: Ctx, action: string, entity: string, details: unknown)
     details: details as any,
   });
   if (error) console.error(`[filey-erp-mcp] audit_log insert failed: ${error.message}`);
-}
-
-function lineTotal(items: Array<{ qty?: number | null; unit_price?: number | null }>): number {
-  return items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unit_price) || 0), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +70,8 @@ interface DocItemRow {
   /** Per-line meta is packed inside the item's `custom` jsonb (see src/lib/docItems.ts). */
   custom?: Record<string, string> | null;
   tax_category?: string | null;
+  discount?: number | null;
+  tax?: number | null;
 }
 
 const CM_KEY = "__calc_mode";
@@ -127,63 +128,37 @@ function docLineGross(
   return r2((Number(it.qty) || 0) * rate);
 }
 
-/** Mirrors src/lib/docItems.ts docTotals(): honours doc-level discount/tax,
- *  per-line discount/tax packed in `custom`, and UAE tax categories (only
- *  standard-rated lines carry VAT). Returns unrounded net/tax/total. */
+/** Mirrors shared docTotals/taxBreakdown: allocate document discounts in cents
+ *  and round VAT once per category/rate, including explicit per-line rates. */
 function computeDocTotals(
   head: DocHead,
   items: DocItemRow[]
 ): { net: number; tax: number; total: number } {
-  const lines = items.map((it) => ({ ...it, ...splitItemMeta(it.custom), }));
-  const isStandard = (l: any) => (l.tax_category ?? "S") === "S";
-  const hasLineLevel = lines.some((l: any) => (l.discount ?? 0) > 0 || (l.tax ?? 0) > 0);
-
-  let subtotal = 0;
-  let disc = 0;
-  let tax = 0;
-
-  if (!hasLineLevel) {
-    // invoiceTotals() path: every line standard unless its tax_category says otherwise.
-    subtotal = lines.reduce((s: number, l: any) => s + docLineGross(l, head.unit_price_formula), 0);
-    disc = Math.min(Math.max(0, Number(head.discount) || 0), subtotal);
-    const rate = (Number(head.tax_rate) || 0) / 100;
-    if (subtotal > 0) {
-      for (const l of lines) {
-        if (!isStandard(l)) continue;
-        const lineNet = docLineGross(l, head.unit_price_formula);
-        tax += (lineNet / subtotal) * (subtotal - disc) * rate;
-      }
-    }
-  } else {
-    subtotal = lines.reduce((s: number, l: any) => s + docLineGross(l, head.unit_price_formula), 0);
-    const grossOf = (l: any) => docLineGross(l, head.unit_price_formula);
-    const netOf = (l: any) => grossOf(l) * (1 - ((l.discount ?? 0) as number) / 100);
-    const lineDiscount = lines.reduce(
-      (s: number, l: any) => s + grossOf(l) * (((l.discount ?? 0) as number) / 100),
-      0
-    );
-    disc = Math.min(Math.max(0, Number(head.discount) || 0) + lineDiscount, subtotal);
-    const net = subtotal - disc;
-    const lineTax = lines.reduce(
-      (s: number, l: any) =>
-        isStandard(l) ? s + netOf(l) * (((l.tax ?? 0) as number) / 100) : s,
-      0
-    );
-    // Doc-level discount is allocated pro-rata by net, so only the share of net
-    // that is standard-rated AND not explicitly rated per-line gets the doc rate.
-    const netAfterLineDisc = lines.reduce((s: number, l: any) => s + netOf(l), 0);
-    const docRatedNet = lines.reduce(
-      (s: number, l: any) => (isStandard(l) && !((l.tax ?? 0) > 0) ? s + netOf(l) : s),
-      0
-    );
-    const taxableNet = netAfterLineDisc > 0 ? net * (docRatedNet / netAfterLineDisc) : 0;
-    tax = taxableNet * ((Number(head.tax_rate) || 0) / 100) + lineTax;
-    const total = r2(net + tax);
-    return { net: r2(total - r2(tax)), tax: r2(tax), total };
+  const groups = new Map<string, { net: number; rate: number }>();
+  for (const item of items) {
+    const meta = splitItemMeta(item.custom);
+    const line = { ...item, ...meta };
+    const discount = meta.discount ?? item.discount ?? 0;
+    const net = r2(docLineGross(line, head.unit_price_formula) * (1 - discount / 100));
+    const category = item.tax_category || "S";
+    const rate = category === "S" ? (meta.tax ?? item.tax) || head.tax_rate || 0 : 0;
+    const key = `${category}:${rate}`;
+    const group = groups.get(key) ?? { net: 0, rate };
+    group.net += Math.round(net * 100);
+    groups.set(key, group);
   }
-
-  const total = r2(subtotal - disc + tax);
-  return { net: r2(total - r2(tax)), tax: r2(tax), total };
+  const rows = [...groups.values()];
+  const subtotal = rows.reduce((sum, row) => sum + row.net, 0);
+  const discount = Math.min(Math.max(0, Math.round((head.discount || 0) * 100)), subtotal);
+  const shares = rows.map(row => subtotal > 0 ? discount * row.net / subtotal : 0);
+  const allocated = shares.map(Math.floor);
+  const order = shares.map((share, index) => ({ index, remainder: share - allocated[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  const remaining = discount - allocated.reduce((sum, value) => sum + value, 0);
+  for (let index = 0; index < remaining; index++) allocated[order[index].index]++;
+  const net = r2((subtotal - discount) / 100);
+  const tax = r2(rows.reduce((sum, row, index) => sum + r2((row.net - allocated[index]) / 100 * row.rate / 100), 0));
+  return { net, tax, total: r2(net + tax) };
 }
 
 /** Round-off nudges the grand total to the whole unit AFTER tax (applyRoundOff). */
@@ -226,6 +201,7 @@ async function paymentsForInvoices(ctx: Ctx, invoiceIds: string[]): Promise<Map<
   const { data, error } = await ctx.supabase
     .from("invoice_payments")
     .select("invoice_id, amount")
+    .eq("org_id", ctx.orgId)
     .in("invoice_id", invoiceIds);
   if (error) throw new Error(`invoice_payments query failed: ${error.message}`);
   for (const p of data ?? []) {
@@ -234,7 +210,16 @@ async function paymentsForInvoices(ctx: Ctx, invoiceIds: string[]): Promise<Map<
   return map;
 }
 
-/** Generate the next sequential document number, e.g. INV-2025-A0042. */
+/** Header and lines commit together under the current user's RLS. No partial
+ * fallback is used when the cloud needs its document-save migration. */
+async function saveDraft(ctx: Ctx, table: string, header: Record<string, unknown>, items: Record<string, unknown>[]): Promise<void> {
+  const { data, error } = await ctx.supabase.rpc("filey_save_document", {
+    p_table: table, p_header: header, p_items: items, p_id: null,
+  });
+  if (error || data == null) throw new Error("Draft could not be saved atomically. " + (error?.message ?? "No document receipt returned."));
+}
+
+/** Reserve an authoritative number rather than predicting it from a stale list. */
 async function nextNumber(
   ctx: Ctx,
   table: string,
@@ -242,23 +227,16 @@ async function nextNumber(
   prefix: string
 ): Promise<string> {
   const year = new Date().getFullYear();
-  const like = `${prefix}-${year}-A%`;
-  const { data, error } = await ctx.supabase
-    .from(table)
-    .select(column)
-    .eq("org_id", ctx.orgId)
-    .like(column, like)
-    .order(column, { ascending: false })
-    .limit(1);
-  if (error) throw new Error(`${table} numbering query failed: ${error.message}`);
-  let seq = 1;
-  const firstRow = data?.[0] as unknown as Record<string, unknown> | undefined;
-  const last = firstRow?.[column] as string | undefined;
-  if (last) {
-    const m = last.match(/A(\d{4,})$/);
-    if (m) seq = parseInt(m[1], 10) + 1;
-  }
-  return `${prefix}-${year}-A${String(seq).padStart(4, "0")}`;
+  const kinds: Record<string, string> = { invoice_docs: "invoice", quotations: "quote", purchase_orders: "purchase_order" };
+  const kind = kinds[table];
+  if (!kind || column !== (table === "purchase_orders" ? "po_number" : "number")) throw new Error("Unsupported document numbering type.");
+  const { data, error } = await ctx.supabase.rpc("filey_reserve_document_number", {
+    p_kind: kind, p_pattern: `${prefix}-{YYYY}-A{0001}`, p_year: year,
+    p_request: crypto.randomUUID(), p_actor: ctx.userId, p_org: ctx.orgId,
+  });
+  if (error || typeof data !== "string" || !data.trim())
+    throw new Error("Document number could not be reserved. " + (error?.message ?? "Update the document-number migration before retrying."));
+  return data;
 }
 
 /** Wrap a handler so failures come back as {error} payloads instead of throwing. */
@@ -270,14 +248,6 @@ function safe(fn: (args: any) => Promise<unknown>): (args: any) => Promise<unkno
       return { error: err?.message ?? String(err) };
     }
   };
-}
-
-/** 4-digit approval code from the platform CSPRNG — Math.random is predictable,
- *  and this code is the only thing gating an outbound email. */
-function approvalCode(): string {
-  const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
-  return String(1000 + (buf[0] % 9000));
 }
 
 const InvoiceItem = z.object({
@@ -309,7 +279,7 @@ export const tools: ToolDef[] = [
 
       const { data: invoices, error: invErr } = await ctx.supabase
         .from("invoice_docs")
-        .select("id, status, tax_rate, discount, round_off, unit_price_formula, due_date")
+        .select("id, status, tax_rate, discount, round_off, unit_price_formula, due_date, currency, invoice_type_code")
         .eq("org_id", ctx.orgId)
         .or(SALES_ONLY);
       if (invErr) throw new Error(`invoice_docs query failed: ${invErr.message}`);
@@ -317,15 +287,17 @@ export const tools: ToolDef[] = [
       const counts: Record<string, number> = { draft: 0, sent: 0, paid: 0 };
       for (const inv of invoices ?? []) counts[inv.status] = (counts[inv.status] ?? 0) + 1;
 
-      const sent = (invoices ?? []).filter((i) => i.status === "sent");
+      const sent = (invoices ?? []).filter((i) => ["sent", "overdue"].includes(i.status) && !credit(i));
       const itemsMap = await itemsForInvoices(ctx, sent.map((i) => i.id));
+      const paidMap = await paymentsForInvoices(ctx, sent.map((i) => i.id));
       const todayStr = today();
-      let receivables = 0;
-      let overdueReceivables = 0;
+      const balances = new Map<string, { outstanding: number; overdue: number }>();
       for (const inv of sent) {
-        const total = invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
-        receivables += total;
-        if (inv.due_date && inv.due_date < todayStr) overdueReceivables += total;
+        const total = Math.max(0, r2(invoiceTotal(inv, itemsMap.get(inv.id) ?? []) - (paidMap.get(inv.id) ?? 0)));
+        const currency = currencyOf(inv), balance = balances.get(currency) ?? { outstanding: 0, overdue: 0 };
+        balance.outstanding += total;
+        if (inv.due_date && inv.due_date < todayStr) balance.overdue += total;
+        balances.set(currency, balance);
       }
 
       const { data: products, error: prodErr } = await ctx.supabase
@@ -345,8 +317,11 @@ export const tools: ToolDef[] = [
         })),
         total_balance: (accounts ?? []).reduce((s, a) => s + (Number(a.balance) || 0), 0),
         invoice_counts: counts,
-        outstanding_receivables: Math.round(receivables * 100) / 100,
-        overdue_receivables: Math.round(overdueReceivables * 100) / 100,
+        receivables_by_currency: [...balances].map(([currency, balance]) => ({ currency,
+          outstanding: r2(balance.outstanding), overdue: r2(balance.overdue) })),
+        ...(balances.size <= 1 ? { currency: [...balances.keys()][0] ?? "AED",
+          outstanding_receivables: r2([...balances.values()][0]?.outstanding ?? 0),
+          overdue_receivables: r2([...balances.values()][0]?.overdue ?? 0) } : {}),
         low_stock_products: lowStock,
       };
     }),
@@ -543,9 +518,9 @@ export const tools: ToolDef[] = [
   {
     name: "run_report",
     description:
-      "Run a built-in report: sales_by_month (last 6 months of non-draft invoices, totals by YYYY-MM), " +
+      "Run a built-in report: sales_by_month (last 6 months of posted sales minus credit notes, totals by YYYY-MM), " +
       "top_customers (last 90 days invoiced totals by customer, top 10), or " +
-      "receivables_aging (sent invoices bucketed current / 1-30 / 31-60 / 61-90 / 90+ days overdue).",
+      "receivables_aging (unpaid sent/overdue invoices by age). Amounts are grouped by currency; never add different currencies.",
     inputSchema: {
       report: z.enum(["sales_by_month", "top_customers", "receivables_aging"]),
     },
@@ -557,88 +532,78 @@ export const tools: ToolDef[] = [
         since.setMonth(since.getMonth() - 6);
         const { data, error } = await ctx.supabase
           .from("invoice_docs")
-          .select("id, issue_date, tax_rate, discount, round_off, unit_price_formula")
+          .select("id, issue_date, tax_rate, discount, round_off, unit_price_formula, currency, invoice_type_code")
           .eq("org_id", ctx.orgId)
           .or(SALES_ONLY)
-          .neq("status", "draft")
+          .in("status", POSTED)
           .gte("issue_date", since.toISOString().slice(0, 10));
         if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
         const itemsMap = await itemsForInvoices(ctx, (data ?? []).map((i) => i.id));
-        const months = new Map<string, { total: number; invoice_count: number }>();
+        const currencies = new Map<string, Map<string, { total: number; invoice_count: number }>>();
         for (const inv of data ?? []) {
+          const currency = currencyOf(inv), months = currencies.get(currency) ?? new Map();
           const month = String(inv.issue_date).slice(0, 7);
           const bucket = months.get(month) ?? { total: 0, invoice_count: 0 };
-          bucket.total += invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
-          bucket.invoice_count += 1;
-          months.set(month, bucket);
+          bucket.total += (credit(inv) ? -1 : 1) * invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
+          bucket.invoice_count++;
+          months.set(month, bucket); currencies.set(currency, months);
         }
-        return {
-          report: "sales_by_month",
-          months: [...months.entries()]
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([month, b]) => ({
-              month,
-              invoice_count: b.invoice_count,
-              total: Math.round(b.total * 100) / 100,
-            })),
-        };
+        const by_currency = [...currencies].map(([currency, months]) => ({ currency,
+          months: [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, bucket]) => ({
+            month, invoice_count: bucket.invoice_count, total: r2(bucket.total),
+          })),
+        }));
+        return { report: "sales_by_month", by_currency,
+          ...(by_currency.length <= 1 ? { currency: by_currency[0]?.currency ?? "AED", months: by_currency[0]?.months ?? [] } : {}) };
+
       }
 
       if (args.report === "top_customers") {
         const { data, error } = await ctx.supabase
           .from("invoice_docs")
-          .select("id, customer_name, tax_rate, discount, round_off, unit_price_formula")
+          .select("id, customer_name, tax_rate, discount, round_off, unit_price_formula, currency, invoice_type_code")
           .eq("org_id", ctx.orgId)
           .or(SALES_ONLY)
-          .neq("status", "draft")
+          .in("status", POSTED)
           .gte("issue_date", isoDaysAgo(90));
         if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
         const itemsMap = await itemsForInvoices(ctx, (data ?? []).map((i) => i.id));
-        const byCustomer = new Map<string, { total: number; invoice_count: number }>();
+        const currencies = new Map<string, Map<string, { total: number; invoice_count: number }>>();
         for (const inv of data ?? []) {
-          const key = inv.customer_name ?? "(unknown)";
-          const bucket = byCustomer.get(key) ?? { total: 0, invoice_count: 0 };
-          bucket.total += invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
-          bucket.invoice_count += 1;
-          byCustomer.set(key, bucket);
+          const currency = currencyOf(inv), customers = currencies.get(currency) ?? new Map();
+          const name = inv.customer_name ?? "(unknown)";
+          const bucket = customers.get(name) ?? { total: 0, invoice_count: 0 };
+          bucket.total += (credit(inv) ? -1 : 1) * invoiceTotal(inv, itemsMap.get(inv.id) ?? []);
+          bucket.invoice_count++;
+          customers.set(name, bucket); currencies.set(currency, customers);
         }
-        return {
-          report: "top_customers",
-          period_days: 90,
-          customers: [...byCustomer.entries()]
-            .map(([customer_name, b]) => ({
-              customer_name,
-              invoice_count: b.invoice_count,
-              total: Math.round(b.total * 100) / 100,
-            }))
-            .sort((a, b) => b.total - a.total)
-            .slice(0, 10),
-        };
+        const by_currency = [...currencies].map(([currency, customers]) => ({ currency,
+          customers: [...customers].map(([customer_name, bucket]) => ({
+            customer_name, invoice_count: bucket.invoice_count, total: r2(bucket.total),
+          })).sort((a, b) => b.total - a.total).slice(0, 10),
+        }));
+        return { report: "top_customers", period_days: 90, by_currency,
+          ...(by_currency.length <= 1 ? { currency: by_currency[0]?.currency ?? "AED", customers: by_currency[0]?.customers ?? [] } : {}) };
+
       }
 
-      // receivables_aging — mirrors src/lib/aiTools.ts: the OUTSTANDING balance
-      // of anything not draft/paid/cancelled (a partly paid invoice is chased
-      // for its balance only; a settled one drops out entirely).
+      // Receivables are the unpaid balance of posted sales invoices; credit
+      // notes and cancelled/draft documents are never collection targets.
       const { data, error } = await ctx.supabase
         .from("invoice_docs")
-        .select("id, number, customer_name, status, due_date, tax_rate, discount, round_off, unit_price_formula")
+        .select("id, number, customer_name, status, due_date, tax_rate, discount, round_off, unit_price_formula, currency, invoice_type_code")
         .eq("org_id", ctx.orgId)
         .or(SALES_ONLY)
-        .neq("status", "draft")
-        .neq("status", "paid")
-        .neq("status", "cancelled");
+        .in("status", ["sent", "overdue"]);
       if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
       const itemsMap = await itemsForInvoices(ctx, (data ?? []).map((i) => i.id));
       const paidMap = await paymentsForInvoices(ctx, (data ?? []).map((i) => i.id));
-      const buckets: Record<string, { total: number; invoices: string[] }> = {
-        current: { total: 0, invoices: [] },
-        "1-30": { total: 0, invoices: [] },
-        "31-60": { total: 0, invoices: [] },
-        "61-90": { total: 0, invoices: [] },
-        "90+": { total: 0, invoices: [] },
-      };
+      const currencies = new Map<string, Record<string, { total: number; invoices: string[] }>>();
+      const emptyBuckets = () => Object.fromEntries(["current", "1-30", "31-60", "61-90", "90+"].map(key => [key, { total: 0, invoices: [] as string[] }]));
       const todayMs = Date.parse(today());
       for (const inv of data ?? []) {
+        if (credit(inv)) continue;
+        const currency = currencyOf(inv), buckets = currencies.get(currency) ?? emptyBuckets();
         const total = docTotal(inv, itemsMap.get(inv.id) ?? []);
         // Fall back to total less paid so docs written before balances were
         // tracked still count.
@@ -657,16 +622,17 @@ export const tools: ToolDef[] = [
           : "90+";
         buckets[key].total += due;
         buckets[key].invoices.push(inv.number);
+        currencies.set(currency, buckets);
       }
-      return {
-        report: "receivables_aging",
-        buckets: Object.fromEntries(
-          Object.entries(buckets).map(([k, v]) => [
-            k,
-            { total: Math.round(v.total * 100) / 100, invoice_count: v.invoices.length, invoices: v.invoices },
-          ])
-        ),
-      };
+      const by_currency = [...currencies].map(([currency, buckets]) => ({ currency,
+        buckets: Object.fromEntries(Object.entries(buckets).map(([key, bucket]) => [key, {
+          total: r2(bucket.total), invoice_count: bucket.invoices.length, invoices: bucket.invoices,
+        }])),
+      }));
+      return { report: "receivables_aging", by_currency,
+        ...(by_currency.length <= 1 ? { currency: by_currency[0]?.currency ?? "AED",
+          buckets: by_currency[0]?.buckets ?? Object.fromEntries(Object.entries(emptyBuckets()).map(([key, bucket]) => [key, { ...bucket, invoice_count: 0 }])) } : {}) };
+
     }),
   },
 ];
@@ -680,7 +646,7 @@ const writeTools: ToolDef[] = [
     inputSchema: {
       customer_name: z.string().min(1),
       customer_email: z.string().email().optional(),
-      items: z.array(InvoiceItem).min(1),
+      items: z.array(InvoiceItem).min(1).max(500),
       currency: z.string().optional().describe("ISO currency code (default AED)"),
       tax_rate: z.number().min(0).optional().describe("Tax rate % applied to the net total (default 5)"),
     },
@@ -693,35 +659,15 @@ const writeTools: ToolDef[] = [
     }) => {
       const ctx = await getCtx();
       const number = await nextNumber(ctx, "invoice_docs", "number", "INV");
-      const { data: head, error } = await ctx.supabase
-        .from("invoice_docs")
-        .insert({
-          user_id: ctx.userId,
-          org_id: ctx.orgId,
-          number,
-          customer_name: args.customer_name,
-          customer_email: args.customer_email ?? null,
-          status: "draft",
-          doc_type: "invoice",
-          issue_date: today(),
-          currency: args.currency ?? "AED",
-          tax_rate: args.tax_rate ?? 5,
-        })
-        .select("id, number, tax_rate")
-        .single();
-      if (error || !head) throw new Error(`Failed to create invoice: ${error?.message}`);
-
-      const rows = args.items.map((it, i) => ({
-        user_id: ctx.userId,
-        org_id: ctx.orgId,
-        invoice_id: head.id,
-        description: it.description,
-        qty: it.qty ?? 1,
-        unit_price: it.unit_price,
-        position: i,
+      const head = {
+        number, customer_name: args.customer_name, customer_email: args.customer_email ?? null,
+        status: "draft", doc_type: "invoice", issue_date: today(), currency: args.currency ?? "AED",
+        tax_rate: args.tax_rate ?? 5,
+      };
+      const rows = args.items.map((item, position) => ({
+        description: item.description, qty: item.qty ?? 1, unit_price: item.unit_price, position,
       }));
-      const { error: itemErr } = await ctx.supabase.from("invoice_doc_items").insert(rows);
-      if (itemErr) throw new Error(`Invoice head ${number} created but items failed: ${itemErr.message}`);
+      await saveDraft(ctx, "invoice_docs", head, rows);
 
       await audit(ctx, "create_draft_invoice", "invoice_docs", { number, customer: args.customer_name });
       return { number, status: "draft", total: invoiceTotal(head, rows) };
@@ -732,7 +678,7 @@ const writeTools: ToolDef[] = [
     description: "Create a DRAFT quotation (head + line items).",
     inputSchema: {
       customer_name: z.string().min(1),
-      items: z.array(InvoiceItem).min(1),
+      items: z.array(InvoiceItem).min(1).max(500),
       currency: z.string().optional().describe("ISO currency code (default AED)"),
     },
     handler: safe(async (args: {
@@ -742,44 +688,26 @@ const writeTools: ToolDef[] = [
     }) => {
       const ctx = await getCtx();
       const number = await nextNumber(ctx, "quotations", "number", "Q");
-      const { data: head, error } = await ctx.supabase
-        .from("quotations")
-        .insert({
-          user_id: ctx.userId,
-          org_id: ctx.orgId,
-          number,
-          customer_name: args.customer_name,
-          status: "draft",
-          quote_date: today(),
-          currency: args.currency ?? "AED",
-        })
-        .select("id, number")
-        .single();
-      if (error || !head) throw new Error(`Failed to create quotation: ${error?.message}`);
-
-      const rows = args.items.map((it, i) => ({
-        user_id: ctx.userId,
-        org_id: ctx.orgId,
-        quotation_id: head.id,
-        description: it.description,
-        qty: it.qty ?? 1,
-        unit_price: it.unit_price,
-        position: i,
+      const head = {
+        number, customer_name: args.customer_name, status: "draft",
+        quote_date: today(), currency: args.currency ?? "AED",
+      };
+      const rows = args.items.map((item, position) => ({
+        product: item.description, qty: item.qty ?? 1, rate: item.unit_price, position,
       }));
-      const { error: itemErr } = await ctx.supabase.from("quotation_items").insert(rows);
-      if (itemErr) throw new Error(`Quotation head ${number} created but items failed: ${itemErr.message}`);
+      await saveDraft(ctx, "quotations", head, rows);
 
       await audit(ctx, "create_draft_quote", "quotations", { number, customer: args.customer_name });
-      return { number, status: "draft", total: lineTotal(rows) };
+      return { number, status: "draft", total: r2(args.items.reduce((sum, item) => sum + (item.qty ?? 1) * item.unit_price, 0)) };
     }),
   },
   {
     name: "create_draft_po",
     description:
-      "Create a DRAFT purchase order for a supplier. The supplier is linked by name (fuzzy match) when a matching suppliers row exists.",
+      "Create a DRAFT purchase order for a supplier. The supplier is linked only when the name uniquely identifies an existing supplier.",
     inputSchema: {
       supplier_name: z.string().min(1),
-      items: z.array(PoItem).min(1),
+      items: z.array(PoItem).min(1).max(500),
       currency: z.string().optional().describe("ISO currency code (default AED)"),
     },
     handler: safe(async (args: {
@@ -798,41 +726,21 @@ const writeTools: ToolDef[] = [
           .select("id")
           .eq("org_id", ctx.orgId)
           .ilike("name", `%${q}%`)
-          .limit(1)
+          .limit(2)
           .maybeSingle();
         supplierId = sup?.id ?? null;
       }
 
       const poNumber = await nextNumber(ctx, "purchase_orders", "po_number", "PO");
       const total = args.items.reduce((s, it) => s + (it.qty ?? 1) * it.unit_cost, 0);
-      const { data: head, error } = await ctx.supabase
-        .from("purchase_orders")
-        .insert({
-          user_id: ctx.userId,
-          org_id: ctx.orgId,
-          po_number: poNumber,
-          supplier_id: supplierId,
-          supplier_name: args.supplier_name,
-          status: "draft",
-          order_date: today(),
-          currency: args.currency ?? "AED",
-          total,
-        })
-        .select("id, po_number")
-        .single();
-      if (error || !head) throw new Error(`Failed to create purchase order: ${error?.message}`);
-
-      const rows = args.items.map((it, i) => ({
-        user_id: ctx.userId,
-        org_id: ctx.orgId,
-        po_id: head.id,
-        description: it.description,
-        quantity: it.qty ?? 1,
-        unit_cost: it.unit_cost,
-        position: i,
+      const head = {
+        po_number: poNumber, supplier_id: supplierId, supplier_name: args.supplier_name,
+        status: "draft", order_date: today(), currency: args.currency ?? "AED", total: r2(total),
+      };
+      const rows = args.items.map((item, position) => ({
+        description: item.description, quantity: item.qty ?? 1, unit_cost: item.unit_cost, position,
       }));
-      const { error: itemErr } = await ctx.supabase.from("purchase_order_items").insert(rows);
-      if (itemErr) throw new Error(`PO head ${poNumber} created but items failed: ${itemErr.message}`);
+      await saveDraft(ctx, "purchase_orders", head, rows);
 
       await audit(ctx, "create_draft_po", "purchase_orders", { po_number: poNumber, supplier: args.supplier_name });
       return {
@@ -914,7 +822,7 @@ const writeTools: ToolDef[] = [
     name: "request_payment_reminder",
     description:
       "Request that a payment reminder email be sent for a SENT invoice. This does NOT send anything: " +
-      "it creates a pending action that the owner must approve by replying APPROVE <code> on a connected channel.",
+      "the owner must request and approve it in their paired channel so the approval is bound to that authenticated conversation.",
     inputSchema: {
       invoice_number: z.string().min(1).describe("Invoice number, e.g. INV-2025-A0001"),
     },
@@ -938,50 +846,13 @@ const writeTools: ToolDef[] = [
         return { error: `Invoice ${inv.number} has no customer_email on file; cannot send a reminder.` };
       }
 
-      const code = approvalCode();
-      // expires_at matches the migration's backfill rule (created_at + 24h) so
-      // the row is valid under the new schema and the edge function can expire
-      // stale proposals.
-      const expiresAt = new Date(Date.now() + 24 * 86_400_000).toISOString();
-      const row: Record<string, unknown> = {
-        user_id: ctx.userId,
-        org_id: ctx.orgId,
-        code,
-        action: "send_payment_reminder",
-        payload: {
-          invoice_id: inv.id,
-          number: inv.number,
-          customer_name: inv.customer_name,
-          customer_email: inv.customer_email,
-          due_date: inv.due_date,
-        },
-        status: "pending",
-        expires_at: expiresAt,
-      };
-      // The partial unique index on (user_id, code) where status='pending' can
-      // reject a colliding live code — regenerate and retry instead of failing.
-      let insErr: { message: string } | null = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const { error } = await ctx.supabase.from("agent_pending_actions").insert(row);
-        insErr = error ?? null;
-        if (!insErr) break;
-        const collision =
-          (insErr as any).code === "23505" || /duplicate key|unique constraint/i.test(insErr.message);
-        if (!collision) break;
-        row.code = approvalCode();
-      }
-      if (insErr) throw new Error(`Failed to create pending action: ${insErr.message}`);
-      const finalCode = row.code as string;
-
-      await audit(ctx, "request_payment_reminder", "agent_pending_actions", {
-        invoice: inv.number,
-        code: finalCode,
-      });
+      // MCP stdio has no authenticated messaging actor to bind an approval to.
+      // Ask the owner to propose it in that channel instead of creating a code
+      // that hardened channel approvals must (correctly) reject.
       return {
-        approval_code: finalCode,
         invoice: inv.number,
-        status: "pending",
-        note: `owner replies APPROVE ${finalCode} on a connected channel`,
+        status: "requires_channel_proposal",
+        note: "Ask Filey AI on your paired channel to prepare this payment reminder, then review and approve it there. Nothing has been sent or queued.",
       };
     }),
   },

@@ -75,12 +75,12 @@ describe("the agent's view of the document toolbox", () => {
     writeAgentStorage("filey.ai.media.config", JSON.stringify({ videoSource: "credits" }));
     vi.mocked(deliverFile).mockReset().mockImplementation(async output => ({ name: output.name, url: `blob:${output.name}` }));
     const convert = vi.spyOn(PDF_TOOLS.find(t => t.id === "compress")!, "run").mockImplementation(async files => [{ name: `${files[0].name}-converted.pdf`, bytes: new Uint8Array([1]) }]);
-    const video = await import("../aiVideo");
-    const quote = vi.spyOn(video, "quoteVideo").mockResolvedValue({ id: "91000000-0000-4000-8000-000000000001", charge_micros: 1_000_000 } as import("../aiVideo").VideoJob);
+    const media = await import("../aiMedia");
+    const quote = vi.spyOn(media, "createMediaDraft").mockResolvedValue({ id: "media-91000000-0000-4000-8000-000000000001", state: "draft" } as import("../aiMedia").MediaJob);
     try {
       expect(await runTool("run_file_tool", { tool_id: "compress" }, () => true, true, "file-tool-reference")).toMatchObject({ ok: true });
-      expect(await runTool("create_video_draft", { prompt: "Use my second original photo", duration: 5, reference_file: 2 }, () => true, true, "file-tool-reference")).toMatchObject({ pending_action: "video_approval" });
-      expect(quote).toHaveBeenCalledWith(expect.any(Object), originals[1]);
+      expect(await runTool("create_video_draft", { prompt: "Use my second original photo", duration: 5, reference_file: 2 }, () => true, true, "file-tool-reference")).toMatchObject({ pending_action: "media_approval" });
+      expect(quote).toHaveBeenCalledWith("video", "Use my second original photo", expect.objectContaining({ reference: originals[1] }));
     } finally { quote.mockRestore(); convert.mockRestore(); endTurn("file-tool-reference"); setCacheOrg(null); }
   });
   it("processes every single-file attachment and keeps concurrent channel outputs separate", async () => {

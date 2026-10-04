@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // It must not settle on "free" while the webhook is still in flight, and must
 // not spin forever when the payment never happens.
 const plan = { value: "free", status: null as string | null, reads: 0 };
+const workspace = vi.hoisted(() => ({ scope: "cloud:org-a:user:buyer" }));
+vi.mock("../agentStorage", () => ({ agentStorageScope: () => workspace.scope }));
 
 vi.mock("../supabase", () => ({
   isConfigured: true,
@@ -41,6 +43,7 @@ describe("waiting for the Cloud plan to switch on", () => {
     plan.value = "free";
     plan.status = null;
     plan.reads = 0;
+    workspace.scope = "cloud:org-a:user:buyer";
   });
 
   it("returns as soon as the webhook has set the plan", async () => {
@@ -90,6 +93,25 @@ describe("waiting for the Cloud plan to switch on", () => {
     for (const status of ["canceled", "paused", "failed", "expired", "unknown", null]) {
       plan.status = status;
       expect(await awaitCloudPlan(1, 0)).toBeNull();
+    }
+  });
+
+  it("stops the original checkout poll when the workspace changes during its delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const { awaitCloudPlan } = await import("../subscription");
+      const pending = awaitCloudPlan(4, 50);
+      const rejected = expect(pending).rejects.toThrow("workspace changed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(plan.reads).toBe(1);
+      workspace.scope = "cloud:org-b:user:buyer";
+      plan.value = "cloud";
+      plan.status = "active";
+      await vi.advanceTimersByTimeAsync(50);
+      await rejected;
+      expect(plan.reads).toBe(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

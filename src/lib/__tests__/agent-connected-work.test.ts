@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { billing, crm, setCacheOrg, type InvoiceDoc, type InvoiceDocSummary } from "../api";
-import { approvalArgs, runTool, TOOLS, endTurn } from "../aiTools";
+import { approvalArgs, runTool, TOOLS, endTurn, setTurnFiles } from "../aiTools";
 import { offeredTools } from "../agentHarness";
 import { setAgentMode } from "../agentMode";
 import { setCapabilityEnabled } from "../capabilities";
@@ -109,9 +109,22 @@ describe("invoice WhatsApp tools", () => {
     expect(vi.mocked(deliverFile).mock.calls[0][0].name).toBe("INV-12.pdf");
     expect(Array.from(vi.mocked(deliverFile).mock.calls[0][0].bytes)).toEqual(Array.from(PDF));
     expect(endTurn("different-turn")).toEqual([]);
-    expect(endTurn("owner-pdf-turn")).toEqual([{ name: "INV-12.pdf", path: "C:/Exports/INV-12.pdf" }]);
+    expect(endTurn("owner-pdf-turn")).toEqual([{ name: "INV-12.pdf", path: "C:/Exports/INV-12.pdf", documentKey: "invoice:12" }]);
     expect(billing.setStatus).not.toHaveBeenCalled();
     expect(sendWaFile).not.toHaveBeenCalled();
+  });
+  it("replaces a stale invoice PDF only after the fresh export succeeds and keeps unrelated files", async () => {
+    setTurnFiles("refresh-pdf-turn", [], [{ name: "Other.pdf", path: "C:/Exports/Other.pdf" }]);
+    vi.mocked(deliverFile).mockResolvedValueOnce({ name: "INV-12.pdf", path: "C:/Exports/old.pdf" })
+      .mockRejectedValueOnce(new Error("Export folder unavailable"))
+      .mockResolvedValueOnce({ name: "INV-12.pdf", path: "C:/Exports/new.pdf" });
+    await runTool("export_invoice_pdf", { invoice_number: "INV-12" }, () => true, true, "refresh-pdf-turn");
+    expect(await runTool("export_invoice_pdf", { invoice_number: "INV-12" }, () => true, true, "refresh-pdf-turn")).toHaveProperty("error");
+    await runTool("export_invoice_pdf", { invoice_number: "INV-12" }, () => true, true, "refresh-pdf-turn");
+    expect(endTurn("refresh-pdf-turn")).toEqual([
+      { name: "Other.pdf", path: "C:/Exports/Other.pdf" },
+      { name: "INV-12.pdf", path: "C:/Exports/new.pdf", documentKey: "invoice:12" },
+    ]);
   });
   it.each(["971abc12345", "++971501234567", "0501234567", "+0001234567"])("rejects malformed recipient %s before PDF export or sending", async (to) => {
     expect(await call("send_invoice_whatsapp", { invoice_number: "INV-12", to })).toMatchObject({ error: expect.stringMatching(/international phone number/) });

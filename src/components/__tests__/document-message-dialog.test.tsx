@@ -111,7 +111,7 @@ it("explains manual attachments when WhatsApp is not paired and labels the text-
   expect(screen.queryByRole("button", { name:"Send PDF via paired WhatsApp" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name:"Open WhatsApp text draft" }));
   await waitFor(() => expect(openMessageDraft).toHaveBeenCalledWith("whatsapp", props.phone, props.message, expect.objectContaining({ expectedScope: identity.scope })));
-  expect(await screen.findByRole("status")).toHaveTextContent("attach the downloaded invoice");
+  expect(await screen.findByRole("status")).toHaveTextContent("attach the downloaded document");
 });
 
 it("shows an unsent handoff and the actual saved PDF path", async () => {

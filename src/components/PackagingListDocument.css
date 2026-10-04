@@ -1,0 +1,137 @@
+/* Packing documents keep their paper and ink independent of the app theme. */
+.packing-sheet {
+  color: #20262b;
+  background: #fff;
+  padding: 48px;
+  box-sizing: border-box;
+  position: relative;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.packing-body { position: relative; min-height: 1027px; padding-bottom: 30px; }
+.packing-sheet p, .packing-sheet h1, .packing-sheet h2, .packing-sheet dl, .packing-sheet dd { margin: 0; }
+.packing-sheet h2 { font-size: 9px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em; color: #5a6269; }
+.packing-address, .packing-description, .packing-notes p { white-space: pre-wrap; }
+.packing-header { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px 28px; padding-bottom: 18px; border-bottom: 2px solid var(--packing-accent); }
+.packing-brand { min-width: 0; display: flex; align-items: flex-start; gap: 14px; }
+.packing-brand img { width: auto; max-width: 100px; max-height: 62px; object-fit: contain; }
+.packing-brand > div { min-width: 0; }
+.packing-brand .packing-company { font-size: 19px; line-height: 1.3; font-weight: 750; margin-bottom: 7px; }
+.packing-brand p { color: #525b63; }
+.packing-brand .packing-company { color: #20262b; }
+.packing-heading { text-align: right; align-self: start; }
+.packing-heading h1 { font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -.025em; color: #20262b; }
+.packing-heading p { margin-top: 6px; color: #626c75; font-size: 10px; }
+.packing-metadata { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 20px; }
+.packing-metadata dt { font-size: 9px; color: #626c75; margin-bottom: 3px; }
+.packing-metadata dd { font-size: 11px; font-weight: 600; }
+.packing-parties { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin: 20px 0 24px; }
+.packing-parties section { min-width: 0; }
+.packing-parties h2 { margin-bottom: 7px; }
+.packing-party-name { font-size: 13px; font-weight: 650; }
+.packing-parties .packing-address { margin-top: 3px; }
+.packing-items { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; line-height: 1.5; }
+.packing-items th, .packing-items td { padding: 9px 5px; vertical-align: top; overflow-wrap: anywhere; }
+.packing-items th { font-size: 9px; font-weight: 650; text-align: left; border-bottom: 1px solid #20262b; }
+.packing-items td { border-bottom: 1px solid #e0e3e6; }
+.packing-items .packing-numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.packing-description { font-weight: 550; }
+.packing-description small { display: block; color: #626c75; font-size: 8px; font-weight: 400; margin-bottom: 2px; }
+.packing-notes { margin-top: 22px; padding-top: 12px; border-top: 1px solid #d8dde1; }
+.packing-notes h2 { margin-bottom: 7px; }
+.packing-summary, .packing-quantity-continuation { margin-top: 22px; padding-top: 14px; border-top: 2px solid var(--packing-accent); }
+.packing-summary > h2, .packing-quantity-continuation > h2 { margin-bottom: 10px; }
+.packing-summary dl, .packing-quantity-continuation dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 20px; }
+.packing-summary dt, .packing-quantity-continuation dt { font-size: 9px; color: #626c75; }
+.packing-summary dd, .packing-quantity-continuation dd { font-size: 17px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.packing-weight-note { margin-top: 10px !important; font-size: 9px; color: #626c75; }
+.packing-signoff { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 38px; margin-top: 34px; }
+.packing-signoff > div { display: flex; flex-direction: column; }
+.packing-signoff p { min-height: 40px; flex: 1; padding-top: 10px; font-size: 11px; }
+.packing-signoff span { display: block; border-top: 1px solid #abb2b8; padding-top: 5px; color: #626c75; font-size: 9px; }
+.packing-page-footer { position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 20px; border-top: 1px solid #d8dde1; padding-top: 8px; font-size: 9px; color: #626c75; }
+
+/* Open manifest: left-led type and understated rows. */
+.packing-minimal .packing-header { grid-template-areas: "heading brand" "meta meta"; border-bottom: 1px solid #d8dde1; }
+.packing-minimal .packing-heading { grid-area: heading; text-align: left; }
+.packing-minimal .packing-heading h1 { font-size: 33px; font-weight: 500; }
+.packing-minimal .packing-brand { grid-area: brand; justify-content: flex-end; text-align: right; }
+.packing-minimal .packing-company { font-size: 17px; }
+.packing-minimal .packing-metadata { grid-area: meta; padding-top: 14px; border-top: 1px solid #d8dde1; }
+.packing-minimal .packing-items td { border-bottom-color: #e9ebed; }
+
+/* Trade stationery: centered letterhead, black table, full grid. */
+.packing-trade .packing-header { grid-template-columns: 1fr; gap: 17px; border-bottom: 0; padding-bottom: 0; }
+.packing-trade .packing-brand { justify-content: center; text-align: center; }
+.packing-trade .packing-company { font-size: 23px; }
+.packing-trade .packing-heading { text-align: center; border-top: 1px solid #20262b; padding-top: 14px; }
+.packing-trade .packing-heading h1 { font-size: 25px; letter-spacing: .09em; }
+.packing-trade .packing-heading p { display: none; }
+.packing-trade .packing-metadata { padding: 13px 0; border-top: 1px solid #20262b; border-bottom: 1px solid #20262b; }
+.packing-trade .packing-parties { gap: 0; border: 1px solid #20262b; }
+.packing-trade .packing-parties section { padding: 12px 15px; }
+.packing-trade .packing-parties section + section { border-left: 1px solid #20262b; }
+.packing-trade .packing-items thead { background: #20262b; color: #fff; }
+.packing-trade .packing-items th { border: 1px solid #20262b; }
+.packing-trade .packing-items td { border: 1px solid #949ca3; }
+.packing-trade .packing-summary { border: 1px solid #20262b; padding: 14px 16px; }
+.packing-trade .packing-summary dd { font-size: 16px; }
+.packing-trade .packing-signoff { gap: 30px; text-align: center; }
+
+/* Dispatch docket: a framed heading and explicit shipment information strip. */
+.packing-dispatch .packing-header { grid-template-areas: "heading brand" "meta meta"; border: 2px solid #20262b; padding: 16px; gap: 16px 25px; }
+.packing-dispatch .packing-heading { grid-area: heading; text-align: left; align-self: center; padding-left: 12px; border-left: 5px solid var(--packing-accent); }
+.packing-dispatch .packing-heading h1 { font-size: 29px; }
+.packing-dispatch .packing-brand { grid-area: brand; }
+.packing-dispatch .packing-company { font-size: 16px; }
+.packing-dispatch .packing-metadata { grid-area: meta; border-top: 1px solid #d8dde1; padding-top: 12px; }
+.packing-dispatch .packing-parties { gap: 18px; }
+.packing-dispatch .packing-parties section { border: 1px dashed #8f989f; padding: 12px 15px; }
+.packing-dispatch .packing-items th { border-top: 2px solid var(--packing-accent); }
+.packing-dispatch .packing-summary { border: 1px solid #8f989f; border-left: 4px solid var(--packing-accent); padding: 14px 16px; }
+
+/* Warehouse ledger: compact numbering, striped rows and a summary band. */
+.packing-warehouse .packing-header { gap: 12px 24px; border-bottom: 3px double #20262b; }
+.packing-warehouse .packing-heading { align-self: center; }
+.packing-warehouse .packing-heading h1 { font-size: 25px; letter-spacing: -.04em; }
+.packing-warehouse .packing-heading p { text-transform: uppercase; font-size: 8px; letter-spacing: .08em; }
+.packing-warehouse .packing-company { font-size: 17px; }
+.packing-warehouse .packing-metadata { padding-top: 12px; border-top: 1px solid #d8dde1; }
+.packing-warehouse .packing-metadata dd { font-size: 10px; }
+.packing-warehouse .packing-parties { margin: 16px 0 20px; }
+.packing-warehouse .packing-items th { background: #eef0f2; border-bottom: 2px solid var(--packing-accent); }
+.packing-warehouse .packing-items tbody tr:nth-child(even) { background: #f4f5f6; }
+.packing-warehouse .packing-items td { border: 0; }
+.packing-warehouse .packing-summary { background: #eef0f2; border-top: 3px double #20262b; border-bottom: 1px solid #20262b; padding: 14px 16px; }
+.packing-warehouse .packing-summary dd { font-size: 16px; }
+
+/* Long shipment details use full-width blocks; later sheets keep a short header. */
+.packing-compact .packing-header { grid-template-columns: 1fr; grid-template-areas: "brand" "heading" "meta"; gap: 12px; padding: 0 0 12px; border: 0; border-bottom: 1px solid #20262b; }
+.packing-compact .packing-brand { grid-area: brand; justify-content: flex-start; text-align: left; gap: 12px; }
+.packing-compact .packing-brand > div { flex: 1; }
+.packing-compact .packing-brand img { max-width: 64px; max-height: 54px; }
+.packing-compact .packing-brand p { font-size: 10px; line-height: 1.35; }
+.packing-compact .packing-brand .packing-company { font-size: 14px; line-height: 1.3; margin-bottom: 5px; }
+.packing-compact .packing-heading { grid-area: heading; text-align: left; border: 0; padding: 0; }
+.packing-compact .packing-heading h1 { font-size: 24px; line-height: 1.15; letter-spacing: .015em; }
+.packing-compact .packing-heading p { display: none; }
+.packing-compact .packing-metadata { grid-area: meta; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 14px; padding: 10px 0 0; border: 0; border-top: 1px solid #d8dde1; }
+.packing-compact .packing-metadata dt { font-size: 8px; line-height: 1.35; margin-bottom: 2px; }
+.packing-compact .packing-metadata dd { font-size: 9.5px; line-height: 1.35; }
+.packing-compact .packing-parties { grid-template-columns: 1fr; gap: 10px; margin: 12px 0 16px; border: 0; }
+.packing-compact .packing-parties section { padding: 0; border: 0; font-size: 10px; line-height: 1.35; }
+.packing-compact .packing-parties section + section { border-left: 0; border-top: 1px solid #d8dde1; padding-top: 8px; }
+.packing-compact .packing-parties h2 { font-size: 9px; margin-bottom: 5px; }
+.packing-compact .packing-party-name { font-size: 12px; line-height: 1.35; }
+.packing-compact.packing-continuation .packing-parties { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.packing-compact.packing-continuation .packing-parties section + section { border-top: 0; padding-top: 0; }
+.packing-compact .packing-summary { margin-top: 18px; }
+.packing-compact .packing-signoff { margin-top: 22px; }
+
+@media print {
+  .packing-sheet { position: relative !important; inset: auto !important; width: 794px !important; height: 1123px !important; padding: 48px !important; break-after: page; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .packing-sheet:last-child { break-after: auto; }
+  .packing-trade .packing-items th { color: #fff !important; -webkit-text-fill-color: #fff !important; }
+  .packing-items tr, .packing-summary, .packing-signoff { break-inside: avoid; }
+}

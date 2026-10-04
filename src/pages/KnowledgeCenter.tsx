@@ -67,6 +67,29 @@ export const GUIDES = [
     ],
   },
   {
+    id: "packing-lists", category: "Sales & CRM", title: "Prepare a packing list", to: "/packaging-list",
+    summary: "Describe the goods being sent, their packages and shipment weights.",
+    steps: [
+      "Open Sales → Packaging List and choose New packaging list. Enter the recipient and delivery address; an invoice reference is optional.",
+      "Add each item's description, quantity and unit. Duplicate repeated items or move them into delivery order. Optionally enter the package type, package count and net or gross weight per quantity unit. Filey calculates the shipment weights without combining different quantity units.",
+      "Choose a packing-list template, review every preview page and Save. Download PDF or choose a sharing action, then check the recipient before sending.",
+      "Update the status as the shipment progresses. A packing list is independent of invoices, stock movements and accounting; saving or dispatching it does not change those records.",
+    ],
+  },
+  {
+    id: "letters", category: "Documents & data", title: "Create and issue a company letter", to: "/letters",
+    summary: "Build custom correspondence on your company's letterhead and keep the issued copy.",
+    steps: [
+      "Open Tools → Letter and choose New letter. Company details, logo, saved letterhead, signature and stamp are copied from Company Details; review them in Details and Appearance.",
+      "Enter a letter title and recipient. Start with authorization or general declaration wording, or write your own text. Replace bracketed starter instructions before issuing.",
+      "Use Add block for paragraphs, custom label/value fields, dates, signatures or stamps. Drag a block by its handle, use the up/down arrows, or use the keyboard to change its order.",
+      "In Content, choose a Formatting target: All body text, Letter title, or a specific paragraph, field or date. Clicking a paragraph also selects it. Apply a font, point size, bold, italic, underline, color, alignment, line spacing or paragraph spacing to that target.",
+      "In Appearance, choose a layout and use the switches for company details, saved company letterhead, company logo, saved signature and company stamp. Show letter reference is optional; the internal letter number still identifies the saved letter.",
+      "Review every preview page and save a draft while preparing the document. Choose Issue letter after reviewing the content. Issuing saves its content, formatting, layout and company asset references. Download the PDF; issuing alone does not send a message or prove the recipient received it.",
+      "Find issued letters on the Letter dashboard. To revise an issued letter, duplicate it into a new draft. Cloud workspaces require the Letter migration and access to the Letter module.",
+    ],
+  },
+  {
     id: "receipts", category: "Finance & people", title: "Issue a payment receipt", to: "/payment-receipts",
     summary: "Record the receipt and produce a PDF for the payer.",
     steps: [
@@ -132,11 +155,12 @@ export const GUIDES = [
     ],
   },
   {
-    id: "local-editions", category: "Getting started", title: "Free and paid local editions", to: "/settings?section=datamode",
-    summary: "Use core ERP and CRM locally without a paid license.",
+    id: "local-editions", category: "Getting started", title: "Free offline Filey and optional cloud upgrades", to: "/settings?section=datamode",
+    summary: "Use the full local app free after one verified account setup.",
     steps: [
-      "Core local storage and local invoices are free with no monthly invoice cap. Sign in online once to link the device; later offline password access requires a remembered password sign-in.",
-      "Paid plans and connected devices are managed from Billing & Subscription and Devices. A paid license is not required to access your local records.",
+      "All core local modules, documents and invoices are free with no monthly cap. Local PDFs have no Filey branding. Your records stay on this device until you choose to transfer them.",
+      "Create and verify a free Filey account online, then sign in on this device once. Later offline password access requires a remembered online password sign-in on this device.",
+      "Use the same account if you later choose Pro or Ultra for paid cloud benefits. Paid upgrades are optional; a paid license is not required to use the local app. Manage plans and purchased-license activations in Billing & Subscription and Devices.",
       "Hosted cloud quotas and provider charges are separate. Free local software does not include unlimited hosted email, SMS, or external AI usage.",
       "In the desktop app, open Data & Storage to create a full database-and-files backup. The separate summary export is not a complete restorable backup.",
     ],
@@ -193,7 +217,8 @@ export const GUIDES = [
     steps: [
       "Create an invoice and select the customer. Select saved products when you want document lines linked to inventory.",
       "Enter quantities, prices, tax and discounts. Check currency, issue date, due date and the live document preview.",
-      "Choose Check e-invoice in the main toolbar to review required UAE e-invoice fields locally without saving. Complete the seller, buyer, tax and document details listed in the review before exporting XML.",
+      "Choose Check e-invoice in the main toolbar. Review Invoice, Seller, Buyer, Items and Tax & payment, then use Edit beside a missing detail to fix it. Changes stay in your draft until you save.",
+      "Use your business's own FTA-issued TIN for its electronic address, separate from the VAT TRN. A tax group's representative TRN must not replace a member's own identity. Filey calculates totals and generates the supported XML identifiers; you do not need to enter them manually.",
       "Save the draft before sending. Use the document's email or sharing action to deliver it; saving a draft does not send it.",
       "Record a payment against the invoice when money is received. Check the remaining balance and Payment Receipts.",
       "Review Accounting and Reports for the resulting entries. A sales value and a cash receipt are different measures.",
@@ -438,7 +463,7 @@ export const GUIDES = [
       "Cloud mode uses your signed-in account and workspace permissions. Local mode stores business records on the device.",
       "In Settings → Data & Storage, turn Store in my Filey account on to upload this device's pending changes before continuing in Filey Cloud. If an edited record differs in both places, this switch keeps the device's edited version; cloud-only records remain.",
       "Turn the switch off to save the latest cloud records and files on this device before working locally. Switching needs a connection to finish the transfer. The destination opens only after the transfer succeeds.",
-      "Cloud saves require connectivity. Local saves work offline. Optional two-way background sync is controlled separately under Advanced sync for the same account and workspace.",
+      "Cloud saves require connectivity. Local saves stay on your device even while online. A verified account stores your login identity; turning on cloud storage explicitly uploads your workspace after confirmation. Sending email or using an AI provider is a separate action that sends the content you select.",
       "The storage badge identifies the active store. If a transfer cannot finish, Filey keeps the current store open and offers Try again. Your account stays signed in; other open tabs pause until reloaded.",
       "Export a backup before moving devices or making a large import. Keep backup files in a location you control.",
       "When reporting a problem, include the section, action, error message and whether it happened in cloud or local mode. Do not include passwords or API keys.",

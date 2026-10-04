@@ -123,4 +123,15 @@ describe("date editing", () => {
     expect(screen.queryByRole("dialog", { name: "Choose a date" })).not.toBeInTheDocument();
     expect(change).not.toHaveBeenCalled();
   });
+
+  it("does not change a date through a portaled calendar after its fieldset becomes disabled", () => {
+    const change = vi.fn();
+    const view = render(<fieldset><DateField value="2026-09-28" onChange={change} /></fieldset>);
+    fireEvent.click(screen.getByRole("button", { name: "Open calendar" }));
+    const next = screen.getByRole("button", { name: /Tuesday, September 29th, 2026/ });
+    view.rerender(<fieldset disabled><DateField value="2026-09-28" onChange={change} /></fieldset>);
+    fireEvent.click(next);
+    expect(change).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Choose a date" })).not.toBeInTheDocument();
+  });
 });

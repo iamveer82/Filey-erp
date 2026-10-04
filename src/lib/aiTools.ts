@@ -44,8 +44,10 @@ import {
 } from "./documentMessage";
 import { log } from "./log";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
-import { invoiceLineAmount, r2 } from "./money";
-import { pickDocNumber, loadDocFormats } from "./numberFormat";
+import { applyRoundOff } from "./money";
+import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
+import { loadDocFormats } from "./numberFormat";
+import { allocateDocumentNumber } from "./documentNumbers";
 import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
 import {
   githubRepo,
@@ -77,36 +79,64 @@ import {
   type CrmData,
 } from "./crmWorkspace";
 
+// Only Filey's own preflight can mark a rejection as safe to correct. A
+// provider-supplied code or retry flag cannot erase an uncertain write.
+const argumentRejections = new WeakSet<object>();
+export const isToolArgumentRejection = (value: unknown): boolean =>
+  !!value && typeof value === "object" && argumentRejections.has(value);
+function documentInputError(message: string): Error {
+  const error = new Error(message);
+  argumentRejections.add(error);
+  return error;
+}
+
 /** Exact, unique matches only: a similar name must not link the wrong business. */
 async function documentContext(
   args: Record<string, unknown>,
-  kind: "customer" | "supplier"
+  kind: "customer" | "supplier",
+  resolveParty = true,
+  validateItems = true
 ) {
   const name = str(args[kind + "_name"])
     .trim()
     .toLowerCase();
-  const parties = kind === "customer" ? await crm.customers() : await suppliers.list();
+  const parties = !resolveParty ? [] : kind === "customer" ? await crm.customers() : await suppliers.list();
+  const selectedId = resolveParty ? args[kind + "_id"] : undefined;
+  if (selectedId != null && (!Number.isSafeInteger(selectedId) || Number(selectedId) <= 0))
+    throw documentInputError(`Choose a valid saved ${kind} ID.`);
   const matches = parties.filter((p) =>
-    [p.name, "company" in p ? p.company : ""].some(
+    selectedId != null ? p.id === selectedId : [p.name, "company" in p ? p.company : ""].some(
       (n) =>
         String(n || "")
           .trim()
           .toLowerCase() === name
     )
   );
+  if (matches.length > 1)
+    throw documentInputError(`More than one ${kind} matches this name. Choose its saved ${kind}_id: ${matches.map(p => `${p.id} (${p.name})`).join(", ")}.`);
   const party = matches.length === 1 ? matches[0] : null;
+  if (selectedId != null && (!party || ![party.name, "company" in party ? party.company : ""].some(value => str(value).trim().toLowerCase() === name)))
+    throw documentInputError(`The saved ${kind} ID and name do not match. Look up the saved record before changing the document.`);
+  const context = { ...args, ...(party ? {
+    [kind + "_id"]: party.id,
+    [kind + "_email"]: party.email,
+    [kind + "_phone"]: party.phone,
+    [kind + "_address"]: "address" in party ? party.address : undefined,
+    [kind + "_trn"]: "tax_id" in party ? party.tax_id : "trn" in party ? party.trn : undefined,
+  } : {}) };
+  if (!validateItems) return context;
   const products = await erp.products();
   const items = Array.isArray(args.items)
     ? (args.items as Record<string, unknown>[])
     : [];
-  if (!items.length) throw new Error("Add at least one item with a quantity and price.");
+  if (!items.length) throw documentInputError("Add at least one item with a quantity and price.");
   const linkedItems = items.map((item, index) => {
     if (!item || typeof item !== "object" || !str(item.description).trim())
-      throw new Error(`Line ${index + 1} needs an item description.`);
+      throw documentInputError(`Line ${index + 1} needs an item description.`);
     const qty = Number(item.qty),
       price = Number(item.unit_price ?? item.rate);
     if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0)
-      throw new Error(
+      throw documentInputError(
         `Line ${index + 1} needs a positive quantity and a non-negative price.`
       );
     const named = products.filter((p) =>
@@ -121,23 +151,60 @@ async function documentContext(
           ? named[0]
           : undefined;
     if (item.product_id != null && !product)
-      throw new Error("The selected product is unavailable.");
+      throw documentInputError("The selected product is unavailable.");
     return { ...item, qty, ...(product ? { product_id: product.id } : {}) };
   });
   return {
-    ...args,
+    ...context,
     items: linkedItems,
-    ...(party
-      ? {
-          [kind + "_id"]: party.id,
-          [kind + "_email"]: party.email,
-          [kind + "_phone"]: party.phone,
-          [kind + "_address"]: "address" in party ? party.address : undefined,
-          [kind + "_trn"]:
-            "tax_id" in party ? party.tax_id : "trn" in party ? party.trn : undefined,
-        }
-      : {}),
   };
+}
+
+/** Validate the active operands before shared display math can normalize bad
+ * strings to zero. Keep the persisted calculation metadata intact. */
+function documentPricing(
+  items: { description: string; qty: number; unit_price: number; custom?: Record<string, string> | null }[],
+  cols: { key: string }[],
+  priceBy: string,
+  discount = 0,
+  taxRate = 0,
+  roundOff = false
+) {
+  if (priceBy && priceBy !== "qty" && !cols.some(c => c.key === priceBy))
+    throw documentInputError("Choose an existing pricing column. No document changes were made.");
+  const operand = (raw: unknown, label: string, max = Infinity) => {
+    const text = String(raw ?? "").trim(), value = Number(text);
+    if (!text || !Number.isFinite(value) || value !== parseFloat(text) || value < 0 || value > max)
+      throw documentInputError(`${label} needs a valid non-negative number${max === 100 ? " from 0 to 100" : ""}. No document changes were made.`);
+  };
+  const formula = priceBy ? { a: priceBy } : undefined;
+  const lines = items.map((item, index) => {
+    const raw = item.custom ?? {}, meta = splitItemMeta(raw), label = `Line ${index + 1}`;
+    if (raw.__calc_mode && !["auto", "manual", "formula"].includes(raw.__calc_mode))
+      throw documentInputError(`${label} has an unsupported calculation mode.`);
+    for (const key of ["__disc_pct", "__tax_pct"]) if (raw[key] != null) operand(raw[key], label, 100);
+    if (meta.calcMode === "manual") operand(raw.__manual_amount, `${label} manual amount`);
+    else {
+      if (meta.calcMode === "formula" && !meta.itemFormula?.a)
+        throw documentInputError(`${label} needs a pricing column for its formula.`);
+      const key = meta.calcMode === "formula" ? meta.itemFormula!.a : priceBy;
+      if (key && key !== "qty") {
+        if (!cols.some(c => c.key === key)) throw documentInputError(`${label} uses an unavailable pricing column.`);
+        operand(raw[key], `${label} ${key}`);
+      }
+    }
+    const amount = storedLineAmount(item, formula);
+    const gross = storedLineAmount({ ...item, custom: { ...raw, __disc_pct: "0" } }, formula);
+    if (amount < 0 || !Number.isSafeInteger(Math.round(amount * 100)) || !Number.isSafeInteger(Math.round(gross * 100)))
+      throw documentInputError(`${label} amount is too large. No document changes were made.`);
+    return { description: item.description, amount };
+  });
+  const gross = items.reduce((sum, item) => sum + storedLineAmount({ ...item, custom: { ...item.custom, __disc_pct: "0" } }, formula), 0);
+  if (!Number.isSafeInteger(Math.round(gross * 100))) throw documentInputError("The document total is too large. No changes were made.");
+  const totals = applyRoundOff(docTotals(items.map(item => ({ ...item, ...splitItemMeta(item.custom) })), discount, taxRate, formula), roundOff);
+  if (Object.values(totals).some(value => !Number.isSafeInteger(Math.round(value * 100))))
+    throw documentInputError("The document total is too large. No changes were made.");
+  return { lines, ...totals };
 }
 
 /* Tools the BYOK copilot can call (function-calling) — Filey as a personal
@@ -211,6 +278,9 @@ export interface FileOutput {
   videoJobId?: string;
   mediaJobId?: string;
   whatsappRecipients?: string[];
+  telegramRecipients?: string[];
+  /** A fresh export replaces only this document's previous output. */
+  documentKey?: string;
 }
 interface TurnSlot {
   scope: string | null;
@@ -275,6 +345,7 @@ const pushTurnOutput = (tid: string, o: FileOutput): void => {
   if (tid && !turnSlots.has(tid)) return;
   if (o.videoJobId && slotFor(tid).outputs.some(f => f.videoJobId === o.videoJobId)) return;
   if (o.mediaJobId && slotFor(tid).outputs.some(f => f.mediaJobId === o.mediaJobId)) return;
+  if (o.documentKey) slotFor(tid).outputs = slotFor(tid).outputs.filter(f => f.documentKey !== o.documentKey);
   slotFor(tid).outputs.push(o);
 };
 /** A file THIS turn produced, matched loosely by name ("the merged pdf" finds
@@ -649,6 +720,7 @@ const NAV_PAGES = [
   "inventory",
   "orders",
   "invoicing",
+  "packaging-list",
   "quoting",
   "crm",
   "customers",
@@ -668,6 +740,7 @@ const NAV_PAGES = [
   "email-templates",
   "marketing",
   "files",
+  "letters",
   "integrations",
   "settings",
   "tools",
@@ -1072,14 +1145,17 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "list_invoices",
-    description: "List invoices. Optional status: draft | sent | paid | overdue.",
+    description: "Find invoice summaries by number/customer and status. Default 30; use offset for more. Read get_invoice before editing or reporting details.",
     parameters: {
       type: "object",
       properties: {
         status: { type: "string", enum: ["draft", "sent", "paid", "overdue"] },
+        query: { type: "string", maxLength: 200 },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        offset: { type: "integer", minimum: 0, maximum: 100000 },
       },
     },
-    run: async ({ status }) => {
+    run: async ({ status, query, limit, offset }) => {
       const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
       const t = today();
       let rows = docs;
@@ -1092,7 +1168,12 @@ export const TOOLS: ToolDef[] = [
             d.status !== "paid"
         );
       else if (status) rows = docs.filter((d) => d.status === status);
-      return rows.slice(0, 30).map((d) => ({
+      const q = lc(query).trim();
+      if (q) rows = rows.filter((d) => [d.number, d.customer_name].some(value => lc(value).includes(q)));
+      const start = Math.max(0, Math.min(100000, Math.floor(numOf(offset))));
+      const count = limit === undefined ? 30 : Math.max(1, Math.min(100, Math.floor(numOf(limit))));
+      return rows.slice(start, start + count).map((d) => ({
+        id: d.id,
         number: d.number,
         customer: d.customer_name,
         total: d.total,
@@ -1101,6 +1182,30 @@ export const TOOLS: ToolDef[] = [
         status: d.status,
         due: d.due_date,
       }));
+    },
+  },
+  {
+    name: "get_invoice",
+    description: "Read saved invoice lines, pricing, dates, buyer, tax and current totals. Use an exact number or id:<id> for duplicates. Read back after edits. Image presence flags replace raw images.",
+    parameters: {
+      type: "object",
+      properties: { invoice_number: { type: "string", minLength: 1, maxLength: 200 } },
+      required: ["invoice_number"],
+      additionalProperties: false,
+    },
+    run: async ({ invoice_number }) => {
+      const summary = await findInvoice(invoice_number);
+      if (!summary) return { error: `No invoice matching "${str(invoice_number)}". Find its exact number or id with list_invoices.` };
+      const { logo, stamp, signature, ...doc } = await billing.getDoc(Number(summary.id));
+      return {
+        ...doc,
+        total: summary.total,
+        balance: summary.balance,
+        paid: summary.paid,
+        has_logo: !!logo,
+        has_stamp: !!stamp?.data,
+        has_signature: !!signature?.data,
+      };
     },
   },
 
@@ -1256,21 +1361,11 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_invoice_draft",
     description:
-      "Create a DRAFT invoice for a customer with line items (always a draft the user reviews). Pass `template` to choose the design (e.g. corporate, elegant, fta) — call list_templates if unsure; omitted, the company default is used.\n\n" +
-      "DECODING THE USER'S WORDS — map a dictated invoice onto the fields like this:\n" +
-      "  · 'invoice Al Noor for 2 laptops at 2500' → customer_name 'Al Noor', items [{description:'laptops', qty:2, unit_price:2500}].\n" +
-      "  · The party after 'for'/'to' is customer_name; on a PURCHASE order or bill the same slot is the supplier.\n" +
-      "  · The product words are description, verbatim — codes stay intact.\n" +
-      "  · 'qty'/'quantity' → qty (decimals fine). 'rate'/'price'/'@' → unit_price, the per-one-unit figure, never multiplied by qty.\n" +
-      "Ask for whatever piece is missing (one question, in the order: customer, item, qty, rate) instead of guessing.\n\n" +
-      "PRICING THAT IS NOT qty × unit_price: by default a line is `qty × unit_price`. When the rate is quoted per something else — per litre, per kg, per metre, per hour — do NOT multiply it out by hand into a fake unit price, and do NOT price by the pack count. Add the real measure as a custom column and price on it:\n" +
-      '  · `custom_columns` names the extra columns, e.g. [{key:"total_liters", label:"T.Liters"}].\n' +
-      '  · each item carries its value in `custom`, e.g. {"total_liters": "400"}.\n' +
-      '  · `price_by` is the column key the amount multiplies, e.g. "total_liters".\n' +
-      'Example — "68 Pail 20L, qty 20, 4.1 per litre, 400 litres total, price by total litres": one item with qty 20, unit "Pail", unit_price 4.1, custom {"total_liters":"400"}, plus custom_columns for it and price_by "total_liters". The line then reads 400 × 4.1 = 1640, not 20 × 4.1 = 82. Getting this wrong puts a wrong total on a tax document, so when a message mentions a rate per unit of measure, use this.',
+      "Create a draft for review using the company template, or pass a template from list_templates. Preserve item descriptions/codes verbatim. Ask for missing customer, item, quantity or rate; never guess. The rate is per unit, never pre-multiplied. For pricing per litre/kg/hour, put the measure in a custom column and use its key as price_by. Example: 20 pails of 20L at 4.1/litre → qty:20, unit:'Pail', unit_price:4.1, custom:{total_liters:'400'}, custom_columns:[{key:'total_liters',label:'T.Liters'}], price_by:'total_liters'; amount is 400 × 4.1 = 1640. Use revise_invoice to correct an existing draft, not create a duplicate.",
     parameters: {
       type: "object",
       properties: {
+        customer_id: { type: "integer", minimum: 1, description: "Saved customer ID; supply with its matching name when names are duplicated." },
         customer_name: {
           type: "string",
           description:
@@ -1285,6 +1380,7 @@ export const TOOLS: ToolDef[] = [
           type: "array",
           items: {
             type: "object",
+            additionalProperties: false,
             properties: {
               product_id: {
                 type: "number",
@@ -1307,6 +1403,7 @@ export const TOOLS: ToolDef[] = [
                 type: "string",
                 description: "What one qty is — Pail, Drum, kg, hr. Shown on the line.",
               },
+              tax_category: { type: "string", enum: ["S", "Z", "E", "O", "AE"] },
               custom: {
                 type: "object",
                 description:
@@ -1349,14 +1446,10 @@ export const TOOLS: ToolDef[] = [
             .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
             .filter((c) => c.key)
         : [];
-      // Price by a column only if that column exists — a formula pointing at a
-      // key no line carries would silently make every amount zero.
-      const wanted = str(args.price_by);
-      const priceBy =
-        wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
+      const priceBy = str(args.price_by).trim();
       // The user's invoice sequence (Settings → Document Numbering), not a
       // timestamp — an agent-made draft sits in the same series as the rest.
-      const number = pickDocNumber(
+      const number = await allocateDocumentNumber(
         "invoice",
         ((await billing.listDocs("sales")) as { number: string }[]).map((d) => d.number),
         await loadDocFormats()
@@ -1390,6 +1483,7 @@ export const TOOLS: ToolDef[] = [
           description: str(it.description),
           qty: numOf(it.qty) || 1,
           unit_price: numOf(it.unit_price),
+          ...(str(it.tax_category) ? { tax_category: str(it.tax_category) } : {}),
           ...(str(it.unit) ? { unit: str(it.unit) } : {}),
           ...(it.custom && typeof it.custom === "object"
             ? {
@@ -1411,21 +1505,17 @@ export const TOOLS: ToolDef[] = [
         // indistinguishable from a hand-made one.
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       };
+      const pricing = documentPricing(input.items, cols, priceBy, input.discount, input.tax_rate);
       await (assertCurrent(), billing.saveDoc(input));
       const unknownParty = await partyCheck("customer", args.customer_name);
       // Hand back what each line actually came to. The agent then states the
       // real figure instead of re-deriving it and reporting a total the
       // document does not have.
-      const lines = input.items.map((it) => ({
-        description: it.description,
-        amount: invoiceLineAmount(it, priceBy ? { a: priceBy } : undefined),
-      }));
       return {
         ok: true,
         number: input.number,
         ...(unknownParty ?? {}),
-        lines,
-        subtotal: r2(lines.reduce((s, l) => s + l.amount, 0)),
+        ...pricing,
         priced_by: priceBy || "qty × unit price",
         message: "Draft invoice created — open Invoicing to review/send.",
       };
@@ -1434,7 +1524,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "revise_invoice",
     description:
-      "Correct a DRAFT invoice that is already saved — replace its lines, change the customer, or change how the lines are priced. Use this when the user says a figure is wrong instead of drafting a second invoice: two near-identical drafts are worse than one corrected. Only drafts can be revised; an invoice that has been sent or paid must be handled deliberately, not edited underneath the customer. `items` replaces every line when given.",
+      "Correct an existing draft's buyer, lines or pricing. Read get_invoice first; items replaces ALL lines, so preserve every retained line and its custom metadata. Only drafts can be revised. Use a credit note for a sent/paid invoice.",
     parameters: {
       type: "object",
       properties: {
@@ -1442,7 +1532,8 @@ export const TOOLS: ToolDef[] = [
           type: "string",
           description: "The number returned when it was created.",
         },
-        customer_name: { type: "string" },
+        customer_name: { type: "string", minLength: 1 },
+        customer_id: { type: "integer", minimum: 1, description: "Saved customer ID; supply with its matching name when names are duplicated." },
         custom_columns: {
           type: "array",
           items: {
@@ -1458,15 +1549,20 @@ export const TOOLS: ToolDef[] = [
         },
         items: {
           type: "array",
+          minItems: 1,
           description: "Replaces ALL existing lines. Omit to keep them.",
           items: {
             type: "object",
+            additionalProperties: false,
             properties: {
-              description: { type: "string" },
-              qty: { type: "number" },
-              unit_price: { type: "number" },
+              id: { type: "integer", minimum: 1, description: "Existing line ID, ignored because replacements get new IDs." },
+              description: { type: "string", minLength: 1 },
+              product_id: { type: "integer", minimum: 1 },
+              qty: { type: "number", minimum: 0 },
+              unit_price: { type: "number", minimum: 0 },
+              tax_category: { type: "string", enum: ["S", "Z", "E", "O", "AE"] },
               unit: { type: "string" },
-              custom: { type: "object" },
+              custom: { type: "object", description: "Preserve the custom values and packed calculation metadata returned by get_invoice when replacing lines." },
             },
             required: ["description", "qty", "unit_price"],
           },
@@ -1486,6 +1582,13 @@ export const TOOLS: ToolDef[] = [
           error: `${str(doc.number)} is "${str(doc.status)}", not a draft. Only drafts can be revised — issue a credit note or a new invoice instead.`,
         };
 
+      if (a.customer_name !== undefined && !str(a.customer_name).trim())
+        return { error: "Choose the customer name. No invoice changes were made." };
+      const changingCustomer = a.customer_name !== undefined && lc(str(a.customer_name).trim()) !== lc(doc.customer_name.trim()) || a.customer_id !== undefined && a.customer_id !== doc.customer_id;
+      const context = a.items !== undefined || changingCustomer
+        ? await documentContext({ ...a, customer_name: a.customer_name ?? doc.customer_name, items: a.items ?? doc.items }, "customer", changingCustomer, a.items !== undefined)
+        : null;
+
       const cols = Array.isArray(a.custom_columns)
         ? (a.custom_columns as Record<string, unknown>[])
             .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
@@ -1493,10 +1596,12 @@ export const TOOLS: ToolDef[] = [
         : (doc.custom_columns ?? []);
 
       const items = Array.isArray(a.items)
-        ? (a.items as Record<string, unknown>[]).map((it) => ({
+        ? (context!.items as Record<string, unknown>[]).map((it) => ({
             description: str(it.description),
-            qty: numOf(it.qty) || 1,
+            qty: Number(it.qty),
             unit_price: numOf(it.unit_price),
+            ...(it.product_id != null ? { product_id: Number(it.product_id) } : {}),
+            ...(str(it.tax_category) ? { tax_category: str(it.tax_category) } : {}),
             ...(str(it.unit) ? { unit: str(it.unit) } : {}),
             ...(it.custom && typeof it.custom === "object"
               ? {
@@ -1515,30 +1620,31 @@ export const TOOLS: ToolDef[] = [
       const priceBy =
         a.price_by === undefined
           ? (doc.unit_price_formula?.a ?? "")
-          : (() => {
-              const w = str(a.price_by);
-              return w && (w === "qty" || cols.some((c) => c.key === w)) ? w : "";
-            })();
+          : str(a.price_by).trim();
 
       const next: InvoiceDocInput = {
         ...doc,
         ...(str(a.customer_name) ? { customer_name: str(a.customer_name) } : {}),
+        ...(changingCustomer ? {
+          customer_id: context!.customer_id == null ? null : Number(context!.customer_id),
+          customer_email: str(context!.customer_email),
+          customer_address: str(context!.customer_address),
+          customer_trn: str(context!.customer_trn),
+          buyer_city: "",
+          buyer_country_subdivision: "",
+          buyer_country_code: "",
+          einvoice: { ...doc.einvoice, buyer: undefined, buyer_delivery_mode: undefined, delivery: undefined },
+        } : {}),
         items,
         custom_columns: cols,
         unit_price_formula: priceBy ? { a: priceBy, b: "unit_price" } : null,
       };
+      const pricing = documentPricing(items, cols, priceBy, next.discount, next.tax_rate, next.round_off);
       await (assertCurrent(), billing.saveDoc(next));
-
-      const formula = priceBy ? { a: priceBy } : undefined;
-      const lines = items.map((it) => ({
-        description: it.description,
-        amount: invoiceLineAmount(it, formula),
-      }));
       return {
         ok: true,
         number: doc.number,
-        lines,
-        subtotal: r2(lines.reduce((s, l) => s + l.amount, 0)),
+        ...pricing,
         priced_by: priceBy || "qty × unit price",
         message: `${doc.number} updated.`,
       };
@@ -1739,7 +1845,7 @@ export const TOOLS: ToolDef[] = [
       const assertCurrent = toolExecutionCheck(signal);
       const number =
         str(a.order_number) ||
-        pickDocNumber(
+        await allocateDocumentNumber(
           "sales_order",
           ((await erp.orders()) as { order_number: string }[]).map((o) => o.order_number),
           await loadDocFormats()
@@ -2071,10 +2177,10 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "open_page",
-    description: `Navigate the app to a page so the user can act there. Pages: ${NAV_PAGES.join(", ")}. Use 'tools' for PDF/image tools.`,
+    description: "Open a Filey section. Use 'tools' for PDF/image tools.",
     parameters: {
       type: "object",
-      properties: { page: { type: "string" } },
+      properties: { page: { type: "string", enum: NAV_PAGES } },
       required: ["page"],
     },
     run: async (a) => {
@@ -2224,13 +2330,9 @@ export const TOOLS: ToolDef[] = [
             .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
             .filter((c) => c.key)
         : [];
-      // Price by a column only if that column exists — a formula pointing at a
-      // key no line carries would silently make every amount zero.
-      const wanted = str(args.price_by);
-      const priceBy =
-        wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
+      const priceBy = str(args.price_by).trim();
       // The user's quotation sequence (Settings → Document Numbering).
-      const qtNo = pickDocNumber(
+      const qtNo = await allocateDocumentNumber(
         "quote",
         ((await quoteApi.listDocs()) as { number: string }[]).map((q) => q.number),
         await loadDocFormats()
@@ -2241,8 +2343,8 @@ export const TOOLS: ToolDef[] = [
         description: str(it.description),
         qty: numOf(it.qty) || 1,
         rate: numOf(it.rate),
-        discount: 0,
-        tax: 0,
+        discount: numOf((it.custom as Record<string, unknown> | undefined)?.__disc_pct),
+        tax: numOf((it.custom as Record<string, unknown> | undefined)?.__tax_pct),
         ...(str(it.unit) ? { unit: str(it.unit) } : {}),
         ...(it.custom && typeof it.custom === "object"
           ? {
@@ -2255,6 +2357,7 @@ export const TOOLS: ToolDef[] = [
             }
           : {}),
       }));
+      const pricing = documentPricing(lineItems.map(it => ({ ...it, unit_price: it.rate })), cols, priceBy);
       await (assertCurrent(), quoteApi.saveDoc({
         number: qtNo,
         status: "draft",
@@ -2271,21 +2374,10 @@ export const TOOLS: ToolDef[] = [
         ...(cols.length ? { custom_columns: cols } : {}),
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       }));
-      // Quote lines price off `rate`; invoiceLineAmount reads `unit_price`, so
-      // the value is handed over under the name it expects.
-      const formula = priceBy ? { a: priceBy } : undefined;
-      const lines = lineItems.map((it) => ({
-        description: it.description,
-        amount: invoiceLineAmount(
-          { qty: it.qty, unit_price: it.rate, custom: it.custom },
-          formula
-        ),
-      }));
       return {
         ok: true,
         number: qtNo,
-        lines,
-        subtotal: r2(lines.reduce((s, l) => s + l.amount, 0)),
+        ...pricing,
         priced_by: priceBy || "qty × rate",
         message: "Draft quotation created — open Quoting to review/send.",
       };
@@ -2377,12 +2469,10 @@ export const TOOLS: ToolDef[] = [
             .map((c) => ({ key: str(c.key), label: str(c.label) || str(c.key) }))
             .filter((c) => c.key)
         : [];
-      const wanted = str(args.price_by);
-      const priceBy =
-        wanted && (wanted === "qty" || cols.some((c) => c.key === wanted)) ? wanted : "";
+      const priceBy = str(args.price_by).trim();
       // The user's own numbering scheme (Settings → Document Numbering), not a
       // random number — an agent-made PO sits in the same sequence as the rest.
-      const poNumber = pickDocNumber(
+      const poNumber = await allocateDocumentNumber(
         "purchase_order",
         (await pos.list()).map((r) => r.po_number),
         await loadDocFormats()
@@ -2404,17 +2494,7 @@ export const TOOLS: ToolDef[] = [
             }
           : {}),
       }));
-      // PO lines price off unit_cost; invoiceLineAmount reads unit_price, so the
-      // value is handed over under the name it expects.
-      const formula = priceBy ? { a: priceBy } : undefined;
-      const lines = lineItems.map((it) => ({
-        description: it.description,
-        amount: invoiceLineAmount(
-          { qty: it.quantity, unit_price: it.unit_cost, custom: it.custom },
-          formula
-        ),
-      }));
-      const total = r2(lines.reduce((s, l) => s + l.amount, 0));
+      const { lines, total } = documentPricing(lineItems.map(it => ({ ...it, qty: it.quantity, unit_price: it.unit_cost })), cols, priceBy);
       await (assertCurrent(), pos.save({
         po_number: poNumber,
         status: "draft",
@@ -3019,7 +3099,7 @@ export const TOOLS: ToolDef[] = [
       const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
       if (!items.length) return { error: "A bill needs at least one line." };
       // The user's purchase-invoice sequence (Settings → Document Numbering).
-      const number = pickDocNumber(
+      const number = await allocateDocumentNumber(
         "purchase_invoice",
         ((await billing.listDocs("purchase")) as { number: string }[]).map(
           (d) => d.number
@@ -3192,7 +3272,7 @@ export const TOOLS: ToolDef[] = [
         import("./api"),
       ]);
       // The user's receipt sequence (Settings → Document Numbering).
-      const number = pickDocNumber(
+      const number = await allocateDocumentNumber(
         "payment_receipt",
         (await receipts.list()).map((r) => r.number),
         await loadDocFormats()
@@ -3308,10 +3388,9 @@ export const TOOLS: ToolDef[] = [
 
       const { loadChallans, saveChallans, blankChallanForm, challanRecord, DC_TYPES } =
         await import("./challans");
-      const { pickDocNumber, loadDocFormats } = await import("./numberFormat");
 
       const existing = await loadChallans();
-      const number = pickDocNumber(
+      const number = await allocateDocumentNumber(
         "delivery_challan",
         existing.map((r) => r.number),
         await loadDocFormats()
@@ -3987,29 +4066,22 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_video_draft",
-    description: "Prepare a video using the user's configured provider. Default: their own fal key, Wan 2.2 at approximately 5 or 10 seconds, 720p, silent. Filey credit mode uses its managed provider only if explicitly selected. This creates a persistent chat card, NEVER paid generation. The user must click Generate. Optionally use an attached photo by its 1-based reference_file number. Never claim a draft is rendered or published, and never bypass the Generate decision using other tools.",
+    description: "Prepare a video using the user's own fal key, Wan 2.2 at approximately 5 or 10 seconds, 720p, silent. Filey Coin cannot pay for videos. This creates a persistent chat card, NEVER paid generation. The user must click Generate. Optionally use an attached photo by its 1-based reference_file number. Never claim a draft is rendered or published, and never bypass the Generate decision using other tools.",
     parameters: { type: "object", properties: {
-      prompt: { type: "string" }, duration: { type: "integer", minimum: 4, maximum: 15 },
-      aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"] }, generate_audio: { type: "boolean" },
+      prompt: { type: "string" }, duration: { type: "integer", enum: [5, 10] },
+      aspect_ratio: { type: "string", enum: ["9:16", "16:9", "1:1"] }, generate_audio: { type: "boolean", enum: [false], description: "Wan generates silent video." },
       reference_file: { type: "integer", minimum: 1, description: "Optional attached JPG, PNG or WebP under 2 MB. Its framing is used instead of aspect_ratio." },
     }, required: ["prompt", "duration"] },
     run: async (a) => {
       const tid = activeTurnId;
-      const { quoteVideo } = await import("./aiVideo");
       const index = a.reference_file;
       const file = index === undefined ? undefined : turnFiles(tid)[Number(index) - 1];
       if (index !== undefined && (!Number.isInteger(index) || Number(index) < 1 || !file)) return { error: "Choose a valid attached image by its 1-based number." };
-      const { getMediaConfig, createMediaDraft } = await import("./aiMedia");
-      if (getMediaConfig().videoSource === "byok") {
-        const job = await createMediaDraft("video", str(a.prompt), { duration: Number(a.duration), aspect: str(a.aspect_ratio) || "9:16", reference: file });
-        pushTurnOutput(tid, { name: "Brand video", mediaJobId: job.id });
-        return { job_id: job.id, state: job.state, billing: "user_provider", pending_action: "media_approval", retry_safe: false,
-          message: "Draft ready in chat. Wan generates silent video. The user must click Generate; their provider rates apply. No Filey credits charged. Do not recreate or submit this draft." };
-      }
-      const job = await quoteVideo({ prompt: str(a.prompt), duration: Number(a.duration), aspect_ratio: str(a.aspect_ratio) || "9:16", generate_audio: a.generate_audio !== false }, file);
-      pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
-      return { job_id: job.id, state: job.state, price_usd: job.charge_micros / 1e6, pending_action: "video_approval", retry_safe: false,
-        message: "Video quote prepared. The user can review the card and click Generate. No generation credits have been charged. Do not poll or recreate the draft." };
+      const { createMediaDraft } = await import("./aiMedia");
+      const job = await createMediaDraft("video", str(a.prompt), { duration: Number(a.duration), aspect: str(a.aspect_ratio) || "9:16", reference: file });
+      pushTurnOutput(tid, { name: "Brand video", mediaJobId: job.id });
+      return { job_id: job.id, state: job.state, billing: "user_provider", pending_action: "media_approval", retry_safe: false,
+        message: "Draft ready in chat. Wan generates silent video. The user must click Generate; their provider rates apply. No Filey Coin charged. Do not recreate or submit this draft." };
     },
   },
   {
@@ -4017,11 +4089,8 @@ export const TOOLS: ToolDef[] = [
     description: "List this account's recent video drafts and jobs. Persisted jobs survive app restarts. No wallet charge.",
     parameters: { type: "object", properties: {} },
     run: async () => {
-      const { getMediaConfig, listMediaJobs } = await import("./aiMedia");
-      if (getMediaConfig().videoSource === "byok") return { jobs: listMediaJobs().filter(j => j.kind === "video").map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0, 200), duration: j.duration, billing: "user_provider" })) };
-      const { listVideos } = await import("./aiVideo");
-      const result = await listVideos();
-      return { configured: result.configured, jobs: result.jobs.map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0,200), duration: j.duration, price_usd: j.charge_micros / 1e6, charged_usd: j.charged_micros / 1e6 })) };
+      const { listMediaJobs } = await import("./aiMedia");
+      return { jobs: listMediaJobs().filter(j => j.kind === "video").map(j => ({ id: j.id, state: j.state, prompt: j.prompt.slice(0, 200), duration: j.duration, billing: "user_provider" })) };
     },
   },
   {
@@ -4040,8 +4109,8 @@ export const TOOLS: ToolDef[] = [
       const job = await getVideo(str(a.id));
       pushTurnOutput(tid, { name: "Brand video", videoJobId: job.id });
       return { job_id: job.id, state: job.state, charged_usd: job.charged_micros / 1e6, output_url: job.output_url,
-        pending_action: job.state === "draft" ? "video_approval" : videoActive(job) ? "video_render" : undefined,
-        message: job.error || (job.state === "completed" ? "Video ready in its card. It has not been saved to disk or posted to social media." : "The video card shows current progress; do not poll in this chat turn.") };
+        pending_action: videoActive(job) ? "video_render" : undefined,
+        message: job.error || (job.state === "draft" ? "This older Coin draft cannot be generated. Create a new video with the user's own API key." : job.state === "completed" ? "Video ready in its card. It has not been saved to disk or posted to social media." : "The video card shows current progress; do not poll in this chat turn.") };
     },
   },
   {
@@ -4290,12 +4359,22 @@ export const TOOLS: ToolDef[] = [
       },
       required: ["url"],
     },
-    run: async (a) => {
+    run: async (a, signal) => {
       // Substituted here rather than by the caller so the credential is absent
       // from the model's context AND from the approval prompt: the owner sees
       // "Bearer {{secret:stripe_key}}", which is the readable thing to approve.
+      const assertCurrent = toolExecutionCheck(signal);
+      const originalGate = gateFor("http_fetch", true);
       const rawHeaders = (a.headers as Record<string, string>) ?? {};
       const secrets = await secretSubstitutions([str(a.url), str(a.body), ...Object.values(rawHeaders).map(str)]);
+      // Native credential reads may resolve after Stop or access revocation.
+      // Recheck the original task before sending any substituted credential.
+      assertCurrent();
+      await requireToolModuleAccess("http_fetch", a);
+      assertCurrent();
+      const currentGate = gateFor("http_fetch", true);
+      if (!isToolAllowed("http_fetch") || currentGate === "block" || currentGate === "ask" && originalGate !== "ask")
+        return { error: "Agent permissions changed before sending. Nothing was sent.", retry_safe: true };
       const used = new Set<string>();
       const missing = new Set<string>();
       const fill = (v: string) => {
@@ -4319,7 +4398,7 @@ export const TOOLS: ToolDef[] = [
         };
 
       try {
-      const r = await httpFetch(url, { method: str(a.method) || "GET", body, headers });
+      const r = await httpFetch(url, { method: str(a.method) || "GET", body, headers, signal });
       // Names only. Echoing a value here would undo the entire point.
       return {
         status: r.status,
@@ -4327,6 +4406,7 @@ export const TOOLS: ToolDef[] = [
         ...(used.size ? { secrets_used: [...used] } : {}),
       };
       } catch (error) {
+        if ((error as Error)?.name === "AbortError") throw error;
         return { error: secrets.redact(error instanceof Error ? error.message : String(error)) };
       }
     },
@@ -5047,7 +5127,7 @@ export const TOOLS: ToolDef[] = [
       signal?.throwIfAborted();
       if (scope !== agentStorageScope()) throw new DOMException("Workspace changed", "AbortError");
       if (!saved.path && !saved.url) return { error: "The PDF could not be saved. Check the export folder in Settings." };
-      pushTurnOutput(tid, saved);
+      pushTurnOutput(tid, { ...saved, documentKey: `invoice:${summary.id}` });
       return { ok: true, file: saved.name, message: "PDF exported. Customer delivery and invoice status are unchanged." };
     },
   },
@@ -5425,6 +5505,11 @@ export async function runTool(
     return out;
   } catch (e) {
     if ((e as Error)?.name === "AbortError") throw e;
+    if (isToolArgumentRejection(e)) {
+      const result = { error: errMsg(e), code: "invalid_arguments", retry_safe: true };
+      argumentRejections.add(result);
+      return result;
+    }
     log.error("agent", `${name} threw`, e);
     // A timeout after dispatch cannot prove that an outbound/payment action
     // failed. Never coach the model to repeat it through another transport.

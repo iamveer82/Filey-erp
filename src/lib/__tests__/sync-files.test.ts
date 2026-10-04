@@ -1,8 +1,9 @@
+import { transferPushFileBlobs as pushFileBlobs, transferSyncNow as syncNow } from "./cloud-transfer-fixture";
 import { webcrypto } from "node:crypto";
 import { Blob as NodeBlob } from "node:buffer";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { localClient, readBlobBytes, journalSnapshot } from "../localdb";
-import { pushFileBlobs, pullFileBlobs, syncNow, getSyncStatus } from "../sync";
+import { pullFileBlobs, getSyncStatus } from "../sync";
 
 const uid = "file-test-owner";
 beforeEach(() => {

@@ -1,4 +1,4 @@
-// The e-invoice XML goes to the FTA. XML 1.0 forbids control characters
+// The e-invoice XML is prepared for provider validation. XML 1.0 forbids control characters
 // outright, so one riding along in a customer name — pasted from a PDF, or
 // imported from a CSV — makes the whole document unparseable, and the rejection
 // names nothing that points back to the field.
@@ -7,14 +7,24 @@ import { buildInvoiceXml, type EInvoiceDoc } from "../einvoiceXml";
 
 const doc = (over: Partial<EInvoiceDoc> = {}): EInvoiceDoc => ({
   number: "INV-2026-0001",
-  einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408" },
+  einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408",
+    seller: { tin: "1001234567", legal_authority: "Dubai Economy" }, buyer: { tin: "1007774567" } },
   issue_date: "2026-09-04",
+  due_date: "2026-10-04",
+  payment_means_code: "10",
   currency: "AED",
   tax_rate: 5,
   seller_name: "Acme FZE",
   seller_trn: "100123456700003",
-  seller_country_subdivision: "DU",
+  seller_address: "Office 1",
+  seller_city: "Dubai",
+  seller_country_subdivision: "DXB",
+  seller_legal_id: "LICENCE-1",
+  seller_legal_id_type: "TL",
   customer_name: "Globex LLC",
+  customer_address: "Office 2",
+  buyer_city: "Dubai",
+  buyer_country_subdivision: "DXB",
   items: [{ description: "Consulting", qty: 1, unit_price: 100, tax_category: "S" }],
   ...over,
 });

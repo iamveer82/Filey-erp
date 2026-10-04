@@ -154,6 +154,60 @@ Deno.test("write tools refuse to run without an owner", async () => {
   assertEquals(typeof out.error, "string");
 });
 
+Deno.test("one hosted task reuses successful write receipts even if the model changes property order", async () => {
+  for (const tool of WRITE_TOOLS) {
+    const f = fakeWriteClient();
+    const receipts = new Map<string, Promise<unknown>>();
+    const input = WRITE_INPUTS[tool.name] as Record<string, unknown>;
+    const reordered = Object.fromEntries(Object.entries(input).reverse());
+    const source = { channel: "whatsapp" as const, externalId: "971500000000" };
+    const [first, repeat] = await Promise.all([
+      runTool(f.client, "ORG", tool.name, input, "OWNER", source, receipts),
+      runTool(f.client, "ORG", tool.name, reordered, "OWNER", source, receipts),
+    ]);
+    assertEquals(repeat, first);
+    assertEquals(f.rpcRequests.length + f.inserts.filter(([table]) => table !== "audit_log").length, 1, tool.name);
+    await runTool(f.client, "ORG", tool.name, input, "OWNER", source, new Map());
+    assertEquals(f.rpcRequests.length + f.inserts.filter(([table]) => table !== "audit_log").length, 2, "a later user task can deliberately repeat the write");
+  }
+});
+
+Deno.test("write receipts keep distinct inputs and workspace/conversation identities separate", async () => {
+  const f = fakeWriteClient();
+  const receipts = new Map<string, Promise<unknown>>();
+  const source = { channel: "telegram" as const, externalId: "42" };
+  await runTool(f.client, "ORG", "add_customer", { name: "One" }, "OWNER", source, receipts);
+  await runTool(f.client, "ORG", "add_customer", { name: "Two" }, "OWNER", source, receipts);
+  await runTool(f.client, "OTHER", "add_customer", { name: "One" }, "OWNER", source, receipts);
+  await runTool(f.client, "ORG", "add_customer", { name: "One" }, "OTHER-OWNER", source, receipts);
+  await runTool(f.client, "ORG", "add_customer", { name: "One" }, "OWNER", { ...source, externalId: "43" }, receipts);
+  assertEquals(f.inserts.filter(([table]) => table === "crm_customers").length, 5);
+});
+
+Deno.test("lost or malformed additive write receipts stop rather than creating duplicates on retry", async () => {
+  for (const name of ["add_customer", "add_product", "log_expense"]) {
+    for (const outcome of ["throw", "error", "missing-id"]) {
+      let inserted = 0;
+      const client = { from: () => {
+        const builder = {
+          insert: () => { inserted++; return builder; },
+          select: () => builder,
+          single: () => outcome === "throw" ? Promise.reject(new Error("response lost after commit"))
+            : Promise.resolve(outcome === "error" ? { data: null, error: { code: "FetchError" } } : { data: {}, error: null }),
+        };
+        return builder;
+      } };
+      const receipts = new Map<string, Promise<unknown>>();
+      const first = await runTool(client, "ORG", name, WRITE_INPUTS[name], "OWNER", undefined, receipts) as { created?: string; code?: string; retry_safe?: boolean };
+      assertEquals(first.created, undefined);
+      assertEquals(first.code, "unconfirmed_write", `${name} ${outcome}`);
+      assertEquals(first.retry_safe, false);
+      assertEquals(await runTool(client, "ORG", name, WRITE_INPUTS[name], "OWNER", undefined, receipts), first);
+      assertEquals(inserted, 1);
+    }
+  }
+});
+
 /* send_message — the agent talking to someone who is NOT the owner. The
  * recipient must be pinned down exactly, and nothing may go out without an
  * approval code. */
@@ -192,6 +246,28 @@ Deno.test("send_message parks an approval instead of sending", async () => {
   const row = parked![1] as { action: string; payload: { to: string } };
   assertEquals(row.action, "send_message");
   assertEquals(row.payload.to, "+971500000000", "must resolve the CRM phone, not the name");
+});
+
+Deno.test("repeated message proposals reuse the exact approval instead of creating multiple pending sends", async () => {
+  const f = fakeLookupClient([]);
+  const receipts = new Map<string, Promise<unknown>>();
+  const input = { channel: "telegram", to: "42", text: "Demo notice" };
+  const source = { channel: "whatsapp" as const, externalId: "971500000000" };
+  const first = await runTool(f.client, "ORG", "send_message", input, "OWNER", source, receipts);
+  assertEquals(await runTool(f.client, "ORG", "send_message", input, "OWNER", source, receipts), first);
+  assertEquals(f.inserts.filter(([table]) => table === "agent_pending_actions").length, 1);
+});
+
+Deno.test("an uncertain approval insert preserves its unsafe receipt instead of parking a second send", async () => {
+  let saved = 0;
+  const client = { from: () => ({ insert: () => { saved++; return Promise.reject(new Error("approval response lost after commit")); } }) };
+  const receipts = new Map<string, Promise<unknown>>();
+  const input = { channel: "telegram", to: "42", text: "Demo notice" };
+  const first = await runTool(client, "ORG", "send_message", input, "OWNER", undefined, receipts) as { code?: string; retry_safe?: boolean };
+  assertEquals(first.code, "unconfirmed_write");
+  assertEquals(first.retry_safe, false);
+  assertEquals(await runTool(client, "ORG", "send_message", input, "OWNER", undefined, receipts), first);
+  assertEquals(saved, 1);
 });
 
 Deno.test("send_message refuses an ambiguous or unreachable recipient", async () => {
@@ -271,15 +347,12 @@ Deno.test("get_vat_summary splits output vs input tax from tax_rate fields", asy
   // Second query (items for ids 1..2): reuse the same thenable builder —
   // it resolves to the same rows array, so give it item-shaped rows.
   const out = (await runTool(client.client, "ORG", "get_vat_summary", {})) as {
-    output_tax: number;
-    input_tax: number;
-    net_vat: number;
+    by_currency: Record<string, unknown>[];
   };
   void docs;
   // The shared fake returns [] for the items fetch → zero nets, but the
   // shape and org scoping are what we're pinning here.
-  assertEquals(out.output_tax, 0);
-  assertEquals(out.input_tax, 0);
+  assertEquals(out.by_currency, [{ currency: "AED", output_net: 0, output_tax: 0, input_net: 0, input_tax: 0, net_vat: 0 }]);
   assertEquals(
     client.eqs.some(([c, v]) => c === "org_id" && v === "ORG"),
     true,
@@ -430,12 +503,41 @@ Deno.test("pending message proposals record their exact source conversation", as
   assertEquals(payload.approval_chat_id, "971500000000");
 });
 
-Deno.test("missing atomic draft RPC returns an honest failure without partial inserts", async () => {
+Deno.test("an unconfirmed atomic draft RPC never promises that nothing was saved or invites a retry", async () => {
   const f = fakeWriteClient();
   f.client.rpc = () => Promise.resolve({ data: null, error: { code: "PGRST202" } });
-  const result = await runTool(f.client, "ORG", "create_draft_quote", WRITE_INPUTS.create_draft_quote, "OWNER") as { error?: string };
-  assertEquals(result.error?.includes("No partial draft was saved"), true);
+  const result = await runTool(f.client, "ORG", "create_draft_quote", WRITE_INPUTS.create_draft_quote, "OWNER") as { error?: string; code?: string; retry_safe?: boolean };
+  assertEquals(result.code, "unconfirmed_write");
+  assertEquals(result.retry_safe, false);
+  assertEquals(result.error?.includes("Check Filey before retrying"), true);
+  assertEquals(result.error?.includes("No partial draft was saved"), false);
   assertEquals(f.inserts.length, 0);
+});
+
+Deno.test("a lost draft response stays unconfirmed after the database may have committed", async () => {
+  for (const name of ["create_draft_invoice", "create_draft_quote", "create_draft_po"]) {
+    const f = fakeWriteClient();
+    let committed = 0;
+    f.client.rpc = () => {
+      committed++;
+      return Promise.reject(new Error("synthetic response lost after commit"));
+    };
+    const result = await runTool(f.client, "ORG", name, WRITE_INPUTS[name], "OWNER") as { error?: string; code?: string; retry_safe?: boolean; created?: string };
+    assertEquals(committed, 1, "the transport must not retry an ambiguous write");
+    assertEquals(result.created, undefined);
+    assertEquals(result.code, "unconfirmed_write");
+    assertEquals(result.retry_safe, false);
+    assertEquals(result.error?.includes("may already have been saved"), true);
+  }
+});
+
+Deno.test("a malformed draft receipt cannot become success or a safe retry", async () => {
+  const client = { rpc: () => Promise.resolve({ data: { created: "draft" }, error: null }) };
+  const result = await runTool(client, "ORG", "create_draft_invoice", WRITE_INPUTS.create_draft_invoice, "OWNER") as { error?: string; code?: string; retry_safe?: boolean; created?: string };
+  assertEquals(result.created, undefined);
+  assertEquals(result.code, "unconfirmed_write");
+  assertEquals(result.retry_safe, false);
+  assertEquals(typeof result.error, "string");
 });
 
 Deno.test("bounded model results stay valid JSON and identify previews", () => {

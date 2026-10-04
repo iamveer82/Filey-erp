@@ -56,14 +56,15 @@ export default function SetupNotice() {
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-brand-500">
-                    Create your free account, then keep your records on this device.
+                    Create and verify your free account online once, then keep working offline on this device.
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
-                      "Free local ERP and CRM",
-                      "Unlimited local invoices and edits",
+                      "The full local ERP and CRM is free",
+                      "Unlimited local documents, invoices and edits",
+                      "Local PDFs without Filey branding",
                       "Works offline — your data stays here",
-                      "Upgrade to Pro or Ultra any time",
+                      "Optional paid cloud upgrades",
                     ].map((line) => (
                       <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600">
                         <Check size={14} className="shrink-0 text-success" />
@@ -107,7 +108,7 @@ export default function SetupNotice() {
                   </div>
                   <p className="text-[13px] text-brand-500">
                     Sign in to use Filey on the web and sync your devices. Basic includes
-                    5 new invoices a month and unlimited edits.
+                    5 new cloud invoices a month and unlimited edits.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
@@ -132,7 +133,7 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-ink">Use offline</h2>
                   <p className="text-[13px] text-brand-500">
-                    Free core ERP and CRM on this device. Sign in once online to link your device.
+                    The full local app is free, with unlimited documents and unbranded local PDFs. Sign in online once with your verified Filey account to link this device.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

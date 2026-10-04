@@ -40,7 +40,9 @@ describe("planCardFor", () => {
     const basic = PLANS.find(plan => plan.id === "free")!;
     expect(basic.price).toBe("$0");
     expect(basic.blurb).toMatch(/unlimited local invoices/i);
-    expect(basic.features).toContain("Unlimited local invoices and edits");
+    expect(basic.blurb).toMatch(/verify your account once.*work offline/i);
+    expect(basic.features).toContain("Unlimited local documents, invoices and edits");
+    expect(basic.features).toContain("Optional cloud storage: 5 new cloud invoices per month");
   });
   // Pro and Enterprise were withdrawn from sale. Orgs still carry those plan
   // values, so the mapping must keep answering for them — a card lookup that

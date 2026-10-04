@@ -18,7 +18,7 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "video",
     name: "Brand videos",
-    description: "Prepare video quotes and check jobs. Paid generation always needs your Generate click.",
+    description: "Prepare video drafts with your own API key and check jobs. Generation needs your Generate click; Coin is not used.",
     tools: ["create_video_draft", "cancel_video_job", "get_video_job", "list_video_jobs"],
     readOnlyTools: ["get_video_job", "list_video_jobs"],
   },

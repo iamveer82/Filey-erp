@@ -1,4 +1,4 @@
-import { billing } from "./api";
+import { billing, quotes, receipts } from "./api";
 import { isLocalMode } from "./dataMode";
 import { requireAgentStorageScope } from "./agentStorage";
 import { deliverFile, type DeliveredFile } from "./agentFiles";
@@ -35,13 +35,17 @@ export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || (isNa
   } catch { return null; }
 }
 
-export async function invoicePublicLink(id: number): Promise<string> {
+async function documentPublicLink(kind: "invoice" | "quotation" | "receipt", id: number): Promise<string> {
   const base = publicAppBase();
   if (isLocalMode() || !base)
-    throw new Error("Public invoice links need a hosted cloud address. Share the PDF from this device instead.");
-  const token = await billing.publicLink(id);
+    throw new Error(`Public ${kind} links need a hosted cloud address. Share the PDF from this device instead.`);
+  const token = await (kind === "invoice" ? billing.publicLink(id) : kind === "quotation" ? quotes.publicLink(id) : receipts.publicLink(id));
   return `${base}#/portal/${encodeURIComponent(token)}`;
 }
+
+export const invoicePublicLink = (id: number): Promise<string> => documentPublicLink("invoice", id);
+export const quotationPublicLink = (id: number): Promise<string> => documentPublicLink("quotation", id);
+export const receiptPublicLink = (id: number): Promise<string> => documentPublicLink("receipt", id);
 
 export interface DocumentMessageContext { expectedScope: string; signal?: AbortSignal }
 

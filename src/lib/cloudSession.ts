@@ -63,19 +63,22 @@ export function sessionFetch(
   send: typeof fetch = (...args) => globalThis.fetch(...args),
 ): typeof fetch {
   const origin = new URL(projectUrl).origin;
+  const transmit: typeof fetch = (input, init) => send(input, {
+    ...init, redirect: "error", credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer",
+  });
   return async (input, init) => {
     const target = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     // Never refresh inside Auth's fetch, cross origins, or replay consumed streams.
     if (target.origin !== origin || !/^\/(rest|storage)\/v1\//.test(target.pathname)
       || (typeof Request !== "undefined" && input instanceof Request)
       || (typeof ReadableStream !== "undefined" && init?.body instanceof ReadableStream))
-      return send(input, init);
+      return transmit(input, init);
     const client = getClient();
-    if (!client) return send(input, init);
+    if (!client) return transmit(input, init);
     const headers = new Headers(init?.headers);
     const { data } = await client.auth.getSession();
     const session = data.session;
-    const response = await send(input, init);
+    const response = await transmit(input, init);
     if (!session || headers.get("Authorization") !== `Bearer ${session.access_token}`
       || ![401, 403].includes(response.status)) return response;
     let detail: unknown;
@@ -84,7 +87,7 @@ export function sessionFetch(
     const renewed = await renewCloudSession(client, session);
     if (init?.signal?.aborted) return response;
     headers.set("Authorization", `Bearer ${renewed.access_token}`);
-    const retried = await send(input, { ...init, headers });
+    const retried = await transmit(input, { ...init, headers });
     if ([401, 403].includes(retried.status)) {
       let error: unknown;
       try { error = await retried.clone().json(); } catch { return retried; }

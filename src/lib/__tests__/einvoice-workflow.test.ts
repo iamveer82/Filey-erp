@@ -88,7 +88,10 @@ test("CSV groups lines, flags duplicates and never hides invalid quantities", ()
 });
 
 test("supplier XML stays a draft, preserves line totals, and rejects entities or unsupported adjustments", () => {
-  const source = { ...base(), einvoice: { uuid: crypto.randomUUID() }, seller_trn: "100000000000003" };
+  const source = { ...base(), due_date: "2026-10-29", payment_means_code: "10",
+    seller_address: "Office 1", seller_city: "Dubai", seller_country_subdivision: "DXB", seller_legal_id: "LICENCE-1", seller_legal_id_type: "TL",
+    customer_address: "Office 2", buyer_city: "Dubai", buyer_country_subdivision: "DXB",
+    einvoice: { uuid: crypto.randomUUID(), seller: { tin: "1000000000", legal_authority: "Dubai Economy" }, buyer: { tin: "1007774567" } }, seller_trn: "100000000000003" };
   const xml = buildInvoiceXml(source);
   const imported = readSupplierInvoice(xml, base());
   expect(imported.doc_type).toBe("purchase"); expect(imported.status).toBe("draft");

@@ -1,4 +1,4 @@
-import { callAiService, aiAccountSession, invalidateCreditStatus } from "./aiCredits";
+import { callAiService, invalidateCreditStatus } from "./aiCredits";
 import { agentStorageScope } from "./agentStorage";
 
 export interface VideoJob {
@@ -44,42 +44,15 @@ async function request<T>(
     throw new Error("Your workspace changed. Reopen Videos in the current workspace.");
   return result;
 }
-export async function quoteVideo(draft: VideoDraft, file?: File) {
-  const scope = agentStorageScope();
-  const user = (await aiAccountSession()).user.id;
-  let reference: { type: string; data: string } | undefined;
-  if (file) {
-    if (
-      !["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
-      file.size > 2_000_000
-    )
-      throw new Error("Use a JPG, PNG or WebP image under 2 MB.");
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let raw = "";
-    for (let i = 0; i < bytes.length; i += 8192)
-      raw += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    reference = { type: file.type, data: btoa(raw) };
-  }
-  if (scope !== agentStorageScope())
-    throw new Error(
-      "Your workspace changed. Choose the photo again in the current workspace."
-    );
-  return (
-    await request<{ job: VideoJob }>({ action: "quote", ...draft, reference }, user)
-  ).job;
+export async function quoteVideo(_draft: VideoDraft, _file?: File): Promise<VideoJob> {
+  throw new Error("Videos use your own API key. Set up Video generation in AI settings. Coin is not used for videos.");
 }
 export const listVideos = () =>
   request<{ jobs: VideoJob[]; configured: boolean }>({ action: "list" });
 export const getVideo = async (id: string) =>
   (await request<{ job: VideoJob }>({ action: "get", id })).job;
-export async function startVideo(job: VideoJob) {
-  const result = await request<{ job: VideoJob }>({
-    action: "start",
-    id: job.id,
-    charge_micros: job.charge_micros,
-  });
-  invalidateCreditStatus();
-  return result.job;
+export async function startVideo(_job: VideoJob): Promise<VideoJob> {
+  throw new Error("This older draft cannot be generated with Coin. Create a new video using your own API key.");
 }
 export async function cancelVideo(id: string) {
   const result = await request<{ job: VideoJob; message?: string }>({

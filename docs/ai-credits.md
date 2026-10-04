@@ -1,193 +1,213 @@
-# Filey Coin wallet
+# Filey AI and Coin wallet
 
-Optional on **Basic, Pro and Ultra**, independent of a subscription and owned by
-the signed-in Supabase account. Changing workspace or plan does not move money.
-The default remains the user's own API key/local model. Selecting credits is
-explicit; failed BYOK/free requests never start paid requests. The current UI
-shows paid OpenRouter models only. Previously saved free selections and older
-clients remain compatible, without automatically switching anyone to paid use.
+Filey AI is the built-in paid assistant on Basic, Pro and Ultra. New accounts
+start with Filey AI; an existing explicitly configured own-key/local model stays
+selected. A saved paid choice becomes the single public `filey-ai` model.
+Retired free choices require an explicit selection before spending Coin. Failed
+requests never switch provider or funding method.
 
 ## User flow
 
-- Account menu → AI wallet (or Settings → AI Wallet): available balance, one-time top-ups, model rates,
-  per-task/daily spending limits, and paginated usage/top-up/refund history.
-- The chat composer and AI settings expose the funding/model selector.
-- Users choose a named OpenRouter model when paying with **Coin**, with its
-  input/output rates and any per-image input fee shown before use. Rates marked
-  **Up to** are conservative bounds across applicable peak-hour/context tiers;
-  the actual provider-reported cost, including any savings, is what is charged.
-  The server keeps that exact model;
-  incompatible image or context requirements prompt the user to choose another
-  model instead of silently substituting one. The former `filey-ai` automatic
-  alias asks the user to choose a model. Existing named model IDs still work
-  when available in the catalogue; history records are not rewritten.
-- Credit mode covers text, vision and the existing agent's function tools,
-  including delegated rounds. Separate image generation, voice and third-party
-  services retain their own connections. Background proactive sweeps do not
-  spend credits; explicitly scheduled agent tasks use the selected mode.
-- Legacy free funding accepts zero-priced OpenRouter models that support function tools,
-  including `openrouter/free` for automatic selection. Each verified account
-  gets up to 20 provider requests per 24-hour window, subject to the provider's
-  shared quota and availability. Agent tasks may use several requests. Free
-  mode never falls back to a paid model or touches the wallet.
-- The wallet display currency is **Coin**, with **1 Coin = US$1**. Balances
-  retain six-decimal precision for tiny usage charges. The ledger, payment
-  requests and limits stay in USD micro-units; this is not a monetary conversion
-  or a migration of existing balances. Each top-up adds a flat $0.50 service fee: $5.50 buys 5 Coin ($5)
-  of credit, before applicable taxes. The fee is recorded separately and is not
-  spendable. Provider usage has no Filey markup and is charged to six
-  decimal places, rounded up. Paid credits have no expiration or auto-top-up.
-  AI credits are excluded from Filey's subscription refund program. There is no
-  customer credit-refund action. Provider reversals/disputes still reconcile the
-  ledger so reversed money cannot be spent. The service fee is not net profit: payment
-  fees, taxes, provider overhead and absorbed failures still affect margin.
-  Daily limits reset at midnight UTC. Defaults: $1/task and $5/day.
-- Custom top-ups accept $5.00–$100.00 in credit, to the cent, alongside preset
-  packs. The review shows spendable credit, the $0.50 fee and total before tax.
-  For example, $12.50 credit costs $13.00 before tax. Desktop opens the secure
-  checkout in the system browser; mobile web continues in the same tab.
-- A task reserves a conservative input/output allowance before each model call.
-  Long/vision prompts can need a larger available allowance than their eventual
-  charge. Actual provider-reported cost settles the reservation; unused funds
-  return immediately. Stop prevents further rounds, but already executed model
-  work can be charged. Maximum output is 8,192 tokens per call.
+- The composer and Settings → AI Assistant offer **Filey AI** or **Your API key**.
+  The managed assistant has one model; there is no provider catalogue or free
+  model picker. Model/provider identifiers and historical provider names are
+  absent from the managed wallet and chat controls.
+- Account menu → AI wallet, or Settings → AI Wallet, shows available Coin,
+  one-time top-ups, Coin usage charges and paginated
+  usage/top-up/adjustment history. **1 Coin = US$1**; the ledger remains USD micros.
+  Input/output token counts and rates are not displayed to users; server-side
+  token accounting and balance enforcement stay on the server. Quick recharge
+  beside the balance opens the smallest configured top-up in the existing
+  review, showing Coin, the service fee and the payment total before checkout.
+  It never pays automatically. Checkout return and desktop payment checks verify
+  the exact saved order for the signed-in user. An unrelated top-up, a changed
+  balance or a success URL cannot confirm that order. Only the payment webhook
+  adds Coin. The wallet refreshes after AI usage and when the app becomes active;
+  older balance/history responses cannot overwrite a newer refresh.
+  When available
+  Coin cannot cover a request, Filey AI stops with **Insufficient credit. Add Coin
+  to continue.** The app provides an Add Coin shortcut to the wallet; no automatic
+  recharge or fallback occurs.
+- Managed text, image understanding and agent tool rounds use the same paid
+  server route. Desktop WhatsApp/Telegram reuse the in-app selection. Hosted
+  channels use the same reservation, completion and settlement helper with the
+  confirmed, paired owner's wallet. Tool approvals and module restrictions stay
+  enforced; a channel connection does not bypass wallet balance checks.
+- Existing top-ups still charge a flat $0.50 service fee, excluded from spendable
+  Coin. Custom credit amounts remain $5–$100. Paid credits have no expiration or
+  automatic top-up. Personal task/day spending-limit controls are retired, and
+  their saved values no longer block requests. Balance reservations, request
+  caps and abuse rate limits remain enforced on the server.
+- Coin purchases are final and non-refundable, except where required by law.
+  Coins cannot be withdrawn, exchanged for cash or transferred to other users.
+  The purchase review states this before payment. Unused request reservations
+  return to the same wallet; they are not cash refunds. Authoritative payment
+  reversals and chargebacks still adjust the ledger and can pause spending.
+- Separate image/video generation and transcription use users' own API
+  connections and provider billing. New videos cannot spend Filey Coin;
+  historical funded jobs retain status, cancellation and reconciliation only.
+  The chat model does not generate videos. Proactive background sweeps do not
+  spend Coin, while explicitly scheduled agent tasks use their selected funding.
 
-## Deployment
+## Server provider and pricing
 
-Brand videos use the same wallet at **$0.25 per second**, independently of chat
-funding/model selection. See [video workflow and deployment](ai-video.md). The
-$0.50 top-up fee still applies once per purchase; it is not charged again per video.
+Managed inference uses only `https://api.deepseek.com/chat/completions` and the
+verified API model `deepseek-flash` (DeepSeek V4.1 Flash as of 3 October 2026).
+Client requests contain only `filey-ai`; the server fixes the upstream model.
+Old OpenRouter/OmniRoute chat configuration cannot create a fallback.
+No master key, provider URL or upstream model identifier is shipped to clients.
 
-1. Apply `supabase/2026-09-20-ai-credits.sql`. It only adds new credit tables,
-   indexes, RLS and one service-only RPC; it does not change business records.
-2. Store a funded OpenRouter key as **FILEY_AI_OPENROUTER_KEY** in Supabase Edge
-   Function secrets. Never use a VITE variable or commit a provider key.
-3. Chat usage always passes through the provider-reported cost with **zero
-   Filey markup**. The old **FILEY_AI_MARKUP_BPS** setting is no longer read and
-   cannot add a usage fee. The $0.50 fee is collected only at top-up.
-   Optional **FILEY_AI_MODELS** is a comma-separated allowlist of OpenRouter IDs.
-   Its default is `*`, exposing all eligible paid models in OpenRouter's live
-   catalogue; an existing narrower setting remains effective until changed or
-   removed. Compatible free models remain available regardless of that paid
-   allowlist. This is the **compatible chat catalogue**, not every OpenRouter
-   endpoint: models must support function tools and text output, valid known
-   token prices and at least 2,048 context tokens. Unknown positive charges or
-   malformed pricing tiers are excluded. Known web-search and audio prices do
-   not hide otherwise compatible models: those paid capabilities cannot be
-   requested through this proxy. Image/video/audio generation, embeddings and
-   batch endpoints are not synchronous chat models. Filey currently caps
-   context at 131,072 tokens and output at 8,192
-   tokens per call, even when a model supports more. Catalogue entries do not
-   guarantee provider capacity at request time. Requests fail safely without
-   switching models when the selected model cannot serve them.
-   Direct **OpenRouter** is the default paid and free connection.
-   For OmniRoute instead of the direct paid connection, follow the
-   [secure gateway setup](ai-omniroute.md). Keep the permitted model IDs consistent
-   between Filey's list and the gateway's restricted inference key.
-4. Apply `supabase/2026-09-21-ai-credit-topup-fee.sql` before deploying the checkout handler. Create one-time Dodo products for $5, $10 and $25 AI credit top-ups, priced at **$5.50, $10.50 and $25.50** respectively in
-   USD, with no discounts, recurring billing or pay-what-you-want. Set the
-   **DODO_AI_CREDIT_PACKS** secret to a JSON array of their real IDs and spendable credit cents (excluding the fee).
-   Live-mode products created 23 September 2026 (`tax_category=digital_products`, one-time USD):
-   `[{"id":"pdt_0NoCgOcjCqEbRyyC1W1yO","cents":500},{"id":"pdt_0NoCgOfqbIZwZFb6JS6SG","cents":1000},{"id":"pdt_0NoCgOj1k3x6AI5oJqiqc","cents":2500}]`.
-   Checkout verifies that the provider's product price equals credit + 50 cents before creating an order. Use a product name/description that clearly shows both credit and fee.
-   Dodo handles checkout tax; tax is not credited as spendable AI balance. Hosts are only `https://live.dodopayments.com` and `https://test.dodopayments.com` — never `api.dodopayments.com`.
-   For custom amounts, create a separate one-time USD **pay-what-you-want**
-   product with a **$5.50 minimum**, no discount or purchasing-power-parity
-   pricing, and store its ID as **DODO_AI_CREDIT_PRODUCT_ID**. Keep the fixed-price
-   products unchanged for older clients. The checkout handler sets the exact
-   session `product_cart[].amount` to credit cents + 50; never omit this field or
-   replace it with a suggested price. Dodo then charges that fixed amount rather
-   than asking the buyer to choose a second price. See [Dodo's fixed-amount
-   checkout guidance](https://docs.dodopayments.com/features/pay-what-you-want#sharing-a-link-with-a-fixed-amount).
-   The custom input is exposed only when the backend advertises the capability;
-   deploying the frontend alone does not enable it. The existing order/ledger
-   schema already records arbitrary integer amounts, so no new migration is needed.
-5. Set **FILEY_APP_URL** to the hosted app origin (default
-   `https://app.gofiley.com`). Keep existing Dodo API/webhook/environment secrets.
-6. Deploy `ai-credits` and the updated `dodo` with `--no-verify-jwt`. Both handlers
-   validate authentication themselves; only Dodo's signed webhook is public.
-7. The existing Dodo webhook must include `payment.succeeded`, all `refund.*`
-   and all `dispute.*` events. Reconciliation retrieves current provider payment
-   state and all succeeded refunds, so out-of-order events converge safely.
-8. Complete a Dodo **test-mode** checkout and refund against a non-production
-   database, then test one funded model call before enabling sales in production.
-   Never test by creating/deleting a customer's invoices or other ERP records.
+Official provider pricing verified on 3 October 2026 is $0.003 per million
+cached input tokens, $0.15 per million uncached input tokens and $0.60 per million
+output tokens during off-peak hours. Filey's customer tariff is exactly **5/3**
+of that base: $0.005/$0.25/$1.00 per million tokens. Thus $5 adds 5 Coin and covers
+approximately $3 of base-rate provider usage, before per-request micro-unit
+rounding. The spendable Coin balance is credited in full; Coin represents
+Filey service credit at Filey's tariff.
+Reservations use the scaled peak bounds ($0.01/$0.50/$2.00 per million tokens).
+Supplier cost remains unknown in the ledger because actual peak/holiday pricing
+is not verified. Filey funds the provider separately and bears peak premiums;
+the $3 example is a base-rate budget, not a guarantee of actual supplier expense.
 
-Without the provider key or products, checkout remains unavailable. Free models need a valid key but no published payment products or customer credit. The UI
-reports that setup is incomplete, while BYOK/local models continue working.
-Do not call this integration live until secrets, webhook subscriptions, products,
-deployment and the funded provider checkout tests have all been verified.
+The server checks integer token counts, cache-hit plus cache-miss accounting,
+ total usage, provider response identity and model before settling. It never
+ trusts a caller-supplied cost or a provider-shaped `usage.cost` field. Customer
+ charges apply the exact tariff before one final upward rounding to USD
+ micro-units and cannot exceed the reserved allowance. Token/provider pricing
+ and the margin are internal; the app shows actual Coin debits and remaining
+ Coin. Legacy `markup_bps: 0` means no additional wallet multiplier is applied
+ on top of Filey's already scaled tariff.
+Output stays capped at 8,192 tokens and input context at 131,072 tokens, despite
+ higher upstream limits. Default reasoning effort is low; tool continuations
+ retain validated `reasoning_content` without displaying it to the user.
+
+Prompts, completions and keys do not enter the wallet ledger or logs. Data sent
+ to the provider is still covered by the app's disclosure of AI processing; the
+ Filey AI product label does not replace required privacy disclosures.
+
+References: [models and pricing](https://api-docs.deepseek.com/quick_start/pricing),
+[chat completion contract](https://api-docs.deepseek.com/api/create-chat-completion),
+[thinking and tools](https://api-docs.deepseek.com/guides/thinking_mode).
+
+## Deployment and current status
+
+These source changes remain **unpublished** until the coordinated deployment
+and live readback succeed. On 4 October the user authorized web and matching
+backend publishing for their mobile wallet test; desktop publishing remains held.
+The supplied key authenticated successfully against the read-only model list,
+ which includes `deepseek-flash`. No paid inference or checkout was performed.
+The credential is staged
+ outside the repository with Windows user encryption and owner-only access.
+
+The one-use owner coupon was created in Dodo live mode on 4 October. It is
+restricted to the requested existing customer and the 5 Coin product, with
+100% off the complete $5.50 price, one total redemption and one per customer.
+Its Filey account binding is staged locally; the server promotion secret,
+database upgrades, matching handlers and web build remain unpublished.
+The web payment review shows the discount and $0.00 total only to the verified
+owner. Opening a checkout consumes the offer; it never falls back to a paid
+checkout. Filey's private deadline is earlier than the provider coupon expiry
+and remains authoritative for the first signed successful receipt.
+
+Promotion validation passed 69 focused frontend tests and the final full Edge
+suite passed 242 tests. The full frontend run passed 2,884 tests before the
+10 new promotion UI regressions were added. The production build and seven
+browser-security checks passed; the managed credential is absent from compiled
+website files. Disposable PostgreSQL checks verify one claim and one 5 Coin
+grant under concurrent retries, ordinary underpayment rejection and repeat
+migration safety. The actual Dodo $0 receipt and funded inference still require
+the user's live test. A $0 test does not verify cash collection or bank payout.
+
+The wallet/recharge refinement passed 33 focused frontend tests. The own-key
+video transition passed another 28 frontend tests, and the complete backend
+suite passed all 192 tests. The production build and disposable PostgreSQL suite
+passed, including saved-budget retirement, concurrent balance reservations,
+replay protection and atomic payment/dispute reconciliation. A 390px dark-mode
+browser preview confirmed quick recharge and its fee review fit without
+horizontal scrolling; spending-limit controls and token counts/rates are absent.
+Preview balances are synthetic, and payments/provider calls are disabled.
+
+On 4 October, the checkout correlation and wallet refresh fixes passed 105 focused
+frontend tests and 48 backend payment/managed-model contract tests. The production
+build, frontend lint and both payment endpoint typechecks passed. Checks cover
+unrelated top-ups, exact-order desktop and web returns, forged return URLs,
+pending/reversed/disputed payments, same-account sign-in on checkout return,
+account changes during verification and stale balance/history responses. No live
+payment, bank payout or paid inference was performed.
+
+Authorized web rollout prerequisites:
+
+1. Retain the existing wallet, top-up fee and refund migrations. No wallet
+   migration is needed for the model change; balances/history are not rewritten.
+   Apply `supabase/2026-10-03-ai-credit-payment-safety.sql` after the video wallet
+   migration for signed dispute ordering and retirement of personal task/day
+   budgets. This separate payment hardening
+   migration must be verified in the live catalog before handler publication.
+2. Set **FILEY_AI_DEEPSEEK_KEY** in Supabase Edge Function secrets from the secure
+   credential store. Never put it in a VITE variable, browser, source or command
+   log. A missing key disables managed chat and chat-only top-up readiness.
+3. Deploy `ai-credits`, `ai-video`, `channel-webhook` and `dodo` together
+   with the frontend. Retain channel transport secrets and the current confirmed
+   owner binding. The new frontend requires Dodo's saved `order_id` response and
+   `ai-credits`' authenticated `checkout_status` action; it will not open checkout
+   if the saved order identity is missing. Do not fabricate a user JWT for
+   service-side calls.
+4. Keep existing Dodo products, `DODO_AI_CREDIT_PACKS`, optional
+   `DODO_AI_CREDIT_PRODUCT_ID`, `FILEY_APP_URL` and signed payment/refund/dispute
+   webhook subscriptions. Both `DODO_PAYMENTS_API_KEY` and
+   `DODO_PAYMENTS_WEBHOOK_KEY` are required before checkout is enabled. Credit is
+   still added only by verified payment state. Verify the live environment and
+   linked-bank payout readiness independently of test-mode checks.
+5. Verify a funded synthetic request, insufficient balance, saved old budgets
+   no longer blocking requests, reservation/request/rate caps, tool
+   continuation, deliberate repeated messages and provider failures after
+   deployment. Do not claim paid production inference before that verification.
 
 ## Accounting and security
 
-`ai_credit_accounts`, `ai_credit_orders`, `ai_credit_requests`, and
-`ai_credit_ledger` stay in the hosted database; they are never part of local sync.
-Clients may read their own balance/history but have no money-write privileges.
-Every mutation runs in `filey_ai_wallet`, locking the account row. Unique payment,
-refund and request IDs prevent duplicate credits or charges. USD micro-units use
-Postgres bigint. Reservations enforce available funds, task/day budgets and a
-30-call/minute limit together, including simultaneous tabs/devices/delegates.
+Customer payments are collected by the Dodo merchant account configured on the
+server. The Coin ledger does not hold or move real money: $10 of credit grants
+10 Coin, while the $0.50 top-up fee is charged separately and grants no Coin.
+Dodo pays eligible net receipts to the merchant's verified linked bank account
+according to its payout schedule and threshold. Payment acceptance and payout
+activation are separate; source checks cannot establish bank verification,
+active payouts or real receipts. See [Dodo payouts](https://docs.dodopayments.com/features/payouts/payout-structure).
+Filey funds its provider account separately; the wallet never sends customer
+money directly to the model provider. Receipts are not all profit: provider
+usage, payment fees, tax and merchant-absorbed peak pricing affect the margin.
 
-The authenticated `ai-credits` proxy builds an allowlisted OpenRouter request,
-retains the selected model, caps routing prices and tokens, rejects paid
-plugins/remote image URLs and bills only usage reported directly by the provider.
-Provider selection may find a cheaper endpoint for that same model within its
-price caps; it does not choose another model. Prompts, completions and master
-keys are not stored in the ledger or logs. Inference requests are not retried.
-Catalogue pricing uses the highest valid applicable prompt, output/reasoning
-and image rate across time tiers and reachable context tiers. Tiers starting
-above Filey's context cap cannot apply and are not included in those bounds.
-Each attached image adds the catalogue's per-image cost to the conservative
-input/output reservation; the same image rate caps provider routing. These are
-spending bounds, not flat charges. See the
-[OpenRouter pricing schema](https://openrouter.ai/docs/guides/overview/models).
-Assistant reasoning strings and supported summary/text/encrypted reasoning
-blocks are validated and returned unchanged on tool continuations, including
-signatures and block order. They count toward the input reservation. Malformed,
-nested or oversized metadata is rejected, not silently discarded. This follows
-[OpenRouter's reasoning continuation contract](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
-Caller cache-write directives are stripped. GPT-5.6 and newer OpenAI models use
-`prompt_cache_options.mode=explicit` with no breakpoints, disabling automatic
-cache writes that would otherwise cost more than the displayed input-token rate.
-This also gives up cache-read savings for these requests. See
-[OpenRouter's cache controls](https://openrouter.ai/docs/guides/best-practices/prompt-caching#disabling-prompt-caching).
-When the optional OmniRoute gateway is selected, the paid route uses a concrete
-OpenRouter-backed model and verifies its generation receipt independently before
-settling Coin. Gateway estimates are never wallet charges. Free requests remain
-direct and cannot silently switch to paid usage. See the gateway document for
-its internal retry behavior and deployment requirements.
-Refunds can make a previously spent balance negative, blocking further spend;
-disputes block spending until provider state shows they were won.
+Wallet tables remain hosted-only and outside business-data synchronization.
+Clients cannot write money. `filey_ai_wallet` locks each account and enforces
+ available funds, reservations, request caps and rate limits. Legacy personal
+ task/day preference fields remain readable for compatibility but are not
+ enforced; the retired public limits action returns a clear error. Unique payment, refund and
+ request IDs prevent duplicate credits and settlements across devices/delegates.
+Each tool round reserves before inference and settles once. Hosted channel
+ request IDs are derived from authenticated provider message identity so a
+ redelivery cannot cause a second model charge; deliberate new messages have
+ different identities.
 
-Unused/crashed reservations expire after ten minutes when that account next
-reads or uses its wallet. Unverifiable/timeout usage is absorbed by Filey, never
-estimated and charged to the customer. A late settlement cannot charge an
-expired hold. The merchant also absorbs any provider cost beyond a reservation.
-Monitor these exceptions before raising scale or default output limits.
+Paid app calls pin the captured account's Authorization token rather than
+letting the SDK select a later active account. Account/workspace and Stop checks
+run before dispatch and after authentication awaits; replies and cached balances
+from an old account are discarded. Failed paid calls are never automatically
+retried. Dispute updates use signed event timestamps; ordinary payment/refund
+snapshots cannot clear a block, and blocking wins ties. A newer verified won
+dispute, confirmed against the current provider list, can restore spending.
+Payment confirmation, known reversals and dispute state commit in one account-
+locked transaction. Every provider reversal is validated before that call; a
+malformed later adjustment rolls back the entire snapshot. A payment already
+reversed in full cannot temporarily fund a concurrent AI reservation.
 
-No Redis is required for accounting. The model catalogue is cached for five
-minutes per edge instance, the frontend caches balances for one minute per
-account, and there is no background balance polling. Ordinary completions use
-two atomic wallet calls (reserve and settle), plus authentication. Free inference uses the existing atomic rate limiter (per-account daily and global per-minute counters), without creating reservations, wallet debits or ledger entries. An upstream
-API charge and a database transaction cannot be one distributed transaction;
-expired holds and idempotency provide the explicit failure policy above.
+Inference is never automatically retried. If a request, usage or settlement is
+ uncertain, stop before tool execution and do not estimate a customer charge.
+An unresolved hold expires under the existing ten-minute wallet policy; Filey
+ absorbs unverifiable provider work. Stop prevents further rounds, while already
+ completed billable work can settle. Refunds/disputes retain their existing debt
+ and blocking behavior. No Redis or second payment balance is introduced.
 
-## Verification
-
-- `npm run test:rls:local`: disposable PostgreSQL, idempotent migration, account
-  isolation, limits, duplicate payment/settlement/refund, debt, disputes, expiry
-  and eight concurrent reservations for five available dollars.
-- `deno test --allow-env --lock=deno.lock --frozen supabase/functions/_shared/ai-credits_test.ts`
-- `npm test -- src/lib/__tests__/ai-credits.test.ts`
-- `deno check --lock=deno.lock supabase/functions/ai-credits/index.ts supabase/functions/dodo/index.ts`
-- `npm run typecheck` and the existing AI connection/regression tests.
-
-Provider references: [usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting),
-[provider routing](https://openrouter.ai/docs/guides/routing/provider-selection),
-[Dodo credit billing](https://docs.dodopayments.com/features/credit-based-billing).
-Dodo collects top-ups; Filey's transactional ledger is the spending authority.
-Do not also enable Dodo token-meter deductions for these same products, which
-would create two independent balances.
+The historical notes below record earlier deployments; their provider/model
+ configuration is superseded by the current Filey AI route above.
 
 ## Subscription refunds
 
@@ -264,7 +284,8 @@ product, secret, payment or customer record was changed for this addition.
 
 The Coin branding, named paid-model picker and optional OmniRoute adapter are
 also local changes, not part of 3.0.3. Deploy the updated `ai-credits` function
-with the updated frontend so the catalogue and zero-markup policy match. Clients
+with the then-current frontend so the catalogue and historical zero-markup
+policy matched. Clients
 that previously saved `filey-ai` must select a named model; the backend does not
 silently route that old alias. The gateway
 must be hosted and verified before setting `FILEY_AI_GATEWAY=omniroute`; a

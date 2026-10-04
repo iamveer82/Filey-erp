@@ -40,6 +40,7 @@ export function aiEffortLevels(cfg: Pick<AiConfig, "provider" | "model">): AiEff
     if (/^claude-opus-4-[6-8]/.test(id)) return ["auto", "low", "medium", "high", "max"];
     if (/^claude-(?:opus-4-5|sonnet-(?:4-6|5))/.test(id)) return ["auto", "low", "medium", "high"];
   } else {
+    if (id === "filey-ai") return ["auto", "low", "high", "max"];
     if (/^gpt-5-pro(?:-|$)/.test(id)) return ["auto", "high"];
     if (/^gpt-(?:5\.[2-9]|6)/.test(id)) return ["auto", ...(/-pro(?:-|$)/.test(id) ? [] : ["low" as const]), "medium", "high", "xhigh"];
     if (/^(?:o[134](?:-|$)|gpt-(?:5|oss)(?:[.-]|$))/.test(id) && !/^o1-(?:mini|preview)/.test(id)) return ["auto", "low", "medium", "high"];
@@ -58,6 +59,9 @@ export function anthropicGenerationOptions(model: string, maxTokens: number, eff
 
 export function openAiGenerationOptions(model: string, maxTokens: number, temperature: number, effort: AiEffort = "auto") {
   const id = model.trim().split("/").pop() ?? "";
+  // The managed transport maps this public name on the server. Keep its
+  // reasoning budget bounded without exposing the upstream provider in UI.
+  if (id === "filey-ai") return { max_tokens: Math.min(maxTokens, 8192), reasoning_effort: effort === "max" ? "max" : effort === "high" || effort === "xhigh" || effort === "medium" ? "high" : "low" };
   const reasoning = /^(?:o[1-9](?:-|$)|gpt-(?:[5-9]|oss)(?:[.-]|$))/.test(id);
   const selected = aiEffortLevels({ provider: "openai", model }).includes(effort) ? effort : "auto";
   return reasoning ? { max_completion_tokens: effortTokenLimit(maxTokens, selected), ...(selected !== "auto" ? { reasoning_effort: selected } : {}) } : { max_tokens: maxTokens, temperature };

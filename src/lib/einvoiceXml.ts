@@ -6,7 +6,7 @@
 
 import { docLineAmount, docTaxBreakdown, type DocItem } from "./docItems";
 import codes from "./einvoiceCodes.json";
-import { r2 } from "./money";
+import { r2, taxBreakdown } from "./money";
 import {
   PINT_AE_SPEC_IDENTIFIER,
   PINT_AE_PROCESS_ID,
@@ -92,6 +92,8 @@ export interface EInvoiceDoc {
 // allocated across categories pro-rata by net so the breakdown reconciles.
 export interface TaxRow {
   category: string;
+  net: number;
+  discount: number;
   taxable: number;
   rate: number;
   tax: number;
@@ -130,9 +132,16 @@ export function computeTotals(doc: EInvoiceDoc): EInvoiceTotals {
 // --- validation -------------------------------------------------------------
 export interface EInvoiceIssue { field: string; label: string; section: "details" | "items" | "einvoice" }
 const validDate = (value?: string | null) => !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-  Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+  !value.startsWith("0000") && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const validVat = (value: string) => /^1\d{12}03$/.test(value.trim());
+// Cent calculations must stay within JavaScript's exact integer range.
+const safeAmount = (value: number) => finite(value) && Number.isSafeInteger(Math.round(value * 100));
+// GS1 check digit, also used by the official PINT IBR-068 GLN rule.
+const validGs1 = (value: string) => {
+  const sum = [...value.slice(0, -1)].reverse().reduce((total, digit, index) => total + Number(digit) * (index % 2 ? 1 : 3), 0);
+  return (10 - sum % 10) % 10 === Number(value.slice(-1));
+};
 
 /** Fast checks run offline. The accredited provider must also validate the
  * complete XML against the versioned PINT-AE Schematrons before submission. */
@@ -140,7 +149,7 @@ export function eInvoiceIssues(doc: EInvoiceDoc): EInvoiceIssue[] {
   const issues: EInvoiceIssue[] = [];
   const add = (field: string, label: string, section: EInvoiceIssue["section"] = "details") => issues.push({ field, label, section });
   if (doc.tax_country_code && doc.tax_country_code !== "AE") add("tax_country_code", "PINT-AE export requires a UAE tax document");
-  if (!doc.number?.trim()) add("number", "Invoice number");
+  if (!esc(doc.number).trim()) add("number", "Invoice number");
   if (!validDate(doc.issue_date)) add("issue_date", "Valid invoice date");
   if (doc.due_date && !validDate(doc.due_date)) add("due_date", "Valid due date");
   if (doc.date_of_supply && !validDate(doc.date_of_supply)) add("date_of_supply", "Valid supply date");
@@ -157,48 +166,62 @@ export function eInvoiceIssues(doc: EInvoiceDoc): EInvoiceIssue[] {
     add("einvoice.beneficiary_id", "Beneficiary TRN or TIN for free-zone supply", "einvoice");
   const delivery = doc.einvoice?.delivery;
   if (doc.transaction_type?.[7] === "1") {
-    if (!delivery?.address?.trim()) add("einvoice.delivery.address", "Export delivery street address", "einvoice");
-    if (!delivery?.city?.trim()) add("einvoice.delivery.city", "Export delivery city", "einvoice");
-    if (!delivery?.region?.trim()) add("einvoice.delivery.region", "Export delivery region", "einvoice");
+    if (!esc(delivery?.address).trim()) add("einvoice.delivery.address", "Export delivery street address", "einvoice");
+    if (!esc(delivery?.city).trim()) add("einvoice.delivery.city", "Export delivery city", "einvoice");
+    if (!esc(delivery?.region).trim()) add("einvoice.delivery.region", "Export delivery region", "einvoice");
     if (!codes.countries.includes(delivery?.country_code || "") || delivery?.country_code === "AE")
       add("einvoice.delivery.country_code", "Export delivery country outside the UAE", "einvoice");
   }
   if (doc.einvoice?.buyer_delivery_mode === "export-unregistered" && doc.transaction_type?.[7] !== "1")
     add("einvoice.buyer_delivery_mode", "Select Exports before using the unregistered export recipient", "einvoice");
-  if (!codes.payments.includes(doc.payment_means_code || "")) add("payment_means_code", "Payment method");
-  if (doc.payment_means_code === "30" && !doc.einvoice?.payment_account_id?.trim()) add("einvoice.payment_account_id", "Bank account / IBAN for credit transfer", "einvoice");
+  // IBR-191-AE: credit notes do not require payment instructions.
+  if ((doc.payment_means_code || !isCreditNote(type)) && !codes.payments.includes(doc.payment_means_code || "")) add("payment_means_code", "Choose a supported payment method");
+  if (doc.payment_means_code === "30" && !esc(doc.einvoice?.payment_account_id).trim()) add("einvoice.payment_account_id", "Bank account / IBAN for credit transfer", "einvoice");
   if (!doc.items.length || doc.items.length > 500) add("items", "Use between 1 and 500 line items", "items");
   doc.items.forEach((item, index) => {
     const prefix = `Item ${index + 1}: `;
-    const error = (label: string) => add(`items.${index}`, prefix + label, "items");
-    if (!item.description?.trim()) error("add a description");
-    if (!finite(item.qty) || item.qty <= 0) error("quantity must be greater than zero");
-    if (!finite(item.unit_price) || item.unit_price < 0) error("enter a valid non-negative price");
-    if (item.calcMode === "manual" && (!finite(item.amount) || item.amount! < 0)) error("enter a valid line amount");
-    if (item.discount != null && (!finite(item.discount) || item.discount < 0 || item.discount > 100)) error("discount must be between 0 and 100%");
-    if (item.tax != null && (!finite(item.tax) || item.tax < 0 || item.tax > 100)) error("enter a valid tax rate");
-    if ((item.tax_category || "S") === "S" && (item.tax || doc.tax_rate || 0) !== 5) error("UAE standard-rated items must use 5% VAT");
-    if (!TAX_CATEGORY_CODES.some(code => code.code === (item.tax_category || "S"))) error("choose a supported tax category");
+    const error = (field: string, label: string) => add(`items.${index}.${field}`, prefix + label, "items");
+    if (!esc(item.description).trim()) error("description", "add a description");
+    if (!finite(item.qty) || item.qty <= 0) error("qty", "quantity must be greater than zero");
+    if (!finite(item.unit_price) || item.unit_price < 0) error("unit_price", "enter a valid non-negative price");
+    if (item.calcMode === "manual" && (!finite(item.amount) || item.amount! < 0)) error("amount", "enter a valid line amount");
+    if (item.discount != null && (!finite(item.discount) || item.discount < 0 || item.discount > 100)) error("discount", "discount must be between 0 and 100%");
+    if (item.tax != null && (!finite(item.tax) || item.tax < 0 || item.tax > 100)) error("tax", "enter a valid tax rate");
+    if ((item.tax_category || "S") === "S" && (item.tax || doc.tax_rate || 0) !== 5) error("tax", "UAE standard-rated items must use 5% VAT");
+    if (!TAX_CATEGORY_CODES.some(code => code.code === (item.tax_category || "S"))) error("tax_category", "choose a supported tax category");
     const category = item.tax_category || "S";
-    if (isCommercialInvoice(type) && !["E", "O", "Z"].includes(category)) error("commercial invoices can only use exempt, out-of-scope or zero-rated categories");
-    if (category === "E" && !TAX_EXEMPTION_CODES.some(code => code.code === item.custom?.einvoice_exemption_code)) error("choose a VAT exemption reason");
+    if (isCommercialInvoice(type) && !["E", "O", "Z"].includes(category)) error("tax_category", "commercial invoices can only use exempt, out-of-scope or zero-rated categories");
+    if (category === "E" && !TAX_EXEMPTION_CODES.some(code => code.code === item.custom?.einvoice_exemption_code)) error("custom.einvoice_exemption_code", "choose a VAT exemption reason");
+    const gtin = item.custom?.einvoice_gtin?.trim();
     if (category === "AE") {
-      if (!REVERSE_CHARGE_TYPES.some(code => code.code === item.custom?.einvoice_nature)) error("choose the reverse-charge goods or services type");
-      if (!/^(?:\d{8}|\d{12,14})$/.test(item.custom?.einvoice_gtin?.trim() || "")) error("enter the item's GTIN for reverse charge");
-      if (!doc.customer_trn?.trim()) add("customer_trn", "Buyer VAT TRN for reverse charge");
+      if (!REVERSE_CHARGE_TYPES.some(code => code.code === item.custom?.einvoice_nature)) error("custom.einvoice_nature", "choose the reverse-charge goods or services type");
+      if (!gtin) error("custom.einvoice_gtin", "enter the item's GTIN for reverse charge");
     }
+    if (gtin && (!/^(?:\d{8}|\d{12,14})$/.test(gtin) || !validGs1(gtin))) error("custom.einvoice_gtin", "enter a valid GTIN including its check digit");
     const itemType = item.custom?.einvoice_item_type;
-    if (itemType && !["G", "S", "B"].includes(itemType)) error("choose a supported item type");
-    if (["G", "B"].includes(itemType || "") && !item.custom?.einvoice_hs_code?.trim()) error("goods require an HS classification code");
-    if (["S", "B"].includes(itemType || "") && !item.custom?.einvoice_service_code?.trim()) error("services require a service accounting code");
-    if (!unitCode(item.unit)) error("choose a recognised unit code, for example H87 (piece), KGM (kg) or HUR (hour)");
+    if (itemType && !["G", "S", "B"].includes(itemType)) error("custom.einvoice_item_type", "choose a supported item type");
+    if (["G", "B"].includes(itemType || "") && !esc(item.custom?.einvoice_hs_code).trim()) error("custom.einvoice_hs_code", "goods require an HS classification code");
+    if (["S", "B"].includes(itemType || "") && !esc(item.custom?.einvoice_service_code).trim()) error("custom.einvoice_service_code", "services require a service accounting code");
+    if (!unitCode(item.unit)) error("unit", "choose a recognised unit code, for example H87 (piece), KGM (kg) or HUR (hour)");
+    const formula = item.calcMode !== "manual" && (item.calcMode === "formula" && item.itemFormula?.a ? item.itemFormula : doc.unit_price_formula);
+    if (formula && formula.a !== "qty") {
+      const multiplier = item.custom?.[formula.a];
+      if (!multiplier?.trim() || !Number.isFinite(Number(multiplier)) || Number(multiplier) !== parseFloat(multiplier) || Number(multiplier) < 0)
+        error(`custom.${formula.a}`, "enter a valid non-negative formula quantity");
+    }
     const net = docLineAmount(item, doc.unit_price_formula);
-    if (!Number.isFinite(net) || net < 0) error("line amount must be non-negative");
+    if (!safeAmount(net) || net < 0) error(item.calcMode === "manual" ? "amount" : "unit_price", "line amount must be non-negative and small enough to calculate accurately");
+    // IBR-147-AE uses exact cent reconciliation. Six-decimal effective prices
+    // can lose a cent on very large quantities; never export a mismatched line.
+    else if (finite(item.qty) && item.qty > 0 && (!finite(net / item.qty) || (net / item.qty).toFixed(6).includes("e") || r2(item.qty * Number((net / item.qty).toFixed(6))) !== net))
+      error(item.calcMode === "manual" ? "amount" : "unit_price", "quantity and effective price cannot reconcile to the line amount; adjust the quantity or amount");
   });
+  if (doc.items.some(item => item.tax_category === "AE") && !doc.customer_trn?.trim()) add("customer_trn", "Buyer VAT TRN for reverse charge");
   if (["380", "381"].includes(type) && doc.items.length && doc.items.every(item => ["E", "O"].includes(item.tax_category || "S")))
     add("invoice_type_code", "Use a commercial invoice or commercial credit note when every line is exempt or out of scope");
-  if (!finite(doc.tax_rate) || doc.tax_rate < 0 || doc.tax_rate > 100) add("tax_rate", "Tax rate must be between 0 and 100%", "items");
+  if (doc.tax_rate != null && (!finite(doc.tax_rate) || doc.tax_rate < 0 || doc.tax_rate > 100)) add("tax_rate", "Tax rate must be between 0 and 100%", "items");
   const net = doc.items.reduce((sum, item) => sum + docLineAmount(item, doc.unit_price_formula), 0);
+  if (!safeAmount(net)) add("items", "Line totals are too large to calculate accurately", "items");
   if (doc.discount != null && (!finite(doc.discount) || doc.discount < 0 || doc.discount > net)) add("discount", "Discount cannot exceed the line total", "items");
   if (doc.advance_applied != null && (!finite(doc.advance_applied) || doc.advance_applied < 0)) add("advance_applied", "Enter a valid advance amount");
   if ((doc.currency || "AED") !== "AED") {
@@ -216,39 +239,66 @@ export function eInvoiceIssues(doc: EInvoiceDoc): EInvoiceIssue[] {
     const address = seller ? doc.seller_address : doc.customer_address;
     const city = seller ? doc.seller_city : doc.buyer_city;
     const emirate = normalizeEmirate(seller ? doc.seller_country_subdivision : doc.buyer_country_subdivision);
-    const vat = seller ? doc.seller_trn : doc.customer_trn;
+    const vat = (seller ? doc.seller_trn : doc.customer_trn)?.trim();
     const legal = seller ? doc.seller_legal_id || party?.legal_id : party?.legal_id;
     const legalType = seller ? doc.seller_legal_id_type || party?.legal_id_type : party?.legal_id_type;
-    const check = (message: string) => add(`einvoice.${role}`, `${label} ${message}`, "einvoice");
-    if (!name?.trim()) add(seller ? "seller_name" : "customer_name", `${label} name`);
-    if (!address?.trim()) check("street address");
-    if (!city?.trim()) check("city");
-    if (!codes.countries.includes(country)) check("country code");
-    if (!emirate || (country === "AE" && !EMIRATES.some(entry => entry.code === emirate))) check("emirate / region");
-    if (vat && country === "AE" && !validVat(vat)) check("VAT TRN must contain 15 digits, start with 1 and end with 03");
-    if (seller && !vat && !isCommercialInvoice(type)) check("VAT TRN (Company settings)");
-    if (seller && !vat && isCommercialInvoice(type) && !/^1\d{9}$/.test(partyTin(party))) check("TIN for a business without a VAT TRN");
+    const check = (field: string, message: string, section: EInvoiceIssue["section"] = "einvoice") => add(field, `${label} ${message}`, section);
+    const identityField = (field: string) => `einvoice.${role}.${field}`;
+    const legalField = seller ? "seller_legal_id" : identityField("legal_id");
+    const legalTypeField = seller ? "seller_legal_id_type" : identityField("legal_id_type");
+    if (!esc(name).trim()) add(seller ? "seller_name" : "customer_name", `${label} name`);
+    if (!esc(address).trim()) check(seller ? "seller_address" : "customer_address", "street address", "details");
+    if (!esc(city).trim()) check(seller ? "seller_city" : "buyer_city", "city", "details");
+    if (!codes.countries.includes(country)) check("buyer_country_code", "country code", "details");
+    if (!esc(emirate).trim() || (country === "AE" && !EMIRATES.some(entry => entry.code === emirate))) check(seller ? "seller_country_subdivision" : "buyer_country_subdivision", "emirate / region", "details");
+    if (vat && country === "AE" && !validVat(vat)) check(seller ? "seller_trn" : "customer_trn", "VAT TRN must contain 15 digits, start with 1 and end with 03", "details");
+    if (seller && !vat && !isCommercialInvoice(type)) check("seller_trn", "VAT TRN", "details");
+    if (seller && !vat && isCommercialInvoice(type) && !/^1\d{9}$/.test(partyTin(party))) check(identityField("tin"), "TIN for a business without a VAT TRN");
     const buyer = buyerEndpoint(doc.einvoice, country);
     const endpoint = seller ? party?.endpoint_id?.trim() || (country === "AE" ? partyTin(party) : "") : buyer.id;
     const scheme = seller ? party?.endpoint_scheme || (country === "AE" ? UAE_EAS_SCHEME : "") : buyer.scheme;
-    if (!endpoint) check("electronic invoicing address / TIN");
-    if (!codes.endpoints.includes(scheme)) check("electronic address scheme");
-    if (scheme === UAE_EAS_SCHEME && endpoint && !/^\d{10}$/.test(endpoint)) check("TIN must contain 10 digits");
-    if (party?.corporate_trn && !/^\d{15}$/.test(party.corporate_trn.trim())) check("Corporate Tax TRN must contain 15 digits");
-    if ((seller || isCommercialInvoice(type) || (!vat && !/^9\d{9}$/.test(endpoint))) && !legal?.trim()) check("legal registration number");
-    if (!seller && scheme === UAE_EAS_SCHEME && !/^1\d{9}$/.test(endpoint) && doc.transaction_type?.[7] !== "1" && !vat && !party?.identifier?.trim()) check("identifier for this electronic recipient");
-    if (legal && !legalType) check("legal registration type");
-    if (legalType && !["TL", "EID", "PAS", "CD"].includes(legalType)) check("supported legal registration type");
-    if (legal && (legalType === "TL" || legalType === "PAS") && !party?.legal_authority?.trim()) check(legalType === "PAS" ? "passport issuing country code" : "trade licence issuing authority");
-    if (legalType === "PAS" && party?.legal_authority && !codes.countries.includes(party.legal_authority)) check("valid passport issuing country code");
+    if (!endpoint) check(identityField("endpoint_id"), "electronic invoicing address / TIN");
+    if (!codes.endpoints.includes(scheme)) check(identityField("endpoint_scheme"), "electronic address scheme");
+    // MoF programme identity: the UAE seller uses 0235 and its own TIN.
+    if (seller && scheme !== UAE_EAS_SCHEME) check(identityField("endpoint_scheme"), "UAE electronic address scheme must be 0235");
+    if (scheme === UAE_EAS_SCHEME && endpoint && !(seller ? /^1\d{9}$/ : /^[19]\d{9}$/).test(endpoint)) check(identityField("endpoint_id"), seller ? "TIN must contain 10 digits and start with 1" : "electronic address must contain 10 digits and start with 1 or 9");
+    if (party?.tin && !/^1\d{9}$/.test(party.tin.trim())) check(identityField("tin"), "TIN must contain 10 digits and start with 1");
+    if (party?.corporate_trn && !/^1\d{14}$/.test(party.corporate_trn.trim())) check(identityField("corporate_trn"), "own FTA TRN must contain 15 digits and start with 1");
+    // Supplied identity sources must describe the same entity. A tax-group
+    // VAT snapshot is deliberately never used to infer this own-entity TIN.
+    if (party?.corporate_trn && /^1\d{14}$/.test(party.corporate_trn.trim()) && party.tin?.trim() && party.tin.trim() !== party.corporate_trn.trim().slice(0, 10))
+      check(identityField("tin"), "TIN must match the first ten digits of the entity's own FTA TRN");
+    if (scheme === UAE_EAS_SCHEME && /^1\d{9}$/.test(endpoint) && partyTin(party) && endpoint !== partyTin(party))
+      check(identityField("endpoint_id"), "electronic address must match the entity's TIN");
+    if (scheme === "0088" && endpoint && (!/^\d{13}$/.test(endpoint) || !validGs1(endpoint))) check(identityField("endpoint_id"), "GLN electronic address must contain 13 digits with a valid GS1 check digit");
+    if (scheme === "0184" && endpoint && !/^DK\d{8}$/.test(endpoint)) check(identityField("endpoint_id"), "Danish electronic address must use DK followed by eight digits");
+    if (!seller && scheme === UAE_EAS_SCHEME && endpoint === "9900000099" && doc.transaction_type?.[7] !== "1") check("einvoice.buyer_delivery_mode", "unregistered export address requires the Exports transaction flag");
+    // IBR-136/149-AE: a tax-invoice buyer with a 1/9-prefix UAE address
+    // does not need a legal ID solely because it has no VAT registration.
+    if ((seller || isCommercialInvoice(type) || (scheme === UAE_EAS_SCHEME && endpoint && !/^[19]\d{9}$/.test(endpoint) && !vat)) && !esc(legal).trim()) check(legalField, "legal registration number", seller ? "details" : "einvoice");
+    if (!seller && scheme === UAE_EAS_SCHEME && !/^1\d{9}$/.test(endpoint) && doc.transaction_type?.[7] !== "1" && !vat && !esc(party?.identifier).trim()) check(identityField("identifier"), "identifier for this electronic recipient");
+    if (legal && !legalType && scheme === UAE_EAS_SCHEME) check(legalTypeField, "legal registration type", seller ? "details" : "einvoice");
+    if (legalType && scheme === UAE_EAS_SCHEME && !["TL", "EID", "PAS", "CD"].includes(legalType)) check(legalTypeField, "supported legal registration type", seller ? "details" : "einvoice");
+    if (legal && (legalType === "TL" || legalType === "PAS") && !esc(party?.legal_authority).trim()) check(identityField("legal_authority"), legalType === "PAS" ? "passport issuing country code" : "trade licence issuing authority");
+    if (legalType === "PAS" && party?.legal_authority && !codes.countries.includes(party.legal_authority)) check(identityField("legal_authority"), "valid passport issuing country code");
   }
   if (CORRECTIVE_TYPE_CODES.includes(type) && doc.einvoice?.credit_reason !== "VD") {
-    if (!doc.original_invoice_number?.trim()) add("original_invoice_number", "Original invoice number (credit/debit note)");
-    if (!validDate(doc.original_invoice_date)) add("original_invoice_date", "Original invoice date");
+    if (!esc(doc.original_invoice_number).trim()) add("original_invoice_number", "Original invoice number (credit/debit note)");
   }
+  // IBT-026 is optional; IBR-073 validates it whenever supplied.
+  if (doc.original_invoice_date && !validDate(doc.original_invoice_date)) add("original_invoice_date", "Valid original invoice date (credit/debit note)");
   if (isCreditNote(type) && !CREDIT_REASONS.some(reason => reason.code === doc.einvoice?.credit_reason)) add("einvoice.credit_reason", "Credit note reason", "einvoice");
   if (!issues.some(issue => issue.section === "items")) {
     const total = computeTotals(doc);
+    if (![total.lineExtension, total.discount, total.taxExclusive, total.taxTotal, total.taxInclusive, total.prepaid, total.rounding, total.payable].every(safeAmount))
+      add("items", "Invoice totals are too large to calculate accurately", "items");
+    const rate = doc.aed_exchange_rate ?? doc.fx_rate;
+    if (doc.currency !== "AED" && finite(rate) && rate > 0 &&
+      (![total.taxTotal * rate, total.taxInclusive * rate].every(safeAmount) || doc.items.some(item => {
+        const amount = docLineAmount(item, doc.unit_price_formula);
+        const lineTax = (item.tax_category || "S") === "S" ? r2(amount * (item.tax || doc.tax_rate || 0) / 100) : 0;
+        return !safeAmount((amount + lineTax) * rate);
+      }))) add("aed_exchange_rate", "AED converted amounts are too large to calculate accurately");
     if (total.payable < 0) add("advance_applied", "Advance cannot exceed the invoice total");
     if (!isCreditNote(type) && total.payable > 0 && !validDate(doc.due_date)) add("due_date", "Payment due date for an invoice with an outstanding amount");
   }
@@ -275,7 +325,9 @@ const esc = (s: unknown) =>
     .replace(/"/g, "&quot;");
 
 const amt = (n: number, ccy: string) =>
-  `currencyID="${esc(ccy)}">${(n || 0).toFixed(2)}`;
+  `currencyID="${esc(ccy)}">${n.toFixed(2)}`;
+// XML decimal values cannot use JavaScript's scientific notation.
+const decimal = (n: number) => n.toLocaleString("en-US", { useGrouping: false, maximumSignificantDigits: 21 });
 
 // Tax-exemption reason line for a non-standard category (BT-120). Goes between
 // <cbc:Percent> and <cac:TaxScheme> in both ClassifiedTaxCategory and TaxCategory.
@@ -336,17 +388,17 @@ function partyXml(
     ? `      <cbc:EndpointID schemeID="${esc(endpointScheme)}">${esc(endpointId)}</cbc:EndpointID>\n` : "";
   return `  <cac:${role}>
     <cac:Party>
-${endpoint}${p.identity?.identifier ? `      <cac:PartyIdentification><cbc:ID>${esc(p.identity.identifier)}</cbc:ID></cac:PartyIdentification>\n` : ""}      <cac:PostalAddress>
+${endpoint}${esc(p.identity?.identifier).trim() ? `      <cac:PartyIdentification><cbc:ID>${esc(p.identity?.identifier)}</cbc:ID></cac:PartyIdentification>\n` : ""}      <cac:PostalAddress>
 ${p.street ? `        <cbc:StreetName>${esc(p.street)}</cbc:StreetName>\n` : ""}${p.city ? `        <cbc:CityName>${esc(p.city)}</cbc:CityName>\n` : ""}${p.emirate ? `        <cbc:CountrySubentity>${esc(normalizeEmirate(p.emirate))}</cbc:CountrySubentity>\n` : ""}        <cac:Country>
           <cbc:IdentificationCode>${esc(country)}</cbc:IdentificationCode>
         </cac:Country>
       </cac:PostalAddress>
-${p.trn ? `      <cac:PartyTaxScheme>
-        <cbc:CompanyID>${esc(p.trn.trim())}</cbc:CompanyID>
+${esc(p.trn).trim() ? `      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${esc(p.trn?.trim())}</cbc:CompanyID>
         <cac:TaxScheme><cbc:ID>${DEFAULT_TAX_SCHEME}</cbc:ID></cac:TaxScheme>
       </cac:PartyTaxScheme>\n` : ""}${p.taxRegistration ? `      <cac:PartyTaxScheme><cbc:CompanyID>${esc(p.taxRegistration)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>TIN</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>\n` : ""}      <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(p.name)}</cbc:RegistrationName>
-${p.legalId ? `        <cbc:CompanyID${p.legalScheme ? ` schemeAgencyID="${esc(p.legalScheme)}" schemeAgencyName="${esc(p.identity?.legal_authority || p.legalScheme)}"` : ""}>${esc(p.legalId)}</cbc:CompanyID>\n` : ""}      </cac:PartyLegalEntity>
+${esc(p.legalId).trim() ? `        <cbc:CompanyID${p.legalScheme ? ` schemeAgencyID="${esc(p.legalScheme)}" schemeAgencyName="${esc(p.identity?.legal_authority || p.legalScheme)}"` : ""}>${esc(p.legalId)}</cbc:CompanyID>\n` : ""}      </cac:PartyLegalEntity>
     </cac:Party>
   </cac:${role}>`;
 }
@@ -355,13 +407,15 @@ ${p.legalId ? `        <cbc:CompanyID${p.legalScheme ? ` schemeAgencyID="${esc(p
 export function buildInvoiceXml(doc: EInvoiceDoc): string {
   if (doc.tax_country_code && doc.tax_country_code !== "AE") throw new Error("PINT-AE export requires a UAE tax document.");
   const ccy = doc.currency || "AED";
-  const t = computeTotals(doc);
   const typeCode = doc.invoice_type_code || DEFAULT_INVOICE_TYPE_CODE;
   if (!PINT_AE_INVOICE_TYPE_CODES.some(type => type.code === typeCode)) throw new Error("This document type is not supported by UAE electronic invoicing.");
   // Identity belongs to the saved invoice, never to an export attempt.
   const uuid = doc.einvoice?.uuid;
   if (!uuid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid))
     throw new Error("Save this invoice before exporting its electronic document.");
+  const issues = eInvoiceIssues(doc);
+  if (issues.length) throw new Error(`Complete the electronic invoice checks: ${issues.map(issue => issue.label).join("; ")}`);
+  const t = computeTotals(doc);
   const root = isCreditNote(typeCode) ? "CreditNote" : "Invoice";
   const quantity = isCreditNote(typeCode) ? "CreditedQuantity" : "InvoicedQuantity";
 
@@ -406,17 +460,17 @@ ${doc.original_invoice_date ? `      <cbc:IssueDate>${esc(doc.original_invoice_d
       // retain line arithmetic within the PINT tolerance without double-discounting.
       const price = it.qty > 0 ? net / it.qty : 0;
       const custom = it.custom || {};
-      const classification = custom.einvoice_nature || custom.einvoice_item_type || custom.einvoice_hs_code
+      const classification = esc(custom.einvoice_nature).trim() || esc(custom.einvoice_item_type).trim() || esc(custom.einvoice_hs_code).trim()
         ? `      <cac:CommodityClassification>
-${custom.einvoice_nature ? `        <cbc:NatureCode>${esc(custom.einvoice_nature)}</cbc:NatureCode>\n` : ""}${custom.einvoice_item_type ? `        <cbc:CommodityCode>${esc(custom.einvoice_item_type)}</cbc:CommodityCode>\n` : ""}${custom.einvoice_hs_code ? `        <cbc:ItemClassificationCode listID="HS">${esc(custom.einvoice_hs_code)}</cbc:ItemClassificationCode>\n` : ""}      </cac:CommodityClassification>\n` : "";
+${esc(custom.einvoice_nature).trim() ? `        <cbc:NatureCode>${esc(custom.einvoice_nature)}</cbc:NatureCode>\n` : ""}${esc(custom.einvoice_item_type).trim() ? `        <cbc:CommodityCode>${esc(custom.einvoice_item_type)}</cbc:CommodityCode>\n` : ""}${esc(custom.einvoice_hs_code).trim() ? `        <cbc:ItemClassificationCode listID="HS">${esc(custom.einvoice_hs_code)}</cbc:ItemClassificationCode>\n` : ""}      </cac:CommodityClassification>\n` : "";
       return `  <cac:${root}Line>
     <cbc:ID>${i + 1}</cbc:ID>
-    <cbc:${quantity} unitCode="${unit}">${it.qty}</cbc:${quantity}>
+    <cbc:${quantity} unitCode="${unit}">${decimal(it.qty)}</cbc:${quantity}>
     <cbc:LineExtensionAmount ${amt(net, ccy)}</cbc:LineExtensionAmount>
     <cac:Item>
       <cbc:Description>${esc(it.description)}</cbc:Description>
       <cbc:Name>${esc(it.description)}</cbc:Name>
-${custom.einvoice_service_code ? `      <cac:AdditionalItemIdentification><cbc:ID schemeID="SAC">${esc(custom.einvoice_service_code)}</cbc:ID></cac:AdditionalItemIdentification>\n` : ""}${custom.einvoice_gtin ? `      <cac:StandardItemIdentification><cbc:ID schemeID="0160">${esc(custom.einvoice_gtin)}</cbc:ID></cac:StandardItemIdentification>\n` : ""}${classification}      <cac:ClassifiedTaxCategory>
+${esc(custom.einvoice_service_code).trim() ? `      <cac:AdditionalItemIdentification><cbc:ID schemeID="SAC">${esc(custom.einvoice_service_code)}</cbc:ID></cac:AdditionalItemIdentification>\n` : ""}${esc(custom.einvoice_gtin).trim() ? `      <cac:StandardItemIdentification><cbc:ID schemeID="0160">${esc(custom.einvoice_gtin.trim())}</cbc:ID></cac:StandardItemIdentification>\n` : ""}${classification}      <cac:ClassifiedTaxCategory>
         <cbc:ID>${esc(cat)}</cbc:ID>
 ${taxPercent(cat, rate)}${exemptReason(cat, custom.einvoice_exemption_code)}        <cac:TaxScheme><cbc:ID>${DEFAULT_TAX_SCHEME}</cbc:ID></cac:TaxScheme>
       </cac:ClassifiedTaxCategory>
@@ -453,15 +507,21 @@ ${taxPercent(row.category, row.rate)}${exemptReason(row.category)}        <cac:T
     )
     .join("\n");
 
-  const allowance = docTaxBreakdown(doc.items, doc.discount || 0, doc.tax_rate || 0, doc.unit_price_formula)
-    .filter(row => row.discount > 0).map(row => `  <cac:AllowanceCharge>
+  // IBT-196: an exempt allowance carries the exemption reason of the lines
+  // it discounts. Reuse the cent allocator to split an E allowance when its
+  // lines use different reasons; their sum preserves the shared tax totals.
+  const allowanceRows = t.rows.filter(row => row.discount > 0).flatMap(row => row.category !== "E" ? [{ ...row, exemption: "" }] :
+    taxBreakdown(doc.items.filter(item => item.tax_category === "E").map(item => ({
+      category: item.custom!.einvoice_exemption_code, net: docLineAmount(item, doc.unit_price_formula), rate: 0,
+    })), row.discount).filter(part => part.discount > 0).map(part => ({ ...part, category: "E", exemption: part.category })));
+  const allowance = allowanceRows.map(row => `  <cac:AllowanceCharge>
     <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
     <cbc:AllowanceChargeReasonCode>100</cbc:AllowanceChargeReasonCode>
     <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>
     <cbc:Amount ${amt(row.discount, ccy)}</cbc:Amount>
     <cac:TaxCategory>
       <cbc:ID>${esc(row.category)}</cbc:ID>
-${row.category === "E" ? "      <cbc:Percent>0</cbc:Percent>\n" : taxPercent(row.category, row.rate)}      <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+${row.category === "E" ? "      <cbc:Percent>0</cbc:Percent>\n" : taxPercent(row.category, row.rate)}${row.exemption ? `      <cbc:TaxExemptionReasonCode>${esc(row.exemption)}</cbc:TaxExemptionReasonCode>\n` : ""}      <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
     </cac:TaxCategory>
   </cac:AllowanceCharge>\n`).join("");
 
@@ -472,7 +532,7 @@ ${row.category === "E" ? "      <cbc:Percent>0</cbc:Percent>\n" : taxPercent(row
   const exchangeRate = needAed ? `  <cac:TaxExchangeRate>
     <cbc:SourceCurrencyCode>${esc(ccy)}</cbc:SourceCurrencyCode>
     <cbc:TargetCurrencyCode>AED</cbc:TargetCurrencyCode>
-    <cbc:CalculationRate>${aedRate}</cbc:CalculationRate>
+    <cbc:CalculationRate>${decimal(aedRate)}</cbc:CalculationRate>
   </cac:TaxExchangeRate>\n` : "";
   // UBL CreditNote orders these elements differently from Invoice.
   const adjustments = root === "CreditNote" ? exchangeRate + allowance : allowance + exchangeRate;
@@ -487,8 +547,8 @@ ${row.category === "E" ? "      <cbc:Percent>0</cbc:Percent>\n" : taxPercent(row
   <cbc:UUID>${uuid}</cbc:UUID>
   <cbc:IssueDate>${esc(doc.issue_date)}</cbc:IssueDate>
 ${doc.due_date && root === "Invoice" ? `  <cbc:DueDate>${esc(doc.due_date)}</cbc:DueDate>\n` : ""}${root === "CreditNote" ? taxPoint : ""}  <cbc:${root}TypeCode>${esc(typeCode)}</cbc:${root}TypeCode>
-${doc.notes ? `  <cbc:Note>${esc(doc.notes)}</cbc:Note>\n` : ""}${root === "Invoice" ? taxPoint : ""}  <cbc:DocumentCurrencyCode>${esc(ccy)}</cbc:DocumentCurrencyCode>
-${taxCurrencyCode}${root === "CreditNote" ? `  <cac:DiscrepancyResponse><cbc:ResponseCode>${esc(doc.einvoice?.credit_reason)}</cbc:ResponseCode></cac:DiscrepancyResponse>\n` : ""}${doc.po_number ? `  <cac:OrderReference><cbc:ID>${esc(doc.po_number)}</cbc:ID></cac:OrderReference>\n` : ""}${billingRef}${needAed ? `  <cac:AdditionalDocumentReference>
+${esc(doc.notes).trim() ? `  <cbc:Note>${esc(doc.notes)}</cbc:Note>\n` : ""}${root === "Invoice" ? taxPoint : ""}  <cbc:DocumentCurrencyCode>${esc(ccy)}</cbc:DocumentCurrencyCode>
+${taxCurrencyCode}${root === "CreditNote" ? `  <cac:DiscrepancyResponse><cbc:ResponseCode>${esc(doc.einvoice?.credit_reason)}</cbc:ResponseCode></cac:DiscrepancyResponse>\n` : ""}${esc(doc.po_number).trim() ? `  <cac:OrderReference><cbc:ID>${esc(doc.po_number)}</cbc:ID></cac:OrderReference>\n` : ""}${billingRef}${needAed ? `  <cac:AdditionalDocumentReference>
     <cbc:ID>AED</cbc:ID><cbc:DocumentTypeCode>aedtotal-incl-vat</cbc:DocumentTypeCode>
     <cbc:DocumentDescription>${r2(t.taxInclusive * aedRate).toFixed(2)}</cbc:DocumentDescription>
   </cac:AdditionalDocumentReference>\n` : ""}${partyXml("AccountingSupplierParty", {
@@ -501,7 +561,7 @@ ${taxCurrencyCode}${root === "CreditNote" ? `  <cac:DiscrepancyResponse><cbc:Res
     emirate: doc.seller_country_subdivision,
     country: UAE_COUNTRY_CODE,
     identity: doc.einvoice?.seller,
-    taxRegistration: !doc.seller_trn && isCommercialInvoice(typeCode) ? partyTin(doc.einvoice?.seller) : undefined,
+    taxRegistration: !doc.seller_trn?.trim() && isCommercialInvoice(typeCode) ? partyTin(doc.einvoice?.seller) : undefined,
   })}
 ${partyXml("AccountingCustomerParty", {
     name: doc.customer_name,
@@ -522,10 +582,10 @@ ${doc.transaction_type?.[0] === "1" && doc.einvoice?.beneficiary_id ? `  <cac:Bu
     <cac:Country><cbc:IdentificationCode>${esc(doc.einvoice.delivery.country_code)}</cbc:IdentificationCode></cac:Country>
   </cac:Address></cac:DeliveryLocation></cac:Delivery>\n` : ""}${doc.payment_means_code ? `  <cac:PaymentMeans>
     <cbc:PaymentMeansCode>${esc(doc.payment_means_code)}</cbc:PaymentMeansCode>
-${doc.einvoice?.payment_account_id ? `    <cac:PayeeFinancialAccount>
-      <cbc:ID>${esc(doc.einvoice.payment_account_id)}</cbc:ID>
-${doc.einvoice.payment_account_name ? `      <cbc:Name>${esc(doc.einvoice.payment_account_name)}</cbc:Name>\n` : ""}    </cac:PayeeFinancialAccount>\n` : ""}
-  </cac:PaymentMeans>\n` : ""}${doc.terms ? `  <cac:PaymentTerms><cbc:Note>${esc(doc.terms)}</cbc:Note></cac:PaymentTerms>\n` : ""}${adjustments}  <cac:TaxTotal>
+${esc(doc.einvoice?.payment_account_id).trim() ? `    <cac:PayeeFinancialAccount>
+      <cbc:ID>${esc(doc.einvoice?.payment_account_id)}</cbc:ID>
+${esc(doc.einvoice?.payment_account_name).trim() ? `      <cbc:Name>${esc(doc.einvoice?.payment_account_name)}</cbc:Name>\n` : ""}    </cac:PayeeFinancialAccount>\n` : ""}
+  </cac:PaymentMeans>\n` : ""}${esc(doc.terms).trim() ? `  <cac:PaymentTerms><cbc:Note>${esc(doc.terms)}</cbc:Note></cac:PaymentTerms>\n` : ""}${adjustments}  <cac:TaxTotal>
     <cbc:TaxAmount ${amt(t.taxTotal, ccy)}</cbc:TaxAmount>
     <cbc:TaxIncludedIndicator>false</cbc:TaxIncludedIndicator>
 ${taxSubtotals}

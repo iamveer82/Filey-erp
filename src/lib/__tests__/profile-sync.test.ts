@@ -1,7 +1,9 @@
+import { rememberLocalIdentity, setLocalSignedIn } from "../localAuth";
+import { transferProfile as syncProfile, transferSyncNow as syncNow } from "./cloud-transfer-fixture";
 import { beforeEach, expect, it, vi } from "vitest";
-import { pendingProfile, queueProfile, syncProfile } from "../profileSync";
+import { pendingProfile, queueProfile } from "../profileSync";
 import { adoptLocalProfile, getLocalProfile } from "../auth";
-import { syncNow } from "../sync";
+
 
 beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); });
 function cloud() {
@@ -29,6 +31,8 @@ it("syncs the photo even when no business records changed; retries errors and ne
 
 it("preserves edits while reconnecting or uploading and separates accounts", async () => {
   queueProfile("owner", { avatar: "local photo", name: "Local name" });
+  rememberLocalIdentity("owner@example.test", "owner");
+  setLocalSignedIn(true);
   adoptLocalProfile({ id: "owner", avatar: "old cloud photo", name: "Old name" });
   expect(getLocalProfile()).toMatchObject({ avatar: "local photo", name: "Local name" });
   const { client, write } = cloud();
@@ -37,6 +41,6 @@ it("preserves edits while reconnecting or uploading and separates accounts", asy
   expect(pendingProfile("owner").avatar).toBe("new photo");
   expect(pendingProfile("someone-else")).toEqual({});
   client.auth.getSession = async () => ({ data: { session: { user: { id: "someone-else" } } } });
-  await expect(syncProfile(client, "owner")).rejects.toThrow("session changed");
+  await expect(syncProfile(client, "owner")).rejects.toThrow("another account");
   expect(pendingProfile("owner").avatar).toBe("new photo");
 });

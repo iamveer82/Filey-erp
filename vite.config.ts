@@ -1,14 +1,29 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { AI_DEV_ORIGINS } from "./src/lib/aiEndpoint";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
-  plugins: [react()],
+export default defineConfig(async ({ command }) => ({
+  plugins: [react(), ...(command === "serve" ? [{
+    name: "filey-development-script-hashes",
+    transformIndexHtml: {
+      order: "post" as const,
+      handler(html: string) {
+        // Vite's trusted refresh preamble is inline in development. Allow its
+        // exact bytes, while keeping arbitrary inline scripts/eval blocked.
+        const hashes = [...html.replace(/\r\n?/g, "\n").matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+          .filter((match) => !/\bsrc\s*=/i.test(match[1]) && match[2].trim())
+          .map((match) => `'sha256-${createHash("sha256").update(match[2]).digest("base64")}'`);
+        return html.replace(/(<meta\s+http-equiv="Content-Security-Policy"\s+content="[^";]*; script-src)([^;]*)(;)/i,
+          (_match, prefix, allowed, end) => `${prefix}${allowed} ${hashes.join(" ")}${end}`);
+      },
+    },
+  }] : [])],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

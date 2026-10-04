@@ -171,6 +171,21 @@ it("isolates jobs and discards responses across account changes; key removal rea
   expect(hasCredential(mediaCredential("video"))).toBe(false);
   await expect(createMediaDraft("video", "Another film")).rejects.toThrow(/API key/);
 });
+it("a workspace change during video-key lookup cannot submit a request", async () => {
+  const credentials = await import("../credentialStore");
+  const read = credentials.readCredential;
+  let reads = 0;
+  vi.spyOn(credentials, "readCredential").mockImplementation(async (name, scope) => {
+    const key = await read(name, scope);
+    if (++reads === 2) setCacheOrg("other-workspace", "other-user");
+    return key;
+  });
+  const request = vi.fn();
+  vi.stubGlobal("fetch", request);
+  const draft = await createMediaDraft("video", "Keep this request private");
+  await expect(startMedia(draft.id)).rejects.toThrow(/account changed/);
+  expect(request).not.toHaveBeenCalled();
+});
 it("snapshots an OpenAI-compatible image endpoint and keeps bytes outside chat JSON", async () => {
   await saveMediaConfig(
     { ...getMediaConfig(), imageProvider: "openai" },

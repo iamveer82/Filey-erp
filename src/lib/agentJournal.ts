@@ -72,7 +72,7 @@ export function failuresFrom(
 /** Record a run. Only the ones worth learning from are kept: a run that
  *  answered cleanly with no failed tool has nothing to teach. */
 export function recordRun(note: Omit<RunNote, "at">, expectedScope?: string): void {
-  if (note.reason !== "exhausted" && note.failures.length === 0) return;
+  if (note.reason !== "exhausted" && note.reason !== "error" && note.failures.length === 0) return;
   save(
     [
       ...load(),
@@ -111,7 +111,9 @@ export function journalDigest(): string {
   if (!recent.length) return "";
   const lines = recent.map((r) => {
     const what =
-      r.reason === "exhausted" ? "ran out of steps" : "finished with tool errors";
+      r.reason === "exhausted" ? "ran out of steps" :
+      r.reason === "error" ? "request failed before completion" :
+      r.reason === "stopped" ? "stopped before completion" : "finished with tool errors";
     const fails = r.failures.length
       ? ` — ${r.failures.map((f) => `${f.tool}: ${f.error}`).join("; ")}`
       : "";

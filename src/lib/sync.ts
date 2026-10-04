@@ -1,16 +1,5 @@
-// Automatic two-way sync between the local store and the cloud. While the app
-// runs in LOCAL mode, every write is journalled per row (localdb.ts); this
-// module debounces those events, PUSHES the changed rows to the signed-in
-// Supabase account, then PULLS back everything this account can see — its own
-// rows plus records shared by org teammates (RLS decides). That is how a
-// second device or a teammate's desktop stays current.
-//
-// Uploads compare the last cloud revision inside a database transaction.
-// Conflicting rows remain local and pending until explicitly reviewed.
-//
-// Requires a cloud session. In local mode the app itself authenticates against
-// the local shim, so the real supabase-js client is signed in separately
-// (cloudSignIn below); its session persists in localStorage across restarts.
+// Local records remain on the device. This engine runs only within the
+// explicit, confirmed local-to-cloud workspace transfer.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { log } from "./log";
@@ -19,6 +8,7 @@ import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 import { syncProfile } from "./profileSync";
+import { assertCloudTransfer, checkCloudTransfer, LOCAL_TRANSFER_REQUIRED, type CloudTransferPermit } from "./cloudTransfer";
 import {
   loadColl,
   replaceColl,
@@ -35,14 +25,12 @@ import {
 const FILES_BUCKET = "files";
 const ENABLED_KEY = "filey_auto_sync";
 
-export const autoSyncEnabled = (): boolean =>
-  typeof localStorage !== "undefined" && localStorage.getItem(ENABLED_KEY) === "on";
-
-export function setAutoSyncEnabled(on: boolean): void {
-  if (on) localStorage.setItem(ENABLED_KEY, "on");
-  else localStorage.setItem(ENABLED_KEY, "off");
+// Retained exports keep older callers harmless. A saved legacy flag cannot
+// authorize any background transfer. Never erase records or journal entries.
+export const autoSyncEnabled = (): boolean => false;
+export function setAutoSyncEnabled(_on: boolean): void {
+  localStorage.setItem(ENABLED_KEY, "off");
   notify();
-  if (on) scheduleSync(500);
 }
 
 export interface SyncStatus {
@@ -161,11 +149,14 @@ export async function pushCollection(
   rows: Record<string, any>[],
   onFailure?: (failure: SyncFailure) => void,
   expectedUserId?: string,
+  transfer?: CloudTransferPermit,
 ): Promise<(string | number)[]> {
+  assertCloudTransfer(transfer, supa, expectedUserId);
   const checkSession = async () => {
     assertWorkspaceCurrent();
     if (expectedUserId && (await freshSession(supa))?.user.id !== expectedUserId)
       throw new Error("Your cloud account changed during upload. Remaining changes are still on this device.");
+    await checkCloudTransfer(transfer, supa, expectedUserId);
   };
   const failed: (string | number)[] = [];
   // Nullable legacy links are preserved. Cloud constraints and RLS validate
@@ -253,9 +244,10 @@ async function clearConflict(table: string, recordId: string | number): Promise<
 }
 /** Apply one preference to the saved workspace, then reconcile both ways.
  * Fresh revisions remain compare-and-swap bases; never force a cloud write. */
-export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null, opts?: { pendingOnly?: boolean }): Promise<boolean> {
+export async function resolveSyncConflicts(keepLocal: boolean, client?: SupabaseClient | null, opts?: { pendingOnly?: boolean; transfer?: CloudTransferPermit }): Promise<boolean> {
   const supa = client ?? supabase;
   if (!isLocalMode() || !supa) throw new Error("Open this device's workspace and connect your cloud account first.");
+  assertCloudTransfer(opts?.transfer, supa);
   if (running || migrating) throw new Error("Wait for the current sync to finish, then choose again.");
   running = true;
   setStatus({ state: "syncing" });
@@ -270,6 +262,7 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
         throw new Error("Your account changed. Reopen sync in the correct workspace.");
       assertLocalAccount(uid);
       if (localWorkspaceOwner() && !isLocalSignedIn()) throw new Error("Sign in to this device's workspace first.");
+      await checkCloudTransfer(opts?.transfer, supa, uid);
     };
     await checkAccount();
     await inRealOrg(supa, uid, true);
@@ -360,7 +353,7 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
     running = false;
   }
   try {
-    return await syncCycle(supa, { manual: true });
+    return await syncCycle(supa, { manual: true, transfer: opts?.transfer });
   } catch (error) {
     setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
     throw error;
@@ -372,7 +365,9 @@ export async function pushFileBlobs(
   uid: string,
   rows: Record<string, any>[],
   onFailure?: (failure: SyncFailure) => void,
+  transfer?: CloudTransferPermit,
 ): Promise<{ rows: Record<string, any>[]; failed: (string | number)[] }> {
+  assertCloudTransfer(transfer, supa, uid);
   const uploaded: Record<string, any>[] = [];
   const failed: (string | number)[] = [];
   for (const f of rows) {
@@ -389,6 +384,7 @@ export async function pushFileBlobs(
       const cloudPath = `${uid}/synced/${fileId}/${hash}/${String(localPath).split("/").pop()}`;
       assertWorkspaceCurrent();
       if ((await freshSession(supa))?.user.id !== uid) throw new Error("Cloud account changed");
+      await checkCloudTransfer(transfer, supa, uid);
       const { error } = await supa.storage
         .from(FILES_BUCKET)
         .upload(cloudPath, new Blob([new Uint8Array(bytes)], { type: f.mime }), { upsert: false, contentType: f.mime });
@@ -480,14 +476,11 @@ export function isMigrating(): boolean {
  *  completion (including "nothing to do"). `client` is injectable for tests. */
 export async function syncNow(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean },
+  opts?: { manual?: boolean; transfer?: CloudTransferPermit },
 ): Promise<boolean> {
   const supa = client ?? supabase;
   const manual = opts?.manual === true;
-  // A press of "Upload all local data" is an instruction, not a background
-  // tick. Every one of these used to return false in silence, so the button
-  // did nothing and said nothing — most cruelly when auto-sync was simply
-  // switched off. Manual runs ignore that preference and report why they stop.
+  // Manual controls reporting only; upload authority requires the scoped permit.
   const stop = (error: string): boolean => {
     if (manual) setStatus({ state: "error", error });
     return false;
@@ -497,15 +490,17 @@ export async function syncNow(
       "This device already works directly against the cloud, so there is nothing to upload.",
     );
   if (!supa) return stop("Cloud is not configured in this build.");
-  if (!manual && !autoSyncEnabled()) return false;
+  try { assertCloudTransfer(opts?.transfer, supa); }
+  catch { return stop(LOCAL_TRANSFER_REQUIRED); }
   if (running) return stop("A sync is already running — wait for it to finish.");
-  if (migrating) return stop("A data migration is running — sync will resume after it finishes.");
+  if (migrating) return stop("A data migration is running — try the cloud switch after it finishes.");
   if (typeof navigator !== "undefined" && !navigator.onLine) return stop("No internet connection.");
 
   // Reserve before the first await, so a second sync or workspace switch
   // cannot start while authentication or the journal is being read.
   running = true;
   try {
+    await checkCloudTransfer(opts?.transfer, supa);
     assertWorkspaceCurrent();
     const sess = await freshSession(supa);
     const uid = sess?.user?.id;
@@ -534,7 +529,7 @@ export async function syncNow(
       return false;
     }
 
-    await syncProfile(supa, uid);
+    await syncProfile(supa, uid, opts?.transfer);
     const j = await journalSnapshot();
     const dirty = PUSH_TABLES.filter((t) => j.tables[t]);
     if (!dirty.length) {
@@ -564,6 +559,7 @@ export async function syncNow(
         if (awaitingReview(t, id)) continue;
         if ((await freshSession(supa))?.user.id !== uid)
           throw new Error("Your session changed. Sign in again before syncing.");
+        await checkCloudTransfer(opts?.transfer, supa, uid);
         const { data, error } = await supa.rpc("sync_record", {
           p_table: t, p_row: { id }, p_expected: j.tables[t].deletedRevisions?.[String(id)] ?? null, p_delete: true,
         });
@@ -597,7 +593,7 @@ export async function syncNow(
         .filter(row => !awaitingReview(t, row.id));
       let ready = rows;
       if (t === "user_files") {
-        const uploaded = await pushFileBlobs(supa, uid, rows, report);
+        const uploaded = await pushFileBlobs(supa, uid, rows, report, opts?.transfer);
         ready = uploaded.rows;
         if (uploaded.failed.length) failedByTable[t] = [...(failedByTable[t] ?? []), ...uploaded.failed];
       }
@@ -608,7 +604,7 @@ export async function syncNow(
         if (!NO_SHARE.has(t)) c.shared = share ? (c.shared ?? false) : false;
         return c;
       });
-      const failed = await pushCollection(supa, t, cleaned, report, uid);
+      const failed = await pushCollection(supa, t, cleaned, report, uid, opts?.transfer);
       if (failed.length) failedByTable[t] = [...new Set([...(failedByTable[t] ?? []), ...failed])];
       if (rows.length) pushedAny = true;
     }
@@ -617,6 +613,7 @@ export async function syncNow(
     // web-side inserts don't collide.
     if (pushedAny) {
       try {
+        await checkCloudTransfer(opts?.transfer, supa, uid);
         await supa.rpc("sync_bump_sequences");
       } catch {
         /* older cloud DBs without the fn */
@@ -627,6 +624,7 @@ export async function syncNow(
     // older cloud DBs may not have the table yet.
     const now = new Date().toISOString();
     const completed = dirty.filter((table) => !failedByTable[table]);
+    await checkCloudTransfer(opts?.transfer, supa, uid);
     if (completed.length) await supa.from("sync_state").upsert(
       completed.map((t) => ({ user_id: uid, table_name: t, synced_at: now })),
       { onConflict: "user_id,table_name" },
@@ -634,6 +632,7 @@ export async function syncNow(
 
     // Keep failed tables dirty throughout: clearing and then re-marking them
     // would lose pending records if storage failed between those two writes.
+    await checkCloudTransfer(opts?.transfer, supa, uid);
     await journalCommit(j.v, dirty, failedByTable);
     for (const [t, ids] of Object.entries(failedByTable)) {
       log.warn("sync", `${t}: ${ids.length} row(s) failed, will retry`);
@@ -762,10 +761,10 @@ export async function pullManifest(supa: SupabaseClient, tables: string[]): Prom
  *  tables are skipped — local edits win until they've been pushed. */
 export async function pullNow(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean; tables?: readonly string[] },
+  opts?: { manual?: boolean; tables?: readonly string[]; transfer?: CloudTransferPermit },
 ): Promise<boolean> {
   const supa = client ?? supabase;
-  if (!isLocalMode() || !supa || (!opts?.manual && !autoSyncEnabled()) || running || migrating)
+  if (!isLocalMode() || !supa || !opts?.transfer || running || migrating)
     return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
   running = true;
@@ -798,6 +797,7 @@ export async function pullNow(
       if ((await freshSession(supa))?.user.id !== uid)
         throw new Error("Your session changed. Local records were not replaced for this table.");
       assertWorkspaceCurrent();
+      await checkCloudTransfer(opts?.transfer, supa, uid);
       const replaced = await replaceColl(t, rows, before.v);
       if (replaced) changed.push(t);
       if ((await journalVersion()) !== before.v) {
@@ -823,17 +823,21 @@ export async function pullNow(
  *  stay local and pending; authentication/transport setup failures stop early. */
 export async function syncCycle(
   client?: SupabaseClient | null,
-  opts?: { manual?: boolean; changesOnly?: boolean }
+  opts?: { manual?: boolean; changesOnly?: boolean; transfer?: CloudTransferPermit }
 ): Promise<boolean> {
-  if (migrating || (!opts?.manual && !autoSyncEnabled())) return false;
-  await seedIfNeeded(client);
-  // A local save only needs to reconcile the collections it uploads. Startup,
-  // reconnect, the five-minute check and Sync now still reconcile every table.
+  const supa = client ?? supabase;
+  if (migrating || !supa || !opts?.transfer) return false;
+  try { await checkCloudTransfer(opts.transfer, supa); } catch (error) {
+    setStatus({ state: "error", error: error instanceof Error ? error.message : String(error) });
+    return false;
+  }
+  await seedIfNeeded(supa, opts.transfer);
+  // A narrowed transfer reconciles the collections it uploads. The confirmed
+  // cloud switch reconciles the complete workspace.
   const tables = opts?.changesOnly && !opts.manual
     ? Object.keys((await journalSnapshot()).tables)
     : undefined;
-  // "Sync now" is a button, not a heartbeat: pass the intent down so it does
-  // not sit there doing nothing when auto-sync happens to be switched off.
+  // Pass the original transfer permit through both stages.
   const pushed = await syncNow(client, opts);
   const uploadStatus = getSyncStatus();
   if (!pushed && !uploadStatus.failures?.length) return false;
@@ -853,73 +857,31 @@ export async function syncCycle(
  *  cloud session predates the seed flag) must mark EVERYTHING dirty once
  *  before its first pull — marking makes every table dirty, pull skips dirty
  *  tables, so nothing local can be replaced until it has been pushed. */
-async function seedIfNeeded(client?: SupabaseClient | null): Promise<void> {
+async function seedIfNeeded(client?: SupabaseClient | null, transfer?: CloudTransferPermit): Promise<void> {
   const supa = client ?? supabase;
   if (typeof localStorage === "undefined" || !supa || !isLocalMode()) return;
   if (localStorage.getItem(SEEDED_KEY)) return;
   const { data } = await supa.auth.getSession();
   if (!data.session) return; // seed the first time a session exists
+  await checkCloudTransfer(transfer, supa, data.session.user.id);
   assertLocalAccount(data.session.user.id);
   await markAllForSync();
   localStorage.setItem(SEEDED_KEY, "1");
 }
 
-let timer: ReturnType<typeof setTimeout> | null = null;
-let fullSyncPending = false;
-
-/** Coalesce writes without downgrading a pending startup/reconnect check. */
-export function scheduleSync(delayMs = 4000, changesOnly = false): void {
-  fullSyncPending ||= !changesOnly;
-  if (timer) clearTimeout(timer);
-  timer = setTimeout(() => {
-    timer = null;
-    const changesOnly = !fullSyncPending;
-    fullSyncPending = false;
-    void syncCycle(null, { changesOnly }).catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
-  }, delayMs);
-}
-
-/** Wire up auto-sync for the app's lifetime. Call once at startup; no-op
- *  outside local mode or in builds without cloud config. */
+/** Legacy startup/save hooks never transfer local records. */
+export function scheduleSync(_delayMs = 4000, _changesOnly = false): void {}
 export function startAutoSync(): () => void {
-  if (typeof window === "undefined" || !isLocalMode() || !supabase) return () => {};
-  // Near-instant: push ~1s after a write. Short enough to feel immediate, long
-  // enough that a burst of saves (e.g. an invoice + its items) becomes one push.
-  const saved = () => scheduleSync(1000, true);
-  const online = () => scheduleSync(1000);
-  window.addEventListener("filey:local-write", saved);
-  window.addEventListener("online", online);
-  // Pull once when the user returns to the app — covers edits missed while the
-  // window was hidden (see the idle-poll note below).
-  const visible = () => {
-    if (!document.hidden) scheduleSync(1000);
-  };
-  document.addEventListener("visibilitychange", visible);
-  window.addEventListener("focus", visible);
-  scheduleSync(3000); // catch up on writes made while offline or signed out
-  // Idle poll so teammate / second-device edits land. A poll used to re-download
-  // a full snapshot of every table, which burnt cloud egress 24/7 for nothing —
-  // that is what exhausted the free-tier quota. Now three things hold it down:
-  // pullNow is incremental (see pullIncremental), the interval is 5 min, and
-  // periodic pulls pause while hidden; the visibilitychange pull catches up.
-  const interval = setInterval(() => {
-    if (typeof document !== "undefined" && document.hidden) return;
-    void syncCycle().catch(e => setStatus({ state: "error", error: e instanceof Error ? e.message : String(e) }));
-  }, 300_000);
-  return () => {
-    window.removeEventListener("filey:local-write", saved);
-    window.removeEventListener("online", online);
-    document.removeEventListener("visibilitychange", visible);
-    window.removeEventListener("focus", visible);
-    clearInterval(interval);
-    if (timer) clearTimeout(timer);
-    timer = null;
-    fullSyncPending = false;
-  };
+  // Preferences are best-effort. A full store cannot restore upload authority
+  // or prevent the app from opening its existing device records.
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem(ENABLED_KEY) !== "off")
+      localStorage.setItem(ENABLED_KEY, "off");
+  } catch { /* The engine remains disabled regardless of this legacy flag. */ }
+  return () => {};
 }
 
-/** Mark every non-empty local collection dirty, then sync — the "upload all my
- *  local data" action for a first-time connect against a non-empty cloud. */
+/** Mark non-empty device collections for the confirmed cloud transfer. */
 export async function markAllForSync(): Promise<void> {
   for (const t of PUSH_TABLES) {
     if ((await loadColl(t)).length) await journalMark(t, { all: true, silent: true });
@@ -931,23 +893,6 @@ export async function markAllForSync(): Promise<void> {
 
 const SEEDED_KEY = "filey_cloud_seeded";
 
-/** Auto-sync used to be opt-out: an absent key meant on. It is opt-in now, so
- *  upgrading would silently stop backing up every install that had simply left
- *  the default alone. Having seeded to cloud proves sync was running, so those
- *  installs keep it; a fresh install has no seed marker and stays off. */
-if (typeof localStorage !== "undefined" &&
-    localStorage.getItem(ENABLED_KEY) === null &&
-    localStorage.getItem(SEEDED_KEY)) {
-  localStorage.setItem(ENABLED_KEY, "on");
-}
-
-// Fresh sign-in: seed (see seedIfNeeded) and sync promptly.
-async function seedOnFirstConnect(): Promise<void> {
-  setStatus({ state: "idle" });
-  await seedIfNeeded();
-  scheduleSync(500);
-}
-
 export async function cloudSignIn(email: string, password: string): Promise<void> {
   const credential = getLocalCredential();
   if (localWorkspaceOwner() && credential?.email !== email.trim().toLowerCase())
@@ -956,7 +901,6 @@ export async function cloudSignIn(email: string, password: string): Promise<void
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error(error.message);
   assertLocalAccount(data.user?.id ?? "");
-  if (autoSyncEnabled()) await seedOnFirstConnect();
 }
 
 /** Create a cloud account from the desktop. Returns "confirm" when the
@@ -970,7 +914,6 @@ export async function cloudSignUp(
   if (error) throw new Error(error.message);
   if (!data.session) return "confirm";
   assertLocalAccount(data.session.user.id);
-  if (autoSyncEnabled()) await seedOnFirstConnect();
   return "session";
 }
 

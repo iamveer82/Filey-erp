@@ -13,6 +13,21 @@ it("keeps the provider's HTTPS authorization link and connection identity intact
  request.mockResolvedValue(link);
  expect(await composioConnect("gmail")).toEqual(link);
 });
+it.each([null, {}, {redirect_url:"https://connect.composio.dev/link/fixture"},
+ {redirect_url:"https://connect.composio.dev/link/fixture",connected_account_id:"ca/foreign"},
+ {redirect_url:"https://connect.composio.dev/link/fixture",connected_account_id:"a".repeat(257)},
+ {redirect_url:"https://connect.composio.dev/link/fixture",connected_account_id:"ca_fixture\n"}])("rejects an incomplete connection reply before polling %j", async (link) => {
+ request.mockResolvedValue(link);
+ await expect(composioConnect("gmail")).rejects.toThrow(/sign-in link/);
+});
+it("returns only the link and connection ID rather than provider tokens", async () => {
+ request.mockResolvedValue({redirect_url:"https://connect.composio.dev/link/fixture",connected_account_id:"ca_fixture",link_token:"fixture-private",state:{access_token:"fixture-private"}});
+ expect(await composioConnect("gmail")).toEqual({redirect_url:"https://connect.composio.dev/link/fixture",connected_account_id:"ca_fixture"});
+});
+it.each(["", "gmail?user_id=other", "a".repeat(257), "gmail\n"])("rejects invalid toolkit identifiers before dispatch %s", async (toolkit) => {
+ await expect(composioConnect(toolkit)).rejects.toThrow("valid app");
+ expect(request).not.toHaveBeenCalled();
+});
 it("reads all connection pages and fails closed on a looping provider cursor",async()=>{
  request.mockResolvedValueOnce({items:[{id:"first"}],next_cursor:"page2"}).mockResolvedValueOnce({items:[{id:"second"}]});
  expect((await composioList()).items?.map(item=>item.id)).toEqual(["first","second"]);

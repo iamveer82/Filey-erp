@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { billing, erp, hr, quotes, pos, crm, receipts, setCacheOrg, tools as settings } from "../api";
+import { billing, erp, hr, quotes, pos, crm, suppliers, receipts, setCacheOrg, tools as settings } from "../api";
 import { runTool, TOOLS } from "../aiTools";
 import { setDataMode } from "../dataMode";
 import { setAgentMode } from "../agentMode";
@@ -12,6 +12,98 @@ beforeEach(() => {
   setAgentMode("auto");
 });
 afterEach(() => vi.restoreAllMocks());
+
+it("relinks a revised buyer and clears the previous buyer's routing snapshot", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({
+    id: 1, number: "INV-1", status: "draft", customer_name: "Old Customer", customer_id: 3,
+    customer_email: "old@example.test", customer_address: "Old address", customer_trn: "old-trn",
+    buyer_city: "Old city", buyer_country_code: "AE", buyer_country_subdivision: "AE-DU",
+    einvoice: { uuid: "existing-uuid", buyer: { endpoint_id: "old-endpoint" }, buyer_delivery_mode: "peppol", delivery: { address: "Old delivery" } },
+    tax_rate: 5, discount: 0, items: [{ description: "Service", qty: 1, unit_price: 100, custom: { tax: "5" }, tax_category: "S" }],
+  } as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 9, name: "New Customer", email: "new@example.test", address: "New address", tax_id: "new-trn" }] as never);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "New Customer" })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0]).toMatchObject({
+    customer_id: 9, customer_email: "new@example.test", customer_address: "New address", customer_trn: "new-trn",
+    buyer_city: "", buyer_country_code: "", einvoice: { uuid: "existing-uuid", buyer: undefined, buyer_delivery_mode: undefined, delivery: undefined },
+  });
+  expect(save.mock.calls[0][0].items[0]).toMatchObject({ custom: { tax: "5" }, tax_category: "S" });
+  await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "Unsaved Customer" });
+  expect(save.mock.calls[1][0]).toMatchObject({ customer_id: null, customer_email: "", customer_address: "", customer_trn: "" });
+});
+
+it("keeps the saved buyer on line edits and reports persisted manual and discounted calculations", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_id: 3, customer_name: "Mary", tax_rate: 5, discount: 0, items: [] } as never);
+  const parties = vi.spyOn(crm, "customers").mockResolvedValue([{ id: 2, name: "Mary" }, { id: 3, name: "Mary" }] as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  const result = await runTool("revise_invoice", { invoice_number: "INV-1", customer_id: 3,
+    custom_columns: [{ key: "liters", label: "Litres" }], price_by: "liters",
+    items: [
+      { description: "Manual", qty: 2, unit_price: 1, custom: { __calc_mode: "manual", __manual_amount: "500" } },
+      { description: "Measured", qty: 1, unit_price: 4, custom: { liters: "400", __disc_pct: "10" } },
+    ] });
+  expect(result).toMatchObject({ ok: true, lines: [{ amount: 500 }, { amount: 1440 }], subtotal: 2100, discount: 160, tax: 97, total: 2037 });
+  expect(save.mock.calls[0][0]).toMatchObject({ customer_id: 3, customer_name: "Mary" });
+  expect(parties).not.toHaveBeenCalled();
+});
+
+it("rejects unknown pricing columns and malformed operands before any document write", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_name: "Mary", tax_rate: 0, discount: 0, items: [] } as never);
+  vi.spyOn(billing, "getCompany").mockResolvedValue({} as never);
+  vi.spyOn(crm, "customers").mockResolvedValue([]);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(suppliers, "list").mockResolvedValue([]);
+  vi.spyOn(quotes, "listDocs").mockResolvedValue([]);
+  vi.spyOn(pos, "list").mockResolvedValue([]);
+  const writes = [vi.spyOn(billing, "saveDoc"), vi.spyOn(quotes, "saveDoc"), vi.spyOn(pos, "save")];
+  for (const name of ["create_invoice_draft", "revise_invoice", "create_quote", "create_purchase_order"]) {
+    for (const invalid of [{ price_by: "missing", custom: { liters: "400" } },
+      { price_by: "liters", custom: {} }, { price_by: "liters", custom: { liters: "400L" } },
+      { price_by: "liters", custom: { __calc_mode: "manual", __manual_amount: "abc" } },
+      { price_by: "liters", custom: { liters: "400", __disc_pct: "101" } }]) {
+      const result = await runTool(name, { invoice_number: "INV-1", customer_name: "Mary", supplier_name: "Mark",
+        custom_columns: [{ key: "liters", label: "Litres" }], price_by: invalid.price_by,
+        items: [{ description: "Oil", qty: 20, ...(name === "create_quote" ? { rate: 4 } : { unit_price: 4 }), custom: invalid.custom }] });
+      expect(result, name).toHaveProperty("error");
+    }
+  }
+  for (const write of writes) expect(write).not.toHaveBeenCalled();
+});
+
+it("validates replacement invoice lines and preserves supplied product and VAT metadata", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_name: "Mark", items: [{ description: "Service", qty: 1, unit_price: 100 }] } as never);
+  vi.spyOn(crm, "customers").mockResolvedValue([]);
+  vi.spyOn(erp, "products").mockResolvedValue([{ id: 2, name: "Consulting", sku: "SVC" }] as never);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  for (const changes of [{ qty: 0 }, { qty: -1 }, { unit_price: -1 }, { description: " " }]) {
+    expect(await runTool("revise_invoice", { invoice_number: "INV-1", items: [{ description: "Consulting", qty: 2, unit_price: 50, ...changes }] })).toHaveProperty("error");
+  }
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", items: [] })).toHaveProperty("error");
+  expect(save).not.toHaveBeenCalled();
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", items: [{ description: "Consulting", product_id: 2, qty: 2, unit_price: 50, tax_category: "E", custom: { tax: "0", tax_exemption_reason: "Exempt supply" } }] })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0].items[0]).toMatchObject({ product_id: 2, qty: 2, unit_price: 50, tax_category: "E", custom: { tax: "0", tax_exemption_reason: "Exempt supply" } });
+});
+
+it("refuses duplicate saved customer names before revising a document", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_name: "Mark", items: [{ description: "Service", qty: 1, unit_price: 100 }] } as never);
+  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 2, name: "Mary" }, { id: 3, name: "Mary" }] as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "Mary" })).toMatchObject({ error: expect.stringContaining("More than one customer") });
+  expect(save).not.toHaveBeenCalled();
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "Mary", customer_id: 3 })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0]).toMatchObject({ customer_name: "Mary", customer_id: 3 });
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "Wrong name", customer_id: 3 })).toHaveProperty("error");
+  expect(save).toHaveBeenCalledTimes(1);
+});
 
 it("resolves employee names uniquely for both payroll and attendance", async () => {
   const employees = vi.spyOn(hr, "employees").mockResolvedValue([

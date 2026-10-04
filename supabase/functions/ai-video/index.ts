@@ -8,16 +8,10 @@ import {
   boundedJson,
   higgsfield,
   HiggsfieldError,
-  providerCost,
   publicHttps,
-  referenceImage,
   requestUrl,
-  uploadReference,
-  VIDEO_MODEL,
   VIDEO_TERMINAL,
   VIDEO_UUID,
-  videoInput,
-  videoQuote,
   HF_ORIGIN,
 } from "../_shared/ai-video.ts";
 
@@ -182,17 +176,27 @@ export async function handleRequest(req: Request): Promise<Response> {
     );
   const user = auth.user;
   if (!mfaAllowed(user, jwt)) return json(MFA_REQUIRED, 403);
+  let body: Record<string, unknown>;
   try {
-    const body = await boundedJson(req);
+    body = await boundedJson(req);
+  } catch (error) {
+    const oversized = error instanceof Error && error.message === "Request too large.";
+    return json({ error: oversized ? "Request too large." : "Invalid JSON video request." }, oversized ? 413 : 400);
+  }
+  try {
     const action = body.action;
     if (!["list", "quote", "get", "start", "cancel"].includes(String(action)))
       return json({ error: "Unknown video action." }, 400);
+    // New videos are billed only by the user's own media provider. Keep legacy
+    // reads/cancellation/callback settlement, but never reserve Coin or submit again.
+    if (action === "quote" || action === "start")
+      return json({ error: "Videos use your own API key. Set up Video generation in AI settings. Coin is not used for videos." }, 409);
     if (
       !(await rateLimit(
         admin,
         user.id,
-        action === "quote" ? "video_quote" : "video_read",
-        action === "quote" ? 30 : 1000,
+        "video_read",
+        1000,
         3600
       ))
     )
@@ -202,47 +206,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (error) throw error;
       return json({
         jobs: data.jobs.map(publicJob),
-        configured:
-          !!Deno.env.get("HF_API_KEY_ID") && !!Deno.env.get("HF_API_KEY_SECRET"),
+        configured: false,
       });
-    }
-    if (action === "quote") {
-      if (!user.email_confirmed_at)
-        return json({ error: "Verify your email before generating videos." }, 403);
-      const params: Record<string, unknown> = videoInput(body);
-      const reference = referenceImage(body.reference);
-      if (reference) {
-        params.image_url = await uploadReference(reference);
-        delete params.aspect_ratio;
-      }
-      const model = `${VIDEO_MODEL}/${reference ? "image-to-video" : "text-to-video"}`;
-      const price = videoQuote(Number(params.duration));
-      const estimate = await (
-        await higgsfield(`/estimate/${model}`, {
-          method: "POST",
-          body: JSON.stringify(params),
-        })
-      ).json();
-      const providerPrice = providerCost(estimate, price);
-      const token = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
-        b.toString(16).padStart(2, "0")
-      ).join("");
-      const { data, error } = await admin
-        .from("ai_video_jobs")
-        .insert({
-          id: crypto.randomUUID(),
-          user_id: user.id,
-          model,
-          params,
-          duration: params.duration,
-          charge_micros: price,
-          provider_quote_micros: providerPrice,
-          callback_token: token,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return json({ job: publicJob(data) });
     }
     let job = await lookup(admin, body.id, user.id);
     if (action === "get") return json({ job: publicJob(await reconcile(admin, job)) });
@@ -266,61 +231,13 @@ export async function handleRequest(req: Request): Promise<Response> {
           : undefined,
       });
     }
-    if (!user.email_confirmed_at)
-      return json({ error: "Verify your email before generating videos." }, 403);
-    if (!Deno.env.get("HF_API_KEY_ID") || !Deno.env.get("HF_API_KEY_SECRET"))
-      throw new Error(
-        "Video generation is not connected yet. Filey’s administrator needs to configure Higgsfield."
-      );
-    // The client can approve only a stored, immutable quote. Claiming and reserving
-    // are one transaction, so concurrent clicks never submit two paid requests.
-    const claim = await transition(admin, job, "start", {
-      charge_micros: body.charge_micros,
-    });
-    job = claim.job;
-    if (!claim.claimed) return json({ job: publicJob(job) });
-    let submitted = false;
-    try {
-      const callback = new URL(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-video`);
-      callback.searchParams.set("callback", "1");
-      callback.searchParams.set("job", job.id);
-      callback.searchParams.set("token", job.callback_token);
-      const res = await higgsfield(
-        `/${job.model}?hf_webhook=${encodeURIComponent(callback.href)}`,
-        { method: "POST", body: JSON.stringify(job.params) }
-      );
-      submitted = true;
-      const accepted = await res.json();
-      requestUrl(accepted.request_id, "status");
-      job = (
-        await transition(admin, job, "accepted", { request_id: accepted.request_id })
-      ).job;
-    } catch (error) {
-      if (
-        !submitted &&
-        error instanceof HiggsfieldError &&
-        error.status >= 400 &&
-        error.status < 500 &&
-        error.status !== 408
-      )
-        job = (
-          await transition(admin, job, "finish", {
-            state: "failed",
-            error: `${error.message} No credits were used.`,
-          })
-        ).job;
-      else job = (await transition(admin, job, "uncertain")).job;
-    }
-    return json({ job: publicJob(job), retry_safe: false });
+    return json({ error: "Unknown video action." }, 400);
   } catch (e) {
     // Provider bodies may echo prompts or credentials. Only our safe messages leave this service.
-    return json(
-      {
-        error:
-          e instanceof Error ? e.message : "The video request could not be completed.",
-      },
-      400
-    );
+    if (e instanceof HiggsfieldError) return json({ error: e.message }, e.status === 429 ? 429 : 503);
+    if (e instanceof Error && ["Invalid video ID.", "This video is unavailable for your account."].includes(e.message))
+      return json({ error: e.message }, 400);
+    return json({ error: "The video request could not be completed. Please try again later." }, 503);
   }
 }
 if (import.meta.main) Deno.serve(handleRequest);

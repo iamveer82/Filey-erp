@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { invoiceTotals, invoiceLineAmount, quotationTotals } from "../money";
+import { invoiceTotals, invoiceLineAmount, quotationTotals, r2 } from "../money";
+
+it("rounds arithmetic half-cent boundaries consistently with decimal accounting", () => {
+  expect(r2(12.5 * 1.15)).toBe(14.38);
+  expect(r2(1.005)).toBe(1.01);
+  expect(r2(14.3749)).toBe(14.37);
+  expect(r2(14.3751)).toBe(14.38);
+  expect(r2(-1.005)).toBe(-1);
+});
 
 // The shape create_invoice_draft now builds for "rate per unit of measure"
 // pricing. It once priced this line as 20 × 4.1 = 82 — the pack count times a

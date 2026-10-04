@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { expect, test, vi } from "vitest";
 vi.mock("./nativePlatform", () => ({ isNativeApp: () => true }));
-import { readDeviceValue, writeDeviceValues, restoreNativeOwnership } from "./deviceStorage";
+import { readDeviceValue, writeDeviceValues, compareDeviceValues, restoreNativeOwnership } from "./deviceStorage";
 
 test("mobile commits records and journal together, rolls back failures, and preserves legacy data", async () => {
   const prefix = crypto.randomUUID();
@@ -30,4 +30,18 @@ test("mobile commits records and journal together, rolls back failures, and pres
   await expect(writeDeviceValues([["localdb:orders", "[]"]])).rejects.toThrow("original account");
   localStorage.setItem("filey_local_workspace_owner", "original-owner");
   expect(await readDeviceValue("localdb:orders")).toBe('[{"id":1}]');
+  const originalOrders = await readDeviceValue("localdb:orders");
+  const originalJournal = await readDeviceValue("syncjournal");
+  await writeDeviceValues([["localdb:orders", '[{"id":1},{"id":2}]'], ["syncjournal", '{"v":2,"tables":{}}']]);
+  expect(await compareDeviceValues([["localdb:orders", "[]"], ["syncjournal", '{"v":3,"tables":{}}']],
+    [["localdb:orders", originalOrders], ["syncjournal", originalJournal]])).toBe(false);
+  expect(await readDeviceValue("localdb:orders")).toBe('[{"id":1},{"id":2}]');
+  expect(await readDeviceValue("syncjournal")).toBe('{"v":2,"tables":{}}');
+  expect(await compareDeviceValues([["localdb:orders", '[{"id":2}]'], ["syncjournal", '{"v":3,"tables":{"orders":{"deleted":[1],"changed":[2]}}}']],
+    [["localdb:orders", '[{"id":1},{"id":2}]'], ["syncjournal", '{"v":2,"tables":{}}']])).toBe(true);
+  expect(await readDeviceValue("localdb:orders")).toBe('[{"id":2}]');
+  localStorage.setItem("filey_local_workspace_owner", "another-account");
+  await expect(compareDeviceValues([["localdb:orders", "[]"]], [["localdb:orders", '[{"id":2}]']])).rejects.toThrow("original account");
+  localStorage.setItem("filey_local_workspace_owner", "original-owner");
+  expect(await readDeviceValue("localdb:orders")).toBe('[{"id":2}]');
 });

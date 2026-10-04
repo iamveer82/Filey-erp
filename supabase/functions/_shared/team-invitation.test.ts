@@ -18,6 +18,7 @@ Deno.test(
   async () => {
     const keys: string[] = [];
     const send: typeof fetch = async (_url, init) => {
+      assertEquals(init?.redirect,"error","Invitations must not send credentials through provider redirects");
       keys.push(new Headers(init?.headers).get("Idempotency-Key")!);
       return new Response('{"id":"test-receipt"}', { status: 200 });
     };

@@ -78,7 +78,7 @@ import {
   plural,
   getDisplayCurrency,
 } from "../lib/format";
-import { getExchangeRates, docAmountInAed } from "../lib/exchange-rates"
+import { getExchangeRates, docAmountInAed, unratedCurrency } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
 import { subdivisionLabel } from "../lib/companyCountry";
 import ColorPicker from "../components/ColorPicker";
@@ -93,6 +93,7 @@ import {
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
 import { sendEmail, emailShell, esc, bytesToBase64 } from "../lib/email";
 import InvoiceExportSheet from "../components/InvoiceExportSheet";
 import { reactToPdfBytes } from "../lib/reactPdf";
@@ -201,6 +202,7 @@ type Item = {
   tax_category?: string;
   /** Per-line discount % (Vyapar parity) — persisted via item custom meta. */
   discount?: number;
+  tax?: number;
 };
 
 // Pages are driven only by manual breaks set by the user. Default = one A4 page.
@@ -492,17 +494,21 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [params, setParams] = useSearchParams();
   useEffect(() => {
     if (params.get("new") === "1" && company && !form) {
-      setForm(blankForm(company, docs.map((d) => d.number), mode, numFmt));
       setParams({}, { replace: true });
+      void newInvoice();
     }
   }, [params, company, form, setParams, docs, numFmt, mode]);
 
   const newInvoice = async () => {
     if (!company) return;
-    const f = blankForm(company, docs.map((d) => d.number), mode, numFmt);
-    // The section's preset wins over the profile-wide default template.
-    f.template = await startingTemplate("invoice", company.default_template, f.template);
-    setForm(f);
+    const scope = agentStorageScope();
+    try {
+      const f = blankForm(company, docs.map((d) => d.number), mode, numFmt);
+      f.number = await allocateDocumentNumber(mode === "purchase" ? "purchase_invoice" : "invoice", docs.map(d => d.number), numFmt);
+      f.template = await startingTemplate("invoice", company.default_template, f.template);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setForm(f);
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const editInvoice = useCallback(async (id: number) => {
@@ -605,9 +611,12 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
 
   const duplicateInvoice = async (id: number, credit = false) => {
     try {
+      const scope = agentStorageScope();
       const d = await billing.getDoc(id);
+      const number = await allocateDocumentNumber(mode === "purchase" ? "purchase_invoice" : "invoice", docs.map(x => x.number), credit ? { [mode === "purchase" ? "purchase_invoice" : "invoice"]: `CN-${d.number}-{0001}` } : numFmt);
+      requireAgentStorageScope(scope ?? "signed-out");
       setForm({
-        number: credit ? `CN-${d.number}-${Date.now().toString().slice(-6)}` : pickInvoiceNumber(mode, docs.map((x) => x.number), numFmt),
+        number,
         status: "draft",
         doc_title: credit ? "Credit Note" : d.doc_title || d.doc_type,
         template: d.template,
@@ -748,18 +757,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       // never a customer FK; null also clears a legacy wrongly linked purchase.
       if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
-      // Consume the applied advance from the customer's credit ledger
-      // (idempotent per invoice id; duplicates start at 0 so copies never
-      // re-consume).
-      if (!isPurchase && form.customer_id)
-        await advances
-          .applyToInvoice(
-            form.customer_id,
-            form.customer_name || "",
-            id,
-            Number(form.advance_applied) || 0
-          )
-          .catch(() => {});
       setForm({ ...form, id });
       await loadDocs();
       return id;
@@ -826,18 +823,6 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       (payload as Record<string, unknown>).advance_applied = isPurchase ? 0 : Number(form.advance_applied) || 0;
       if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
-      // Consume the applied advance from the customer's credit ledger
-      // (idempotent per invoice id; duplicates start at 0 so copies never
-      // re-consume).
-      if (!isPurchase && form.customer_id)
-        await advances
-          .applyToInvoice(
-            form.customer_id,
-            form.customer_name || "",
-            id,
-            Number(form.advance_applied) || 0
-          )
-          .catch(() => {});
       setForm({ ...form, id, status });
       await loadDocs();
       toast.success(
@@ -1963,6 +1948,8 @@ function Editor({
   const isLastPreviewPage = curPageIdx === previewPages - 1;
   const [downloading, setDownloading] = useState(false);
   const [eInvoiceOpen, setEInvoiceOpen] = useState(false);
+  const [eInvoiceJump, setEInvoiceJump] = useState<string | null>(null);
+  const editorRootRef = useRef<HTMLDivElement>(null);
   const [exportingXml, setExportingXml] = useState(false);
   const downloadPdf = async () => {
     if (downloading) return;
@@ -2118,10 +2105,13 @@ function Editor({
     setForm({
       ...form,
       customColumns: form.customColumns.filter((c) => c.key !== key),
+      unit_price_formula: form.unit_price_formula?.a === key ? null : form.unit_price_formula,
       items: form.items.map((it) => {
         const c = { ...it.custom };
         delete c[key];
-        return { ...it, custom: c };
+        return { ...it, custom: c, ...(it.itemFormula?.a === key ? {
+          itemFormula: null, calcMode: it.calcMode === "formula" ? "auto" as const : it.calcMode,
+        } : {}) };
       }),
     });
   };
@@ -2152,15 +2142,25 @@ function Editor({
       .catch(() => {});
   }, []);
   useEffect(() => {
+    let active = true;
+    const scope = agentStorageScope();
+    setAvailAdvance(0);
     if (supplierMode || !form.customer_id) {
-      setAvailAdvance(0);
       return;
     }
-    advances
-      .creditForInvoice(form.customer_id, form.id)
-      .then(setAvailAdvance)
-      .catch(() => {});
-  }, [form.customer_id, form.id, supplierMode]);
+    void (async () => {
+      const credit = await advances.creditForInvoice(form.customer_id!, form.id);
+      const rates = form.currency === "AED" || (form.fx_rate && form.fx_rate > 0) ? {} : await getExchangeRates();
+      if (!active || scope !== agentStorageScope()) return;
+      if (unratedCurrency(form.currency, form.fx_rate, rates)) throw new Error("Set an AED exchange rate before applying customer credit.");
+      const fx = docAmountInAed(1, form.currency, form.fx_rate, rates);
+      if (!Number.isFinite(fx) || fx <= 0) throw new Error("Set a valid AED exchange rate before applying customer credit.");
+      // The historical advance register is in AED. Round down so the UI
+      // never offers more document-currency credit than the actual pool.
+      setAvailAdvance(Math.floor(Math.max(0, credit) / fx * 100 + 1e-8) / 100);
+    })().catch(e => { if (active && scope === agentStorageScope()) toast.error(errMsg(e)); });
+    return () => { active = false; };
+  }, [form.customer_id, form.id, form.currency, form.fx_rate, supplierMode, toast]);
   // Append an inventory product as an invoice line item (fills description &
   // unit price); drops a leftover empty row so the first import replaces it.
   const addItemFromProduct = (p: Product) => {
@@ -2233,6 +2233,19 @@ function Editor({
 
   const [viewAll, setViewAll] = useState(false);
   const [lineOptions, setLineOptions] = useState(() => !!form.unit_price_formula || form.customColumns.length > 0 || form.items.some((item) => (item.discount || 0) > 0 || (item.calcMode && item.calcMode !== "auto") || (item.tax_category && item.tax_category !== DEFAULT_TAX_CATEGORY)));
+  const pricingField = form.unit_price_formula?.a || "qty";
+  const pricingLabel = pricingField === "qty" ? "Quantity" : form.customColumns.find(column => column.key === pricingField)?.label;
+  const focusEInvoiceField = () => {
+    if (!eInvoiceJump) return;
+    const control = Array.from(editorRootRef.current?.querySelectorAll<HTMLElement>('[data-einvoice-field], [id^="invoice-field-"]') || [])
+      .find(element => element.dataset.einvoiceField === eInvoiceJump || element.id === `invoice-field-${eInvoiceJump.replace(/\./g, "-")}`)
+      || editorRootRef.current?.querySelector<HTMLElement>(`[data-einvoice-field="${eInvoiceJump === "items" ? "items.0.description" : "tax_rate"}"]`);
+    const disclosure = control?.closest("details");
+    if (disclosure) disclosure.open = true;
+    control?.scrollIntoView?.({ block: "center", inline: "nearest" });
+    control?.focus({ preventScroll: true });
+    setEInvoiceJump(null);
+  };
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
@@ -2370,10 +2383,19 @@ function Editor({
   });
 
   return (
-    <div>
+    <div ref={editorRootRef}>
       <EInvoiceReview open={eInvoiceOpen} doc={form} busy={saving || exportingXml}
         onClose={() => setEInvoiceOpen(false)} onChange={einvoice => set("einvoice", einvoice)}
-        onFix={issue => { setEInvoiceOpen(false); if (issue.field.startsWith("seller")) onEditCompany(); else setEditorTab(issue.section === "items" ? "items" : "details"); }}
+        onCloseAutoFocus={focusEInvoiceField}
+        onDocumentChange={setForm}
+        bankAccount={bank.iban || bank.account_number ? { id: bank.iban || bank.account_number, name: bank.account_name } : undefined}
+        onFix={issue => {
+          setEInvoiceOpen(false);
+          setEditorTab(issue.section === "items" ? "items" : "details");
+          if (issue.section === "items") setLineOptions(true);
+          if (issue.field === "discount") setShowDiscount(true);
+          setEInvoiceJump(issue.field);
+        }}
         onExport={() => void exportXml()} />
       <PageHeader
         title={form.id ? (partyLabel === "Supplier" ? "Edit Purchase Invoice" : "Edit Invoice") : (partyLabel === "Supplier" ? "New Purchase Invoice" : "New Invoice")}
@@ -2406,15 +2428,10 @@ function Editor({
             <button
               className="btn-primary"
               disabled={saving || exportingXml}
-              onClick={() => {
-                set("einvoice", { ...form.einvoice,
-                  payment_account_id: form.einvoice?.payment_account_id || bank.iban || bank.account_number,
-                  payment_account_name: form.einvoice?.payment_account_name || bank.account_name });
-                setEInvoiceOpen(true);
-              }}
+              onClick={() => setEInvoiceOpen(true)}
               title="Check required UAE e-invoice details and export XML for free"
             >
-              <FileCode size={15} /> Check e-invoice
+              <FileCode size={15} /> Check E-invoice
             </button>
           )}
           <button
@@ -2671,7 +2688,7 @@ function Editor({
                   (availAdvance > 0 || (Number(form.advance_applied) || 0) > 0) && (
                     <Field label="Apply customer advance">
                       <div className="flex items-center gap-2">
-                        <input aria-label="Advance payment applied"
+                        <input data-einvoice-field="advance_applied" aria-label="Advance payment applied"
                           className="input"
                           type="number"
                           min={0}
@@ -2731,7 +2748,7 @@ function Editor({
                   />
                 </Field>
                 <Field label="Tax country">
-                  <SelectMenu value={form.tax_country_code || ""} onChange={v => setForm({ ...form, tax_country_code: v || undefined, template:v && v !== "AE" && /(^|-)uae($|-)/.test(form.template || "") ? "minimal" : form.template })}
+                  <SelectMenu id="invoice-field-tax_country_code" value={form.tax_country_code || ""} onChange={v => setForm({ ...form, tax_country_code: v || undefined, template:v && v !== "AE" && /(^|-)uae($|-)/.test(form.template || "") ? "minimal" : form.template })}
                     options={[{ value:"", label:"Legacy currency defaults" }, ...COUNTRY_OPTIONS]} />
                 </Field>
                 <Field label="Currency">
@@ -2884,7 +2901,7 @@ function Editor({
                         key={f.key}
                         className="flex items-center gap-1.5 text-xs text-brand-600"
                       >
-                        <input
+                        <input data-einvoice-field="transaction_type"
                           type="checkbox"
                           checked={decodeTransactionType(form.transaction_type)[f.key]}
                           onChange={(e) => {
@@ -2936,65 +2953,30 @@ function Editor({
           <TabsContent value="items" forceMount hidden={editorTab !== "items"}>
           {/* Items */}
           <Step title="Items" action={
-            <div className="flex flex-wrap items-center gap-3">
+            <div role="group" aria-label="Invoice line controls" className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-2">
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 {taxRegimeFor(form.currency, form.tax_country_code).taxLabel} %
-                <input aria-label="Document tax rate percent" type="number" min="0" max="100" className="input w-20 text-right" value={form.tax_rate} onChange={(e) => set("tax_rate", Math.min(100, Math.max(0, numInput(e.target.value))))} />
+                <input data-einvoice-field="tax_rate" aria-label="Document tax rate percent" type="number" min="0" max="100" className="input w-16 text-right" value={form.tax_rate} onChange={(e) => set("tax_rate", Math.min(100, Math.max(0, numInput(e.target.value))))} />
               </label>
-              <button type="button" className="btn-ghost" aria-expanded={lineOptions} onClick={() => setLineOptions((open) => !open)}>Line options<ChevronDown size={15} className={lineOptions ? "rotate-180" : ""} /></button>
+              <div className="flex min-w-0 max-w-full items-center gap-2 text-xs text-muted-foreground">
+                <span>Pricing</span>
+                <SelectMenu ariaLabel="Invoice pricing calculation" className="w-48 max-w-full" size="sm" value={pricingField}
+                  onChange={value => set("unit_price_formula", value === "qty" ? null : { a: value, b: "unit_price" })}
+                  options={[
+                    { value: "qty", label: "Quantity × unit price" },
+                    ...form.customColumns.map(column => ({ value: column.key, label: `${column.label} × unit price` })),
+                    ...(!pricingLabel ? [{ value: pricingField, label: "Unavailable calculation field" }] : []),
+                  ]} />
+              </div>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <input type="checkbox" checked={lineOptions} onChange={event => setLineOptions(event.target.checked)} />
+                Line details
+              </label>
             </div>
           }>
-            <div hidden={!lineOptions} className="rounded-xl border border-border p-3 mb-3">
-              <div className="flex items-center justify-between gap-2 text-xs font-semibold text-brand-500 mb-2">
-                Multiply field with unit price
-                <button
-                  type="button"
-                  role="switch"
-                  aria-label="Multiply field with unit price"
-                  aria-checked={!!form.unit_price_formula}
-                  onClick={() =>
-                    set(
-                      "unit_price_formula",
-                      form.unit_price_formula ? null : { a: "", b: "unit_price" }
-                    )
-                  }
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    form.unit_price_formula ? "bg-primary-400" : "bg-brand-200"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      form.unit_price_formula ? "translate-x-4" : "translate-x-1"
-                    }`}
-                  />
-                </button>
-              </div>
-              {form.unit_price_formula && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <SelectMenu
-                    className="w-auto"
-                    size="sm"
-                    value={form.unit_price_formula.a || ""}
-                    onChange={(v) =>
-                      set("unit_price_formula", {
-                        a: v,
-                        b: "unit_price",
-                      })
-                    }
-                    options={[
-                      { value: "", label: "Select field" },
-                      { value: "qty", label: "Qty" },
-                      ...form.customColumns.map((c) => ({
-                        value: c.key,
-                        label: c.label,
-                      })),
-                    ]}
-                  />
-                  <span className="text-brand-400">× unit price</span>
-                  <span className="text-[10px] text-brand-400">→ Amount</span>
-                </div>
-              )}
-            </div>
+            <p className={`mb-3 text-xs ${pricingLabel ? "text-muted-foreground" : "text-danger"}`}>
+              {pricingLabel ? `Amount = ${pricingLabel} × unit price. Line calculations override this; discounts and tax are applied afterward.` : "This calculation field is unavailable. Choose quantity or another field before finalizing."}
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm [&_th]:whitespace-nowrap">
                 <thead>
@@ -3064,7 +3046,10 @@ function Editor({
                   </tr>
                 </thead>
                 <tbody>
-                  {form.items.map((it, i) => (
+                  {form.items.map((it, i) => {
+                    const multiplier = it.calcMode === "manual" ? null : it.calcMode === "formula" && it.itemFormula?.a ? it.itemFormula.a : pricingField;
+                    const multiplierLabel = multiplier === "qty" ? "Quantity" : form.customColumns.find(column => column.key === multiplier)?.label;
+                    return (
                     <tr key={i} className="border-t border-brand-100">
                       <td className="py-2 pr-2 text-brand-500">
                         {i + 1}
@@ -3073,7 +3058,7 @@ function Editor({
                         )}
                       </td>
                       <td className="py-2 px-2">
-                        <input aria-label={"Description for line " + (i + 1)}
+                        <input data-einvoice-field={`items.${i}.description`} aria-label={"Description for line " + (i + 1)}
                           className="input"
                           placeholder="Item description"
                           value={it.description}
@@ -3081,7 +3066,7 @@ function Editor({
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <input aria-label={"Quantity for line " + (i + 1)}
+                        <input data-einvoice-field={`items.${i}.qty`} aria-label={"Quantity for line " + (i + 1)}
                           type="number"
                           className="input text-right !px-2"
                           value={it.qty || ""}
@@ -3100,7 +3085,7 @@ function Editor({
                         />
                       </td>
                       <td className="py-2 px-2">
-                        <input aria-label={"Unit for line " + (i + 1)}
+                        <input data-einvoice-field={`items.${i}.unit`} aria-label={"Unit for line " + (i + 1)}
                           className="input text-right !px-2"
                           placeholder="pcs"
                           value={it.unit || ""}
@@ -3110,6 +3095,7 @@ function Editor({
                       </td>
                       <td hidden={!lineOptions} className="py-2 px-2">
                         <SelectMenu
+                          ariaLabel={`Calculation for line ${i + 1}`}
                           value={
                             it.calcMode === "manual"
                               ? "manual"
@@ -3144,12 +3130,12 @@ function Editor({
                             }
                           }}
                           options={[
-                            { value: "auto", label: "Auto" },
-                            { value: "manual", label: "Manual" },
-                            { value: "qty", label: "Formula: Qty" },
+                            { value: "auto", label: "Use document pricing" },
+                            { value: "manual", label: "Manual amount" },
+                            { value: "qty", label: "Quantity × unit price" },
                             ...form.customColumns.map((c) => ({
                               value: `formula:${c.key}`,
-                              label: `Formula: ${c.label}`,
+                              label: `${c.label} × unit price`,
                             })),
                           ]}
                         />
@@ -3157,6 +3143,7 @@ function Editor({
                       {((form.tax_rate || 0) > 0 || isUaeRegime(form.currency, form.tax_country_code)) && (
                         <td hidden={!lineOptions} className="py-2 px-2">
                           <SelectMenu
+                            id={`invoice-field-items-${i}-tax_category`}
                             ariaLabel={`Tax category for line ${i + 1}`}
                             value={it.tax_category || DEFAULT_TAX_CATEGORY}
                             onChange={(v) => setItem(i, { tax_category: v })}
@@ -3167,18 +3154,25 @@ function Editor({
                           />
                         </td>
                       )}
-                      {form.customColumns.map((col) => (
+                      {form.customColumns.map((col) => {
+                        const value = it.custom?.[col.key] || "";
+                        const invalid = multiplier === col.key && (!value.trim() || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) !== Number.parseFloat(value));
+                        return (
                         <td key={col.key} className="py-2 px-2">
-                          <input aria-label={col.label + " for line " + (i + 1)}
+                          <input data-einvoice-field={`items.${i}.custom.${col.key}`} aria-label={col.label + " for line " + (i + 1)}
                             className="input text-right !px-2 !py-1 text-xs"
+                            inputMode={multiplier === col.key ? "decimal" : undefined}
+                            aria-invalid={invalid || undefined}
+                            aria-describedby={invalid ? `invoice-measure-${i}-${col.key}` : undefined}
                             placeholder={col.label}
-                            value={it.custom?.[col.key] || ""}
+                            value={value}
                             onChange={(e) => setItemCustom(i, col.key, e.target.value)}
                           />
+                          {invalid && <p id={`invoice-measure-${i}-${col.key}`} className="mt-1 text-xs text-danger">Enter a number ≥ 0 for this calculation.</p>}
                         </td>
-                      ))}
+                      ); })}
                       <td className="py-2 px-2">
-                        <input aria-label={"Unit price for line " + (i + 1)}
+                        <input data-einvoice-field={`items.${i}.unit_price`} aria-label={"Unit price for line " + (i + 1)}
                           type="number"
                           className={`input text-right !px-2 ${
                             it.calcMode !== "manual" &&
@@ -3196,7 +3190,7 @@ function Editor({
                         />
                       </td>
                       <td hidden={!lineOptions} className="py-2 px-2">
-                        <input aria-label={"Discount percent for line " + (i + 1)}
+                        <input data-einvoice-field={`items.${i}.discount`} aria-label={"Discount percent for line " + (i + 1)}
                           type="number"
                           min="0"
                           max="100"
@@ -3224,7 +3218,7 @@ function Editor({
                       )}
                       <td className="py-2 px-2 text-right font-medium text-ink">
                         {it.calcMode === "manual" ? (
-                          <input aria-label={"Line amount for line " + (i + 1)}
+                          <input data-einvoice-field={`items.${i}.amount`} aria-label={"Line amount for line " + (i + 1)}
                             type="number"
                             className="input text-right !px-2"
                             placeholder="0"
@@ -3240,6 +3234,9 @@ function Editor({
                         ) : (
                           m(docLineAmount(it, form.unit_price_formula))
                         )}
+                        <span className="mt-1 block text-[10px] font-normal text-muted-foreground">
+                          {it.calcMode === "manual" ? "Entered amount" : `${multiplierLabel || "Missing field"} × unit price${it.discount ? ` − ${it.discount}%` : ""}`}
+                        </span>
                       </td>
                       <td className="py-2">
                         <div className="flex items-center gap-0.5">
@@ -3279,36 +3276,57 @@ function Editor({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>
-            {isUaeRegime(form.currency, form.tax_country_code) && form.items.some(item => ["E", "AE"].includes(item.tax_category || "")) && (
-              <section aria-label="Required line tax details" className="mt-4 space-y-3 border-t border-border pt-4">
-                <h3 className="text-sm font-medium">Required line tax details</h3>
-                {form.items.map((item, index) => ["E", "AE"].includes(item.tax_category || "") && (
+            {isUaeRegime(form.currency, form.tax_country_code) && (
+              <details className="mt-4 border-t border-border pt-4" open={form.items.some(item => ["E", "AE"].includes(item.tax_category || "") || !!item.custom.einvoice_item_type)}>
+                <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-medium">E-invoice line details <ChevronDown size={15} /></summary>
+                <section aria-label="Required line tax details" className="space-y-3 pt-3">
+                <p className="text-xs text-muted-foreground">Set an item classification where applicable. Goods need an HS code and services need a service accounting code when you specify their type.</p>
+                {form.items.map((item, index) => (
                   <fieldset key={index} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <legend className="mb-2 text-xs text-muted-foreground">Line {index + 1} · {item.description || "Item"}</legend>
-                    {item.tax_category === "E" ? (
+                    <Field label="Item classification (optional)">
+                      <SelectMenu id={`invoice-field-items-${index}-custom-einvoice_item_type`} ariaLabel={`Item classification for line ${index + 1}`}
+                        value={item.custom.einvoice_item_type || ""} onChange={value => setItemCustom(index, "einvoice_item_type", value)}
+                        options={[{ value: "", label: "Not specified" }, { value: "G", label: "Goods" }, { value: "S", label: "Services" }, { value: "B", label: "Goods and services" }]} />
+                    </Field>
+                    <Field label="Line VAT rate (optional override)" hint="Blank or 0 uses the document rate for standard-rated lines. Use the tax category for zero-rated or exempt supplies.">
+                      <input data-einvoice-field={`items.${index}.tax`} className="input" type="number" min="0" max="100" step="0.01" aria-label={`VAT rate for line ${index + 1}`}
+                        value={item.tax ?? ""} onChange={event => setItem(index, { tax: event.target.value === "" ? undefined : Number(event.target.value) })} />
+                    </Field>
+                    {["G", "B"].includes(item.custom.einvoice_item_type) && <Field label="HS classification code" required>
+                      <input data-einvoice-field={`items.${index}.custom.einvoice_hs_code`} className="input" aria-label={`HS classification code for line ${index + 1}`}
+                        value={item.custom.einvoice_hs_code || ""} onChange={event => setItemCustom(index, "einvoice_hs_code", event.target.value)} />
+                    </Field>}
+                    {["S", "B"].includes(item.custom.einvoice_item_type) && <Field label="Service accounting code" required>
+                      <input data-einvoice-field={`items.${index}.custom.einvoice_service_code`} className="input" aria-label={`Service accounting code for line ${index + 1}`}
+                        value={item.custom.einvoice_service_code || ""} onChange={event => setItemCustom(index, "einvoice_service_code", event.target.value)} />
+                    </Field>}
+                    {item.tax_category === "E" && (
                       <Field label="VAT exemption reason">
-                        <SelectMenu ariaLabel={`VAT exemption reason for line ${index + 1}`} value={item.custom.einvoice_exemption_code || ""}
+                        <SelectMenu id={`invoice-field-items-${index}-custom-einvoice_exemption_code`} ariaLabel={`VAT exemption reason for line ${index + 1}`} value={item.custom.einvoice_exemption_code || ""}
                           onChange={value => setItemCustom(index, "einvoice_exemption_code", value)}
                           options={[{ value: "", label: "Choose the applicable exemption" }, ...TAX_EXEMPTION_CODES.map(code => ({ value: code.code, label: code.label }))]} />
                       </Field>
-                    ) : <>
+                    )}
+                    {item.tax_category === "AE" && <>
                       <Field label="Reverse-charge supply type">
-                        <SelectMenu ariaLabel={`Reverse-charge supply type for line ${index + 1}`} value={item.custom.einvoice_nature || ""}
+                        <SelectMenu id={`invoice-field-items-${index}-custom-einvoice_nature`} ariaLabel={`Reverse-charge supply type for line ${index + 1}`} value={item.custom.einvoice_nature || ""}
                           onChange={value => setItemCustom(index, "einvoice_nature", value)}
                           options={[{ value: "", label: "Choose the supply type" }, ...REVERSE_CHARGE_TYPES.map(code => ({ value: code.code, label: code.label }))]} />
                       </Field>
                       <Field label="GTIN product identifier">
-                        <input className="input" aria-label={`GTIN product identifier for line ${index + 1}`} value={item.custom.einvoice_gtin || ""}
+                        <input data-einvoice-field={`items.${index}.custom.einvoice_gtin`} className="input" aria-label={`GTIN product identifier for line ${index + 1}`} value={item.custom.einvoice_gtin || ""}
                           onChange={event => setItemCustom(index, "einvoice_gtin", event.target.value)} />
                       </Field>
                     </>}
                   </fieldset>
                 ))}
-              </section>
+                </section>
+              </details>
             )}
             {/* Custom column management */}
             {form.customColumns.length > 0 && (
@@ -3361,7 +3379,7 @@ function Editor({
             )}
             <div className="flex flex-wrap gap-2 mt-3">
               <button className="btn-ghost" onClick={() => addItem("Delivery or service charge")}><Plus size={14} /> Add charge</button>
-              <button className="btn-ghost" onClick={() => addItem()}>
+              <button data-einvoice-field="items" className="btn-ghost" onClick={() => addItem()}>
                 <Plus size={14} /> Add item
               </button>
               <button className="btn-ghost text-xs" onClick={() => setInvOpen(true)}>
@@ -3417,7 +3435,7 @@ function Editor({
             {showDiscount && (
               <div className="mt-3 max-w-xs">
                 <Field label="Discount (amount)">
-                  <input aria-label="Document discount"
+                  <input data-einvoice-field="discount" aria-label="Document discount"
                     type="number"
                     className="input"
                     placeholder="0"

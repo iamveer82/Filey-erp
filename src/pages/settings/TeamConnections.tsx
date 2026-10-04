@@ -16,7 +16,7 @@ export const TEAM_ACCESS = [
   {
     value: "sales",
     label: "Sales",
-    modules: ["team", "crm", "customers", "quoting", "invoicing", "follow-ups"],
+    modules: ["team", "crm", "customers", "quoting", "invoicing", "packaging-list", "follow-ups"],
   },
   {
     value: "finance",
@@ -38,6 +38,7 @@ export const TEAM_ACCESS = [
       "team",
       "inventory",
       "orders",
+      "packaging-list",
       "suppliers",
       "purchase-orders",
       "purchase-invoices",

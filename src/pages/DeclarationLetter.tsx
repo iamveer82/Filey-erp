@@ -25,10 +25,11 @@ import {
 } from "../lib/api";
 import { useUI } from "../lib/ui";
 import {
-  pickDocNumber,
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import { errMsg, fmtDate, todayYmd } from "../lib/format";
 import { PageHeader, Field, DataTable, Card, SearchInput, ErrorBanner } from "../components/ui";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
@@ -185,7 +186,7 @@ let dlFormats: DocFormats = {};
 
 /** Next letter reference: the user's format when set, else DL-0001, DL-0002… */
 const nextRef = (list: SavedDecl[]) =>
-  pickDocNumber(
+  allocateDocumentNumber(
     "declaration_letter",
     list.map((d) => d.ref || ""),
     dlFormats
@@ -256,19 +257,29 @@ export default function DeclarationLetter() {
 
   // ---- List-row actions (DEMO parity) ----
   const duplicateRow = async (d: SavedDecl) => {
+    try {
+    const scope = agentStorageScope();
     const copy: SavedDecl = {
       ...d,
       id: newId(),
-      ref: nextRef(docs),
+      ref: await nextRef(docs),
       updated_at: new Date().toISOString(),
     };
-    try {
+      requireAgentStorageScope(scope ?? "signed-out");
       const list = await upsertDeclaration(copy);
       setDocs(list);
       toast.success(`Duplicated as ${copy.ref}.`);
     } catch (e) {
       toast.error(errMsg(e));
     }
+  };
+  const createLetter = async () => {
+    const scope = agentStorageScope();
+    try {
+      const ref = await nextRef(docs);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setEditing({ ...blankDecl(), id: newId(), ref, updated_at: "" });
+    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const deleteRow = async (d: SavedDecl) => {
@@ -342,14 +353,7 @@ export default function DeclarationLetter() {
           <button
             className="btn-primary"
             disabled={loading || !!loadError}
-            onClick={() =>
-              setEditing({
-                ...blankDecl(),
-                id: newId(),
-                ref: nextRef(docs),
-                updated_at: "",
-              })
-            }
+            onClick={createLetter}
           >
             <Plus size={16} /> New letter
           </button>

@@ -63,7 +63,7 @@ function timedFetch(ms: number): typeof fetch {
   return async (input, init) => {
     const timeout = AbortSignal.timeout(ms);
     const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    return fetch(input, { ...init, signal });
+    return fetch(input, { ...init, signal, redirect: "error" });
   };
 }
 

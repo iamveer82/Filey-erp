@@ -8,6 +8,7 @@ import { log } from "./log";
 import { bridgeState, getBridgeConfig, hasDesktop, onBridgeState, sendWa } from "./waBridge";
 import { loadReminders, nextOccurrence, saveReminders } from "./reminders";
 import { waFormat } from "./waAgent";
+import { agentStorageScope, readAgentStorage, requireAgentStorageScope, writeAgentStorage } from "./agentStorage";
 
 let started = false;
 
@@ -24,14 +25,14 @@ const digits = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
 
 function readStamp(key: string): number {
   try {
-    return Number(localStorage.getItem(key) || "0") || 0;
+    return Number(readAgentStorage(key) || "0") || 0;
   } catch {
     return 0;
   }
 }
-function writeStamp(key: string, at: number): void {
+function writeStamp(key: string, at: number, scope: string): void {
   try {
-    localStorage.setItem(key, String(at));
+    writeAgentStorage(key, String(at), scope);
   } catch (e) {
     console.error(`Failed to write "${key}" to localStorage`, e);
   }
@@ -69,12 +70,14 @@ const ALERTS_GOAL =
  *  not consume its slot's throttle, or a transient failure blacks the alert
  *  out for a whole day and nobody is told why it went quiet. */
 async function run(kind: "daily" | "alerts"): Promise<boolean> {
+  const scope = agentStorageScope();
+  if (!scope) return false;
   // Chat funding must not silently spend money or shared free quota in the background.
   if (creditChoice().funding !== "byok") return false;
   if (!aiReady()) return false;
-  const to = await ownerJid();
-  if (!to) return false; // bridge not paired — nothing to send through
   try {
+    const to = await ownerJid();
+    if (!to || scope !== agentStorageScope()) return false;
     const text = (
       await aiAutonomous(kind === "daily" ? DAILY_GOAL : ALERTS_GOAL, {
         maxTokens: 900,
@@ -84,6 +87,7 @@ async function run(kind: "daily" | "alerts"): Promise<boolean> {
         confirm: DENY_SENSITIVE,
       })
     ).trim();
+    requireAgentStorageScope(scope);
     if (!text) return true; // nothing worth sending — done, don't retry
     if (kind === "alerts" && text.toUpperCase() === "NONE") return true;
     await sendWa(to, waFormat(text));
@@ -98,33 +102,46 @@ async function run(kind: "daily" | "alerts"): Promise<boolean> {
  *  reminder is only dropped once its WhatsApp send actually succeeded — a
  *  transient failure used to delete it outright, silently losing whatever the
  *  owner had asked to be told about. */
+let firingReminders = false;
 async function fireDueReminders(): Promise<void> {
-  const now = Date.now();
-  const list = loadReminders();
-  if (!list.length) return;
-  const remaining: typeof list = [];
-  let changed = false;
-  for (const r of list) {
-    if (r.at > now) {
-      remaining.push(r);
-      continue;
+  if (firingReminders) return;
+  const scope = agentStorageScope();
+  if (!scope) return;
+  firingReminders = true;
+  try {
+    const now = Date.now();
+    const list = loadReminders();
+    if (!list.length) return;
+    const updates = new Map<string, { original: typeof list[number]; next: typeof list[number] | null }>();
+    for (const r of list) {
+      if (r.at > now) continue;
+      const to = await ownerJid();
+      requireAgentStorageScope(scope);
+      // A cancellation/edit while resolving WhatsApp must take effect before send.
+      if (!loadReminders().some(current => JSON.stringify(current) === JSON.stringify(r))) continue;
+      const sent = to
+        ? await sendWa(to, waFormat(`*REMINDER* — ${r.text}`)).then(
+            () => true,
+            () => false
+          )
+        : false;
+      requireAgentStorageScope(scope);
+      if (r.repeat && r.repeat !== "none") {
+        // Repeats move forward regardless — a missed ping shouldn't stack up.
+        updates.set(r.id, { original: r, next: { ...r, at: nextOccurrence(r.at, r.repeat, now) } });
+      } else if (sent) {
+        updates.set(r.id, { original: r, next: null });
+      }
     }
-    changed = true;
-    const to = await ownerJid();
-    const sent = to
-      ? await sendWa(to, waFormat(`*REMINDER* — ${r.text}`)).then(
-          () => true,
-          () => false
-        )
-      : false;
-    if (r.repeat && r.repeat !== "none") {
-      // Repeats move forward regardless — a missed ping shouldn't stack up.
-      remaining.push({ ...r, at: nextOccurrence(r.at, r.repeat, now) });
-    } else if (!sent) {
-      remaining.push(r); // keep until it actually goes out
-    }
-  }
-  if (changed) saveReminders(remaining);
+    if (updates.size) saveReminders(loadReminders().flatMap(current => {
+      const update = updates.get(current.id);
+      // Preserve reminders added, changed or cancelled during the network request.
+      return update && JSON.stringify(current) === JSON.stringify(update.original)
+        ? update.next ? [update.next] : [] : [current];
+    }), scope);
+  } catch (error) {
+    log.warn("agent", "reminder delivery stopped", error);
+  } finally { firingReminders = false; }
 }
 
 /** Mount once at boot: sweep on every bridge connect, then alerts hourly. */
@@ -137,11 +154,19 @@ export function startProactiveAgent(): void {
    *  run — an LLM bill and a WhatsApp message per flap. The timestamp is
    *  written AFTER the run: a failed run only buys a short backoff, not a
    *  full day of silence. */
+  const inFlight = new Set<string>();
   const throttled = async (kind: "daily" | "alerts", key: string, every: number) => {
+    const scope = agentStorageScope();
+    if (!scope) return;
+    const active = `${scope}:${kind}`;
+    if (inFlight.has(active)) return;
     const last = readStamp(key);
     if (Date.now() - last < every) return;
-    const ok = await run(kind);
-    writeStamp(key, ok ? Date.now() : Date.now() - every + FAILURE_RETRY_MS);
+    inFlight.add(active);
+    try {
+      const ok = await run(kind);
+      writeStamp(key, ok ? Date.now() : Date.now() - every + FAILURE_RETRY_MS, scope);
+    } finally { inFlight.delete(active); }
   };
 
   onBridgeState((s) => {

@@ -67,7 +67,9 @@ export const TOOLS: ToolDef[] = [
       "Run a predefined business report. Reports: 'sales_by_month' (last 6 " +
       "months of finalized sales invoices), 'top_customers' (by invoiced total, " +
       "last 90 days), 'receivables_aging' (unpaid invoices bucketed by how " +
-      "overdue they are). Use for analytical questions — trends, who buys most, " +
+      "overdue they are). Amount reports return by_currency groups; never add " +
+      "different currencies or rank customers across currencies without conversion. " +
+      "Use for analytical questions — trends, who buys most, " +
       "what's stuck unpaid.",
     input_schema: {
       type: "object",
@@ -114,8 +116,9 @@ export const TOOLS: ToolDef[] = [
     name: "get_vat_summary",
     description:
       "Output vs input VAT over a period (default last 90 days), computed " +
-      "from issued invoices' tax rates: output tax on sales documents, input " +
-      "tax on purchase documents. Use for 'how much VAT do I owe/collect?'",
+      "using issued invoice calculations: output tax on sales documents, input " +
+      "tax on purchase documents. Returns by_currency groups without currency " +
+      "conversion; subtracts credit notes. Use for 'how much VAT do I owe/collect?'",
     input_schema: {
       type: "object",
       properties: {
@@ -430,8 +433,33 @@ import {
   runWriteTool,
 } from "./tools-writes.ts";
 import type { InboundMsg } from "./parse.ts";
+import { storedDocTotals, type DocItem } from "../_shared/docItems.ts";
+import { applyRoundOff, isCreditNote, POSTED_INVOICE_STATUSES, r2 } from "../_shared/money.ts";
 
-const r2 = (n: number) => Math.round(n * 100) / 100;
+type StoredItem = Omit<DocItem, "description"> & { description?: string; invoice_id?: number | string };
+type StoredDocument = {
+  id?: number | string; currency?: string; discount?: number; tax_rate?: number;
+  unit_price_formula?: { a: string; b?: string } | null; round_off?: boolean;
+  invoice_type_code?: string | null;
+};
+
+function documentAmounts(doc: StoredDocument, items: StoredItem[]) {
+  const totals = applyRoundOff(storedDocTotals(items, num(doc.discount), num(doc.tax_rate), doc.unit_price_formula), doc.round_off);
+  return { ...totals, net: r2(totals.total - totals.tax), sign: isCreditNote(doc.invoice_type_code) ? -1 : 1 };
+}
+
+const documentCurrency = (doc: StoredDocument) => String(doc.currency ?? "").trim().toUpperCase() || "AED";
+
+function linesByDocument(items: StoredItem[]): Map<string, StoredItem[]> {
+  const lines = new Map<string, StoredItem[]>();
+  for (const item of items) {
+    const key = String(item.invoice_id);
+    const group = lines.get(key) ?? [];
+    group.push(item);
+    lines.set(key, group);
+  }
+  return lines;
+}
 
 /** Keep model context bounded without passing broken, sliced JSON as facts. */
 export function boundedToolResult(result: unknown): string {
@@ -486,6 +514,8 @@ export async function runTool(
   /** Required for write tools: the account the rows belong to. */
   ownerId?: string,
   source?: Pick<InboundMsg, "channel" | "externalId">,
+  /** One map per user task; never reuse it across messages. */
+  receipts?: Map<string, Promise<unknown>>,
 ): Promise<unknown> {
   const org = String(orgId);
   if (!org.trim()) return { error: "Workspace is not configured." };
@@ -494,24 +524,50 @@ export async function runTool(
   const invalid = validateToolInput(input, definition.input_schema);
   if (invalid) return { error: invalid };
 
+  // A model may repeat a successful write while continuing its tool loop.
+  // Reuse its receipt, including an in-flight write, within this task only.
+  // Different inputs/owners/conversations and later user tasks stay distinct.
+  const mutation = async (execute: () => Promise<unknown>): Promise<unknown> => {
+    if (!receipts) return execute();
+    const key = JSON.stringify([org, ownerId, source ?? null, name, input], (_key, value) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+        : value);
+    const previous = receipts.get(key);
+    if (previous) return previous;
+    const pending = execute();
+    receipts.set(key, pending);
+    try {
+      const result = await pending;
+      // Known validation/lookup errors can be corrected after another tool.
+      // An uncertain save must keep its receipt and stop the caller's loop.
+      if (result && typeof result === "object" && "error" in result &&
+          !("code" in result && result.code === "unconfirmed_write")) receipts.delete(key);
+      return result;
+    } catch (error) {
+      receipts.delete(key);
+      throw error;
+    }
+  };
+
   // ---- draft-only writes ----
   if (WRITE_TOOLS.some((t) => t.name === name)) {
     if (!ownerId) return { error: "writes are not configured (no owner)" };
-    return runWriteTool(client, org, ownerId, name, input);
+    return mutation(() => runWriteTool(client, org, ownerId, name, input));
   }
 
   // ---- confirm-gated proposals ----
   if (name === "request_payment_reminder") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposePaymentReminder(client, org, ownerId, input, source);
+    return mutation(() => proposePaymentReminder(client, org, ownerId, input, source));
   }
   if (name === "connect_channel") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposeConnectChannel(client, ownerId, input, source);
+    return mutation(() => proposeConnectChannel(client, ownerId, input, source));
   }
   if (name === "send_message") {
     if (!ownerId) return { error: "actions are not configured (no owner)" };
-    return proposeSendMessage(client, org, ownerId, input, source);
+    return mutation(() => proposeSendMessage(client, org, ownerId, input, source));
   }
 
   // ---- durable memory ----
@@ -519,7 +575,7 @@ export async function runTool(
     if (!ownerId) return { error: "memory is not configured (no owner)" };
     return name === "remember"
       ? rememberMemory(client, org, ownerId, input)
-      : recallMemories(client, ownerId, input);
+      : recallMemories(client, org, ownerId, input);
   }
 
   switch (name) {
@@ -579,9 +635,9 @@ export async function runTool(
         const since = new Date(t.getFullYear(), t.getMonth() - 5, 1).toISOString().slice(0, 10);
         const { data, error } = await client
           .from("invoice_docs")
-          .select("issue_date,status,doc_type,id")
+          .select("issue_date,status,doc_type,id,currency,tax_rate,discount,unit_price_formula,round_off,invoice_type_code")
           .eq("org_id", org)
-          .neq("status", "draft")
+          .in("status", [...POSTED_INVOICE_STATUSES])
           .gte("issue_date", since);
         if (error) return { error: error.message };
         // Totals need items; keep it cheap: count invoices per month + fetch totals per doc set.
@@ -590,32 +646,31 @@ export async function runTool(
         // deno-lint-ignore no-explicit-any
         const ids = sales.map((d: any) => d.id);
         const { data: items, error: itemError } = ids.length
-          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price,custom,tax_category").eq("org_id", org).in("invoice_id", ids)
           : { data: [], error: null };
         if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
-        const totalByDoc = new Map<number, number>();
-        // deno-lint-ignore no-explicit-any
-        for (const it of items ?? []) {
-          totalByDoc.set(it.invoice_id, (totalByDoc.get(it.invoice_id) ?? 0) + Number(it.qty) * Number(it.unit_price));
-        }
-        const byMonth: Record<string, { invoices: number; total: number }> = {};
+        const byDoc = linesByDocument(items ?? []);
+        const byCurrency = new Map<string, Record<string, { invoices: number; total: number }>>();
         // deno-lint-ignore no-explicit-any
         for (const d of sales) {
           const mo = String(d.issue_date ?? "").slice(0, 7);
           if (!mo) continue;
+          const currency = documentCurrency(d), byMonth = byCurrency.get(currency) ?? {};
+          const amounts = documentAmounts(d, byDoc.get(String(d.id)) ?? []);
           byMonth[mo] ??= { invoices: 0, total: 0 };
           byMonth[mo].invoices++;
-          byMonth[mo].total += Math.round((totalByDoc.get(d.id) ?? 0) * 100) / 100;
+          byMonth[mo].total = r2(byMonth[mo].total + amounts.sign * amounts.total);
+          byCurrency.set(currency, byMonth);
         }
-        return byMonth;
+        return { by_currency: [...byCurrency].map(([currency, months]) => ({ currency, months })) };
       }
       if (report === "top_customers") {
         const since = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
         const { data, error } = await client
           .from("invoice_docs")
-          .select("id,customer_name,doc_type,status,issue_date")
+          .select("id,customer_name,doc_type,status,issue_date,currency,tax_rate,discount,unit_price_formula,round_off,invoice_type_code")
           .eq("org_id", org)
-          .neq("status", "draft")
+          .in("status", [...POSTED_INVOICE_STATUSES])
           .gte("issue_date", since);
         if (error) return { error: error.message };
         // deno-lint-ignore no-explicit-any
@@ -623,24 +678,22 @@ export async function runTool(
         // deno-lint-ignore no-explicit-any
         const ids = sales.map((d: any) => d.id);
         const { data: items, error: itemError } = ids.length
-          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+          ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price,custom,tax_category").eq("org_id", org).in("invoice_id", ids)
           : { data: [], error: null };
         if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
-        const totalByDoc = new Map<number, number>();
-        // deno-lint-ignore no-explicit-any
-        for (const it of items ?? []) {
-          totalByDoc.set(it.invoice_id, (totalByDoc.get(it.invoice_id) ?? 0) + Number(it.qty) * Number(it.unit_price));
-        }
-        const byCustomer: Record<string, number> = {};
+        const byDoc = linesByDocument(items ?? []);
+        const byCurrency = new Map<string, Map<string, number>>();
         // deno-lint-ignore no-explicit-any
         for (const d of sales) {
           const c = d.customer_name || "—";
-          byCustomer[c] = Math.round(((byCustomer[c] ?? 0) + (totalByDoc.get(d.id) ?? 0)) * 100) / 100;
+          const currency = documentCurrency(d), byCustomer = byCurrency.get(currency) ?? new Map<string, number>();
+          const amounts = documentAmounts(d, byDoc.get(String(d.id)) ?? []);
+          byCustomer.set(c, r2((byCustomer.get(c) ?? 0) + amounts.sign * amounts.total));
+          byCurrency.set(currency, byCustomer);
         }
-        return Object.entries(byCustomer)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 10)
-          .map(([customer, total]) => ({ customer, total }));
+        return { by_currency: [...byCurrency].map(([currency, customers]) => ({ currency,
+          customers: [...customers].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([customer, total]) => ({ customer, total })),
+        })) };
       }
       if (report === "receivables_aging") {
         const todayIso = new Date().toISOString().slice(0, 10);
@@ -685,7 +738,7 @@ export async function runTool(
       if (!number) return { error: "invoice_number is required" };
       const { data: inv, error } = await client
         .from("invoice_docs")
-        .select("id,number,status,currency,customer_name,customer_email,issue_date,due_date,tax_rate,discount")
+        .select("id,number,status,currency,customer_name,customer_email,issue_date,due_date,tax_rate,discount,unit_price_formula,round_off,invoice_type_code")
         .eq("org_id", org)
         .eq("number", number)
         .maybeSingle();
@@ -693,22 +746,23 @@ export async function runTool(
       if (!inv) return { error: `invoice ${number} not found` };
       const { data: items, error: ie } = await client
         .from("invoice_doc_items")
-        .select("description,qty,unit_price")
+        .select("description,qty,unit_price,custom,tax_category")
         .eq("org_id", org)
         .eq("invoice_id", inv.id)
         .order("position");
       if (ie) return { error: ie.message };
-      // Same math the app's totals use: net lines, doc-level discount, then
-      // the doc-level tax rate. There is no stored tax_amount column.
-      const subtotal = r2((items ?? []).reduce((s: number, it: any) => s + num(it.qty) * num(it.unit_price), 0));
-      const taxable = Math.max(subtotal - num(inv.discount), 0);
-      const tax = r2((taxable * Math.max(num(inv.tax_rate), 0)) / 100);
+      const amounts = documentAmounts(inv, items ?? []);
       return {
         ...inv,
         items: items ?? [],
-        subtotal,
-        tax,
-        total: r2(taxable + tax),
+        currency: documentCurrency(inv),
+        subtotal: amounts.subtotal,
+        applied_discount: amounts.discount,
+        net: amounts.net,
+        tax: amounts.tax,
+        total: amounts.total,
+        round_off_adjustment: amounts.round_off,
+        is_credit_note: amounts.sign < 0,
       };
     }
     case "get_vat_summary": {
@@ -718,36 +772,35 @@ export async function runTool(
         : new Date().toISOString().slice(0, 10);
       const { data: docs, error } = await client
         .from("invoice_docs")
-        .select("id,issue_date,tax_rate,doc_type")
+        .select("id,issue_date,tax_rate,discount,unit_price_formula,round_off,invoice_type_code,doc_type,currency")
         .eq("org_id", org)
-        .neq("status", "draft")
+        .in("status", [...POSTED_INVOICE_STATUSES])
         .gte("issue_date", date)
         .lte("issue_date", to);
       if (error) return { error: error.message };
       const ids = (docs ?? []).map((d: any) => d.id);
       const { data: items, error: itemError } = ids.length
-        ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price").eq("org_id", org).in("invoice_id", ids)
+        ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price,custom,tax_category").eq("org_id", org).in("invoice_id", ids)
         : { data: [], error: null };
       if (itemError) return { error: "Invoice line details could not be loaded. No VAT totals were calculated." };
-      const netByDoc = new Map<number, number>();
-      for (const it of items ?? []) {
-        netByDoc.set(it.invoice_id, (netByDoc.get(it.invoice_id) ?? 0) + num(it.qty) * num(it.unit_price));
-      }
-      let outputNet = 0, outputTax = 0, inputNet = 0, inputTax = 0;
+      const byDoc = linesByDocument(items ?? []);
+      const byCurrency = new Map<string, { output_net: number; output_tax: number; input_net: number; input_tax: number }>();
       for (const d of docs ?? []) {
-        const net = Math.max(netByDoc.get(d.id) ?? 0, 0);
-        const tax = r2((net * Math.max(num(d.tax_rate), 0)) / 100);
-        if (d.doc_type === "purchase") { inputNet += net; inputTax += tax; }
-        else { outputNet += net; outputTax += tax; }
+        const amounts = documentAmounts(d, byDoc.get(String(d.id)) ?? []);
+        const net = amounts.sign * amounts.net, tax = amounts.sign * amounts.tax;
+        const currency = documentCurrency(d), totals = byCurrency.get(currency) ?? { output_net: 0, output_tax: 0, input_net: 0, input_tax: 0 };
+        if (d.doc_type === "purchase") { totals.input_net += net; totals.input_tax += tax; }
+        else { totals.output_net += net; totals.output_tax += tax; }
+        byCurrency.set(currency, totals);
       }
       return {
         from: date,
         to,
-        output_tax: r2(outputTax),
-        output_net: r2(outputNet),
-        input_tax: r2(inputTax),
-        input_net: r2(inputNet),
-        net_vat: r2(outputTax - inputTax),
+        by_currency: [...byCurrency].map(([currency, totals]) => ({ currency,
+          output_net: r2(totals.output_net), output_tax: r2(totals.output_tax),
+          input_net: r2(totals.input_net), input_tax: r2(totals.input_tax),
+          net_vat: r2(totals.output_tax - totals.input_tax),
+        })),
       };
     }
     case "list_expenses": {

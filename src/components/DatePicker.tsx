@@ -82,6 +82,7 @@ export function DatePicker({
 
   // Commit a typed value: parse it, or revert to the last valid date.
   const commit = () => {
+    if (inputRef.current?.matches(":disabled")) return;
     if (text === formattedValue) return;
     if (text.trim() === "" && !required) {
       if (value) onChange(undefined);
@@ -104,6 +105,7 @@ export function DatePicker({
   };
 
   const choose = (date: Date | undefined) => {
+    if (inputRef.current?.matches(":disabled")) { setOpen(false); return; }
     if (date && !inRange(date)) return;
     const next = date ? format(date, DISPLAY) : "";
     if (next !== formattedValue) onChange(date);
@@ -127,6 +129,7 @@ export function DatePicker({
         autoComplete="off"
         spellCheck={false}
         aria-keyshortcuts="Alt+ArrowDown"
+        aria-invalid={notice ? true : inputProps["aria-invalid"]}
         aria-describedby={[inputProps["aria-describedby"], notice ? noticeId : undefined].filter(Boolean).join(" ") || undefined}
         onChange={(e) => { setText(e.target.value); setNotice(""); }}
         onBlur={commit}

@@ -12,12 +12,12 @@ It runs against either backend:
 - **Cloud mode** — Supabase/PostgREST with row-level security enforced as *your* user.
 
 - 17 tools: financial summaries, invoices, quotes, purchase orders, customers,
-  products, low-stock alerts, built-in reports, draft-only writes, and a
-  human-approval-gated payment reminder flow.
+  products, low-stock alerts, built-in reports, draft-only writes, and
+  guidance to request and approve payment reminders in a paired channel.
 - **Draft-only writes.** The agent can create draft invoices, quotes and POs, add
   customers and products — it cannot send, approve, or post anything.
-- **Confirm-gated side effects.** Sending a payment reminder requires the owner to
-  reply `APPROVE <code>` on a connected channel.
+- **Confirm-gated side effects.** MCP cannot bind approvals to a messaging actor.
+  Request the reminder in your paired channel and approve the proposal there.
 
 ## Install
 
@@ -51,12 +51,23 @@ to override.
 
 Notes:
 
-- The desktop app can stay open — SQLite handles concurrent access, and the app
-  picks up agent-created drafts on its next read.
-- Drafts created here are marked dirty in the app's sync journal, so they upload
-  with the next cloud sync if you use one.
-- `request_payment_reminder` still only *proposes*; the reminder is sent by the
-  cloud channel agent after `APPROVE <code>`, so it needs the Supabase deployment.
+- MCP writers use SQLite transactions for collections, generated IDs and sync
+  journals. The updated desktop UI validates cached reads against stored bytes
+  and compares its entire read set before committing collection/journal writes.
+  If an edit races another process, refresh and retry the reported conflict;
+  failed stale saves cannot overwrite the competing records. Older desktop
+  binaries must be updated before editing alongside MCP.
+- Drafts created here remain on the device. The journal preserves pending changes
+  for a later explicitly confirmed transfer to cloud mode; local mode does not
+  upload them automatically.
+- Tagged records respect the selected workspace and author. Other users' private
+  rows are hidden; explicitly shared rows in the selected workspace are readable.
+  Cached administrator labels do not bypass this rule. Older ownerless offline
+  records remain visible within that workspace. When multiple cached profiles exist, set `FILEY_LOCAL_USER_ID`
+  explicitly. Damaged collections or sync journals block writes and preserve
+  their original bytes for recovery.
+- `request_payment_reminder` returns `requires_channel_proposal` without storing
+  an unbound approval code or sending anything.
 
 ## Environment variables
 
@@ -64,6 +75,7 @@ Notes:
 |---|---|---|
 | `FILEY_LOCAL` | local mode | `1` forces local mode even when `SUPABASE_URL` is set |
 | `FILEY_LOCAL_DB` | local mode | Full path to `filey-erp.db`; overrides auto-detection |
+| `FILEY_LOCAL_USER_ID` | local mode with multiple profiles | Select the exact cached profile; ambiguous defaults are rejected |
 | `SUPABASE_URL` | cloud mode | Your Supabase project URL, e.g. `https://xyz.supabase.co` |
 | `SUPABASE_ANON_KEY` | cloud mode | Supabase anon/public key |
 | `SUPABASE_ACCESS_TOKEN` | one of the two auth options | A Filey **user JWT**. Pinned as the `Authorization` header on every request so Postgres RLS runs as that user. |
@@ -72,6 +84,15 @@ Notes:
 The server also resolves your `user_id` and `org_id` from the `profiles` table on
 first tool call; every query is pinned to `org_id` and every insert carries
 `user_id` + `org_id` explicitly.
+
+Cloud draft creation requires the authenticated `filey_save_document` RPC from
+`supabase/2026-10-04-atomic-document-save.sql`. Header and items commit together;
+the MCP server reports a save error if that migration is unavailable.
+
+Sales reports use posted invoices and subtract credit notes. Receivables subtract
+workspace payments and exclude credit notes, drafts and cancelled documents.
+Reports return `by_currency` groups (or `receivables_by_currency` for the summary);
+flat totals remain available only when the result has at most one currency.
 
 ## Claude Code
 
@@ -137,15 +158,15 @@ Add to your MCP settings JSON (e.g. `~/.cursor/mcp.json` or your Hermes config):
 | `find_customer` | read | Case-insensitive search on customer name/company |
 | `list_products` | read | Products / inventory |
 | `list_low_stock` | read | Products where `reorder_level > 0` and `quantity <= reorder_level` |
-| `run_report` | read | `sales_by_month` (6 months, non-draft, totals by YYYY-MM) · `top_customers` (90-day totals, top 10) · `receivables_aging` (current / 1-30 / 31-60 / 61-90 / 90+) |
+| `run_report` | read | Posted sales minus credit notes by month (6 months) or customer (90 days, top 10); outstanding receivables by age. Separate currency groups. |
 | `create_draft_invoice` | write (draft) | Draft invoice `INV-<year>-A####`, head + items, returns `{number, total}` |
 | `create_draft_quote` | write (draft) | Draft quotation `Q-<year>-A####` |
-| `create_draft_po` | write (draft) | Draft purchase order `PO-<year>-A####`; links `supplier_id` by fuzzy name match when possible |
+| `create_draft_po` | write (draft) | Draft purchase order `PO-<year>-A####`; links `supplier_id` only when the name uniquely matches |
 | `add_customer` | write | Insert a CRM customer |
 | `add_product` | write | Insert a product (quantity starts at 0) |
-| `request_payment_reminder` | confirm-gated | Creates an `agent_pending_actions` row and returns a 4-digit `approval_code`; the reminder is only sent after the owner replies `APPROVE <code>` on a connected channel. Codes are unique among live proposals and expire after 24h (`expires_at`). |
+| `request_payment_reminder` | guidance | Validates the sent invoice and returns `requires_channel_proposal`; request and approve the reminder in the paired conversation. No message or pending action is created here. |
 
-All write tools record an `audit_log` entry with actor `mcp-agent`. Every tool
+Write tools attempt an `audit_log` entry with actor `mcp-agent`. Every tool
 returns `{error: "..."}` payloads on failure instead of crashing.
 
 ## Security
@@ -160,10 +181,9 @@ returns `{error: "..."}` payloads on failure instead of crashing.
   insert includes `user_id` + `org_id` explicitly.
 - **Draft-only writes.** Invoices, quotes and POs are created with `status: 'draft'`
   — a human reviews and sends them in the Filey UI.
-- **APPROVE flow.** Outbound side effects (payment reminders) go through
-  `agent_pending_actions` with a one-time 4-digit code drawn from the platform
-  CSPRNG; codes are unique among live proposals and expire after 24h, so nothing
-  is sent until the owner approves on a connected channel.
+- **APPROVE flow.** Messaging proposals are created and approved by the paired
+  channel agent, which binds the action to the current workspace and actor.
+  Stdio MCP tools cannot create portable approval codes or send reminders.
 - **Stdio hygiene.** All logging goes to stderr; stdout carries JSON-RPC only.
 
 ## Troubleshooting

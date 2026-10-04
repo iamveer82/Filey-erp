@@ -42,6 +42,7 @@ describe("waLogList", () => {
  * reply that means "stay silent". */
 describe("waFormat", () => {
   it("prefixes the header", () => {
+    expect(WA_HEADER).toBe("*Filey Agent*\n────────────");
     expect(waFormat("Draft created.")).toBe(`${WA_HEADER}\n\nDraft created.`);
   });
 
@@ -49,6 +50,15 @@ describe("waFormat", () => {
     expect(waFormat(`${WA_HEADER}\n\nDraft created.`)).toBe(
       `${WA_HEADER}\n\nDraft created.`
     );
+  });
+
+  it("replaces old or model-styled headings without changing the body", () => {
+    const legacy = `*${[..."Filey Agent"].map(ch => ch === " " ? ch : `${ch}\u0332`).join("")}*`;
+    const body = "*DOCUMENTS*\n· Invoice — AED 105\n\n_Code_ and `reference`";
+    for (const header of [legacy, "**Filey Agent**", "⚡ _Filey Agent_"])
+      expect(waFormat(`${header}\r\n\r\n${body}`)).toBe(`${WA_HEADER}\n\n${body}`);
+    expect(waFormat(WA_HEADER)).toBe(WA_HEADER);
+    expect(waFormat("────────────\nThis is the user's content.")).toBe(`${WA_HEADER}\n\n────────────\nThis is the user's content.`);
   });
 
   it("leaves silence silent", () => {

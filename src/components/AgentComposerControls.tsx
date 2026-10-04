@@ -51,7 +51,7 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
   const levels = aiEffortLevels(config);
   const selected = levels.includes(value) ? value : "auto";
   const index = levels.indexOf(selected);
-  const model = config.model.trim() || (config.billing ? "Choose a model" : "Select model in settings");
+  const model = config.billing === "credits" ? "Filey AI" : config.model.trim() || (config.billing ? "Choose a model" : "Select model in settings");
   const percent = levels.length > 1 ? index / (levels.length - 1) * 100 : 0;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
@@ -74,7 +74,7 @@ export function AgentEffortControl({ config, value, disabled, onChange }: {
           <input type="range" min={0} max={levels.length - 1} step={1} value={index} aria-label="Reasoning effort" aria-valuetext={EFFORT_LABELS[selected]} onChange={e => onChange(levels[Number(e.target.value)])} />
         </div>
         <div className="mt-2 flex justify-between text-[11px] text-muted-foreground"><span>Default</span><span>{EFFORT_LABELS[levels[levels.length - 1]]}</span></div>
-        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">More effort gives the model more room to reason. It can take longer and use more tokens.</p>
+        <p className="mt-4 text-xs leading-relaxed text-muted-foreground">More effort can improve difficult answers and take longer.</p>
       </> : <p className="mt-4 text-xs leading-relaxed text-muted-foreground">This model uses its own default. A supported reasoning model enables the effort slider.</p>}
     </PopoverContent>
   </Popover>;

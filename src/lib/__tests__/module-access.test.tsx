@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setCacheOrg } from "../api";
 import { loadModuleAccess, requireToolModuleAccess } from "../moduleAccess";
+import { runTool } from "../aiTools";
 import { ModulesProvider, useModules } from "../modules";
 import { notifyDataChanged } from "../realtime";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../../../supabase/functions/_shared/integration-access";
@@ -31,6 +32,22 @@ it("rejects forbidden reads and native powers even in an authenticated agent con
   await expect(requireToolModuleAccess("financial_summary",{})).rejects.toThrow("accounting");
   await expect(requireToolModuleAccess("run_shell",{})).rejects.toThrow("administrator");
   await expect(requireToolModuleAccess("create_product",{})).resolves.toBeUndefined();
+});
+it("checks the destination module before AI navigation and keeps core pages accessible", async () => {
+  const hash = window.location.hash;
+  try {
+    window.location.hash = "#/overview";
+    rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["tools"] }, error: null });
+    await expect(runTool("open_page", { page: "letters" })).resolves.toEqual({ error: expect.stringContaining("letters") });
+    expect(window.location.hash).toBe("#/overview");
+    await expect(requireToolModuleAccess("open_page", { page: "/overview" })).resolves.toBeUndefined();
+    await expect(requireToolModuleAccess("open_page", { page: "settings" })).resolves.toBeUndefined();
+    rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["letters"] }, error: null });
+    await expect(runTool("open_page", { page: "letters" })).resolves.toEqual({ ok: true, message: "Opened letters." });
+    expect(window.location.hash).toBe("#/letters");
+    rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: [] }, error: null });
+    await expect(requireToolModuleAccess("open_page", { page: "letters" })).rejects.toThrow("letters");
+  } finally { window.location.hash = hash; }
 });
 it("rejects a membership response from a previous workspace",async()=>{
   rpc.mockImplementationOnce(async()=>{setCacheOrg("other","staff");return {data:{allowed:true,admin:true,modules:null}};});

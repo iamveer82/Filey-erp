@@ -272,10 +272,12 @@ async function execute(message: TelegramMessage, owner: string, generation: numb
       if (!valid()) return;
       if (!file.path || seen.has(file.path)) { if (!file.path) deliveries.push(`${file.name}: open Filey to review this output.`); continue; }
       seen.add(file.path);
+      if (file.telegramRecipients?.includes(owner)) continue;
       if (Date.now() >= deadline - 10_000) { deliveries.push(`${file.name}: saved locally; task time limit reached before sending.`); continue; }
       try {
         const receipt = await request<{ message_id?: number }>("sendDocument", { chat_id: owner, path: file.path, filename: file.name }, generation, expected, controller.signal);
         if (!Number.isSafeInteger(receipt?.message_id) || receipt.message_id! <= 0) throw new Error("Telegram did not confirm the document.");
+        (file.telegramRecipients ??= []).push(owner);
         deliveries.push(`${file.name}: accepted by Telegram.`);
       }
       catch { deliveries.push(`${file.name}: delivery not confirmed. Check Telegram before retrying; the local file is preserved.`); }

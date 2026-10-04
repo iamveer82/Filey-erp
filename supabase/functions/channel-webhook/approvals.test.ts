@@ -2,6 +2,7 @@
 //   deno test supabase/functions/channel-webhook/
 import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { handleApproval, type ApprovalIO } from "./approvals.ts";
+import { channelActorAllowed } from "./access.ts";
 
 /**
  * Stateful fake modelling exactly what handleApproval touches.
@@ -128,7 +129,8 @@ function fakeClient(
 
 const io: ApprovalIO = {
   env: (k) => ({ RESEND_API_KEY: "re_test", SUPABASE_URL: "" })[k],
-  forgetCreds: () => {},
+  canExecute: async () => true,
+  workspaceActive: async () => true,
   sendTelegram: async () => {},
   sendWhatsApp: async () => {},
   sendSlack: async () => {},
@@ -205,6 +207,94 @@ Deno.test("CANCEL rejects without executing and an APPROVE after it is inert", a
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+Deno.test("approval rechecks current workspace authority both before and after claiming", async () => {
+  for (const revokeAfterClaim of [false, true]) {
+    const f = fakeClient(reminderRow);
+    let checks = 0, sends = 0;
+    const guarded = { ...io, canExecute: async () => ++checks === 1 && revokeAfterClaim,
+      sendTelegram: async () => { sends++; } };
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => { sends++; return new Response(JSON.stringify({ id: "email-1" })); };
+    try {
+      const reply = await handleApproval(f.client, "OWNER", "APPROVE 1234", guarded);
+      assertEquals(reply?.includes("workspace access changed"), true);
+      assertEquals(f.state.claimed, revokeAfterClaim);
+      assertEquals(sends, 0, "revoked authority cannot send even after winning the approval claim");
+    } finally { globalThis.fetch = original; }
+  }
+});
+
+Deno.test("disconnecting or re-pairing the approving chat prevents external effects", async () => {
+  const original = globalThis.fetch;
+  let sends = 0;
+  globalThis.fetch = async () => { sends++; return new Response(JSON.stringify({ id: "email-1" })); };
+  try {
+    for (const enabled of [false, true]) {
+      const actor = { channel: "telegram" as const, externalId: "42", body: "APPROVE 1234", fromName: "Fixture" };
+      const f = fakeClient({ ...reminderRow, payload: { ...reminderRow.payload, approval_channel: "telegram", approval_chat_id: "42" } });
+      const before = f.client.from.bind(f.client);
+      let connection = { enabled: true, owner_ref: "42", credentials: {} };
+      const lookup = { select: () => lookup, eq: () => lookup, maybeSingle: () => Promise.resolve({ data: connection, error: null }) };
+      // deno-lint-ignore no-explicit-any
+      f.client.from = ((table: string) => table === "agent_channels" ? lookup : before(table)) as any;
+      let checks = 0;
+      const guarded = { ...io, canExecute: () => {
+        if (++checks === 2) connection = { ...connection, enabled, owner_ref: "43" };
+        return channelActorAllowed(f.client, "OWNER", actor, { env: () => undefined });
+      } };
+      const reply = await handleApproval(f.client, "OWNER", actor.body, guarded, actor, "ORG");
+      assertEquals(reply?.includes("no longer paired"), true);
+      assertEquals(f.state.claimed, true, "the final state after claim cannot retain old actor authority");
+      assertEquals(sends, 0);
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+Deno.test("an approved Telegram reconnect registers its webhook after deliberately resetting pairing", async () => {
+  const actor = { channel: "telegram" as const, externalId: "42", body: "APPROVE 1234", fromName: "Fixture" };
+  const f = fakeClient({ ...reminderRow, action: "connect_channel", payload: {
+    provider: "telegram", token: "123:fixture-token", approval_channel: "telegram", approval_chat_id: "42",
+  } });
+  let actorChecks = 0, posts = 0;
+  const guarded = { ...io, canExecute: async () => {
+    actorChecks++;
+    return f.state.upserts.length === 0;
+  } };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    posts++;
+    assertEquals(init?.redirect, "error");
+    return new Response(JSON.stringify({ ok: true }));
+  };
+  try {
+    const reply = await handleApproval(f.client, "OWNER", actor.body, guarded, actor, "ORG");
+    assertEquals(reply?.startsWith("✅ Telegram webhook registered."), true);
+    assertEquals(actorChecks, 2);
+    assertEquals(f.state.upserts[0].owner_ref, null);
+    assertEquals(posts, 1);
+  } finally { globalThis.fetch = original; }
+});
+
+Deno.test("approved email requires a confirmed receipt and never exposes provider errors or follows redirects", async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const response of [{}, { error: "secret-token private-email" }, { id: "" }]) {
+      let calls = 0;
+      globalThis.fetch = async (_url, init) => {
+        calls++;
+        assertEquals(init?.redirect, "error");
+        return new Response(JSON.stringify(response));
+      };
+      const f = fakeClient(reminderRow);
+      const reply = await handleApproval(f.client, "OWNER", "APPROVE 1234", io);
+      assertEquals(reply?.includes("not confirmed"), true);
+      assertEquals(reply?.includes("secret-token"), false);
+      assertEquals(f.state.auditRows.length, 0, "no Sent audit record without a receipt");
+      assertEquals(calls, 1);
+    }
+  } finally { globalThis.fetch = original; }
 });
 
 Deno.test("a code with no live matching row answers 'expired or already run'", async () => {

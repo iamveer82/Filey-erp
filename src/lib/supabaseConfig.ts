@@ -6,7 +6,7 @@
 // dataMode.ts whether it is in local mode.
 //
 // Filey's hosted cloud is baked in so every packaged build is cloud-ready out of
-// the box (accounts, team sharing, auto-sync all point here). Env vars still
+// the box (accounts and explicitly selected cloud workspaces point here). Env vars still
 // override for dev/self-hosting against another project. The publishable key is
 // a client-side key by design; RLS guards the data.
 

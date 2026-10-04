@@ -150,7 +150,7 @@ it("starts typing promptly, acknowledges after two seconds, and stops after the 
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "task", remoteJid: jid }, message: { conversation: "Export my invoice" } }] });
   await vi.waitFor(() => expect(transport.presence).toHaveBeenCalledWith("composing", jid));
   await vi.advanceTimersByTimeAsync(2000);
-  expect(transport.send).toHaveBeenCalledWith(jid, { text: expect.stringContaining("Got your request") }, expect.any(Object));
+  expect(transport.send).toHaveBeenCalledWith(jid, { text: "*Filey Agent*\n────────────\n\nGot your request — I'll send the result here. Keep Filey open while I work." }, expect.any(Object));
   await vi.advanceTimersByTimeAsync(6000);
   expect(transport.presence.mock.calls.filter(([state]) => state === "composing")).toHaveLength(2);
   command({ type: "reply", id: emitted("message")[0].id, text: "Your PDF is ready", requestId: "done" });
@@ -199,6 +199,7 @@ it("does not execute synchronized history, missing dates, strangers or Filey's o
     { ...message, key: { ...message.key, id: "stranger", fromMe: false, remoteJid: "971500000099@s.whatsapp.net" }, messageTimestamp: timestamp },
     { ...message, key: { ...message.key, id: "other-chat", remoteJid: "971500000099@s.whatsapp.net" }, messageTimestamp: timestamp },
     { ...message, key: { ...message.key, id: "prior-reply" }, messageTimestamp: timestamp, message: { conversation: header + '\n\nYour invoice is ready' } },
+    { ...message, key: { ...message.key, id: "current-reply" }, messageTimestamp: timestamp, message: { conversation: '*Filey Agent*\n────────────\n\nYour invoice is ready' } },
   ] });
   expect(emitted("message")).toHaveLength(0);
   expect(transport.send).not.toHaveBeenCalled();

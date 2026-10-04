@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setDataMode } from "../dataMode";
-import { billing } from "../api";
+import { billing, setCacheOrg } from "../api";
 import { TOOLS } from "../aiTools";
 
 // A supplier bill and a sales invoice live in the same table, told apart only
@@ -9,7 +9,9 @@ import { TOOLS } from "../aiTools";
 beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
+  setCacheOrg("purchase-agent-test-org", "purchase-agent-test-user");
 });
+afterEach(() => setCacheOrg(null));
 
 const tool = (name: string) => {
   const t = TOOLS.find((x) => x.name === name);

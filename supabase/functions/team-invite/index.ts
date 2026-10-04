@@ -1,15 +1,28 @@
 // Deploy with --no-verify-jwt. Authentication and workspace authorization are
 // checked here and in the caller-scoped RPC. Resend keys never reach the app.
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { CORS_HEADERS, json } from "../_shared/rateLimit.ts";
 import { sendInvitation, type TeamInvitation } from "../_shared/team-invitation.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
 
-serve(async (req) => {
+// Only deliberate business validation messages may be shown. SQL/client
+// errors can contain statement values, private addresses or configuration.
+const INVITATION_ERRORS = new Set([
+  "Only a verified workspace owner or administrator can invite members", "Choose a workspace first",
+  "Invitation is no longer pending", "Enter a valid email address", "Invalid member role",
+  "Too many module permissions", "This person is already a workspace member",
+  "Wait a minute before resending", "Workspace invitation limit reached. Try again tomorrow",
+]);
+
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   try {
+    let body;
+    try { body=JSON.parse(await readBillingBody(req,16384)); }
+    catch(error) { return json({error:error instanceof BillingRequestError?"Invitation request is too large":"Invalid invitation"},error instanceof BillingRequestError?413:400); }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({error:"Invalid invitation"},400);
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const url = Deno.env.get("SUPABASE_URL")!;
     const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -17,9 +30,6 @@ serve(async (req) => {
     if (authError || !auth.user?.email_confirmed_at)
       return json({ error: "Sign in with a verified email to invite teammates." }, 401);
     if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object")
-      return json({ error: "Invalid invitation" }, 400);
     const key = Deno.env.get("RESEND_API_KEY") ?? "",
       from = Deno.env.get("EMAIL_FROM") ?? "";
     if (!key || !from)
@@ -39,14 +49,14 @@ serve(async (req) => {
       return json({ error: "Invalid resend request" }, 400);
     if (
       body.invite === undefined &&
-      (typeof body.email !== "string" || typeof body.role !== "string")
+      (typeof body.email !== "string" || body.email.length>320 || typeof body.role !== "string" || body.role.length>40)
     )
       return json({ error: "Email and role are required" }, 400);
     if (
       body.modules != null &&
       (!Array.isArray(body.modules) ||
         body.modules.length > 100 ||
-        body.modules.some((m: unknown) => typeof m !== "string"))
+        body.modules.some((m: unknown) => typeof m !== "string" || m.length>128))
     )
       return json({ error: "Invalid permissions" }, 400);
     const caller = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -60,7 +70,7 @@ serve(async (req) => {
       p_invite: body.invite ?? null,
       p_resend: body.resend ?? false,
     });
-    if (error) return json({ error: error.message }, 400);
+    if (error) return json({ error: INVITATION_ERRORS.has(error.message)?error.message:"Could not prepare the invitation. Please retry." }, 400);
     const invite = data as TeamInvitation;
     if (invite.email_status === "accepted")
       return json({ id: invite.id, status: "accepted" });

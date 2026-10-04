@@ -70,7 +70,7 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
       if (agentStorageScope() === scope) return;
       controller.abort();
       setStale(true); setFile(null); setLink(""); setSavedPath(""); setNotice(""); setHistory([]);
-      setError("Your workspace changed. Close this dialog and open the invoice in the current workspace.");
+      setError("Your workspace changed. Close this dialog and open the document in the current workspace.");
     };
     window.addEventListener(AGENT_STORAGE_EVENT, check);
     window.addEventListener("filey:workspace-changed", check);
@@ -137,7 +137,7 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
     computerAttempted = previous.some(job => job.outcome === "sending" || job.outcome === "unknown");
   } catch { /* The input is still being edited. */ }
   const savePdf = async () => {
-    if (!file) throw new Error("The invoice PDF is not ready.");
+    if (!file) throw new Error("The document PDF is not ready.");
     const saved = await saveDocumentPdf(file, context());
     setSavedPath(saved.path ?? "");
     return saved;
@@ -168,14 +168,14 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
         <div className="flex items-start gap-3 border-y border-border py-4">
           <FileText size={20} className="shrink-0 text-muted-foreground mt-0.5" />
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium break-words">{file?.name || (pdfError ? "PDF unavailable" : stale ? "Workspace changed" : "Preparing invoice PDF…")}</p>
-            <p className="text-xs text-muted-foreground mt-1">{file ? `${Math.max(1, Math.ceil(file.size / 1024))} KB · PDF ready to share` : "Uses the saved invoice and its selected template."}</p>
+            <p className="text-[13px] font-medium break-words">{file?.name || (pdfError ? "PDF unavailable" : stale ? "Workspace changed" : "Preparing document PDF…")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{file ? `${Math.max(1, Math.ceil(file.size / 1024))} KB · PDF ready to share` : "Uses the saved document and its selected template."}</p>
             {pdfError && <p role="alert" className="error-text">{pdfError} <button disabled={busy || stale} className="underline" onClick={() => setAttempt((n) => n + 1)}>Retry PDF</button></p>}
           </div>
           {!file && !pdfError && !stale && <Loader2 size={16} className="animate-spin shrink-0" />}
           {file && <button className="btn-ghost shrink-0" aria-expanded={preview} onClick={() => setPreview(value => !value)}>{preview ? "Hide PDF" : "Preview PDF"}</button>}
         </div>
-        {preview && file && <section aria-label="Invoice PDF preview" className="h-[420px] overflow-hidden rounded-xl border border-border bg-muted"><Suspense fallback={<p className="p-4 text-sm">Loading preview…</p>}><PdfCanvas file={file}/></Suspense></section>}
+        {preview && file && <section aria-label="Document PDF preview" className="h-[420px] overflow-hidden rounded-xl border border-border bg-muted"><Suspense fallback={<p className="p-4 text-sm">Loading preview…</p>}><PdfCanvas file={file}/></Suspense></section>}
         {createLink && !link && <div>
           <button className="btn-ghost" disabled={busy || stale} onClick={() => void run(async () => { const value = await createLink(); assertCurrent(); setLink(value); })}><Link2 size={14} /> Add invoice link</button>
           <p className="help">Anyone with this link can view the invoice. Adding it enables public access.</p>
@@ -235,13 +235,13 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
         {(channel === "sms" || pairedSend) && <p className="text-xs text-muted-foreground leading-relaxed">
           {channel === "sms"
             ? "SMS sends the message and any invoice link, without a PDF attachment. Use Share PDF to choose a supported messaging app. Carrier charges may apply."
-            : pairedSend ? "Paired WhatsApp sends the PDF with this exact message as its caption. Delivery and read receipts remain in WhatsApp." : "Prepare WhatsApp + PDF saves the invoice and opens this exact message as an unsent draft. Attach the saved PDF and check the recipient before sending."}
+            : pairedSend ? "Paired WhatsApp sends the PDF with this exact message as its caption. Delivery and read receipts remain in WhatsApp." : "Prepare WhatsApp + PDF saves the document and opens this exact message as an unsent draft. Attach the saved PDF and check the recipient before sending."}
         </p>}
         {channel === "whatsapp" && !pairedSend && <div className="rounded-md bg-muted p-3 text-xs leading-relaxed">
           <p className="font-medium">Send the PDF as an attachment</p>
           <p className="mt-1">{nativeShare
             ? "Choose Share PDF, then WhatsApp and the recipient in your device's share sheet. The phone field above applies to text drafts and paired sending."
-            : "Choose Prepare WhatsApp + PDF, then Attach → Document and select the saved invoice. On Windows, the chat opens in Filey's browser."}</p>
+            : "Choose Prepare WhatsApp + PDF, then Attach → Document and select the saved PDF. On Windows, the chat opens in Filey's browser."}</p>
           <p className="mt-2">{computerSupported ? "For automatic sending, use Filey AI above or pair WhatsApp in Integrations → WhatsApp (QR)." : "The Windows app supports automatic sending with Filey AI or a paired WhatsApp connection."}</p>
           <a className="inline-block underline mt-2" href="#/integrations?tab=free" onClick={onClose}>WhatsApp setup</a>
         </div>}
@@ -273,7 +273,7 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
           <button className="btn-ghost" disabled={busy || stale || !message.trim()} onClick={() => void run(async () => {
             await openMessageDraft(channel, phone, body, context());
             assertCurrent();
-            setNotice("Text draft opened. To include the PDF, attach the downloaded invoice in your messaging app.");
+            setNotice("Text draft opened. To include the PDF, attach the downloaded document in your messaging app.");
             remember("draft");
           })}><MessageCircle size={14} /> {channel === "sms" ? "Open SMS draft" : "Open WhatsApp text draft"}</button>
           {channel === "whatsapp" && !pairedSend && <button className={nativeShare ? "btn-ghost" : "btn-primary"} disabled={busy || stale || !file} onClick={() => void run(async () => {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertLocalAccount } from "./localAuth";
 import { assertWorkspaceCurrent } from "./dataMode";
+import { checkCloudTransfer, type CloudTransferPermit } from "./cloudTransfer";
 
 // Only editable personal fields may leave the device. Never sync local role,
 // organization, email/auth identity or subscription fields back to profiles.
@@ -26,18 +27,20 @@ export function queueProfile(uid: string, patch: Record<string, unknown>): void 
   window.dispatchEvent(new Event("filey:local-write"));
 }
 
-export async function syncProfile(client: SupabaseClient, uid: string): Promise<void> {
+export async function syncProfile(client: SupabaseClient, uid: string, transfer?: CloudTransferPermit): Promise<void> {
   const raw = localStorage.getItem(key(uid));
   if (!raw) return;
   assertWorkspaceCurrent();
   assertLocalAccount(uid);
   if ((await client.auth.getSession()).data.session?.user.id !== uid)
     throw new Error("Your session changed. Profile changes are still on this device.");
+  await checkCloudTransfer(transfer, client, uid);
   const patch = editable(JSON.parse(raw));
   if (Object.keys(patch).length) {
     const { error } = await client.from("profiles").update(patch).eq("id", uid).select("id").single();
     if (error) throw new Error(`Could not sync your profile: ${error.message}`);
   }
+  await checkCloudTransfer(transfer, client, uid);
   assertWorkspaceCurrent();
   // An edit made during the request must remain pending for the next sync.
   if (localStorage.getItem(key(uid)) === raw) localStorage.removeItem(key(uid));

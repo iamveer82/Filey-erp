@@ -24,7 +24,11 @@ export type Channel = InboundMsg["channel"];
 /** Everything approvals need from the outside world. */
 export interface ApprovalIO {
   env: (key: string) => string | undefined;
-  forgetCreds: (provider: Channel) => void;
+  /** Recheck captured owner/admin workspace and paired actor before effects. */
+  canExecute(): Promise<boolean>;
+  /** Reconnect deliberately resets the source pairing; keep checking the
+   * captured workspace while registering that already-approved connection. */
+  workspaceActive(): Promise<boolean>;
   /** Send a message out on a channel (used by the send_message executor). */
   sendTelegram(chatId: string, text: string): Promise<void>;
   sendWhatsApp(phone: string, text: string): Promise<void>;
@@ -145,6 +149,9 @@ export async function handleApproval(
     return won ? `Canceled — nothing was sent.` : already;
   }
 
+  const accessChanged = "Your workspace access changed or this conversation is no longer paired. Nothing was sent. Open Filey and propose this action again.";
+  if (!(await io.canExecute())) return accessChanged;
+
   // Claim BEFORE any side effect: losing here means another APPROVE/CANCEL
   // got there first and the action must not fire a second time.
   const scrubbed = scrubPayload(row.payload);
@@ -153,6 +160,9 @@ export async function handleApproval(
     ...(scrubbed ? { payload: scrubbed } : {}),
   });
   if (!won) return already;
+  // Claiming is asynchronous. A demotion or workspace switch while it runs
+  // must not turn a previously valid code into current external authority.
+  if (!(await io.canExecute())) return accessChanged;
 
   // Credentials were scrubbed atomically with the claim. Only this in-memory
   // row retains them, including when provider fetch or channel setup throws.
@@ -182,10 +192,12 @@ export async function handleApproval(
           ` is awaiting payment.</p><p>Thank you.</p>`,
       }),
       signal: AbortSignal.timeout(15000),
+      redirect: "error",
     });
-    if (!res.ok) {
-      console.error("resend", res.status, await res.text());
-      return "Approved, but the email failed to send — ask me to propose it again.";
+    const receipt = await res.json().catch(() => null);
+    if (!res.ok || typeof receipt?.id !== "string" || !receipt.id.trim()) {
+      console.error("resend delivery unconfirmed", res.status);
+      return "Email delivery was not confirmed. Check the customer's email or Filey before proposing another reminder; it may have been accepted.";
     }
     try {
       await client.from("audit_log").insert({
@@ -264,9 +276,8 @@ export async function handleApproval(
     if (ue) {
       return "Approved, but saving the channel failed. Check the deployment and propose the connection again.";
     }
-    io.forgetCreds(provider);
-
     if (provider === "telegram") {
+      if (!(await io.workspaceActive())) return "Credentials were saved, but workspace access changed before webhook setup. Open Filey to review this connection.";
       const base = (io.env("SUPABASE_URL") ?? "").replace(/\/+$/, "");
       let res: Response;
       try {
@@ -280,6 +291,7 @@ export async function handleApproval(
               secret_token: credentials.webhook_secret,
             }),
             signal: AbortSignal.timeout(15000),
+            redirect: "error",
           }
         );
       } catch {

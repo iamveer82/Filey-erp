@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { sendChannelText } from "../channel-webhook/delivery.ts";
+import { requireScheduledWorkspace } from "./scheduled-workspace.ts";
 
 type Client = SupabaseClient;
 
@@ -123,18 +124,22 @@ export async function runLowStockPo(
 export async function tell(
   supa: Client,
   text: string,
-  config: { owner: string; bot: string; chat: string }
+  config: { owner: string; org: string; bot: string; chat: string }
 ): Promise<"sent" | "unconfigured"> {
-  if (!config.bot || !config.chat) return "unconfigured";
-  await sendChannelText("telegram", config.chat, text, { token: config.bot });
+  const { owner, org, bot, chat } = config;
+  if (!bot || !chat) return "unconfigured";
+  // Recheck after all digest/draft reads, against the original workspace.
+  // The service-only RPC checks profile + membership in one SQL snapshot.
+  await requireScheduledWorkspace(supa, owner, org);
+  await sendChannelText("telegram", chat, text, { token: bot });
   // Audit is best effort; accepted delivery is never retried due to a log failure.
   try {
     const result = await supa
       .from("channel_messages")
       .insert({
-        user_id: config.owner,
+        user_id: owner,
         channel: "telegram",
-        external_id: config.chat,
+        external_id: chat,
         direction: "out",
         body: text,
         raw: { job: true },

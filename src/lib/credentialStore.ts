@@ -88,7 +88,7 @@ export async function flushCredentials(name?: string): Promise<void> {
  * do not silently hand them to the next account that signs in. */
 export async function quarantineLegacyCredentials(): Promise<void> {
   if (!desktop()) return;
-  for (const key of ["filey.ai.config", "filey.ai.image"]) {
+  for (const key of ["filey.ai.config", "filey.ai.image", "filey_reach_config"]) {
     const raw = localStorage.getItem(key);
     if (!raw) continue;
     const config = JSON.parse(raw);

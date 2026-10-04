@@ -42,6 +42,7 @@ export function nextDocNumber({
     const m = typeof n === "string" && n.match(re);
     if (m) {
       const v = parseInt(m[1], 10);
+      if (!Number.isSafeInteger(v) || v >= Number.MAX_SAFE_INTEGER) throw new Error("Document counter is exhausted. Use a new number format.");
       if (v > max) max = v;
     }
   }
@@ -127,6 +128,7 @@ export function nextFromPattern({
     const mm = typeof n === "string" && n.match(re);
     if (mm) {
       const v = parseInt(mm[1], 10);
+      if (!Number.isSafeInteger(v) || v >= Number.MAX_SAFE_INTEGER) throw new Error("Document counter is exhausted. Use a new number format.");
       if (v > max) max = v;
     }
   }

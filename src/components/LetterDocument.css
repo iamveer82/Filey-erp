@@ -1,0 +1,113 @@
+.letter-sheet {
+  position: relative;
+  box-sizing: border-box;
+  background: #fff;
+  color: #222;
+  overflow: hidden;
+  isolation: isolate;
+}
+.letter-sheet *,
+.letter-sheet *::before,
+.letter-sheet *::after {
+  box-sizing: border-box;
+}
+.letter-frame {
+  z-index: 1;
+}
+.letter-part {
+  white-space: pre;
+  tab-size: 4;
+}
+.letter-contact,
+.letter-reference,
+.letter-label {
+  color: #626262;
+}
+.letter-reference {
+  border-top: 1px solid #d9d9d9;
+  padding-top: 0;
+}
+.letter-title {
+  color: var(--letter-accent);
+  letter-spacing: -0.025em;
+}
+.letter-mark {
+  line-height: 0;
+}
+.letter-mark-label {
+  white-space: pre;
+  font-size: 10px;
+  line-height: 16px;
+}
+.letter-mark img {
+  max-width: none;
+}
+.letter-manual-signature {
+  border-bottom: 1px solid #999;
+}
+.letter-manual-stamp {
+  border: 1px solid #ddd;
+  border-radius: 3px;
+}
+.letter-footer {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  color: #777;
+  font-size: 9px;
+  line-height: 14px;
+  border-top: 1px solid #e5e5e5;
+  padding-top: 8px;
+  z-index: 2;
+}
+.letter-footer span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.letter-footer span:last-child {
+  flex: none;
+  margin-left: auto;
+}
+.letter-continuation {
+  height: 46px;
+  color: #666;
+  font-size: 10px;
+  line-height: 18px;
+  border-bottom: 1px solid #e5e5e5;
+  margin: 0;
+}
+.letter-continuation span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.letter-modern .letter-company {
+  color: var(--letter-accent);
+}
+.letter-modern .letter-reference {
+  border-top: 2px solid var(--letter-accent);
+}
+.letter-formal .letter-reference {
+  border-top: 3px double #777;
+}
+.letter-formal .letter-title {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.letter-with-background .letter-reference {
+  border-top: none;
+}
+@media print {
+  .letter-sheet {
+    break-after: page;
+    break-inside: avoid;
+    box-shadow: none;
+  }
+  .letter-sheet:last-child {
+    break-after: auto;
+  }
+}

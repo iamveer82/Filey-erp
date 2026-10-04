@@ -10,7 +10,7 @@ import {
 } from "../challans";
 import { runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
-import { tools } from "../api";
+import { tools, setCacheOrg } from "../api";
 import { setDataMode } from "../dataMode";
 
 const settings = vi.hoisted(() => new Map<string, string>());
@@ -33,9 +33,10 @@ beforeEach(() => {
   localStorage.clear();
   settings.clear();
   setDataMode("local");
+  setCacheOrg("challan-test-org", "challan-test-user");
   setAgentMode("auto"); // gate behaviour has its own tests
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); setCacheOrg(null); });
 
 describe("challan storage", () => {
   it("round-trips a record", async () => {

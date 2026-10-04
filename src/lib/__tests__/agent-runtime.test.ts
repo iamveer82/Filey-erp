@@ -4,7 +4,7 @@ import { runTool } from "../aiTools";
 import type { AiConfig } from "../ai";
 import { compressForModel, headroomReset } from "../headroom";
 
-vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn(), isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
+vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn(), isToolArgumentRejection: () => false, isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
 vi.mock("../capabilities", () => ({ isToolAllowed: () => true }));
 vi.mock("../agentMode", () => ({ gateFor: () => "run" }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
@@ -54,6 +54,44 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config) {
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it.each(["INV-1", "INV-2"])("resolves a schema rejection only when the corrected call targets INV-1, not %s", async invoiceNumber => {
+    const appearance = { name: "update_invoice_appearance", description: "Edit appearance", parameters: {
+      type: "object", properties: { invoice_number: { type: "string" }, stamp_opacity: { type: "number", minimum: 5, maximum: 100 } }, required: ["invoice_number"],
+    } };
+    const result = await run([
+      turn([call(appearance.name, { invoice_number: "INV-1", stamp_opacity: 101 }, "invalid")]),
+      turn([call(appearance.name, { invoice_number: invoiceNumber, stamp_opacity: 100 }, "corrected")]),
+      turn([], "The appearance was updated."),
+    ], { extraTools: [appearance] });
+    expect(runTool).toHaveBeenCalledTimes(1);
+    expect(result.events.find(event => event.type === "tool_result")).toMatchObject({ result: { code: "invalid_arguments" } });
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: invoiceNumber === "INV-1" ? "answered" : "blocked" });
+    expect(result.text).not.toMatch(/update_invoice_appearance|stamp_opacity|Out of range/);
+  });
+
+  it.each(["round", "action"])("keeps diagnostics but omits raw tool details from the %s-limit reply", async limit => {
+    vi.mocked(runTool).mockResolvedValue({ ok: true, message: "private-provider-body" });
+    const result = await run([turn([
+      call("create_invoice_draft", { customer_name: "private-argument" }, "first"),
+      ...(limit === "action" ? [call("create_invoice_draft", { customer_name: "other" }, "second")] : []),
+    ])], limit === "round" ? { maxRounds: 1 } : { budget: { requests: 3, tools: 1 } });
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "exhausted" });
+    expect(result.text).not.toMatch(/create_invoice_draft|private-provider-body|private-argument/);
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "create_invoice_draft", result: { ok: true, message: "private-provider-body" } }));
+  });
+
+  it("cannot complete after success for a different invoice hides a failed send", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "INV-1 delivery unconfirmed", retry_safe: false }).mockResolvedValueOnce({ ok: true });
+    const result = await run([
+      turn([call("email_invoice", { invoice_number: "INV-1" }, "first")]),
+      turn([call("email_invoice", { invoice_number: "INV-2" }, "second")]),
+      turn([call("task_complete", { summary: "Both invoices sent" })]),
+      turn([call("task_complete", { summary: "INV-1 needs verification; INV-2 was accepted.", status: "blocked" })]),
+    ], { finishToolName: "task_complete", extraTools: [finish] });
+    expect(JSON.stringify(result.requests[3])).toContain("failed actions");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
   it("keeps every fresh batch result intact, then offers retrieval after observation", async () => {
     headroomReset();
     vi.mocked(runTool)
@@ -116,7 +154,8 @@ describe("advanced agent runtime", () => {
     vi.mocked(runTool).mockResolvedValueOnce({ error: "The user did not approve sending." });
     const result = await run([turn([call("send_invoice", { invoice_number: "INV-1" })]), turn([], "Sent!")]);
     expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
-    expect(result.text).toContain("Not completed: send_invoice failed");
+    expect(result.text).toContain("Some requested work could not be completed or confirmed.");
+    expect(result.text).not.toContain("send_invoice");
   });
   it.each(["openai", "anthropic"] as const)("rejects duplicate provider call IDs before any %s batch action runs", async provider => {
     const reply = provider === "openai" ? turn([call("create_invoice_draft", {}, "same"), call("get_stats", {}, "same")])
@@ -128,10 +167,11 @@ describe("advanced agent runtime", () => {
   });
   it("bounds a single provider batch and does not label an empty response successful", async () => {
     const excessive = await run([turn(Array.from({ length: 33 }, (_, index) => call("get_stats", {}, String(index))))]);
-    expect(excessive.text).toContain("too many tool calls");
+    expect(excessive.text).toContain("Nothing was executed");
+    expect(excessive.text).not.toContain("tool calls");
     expect(runTool).not.toHaveBeenCalled();
     const empty = await run([turn()]);
-    expect(empty.events[0]).toMatchObject({ type: "done", reason: "error", text: "The model returned no final answer." });
+    expect(empty.events[0]).toMatchObject({ type: "done", reason: "error", text: "Filey AI returned no answer. Please try again." });
   });
 
   it("does not execute malformed tool arguments", async () => {

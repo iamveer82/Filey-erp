@@ -18,6 +18,8 @@ import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../_shared/integration-access.ts";
 import { cachedCatalog } from "../_shared/catalog-cache.ts";
 import { rateLimit } from "../_shared/rateLimit.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
+import { composioAuthConfig, composioConnectLink, composioIdentifier, createdComposioAuthConfig } from "../_shared/composio-connect.ts";
 
 const COMPOSIO_BASE = "https://backend.composio.dev/api/v3";
 const ZERNIO_BASE = "https://zernio.com/api/v1";
@@ -51,20 +53,43 @@ const BILLABLE = new Set([
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  let requestBody: Record<string, unknown>;
   try {
-    const { provider, action, payload } = await req.json();
+    const value: unknown = JSON.parse(await readBillingBody(req, 1_048_576));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    requestBody = value as Record<string, unknown>;
+  } catch (error) {
+    return error instanceof BillingRequestError
+      ? json({ error: "Integration requests must be no larger than 1 MiB." }, 413)
+      : json({ error: "Invalid JSON integration request." }, 400);
+  }
+  try {
+    const { provider, action, payload, expected_org_id } = requestBody;
+    if (typeof action !== "string" || !/^[a-z_]{1,64}$/.test(action))
+      return json({ error: "Choose a valid integration action." }, 400);
+    if (payload != null && (typeof payload !== "object" || Array.isArray(payload)))
+      return json({ error: "Integration arguments must be an object." }, 400);
+    const argumentsBody = (payload ?? {}) as Record<string, unknown>;
     const op = `${provider}_${action}`;
 
-    if (!["composio", "zernio"].includes(provider)) return json({ error: "Unknown integration provider" }, 400);
+    if (typeof provider !== "string" || !["composio", "zernio"].includes(provider)) return json({ error: "Unknown integration provider" }, 400);
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     if (!jwt) return json({ error: "Sign in to use integrations." }, 401);
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: auth, error: authError } = await supa.auth.getUser(jwt);
     if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
     if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
+    // Older clients omit intent. Updated clients bind the workspace reviewed
+    // before dispatch; a cross-tab switch must never retarget a mutation.
+    if (expected_org_id !== undefined &&
+      (typeof expected_org_id !== "string" || !expected_org_id || expected_org_id.length > 200))
+      return json({ error: "Workspace changed. Reopen Integrations before continuing." }, 409);
     const userId = auth.user.id;
     const { data: profile, error: profileError } = await supa.from("profiles").select("org_id").eq("id",userId).maybeSingle();
     if (profileError || !profile?.org_id) return json({error:"Workspace access could not be verified."},403);
+    if (expected_org_id !== undefined && expected_org_id !== profile.org_id)
+      return json({ error: "Workspace changed. Reopen Integrations before continuing." }, 409);
     const { data: member, error: memberError } = await supa.from("org_members").select("role,modules").eq("org_id",profile.org_id).eq("user_id",userId).maybeSingle();
     if (memberError || !integrationAllowed(member,provider)) return json({error:"Your role does not have access to this integration."},403);
     const entity = await integrationEntity(profile.org_id,userId);
@@ -82,7 +107,7 @@ Deno.serve(async (req) => {
     if (keyError) return json({ error: "Could not load your integration settings. Please try again." }, 503);
     const ownKey = (ownRow?.api_key as string | undefined)?.trim() || "";
 
-    if (action === "status" && !payload?.connected_account_id) return json({
+    if (action === "status" && !argumentsBody.connected_account_id) return json({
       configured: !!ownKey || !!Deno.env.get(provider === "composio" ? "COMPOSIO_API_KEY" : "ZERNIO_API_KEY"),
     });
     if (BILLABLE.has(op) && !ownKey) {
@@ -118,10 +143,10 @@ Deno.serve(async (req) => {
 
     const result =
       provider === "composio"
-        ? await composio(action, payload ?? {}, entity, ownKey)
+        ? await composio(action, argumentsBody, entity, ownKey)
         : provider === "zernio"
-          ? await zernio(action, payload ?? {}, ownKey)
-          : { status: 400, body: { error: `Unknown provider: ${provider}` } };
+          ? await zernio(action, argumentsBody, ownKey)
+          : { status: 400, body: { error: "Unknown integration provider" } };
 
     if (BILLABLE.has(op) && !ownKey && result.status < 400) {
       await supa.from("audit_log").insert({
@@ -133,8 +158,8 @@ Deno.serve(async (req) => {
       });
     }
     return json(result.body, result.status);
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  } catch {
+    return json({ error: "Integrations are temporarily unavailable. Check whether your action completed before trying again." }, 500);
   }
 });
 
@@ -148,13 +173,13 @@ async function callJson(
   init: RequestInit,
   missing: string
 ): Promise<Result> {
-  const res = await fetch(url, init);
-  const body = await res.json().catch(() => ({}));
+  const res = await fetch(url, { ...init, redirect: "error" });
   if (!res.ok)
     return {
       status: res.status,
-      body: { error: (body as { message?: string })?.message ?? missing },
+      body: { error: missing },
     };
+  const body = await res.json().catch(() => ({}));
   return { status: 200, body };
 }
 
@@ -199,9 +224,9 @@ async function composio(
   }
 
   if (action === "connect") {
-    const toolkit = String(payload.toolkit ?? "").toLowerCase();
-    if (!toolkit) return { status: 400, body: { error: "toolkit required" } };
-    // Re-use the platform's managed auth config for this toolkit, creating one
+    const toolkit = typeof payload.toolkit === "string" ? payload.toolkit.toLowerCase() : "";
+    if (!composioIdentifier(toolkit)) return { status: 400, body: { error: "Choose a valid app to connect." } };
+    // Re-use an enabled auth config for this toolkit, creating a managed one
     // the first time a customer asks for it.
     const found = await callJson(
       `${COMPOSIO_BASE}/auth_configs?toolkit_slug=${encodeURIComponent(toolkit)}&limit=1`,
@@ -209,7 +234,9 @@ async function composio(
       "Could not read auth configs"
     );
     if (found.status >= 400) return found;
-    let acId = (found.body as { items?: { id?: string }[] })?.items?.[0]?.id;
+    let acId: string | null;
+    try { acId = composioAuthConfig(found.body, toolkit); }
+    catch { return { status: 502, body: { error: "Could not verify the app authorization configuration." } }; }
     if (!acId) {
       const made = await callJson(
         `${COMPOSIO_BASE}/auth_configs`,
@@ -224,10 +251,11 @@ async function composio(
         "Could not create an auth config"
       );
       if (made.status >= 400) return made;
-      acId = (made.body as { auth_config?: { id?: string } })?.auth_config?.id;
+      try { acId = createdComposioAuthConfig(made.body, toolkit); }
+      catch { return { status: 502, body: { error: "Could not verify the app authorization configuration." } }; }
     }
     if (!acId) return { status: 502, body: { error: "No auth config for that app" } };
-    return callJson(
+    const linked = await callJson(
       `${COMPOSIO_BASE}/connected_accounts/link`,
       {
         method: "POST",
@@ -236,6 +264,9 @@ async function composio(
       },
       "Could not start the connection"
     );
+    if (linked.status >= 400) return linked;
+    try { return { status: 200, body: composioConnectLink(linked.body) }; }
+    catch { return { status: 502, body: { error: "Could not verify the app sign-in link. Try connecting again." } }; }
   }
 
   if (action === "execute") {
@@ -278,7 +309,7 @@ async function composio(
     return cachedCatalog(url, key, () => callJson(url, { headers }, "Could not list tools"));
   }
 
-  return { status: 400, body: { error: `Unknown Composio action: ${action}` } };
+  return { status: 400, body: { error: "Unknown Composio action" } };
 }
 
 /**
@@ -343,10 +374,11 @@ async function zernio(
     const res = await fetch(`${ZERNIO_BASE}/posts/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers,
+      redirect: "error",
     });
     return res.ok
       ? { status: 200, body: { ok: true } }
       : { status: res.status, body: { error: "Could not delete that post" } };
   }
-  return { status: 400, body: { error: `Unknown Zernio action: ${action}` } };
+  return { status: 400, body: { error: "Unknown Zernio action" } };
 }

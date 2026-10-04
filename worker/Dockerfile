@@ -14,10 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
 
-COPY index.js paths.js ./
+COPY index.js paths.js jobs.js runtime.js ./
 
 # Long-running worker; no port needed (it polls Supabase).
 CMD ["node", "index.js"]

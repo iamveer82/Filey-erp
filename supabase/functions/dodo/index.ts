@@ -41,6 +41,7 @@ import {
 import { buyerOf, planPatchFor, type DodoPurchase } from "../_shared/billing.ts";
 import { createCreditCheckout, reconcileCreditPayment } from "../_shared/ai-credit-payments.ts";
 import { subscriptionRefundAction, reconcileSubscriptionRefund } from "../_shared/subscription-refunds.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -82,10 +83,15 @@ const reply = (r: LicenseResult) => json(r.body, r.status);
 const admin = () => createClient(SUPABASE_URL, SERVICE_ROLE);
 
 /** Billing follows the profile workspace, with an explicit owner/admin check. */
-async function userOrg(supa: ReturnType<typeof admin>, userId: string) {
+async function userOrg(supa: ReturnType<typeof admin>, userId: string, expectedOrg?: unknown) {
+  if (expectedOrg !== undefined &&
+    (typeof expectedOrg !== "string" || !expectedOrg || expectedOrg.length > 200))
+    throw new Error("Workspace changed. Reopen Billing before continuing.");
   const { data: profile, error: profileError } = await supa.from("profiles")
     .select("org_id").eq("id", userId).maybeSingle();
   if (profileError) throw profileError;
+  if (expectedOrg !== undefined && profile?.org_id !== expectedOrg)
+    throw new Error("Workspace changed. Reopen Billing before continuing.");
   if (!profile?.org_id) return null;
   const { data: org, error } = await supa.from("organizations")
     .select("*").eq("id", profile.org_id).maybeSingle();
@@ -98,13 +104,30 @@ async function userOrg(supa: ReturnType<typeof admin>, userId: string) {
   return member?.role === "admin" || member?.role === "owner" ? org : null;
 }
 
-Deno.serve(async (req) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (req.headers.get("webhook-signature")) return handleWebhook(req);
-
-  const payload = await req.json().catch(() => ({}) as Record<string, unknown>);
-  const action = String(payload.action ?? "");
+  if (req.headers.get("webhook-signature")) {
+    try { return await handleWebhook(req); }
+    catch (error) {
+      return error instanceof BillingRequestError
+        ? json({ error: error.message }, 413)
+        : json({ error: "Payment reconciliation failed. Delivery will be retried." }, 500);
+    }
+  }
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(await readBillingBody(req, 16_384));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    payload = parsed as Record<string, unknown>;
+  } catch (error) {
+    return error instanceof BillingRequestError
+      ? json({ error: error.message }, 413)
+      : json({ error: "Invalid JSON billing request." }, 400);
+  }
+  const action = payload.action;
+  if (typeof action !== "string" || !/^[a-z_]{1,64}$/.test(action))
+    return json({ error: "Choose a valid billing action." }, 400);
 
   try {
     const supa = admin();
@@ -132,12 +155,12 @@ Deno.serve(async (req) => {
     // Account-owned and available on every tier, independently of org billing.
     if (action === "checkout_ai_credits") {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
-      return json(await createCreditCheckout(dodo, supa, user, payload.pack_id, payload.amount_cents));
+      return json(await createCreditCheckout(dodo, supa, user, payload.pack_id, payload.amount_cents, payload.promotion_id));
     }
 
     if (["subscription_refunds", "subscription_refund_payments", "request_subscription_refund", "review_subscription_refund", "refresh_subscription_refund"].includes(action)) {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
-      return json(await subscriptionRefundAction(dodo, supa, user.id, await userOrg(supa, user.id), payload));
+      return json(await subscriptionRefundAction(dodo, supa, user.id, await userOrg(supa, user.id, payload.expected_org_id), payload));
     }
 
     if (action === "license_status") return reply(await licenseStatus(supa, user.id));
@@ -182,7 +205,7 @@ Deno.serve(async (req) => {
     if (action === "checkout_cloud") {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
       if (!PRODUCT_CLOUD) return json({ error: "Cloud plan not configured" }, 503);
-      const org = await userOrg(supa, user.id);
+      const org = await userOrg(supa, user.id, payload.expected_org_id);
       if (!org) return json({ error: "Only the workspace owner or an admin can manage billing." }, 403);
       if (org.plan !== "free" && ["active", "trialing", "past_due"].includes(org.plan_status))
         return json({ error: "This workspace already has a paid plan. Use Manage billing." }, 409);
@@ -208,7 +231,7 @@ Deno.serve(async (req) => {
     // Cancelling, changing the card, downloading invoices — all Dodo's, since
     // Dodo is the merchant of record and owns the billing relationship.
     if (action === "portal") {
-      const org = await userOrg(supa, user.id);
+      const org = await userOrg(supa, user.id, payload.expected_org_id);
       if (!org) return json({ error: "Only the workspace owner or an admin can manage billing." }, 403);
       const customerId = org.dodo_customer_id as string | undefined;
       if (!customerId)
@@ -219,10 +242,42 @@ Deno.serve(async (req) => {
     }
 
     return json({ error: "Unknown action" }, 400);
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  } catch (error) {
+    // Only known first-party instructions are safe for callers. Provider and
+    // SQL errors may include response bodies, addresses, row values or keys.
+    const message = error instanceof Error ? error.message : "";
+    return BILLING_MESSAGES.has(message)
+      ? json({ error: message }, message === "Workspace changed. Reopen Billing before continuing." ? 409 : 400)
+      : json({ error: "Billing is temporarily unavailable. Please try again later." }, 503);
   }
-});
+}
+
+const BILLING_MESSAGES = new Set([
+  "Coin payments are not available yet.",
+  "Filey-funded AI is not available yet.",
+  "Verify your email before adding AI credits.",
+  "Choose one AI credit pack or enter a custom amount.",
+  "Choose an AI credit amount from $5.00 to $100.00, in whole cents.",
+  "Custom AI credit amounts are not available yet.",
+  "Choose an available AI credit pack.",
+  "This AI credit pack is not configured correctly.",
+  "This Coin promotion is not available for this account or amount.",
+  "This Coin promotion has already been opened. Complete your original checkout.",
+  "Only a workspace owner or admin can manage billing.",
+  "No subscription is linked to this workspace.",
+  "Choose a payment and provide a reason (10–2,000 characters).",
+  "Only this workspace's subscription payments can be refunded.",
+  "Only successful, non-zero payments can be refunded.",
+  "This payment already has a refund or dispute. Review it in Dodo Payments.",
+  "This payment is not a Filey subscription.",
+  "Only Filey billing administrators can review refunds.",
+  "Unknown refund action.",
+  "Choose approve or reject.",
+  "Add a review note (5–1,000 characters).",
+  "Payment details changed. Review this payment in Dodo Payments.",
+  "Usage limits are temporarily unavailable. Please retry later.",
+  "Workspace changed. Reopen Billing before continuing.",
+]);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -243,8 +298,12 @@ async function publicCheckout(
     return json({ error: "Enter a valid email address." }, 400);
 
   const product = plan === "cloud" ? PRODUCT_CLOUD : plan === "freedom" ? PRODUCT_FREEDOM : "";
-  if (!product) return json({ error: `Unknown plan: ${plan}` }, 400);
+  if (!product) return json({ error: "Choose an available plan." }, 400);
 
+  // An address is caller-controlled. Rotating it must not bypass the provider
+  // creation ceiling or grow unlimited subject rows in the rate-limit table.
+  if (!(await rateLimit(supa, "public:checkout", "dodo_public_checkout_global", 100, 3600)))
+    return json({ error: "Checkout is busy. Please try again later." }, 429);
   // An open endpoint that creates sessions upstream needs a ceiling. Keyed by
   // the email, which is the only identity a stranger has here.
   const allowed = await rateLimit(supa, `web:${email}`, "dodo_public_checkout", 5, 3600);
@@ -303,7 +362,7 @@ async function parkOrGrant(
  *  read out of the body; an unverified payload is an attacker's licence. */
 async function handleWebhook(req: Request): Promise<Response> {
   if (!WEBHOOK_KEY) return json({ error: "Webhook key not configured" }, 503);
-  const raw = await req.text();
+  const raw = await readBillingBody(req, 1_000_000);
 
   let event: Awaited<ReturnType<typeof dodo.webhooks.unwrap>>;
   try {
@@ -314,8 +373,8 @@ async function handleWebhook(req: Request): Promise<Response> {
         "webhook-timestamp": req.headers.get("webhook-timestamp") ?? "",
       },
     });
-  } catch (e) {
-    return json({ error: `Invalid signature: ${e instanceof Error ? e.message : String(e)}` }, 401);
+  } catch {
+    return json({ error: "Invalid webhook signature." }, 401);
   }
 
   // Subscriptions: every lifecycle event restates the status, so one handler
@@ -329,7 +388,10 @@ async function handleWebhook(req: Request): Promise<Response> {
     const paymentId = (event.data as { payment_id?: string }).payment_id;
     if (paymentId) {
       try {
-        if (await reconcileCreditPayment(dodo, admin(), paymentId)) return json({ received: true, credits: true });
+        if (await reconcileCreditPayment(dodo, admin(), paymentId, {
+          type: event.type,
+          timestamp: event.timestamp,
+        })) return json({ received: true, credits: true });
         if (event.type.startsWith("refund.") && await reconcileSubscriptionRefund(dodo, admin(), paymentId))
           return json({ received: true, subscription_refund: true });
       }
@@ -363,10 +425,10 @@ async function handleWebhook(req: Request): Promise<Response> {
     }
     const outcome = await grantLicense(admin(), buyer.userId, data.payment_id);
     return json({ received: true, outcome });
-  } catch (e) {
+  } catch {
     // 500 asks Dodo to retry, which is what we want: the buyer has paid and
     // has no licence yet.
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    return json({ error: "Could not grant the licence. Delivery will be retried." }, 500);
   }
 }
 
@@ -389,3 +451,5 @@ async function handleSubscription(payload: unknown, timestamp: string): Promise<
   if (error) throw error;
   return json({ received: true, outcome });
 }
+
+if (import.meta.main) Deno.serve(handleRequest);

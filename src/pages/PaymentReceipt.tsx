@@ -33,9 +33,11 @@ import {
   loadDocFormats,
   type DocFormats,
 } from "../lib/numberFormat";
+import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
 import { autoSaveDocument } from "../lib/files";
-import { publicAppBase } from "../lib/documentMessage";
+import { publicAppBase, receiptPublicLink } from "../lib/documentMessage";
 import DocTemplateGallery from "../components/DocTemplateGallery";
 import { startingTemplate } from "../components/DocPresetBar";
 import CompanyModal from "../components/CompanyModal";
@@ -198,6 +200,8 @@ export default function PaymentReceipt() {
   const previewRef = useRef<HTMLDivElement>(null);
   const [docsLoading, setDocsLoading] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const editRequest = useRef(0);
+  useEffect(() => () => { ++editRequest.current; }, []);
 
   const reload = () => {
     Promise.all([billing.getCompany(), receipts.list()])
@@ -225,18 +229,27 @@ export default function PaymentReceipt() {
 
   const newReceipt = async () => {
     if (!company) return;
+    const scope = agentStorageScope();
+    const request = ++editRequest.current;
+    try {
     const f = blankForm(company, docs.map((d) => d.number), docFmts);
+    f.number = await allocateDocumentNumber("payment_receipt", docs.map(d => d.number), docFmts);
     // Receipts used to hardcode their template because default_template was
     // shared with invoices; the per-type preset gives them their own.
     f.template = await startingTemplate("receipt", company.default_template, f.template);
+    requireAgentStorageScope(scope ?? "signed-out");
+    if (request !== editRequest.current) return;
     setForm(f);
     setView("edit");
+    } catch (e) { if (request === editRequest.current && scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const loadDoc = async (id: number) => {
+    const request = ++editRequest.current;
     try {
       const d = await receipts.get(id);
       const stampSig = await loadCompanyStampSig();
+      if (request !== editRequest.current) return;
       // Prefer the document's own saved overlays; fall back to company defaults.
       const savedStamp = (d.stamp as Form["stamp"] | null | undefined) ?? undefined;
       const savedSignature = (d.signature as Form["signature"] | null | undefined) ?? undefined;
@@ -251,7 +264,7 @@ export default function PaymentReceipt() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       return d.id;
     } catch (e) {
-      toast.error("Failed to load receipt: " + errMsg(e));
+      if (request === editRequest.current) toast.error("Failed to load receipt: " + errMsg(e));
     }
   };
 
@@ -271,6 +284,7 @@ export default function PaymentReceipt() {
       return null;
     }
     setSaving(true);
+    const request = editRequest.current;
     try {
       // Stamp/signature are real columns on payment_receipts — keep positions
       // (StampSig x/y + data) so a reloaded receipt restores the overlays.
@@ -282,8 +296,10 @@ export default function PaymentReceipt() {
       const id = await receipts.save(payload);
       await refreshList();
       toast.success(`Receipt ${form!.number} saved.`);
-      if (!form!.id) setForm((f) => f && { ...f, id });
-      await archivePdf();
+      if (request === editRequest.current) {
+        if (!form!.id) setForm((f) => f && { ...f, id });
+        await archivePdf();
+      }
       return id;
     } catch (e) {
       toast.error("Save failed: " + errMsg(e));
@@ -328,13 +344,18 @@ export default function PaymentReceipt() {
     await markStatus("paid", id);
   };
 
-  const duplicate = () => {
+  const duplicate = async () => {
+    const scope = agentStorageScope(), request = ++editRequest.current;
+    try {
     const numbers = docs.map((d) => d.number);
+    const number = await allocateDocumentNumber("payment_receipt", numbers, docFmts);
+    requireAgentStorageScope(scope ?? "signed-out");
+    if (request !== editRequest.current) return;
     setForm({
       ...blankForm(company || ({} as any), numbers, docFmts),
       ...form,
       id: undefined,
-      number: pickDocNumber("payment_receipt", numbers, docFmts),
+      number,
       status: "draft",
       shared: false,
       share_token: undefined,
@@ -342,6 +363,7 @@ export default function PaymentReceipt() {
       due_date: today(),
     });
     toast.info("Receipt duplicated. Save to create a new copy.");
+    } catch (e) { if (request === editRequest.current && scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const share = async (shared: boolean) => {
@@ -463,6 +485,7 @@ export default function PaymentReceipt() {
       await receipts.delete(id);
       await refreshList();
       if (form?.id === id) {
+        ++editRequest.current;
         setForm(null);
         setView("list");
       }
@@ -487,13 +510,13 @@ export default function PaymentReceipt() {
   const shareReceipt = async (kind: ShareKind, d: ReceiptSummary) => {
     const cust = findCustomer(d.customer_name);
     const ccy = d.currency || company?.currency || "AED";
-    let url = `${location.origin}${location.pathname}#/payment-receipts`;
+    let url: string;
     try {
-      const token = await receipts.publicLink(d.id);
-      url = `${location.origin}${location.pathname}#/portal/${token}`;
-      refreshList(); // publicLink flips the doc's shared flag
-    } catch {
-      /* fall back to the app link (e.g. Local mode) */
+      url = await receiptPublicLink(d.id);
+      await refreshList(); // publicLink flips the doc's shared flag
+    } catch (error) {
+      toast.error(errMsg(error));
+      return;
     }
     const text = `Receipt ${d.number} for ${money(d.amount || 0, ccy)} received. Thank you! View: ${url}`;
     if (kind === "email") {
@@ -517,15 +540,21 @@ export default function PaymentReceipt() {
   };
 
   const duplicateRow = async (id: number) => {
+    const request = ++editRequest.current;
+    const scope = agentStorageScope();
     try {
       const d = await receipts.get(id);
+      if (request !== editRequest.current) return;
       const numbers = docs.map((x) => x.number);
+      const number = await allocateDocumentNumber("payment_receipt", numbers, docFmts);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editRequest.current) return;
       const { stamp, signature, ...rest } = d;
       setForm({
         ...blankForm(company || ({} as any), numbers, docFmts),
         ...rest,
         id: undefined,
-        number: pickDocNumber("payment_receipt", numbers, docFmts),
+        number,
         status: "draft",
         shared: false,
         share_token: undefined,
@@ -540,7 +569,7 @@ export default function PaymentReceipt() {
       window.scrollTo({ top: 0, behavior: "smooth" });
       toast.info("Receipt duplicated. Save to create a new copy.");
     } catch (e) {
-      toast.error("Duplicate failed: " + errMsg(e));
+      if (request === editRequest.current) toast.error("Duplicate failed: " + errMsg(e));
     }
   };
 
@@ -858,6 +887,7 @@ export default function PaymentReceipt() {
                   <button
                     className="btn-ghost shrink-0"
                     onClick={() => {
+                      ++editRequest.current;
                       setForm(null);
                       setView("list");
                     }}

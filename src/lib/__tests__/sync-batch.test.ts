@@ -1,8 +1,9 @@
+import { transferPushCollection as pushCollection } from "./cloud-transfer-fixture";
 import { beforeEach, expect, it, vi } from "vitest";
-import { inRealOrg, prepareSyncRows, pushCollection } from "../sync";
+import { inRealOrg, prepareSyncRows } from "../sync";
 import { journalCommit, journalMark, journalSnapshot, localClient, replaceColl } from "../localdb";
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => { localStorage.clear(); localStorage.setItem("filey_data_mode", "local"); });
 
 it.each([false, true])("stops an upload when its account changes between requests (legacy server: %s)", async legacy => {
   let user = "owner";

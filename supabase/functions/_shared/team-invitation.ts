@@ -37,6 +37,7 @@ export async function sendInvitation(
 ) {
   try {
     const response = await send("https://api.resend.com/emails", {
+      redirect: "error",
       method: "POST",
       signal: AbortSignal.timeout(20000),
       headers: {

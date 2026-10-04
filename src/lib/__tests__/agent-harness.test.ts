@@ -281,7 +281,8 @@ describe("agent harness", () => {
 
     const done = events[events.length - 1];
     expect(done).toMatchObject({ type: "done", reason: "exhausted" });
-    expect(final).toMatch(/ran out of steps|couldn't finish/);
+    expect(final).toMatch(/couldn't finish/);
+    expect(final).not.toContain("recall");
     // Two rounds means two model calls, not an unbounded run.
     expect(events.filter((e) => e.type === "tool_call")).toHaveLength(2);
   });
@@ -298,14 +299,15 @@ describe("agent harness", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
-        throw new Error("socket hung up");
+        throw new Error("socket hung up: private-provider-body");
       })
     );
     const { events, final } = await collect(
       aiAgentStream([{ role: "user", text: "hello" }])
     );
     expect(events[events.length - 1]).toMatchObject({ type: "done", reason: "error" });
-    expect(final).toMatch(/model call failed/);
+    expect(final).toContain("Filey AI couldn't continue.");
+    expect(final).not.toContain("private-provider-body");
 
     // A hard HTTP refusal is non-retryable, so it surfaces immediately.
     vi.stubGlobal(
@@ -313,7 +315,7 @@ describe("agent harness", () => {
       vi.fn(async () => ({
         ok: false,
         status: 401,
-        text: async () => "bad key",
+        text: async () => "bad key: private-provider-body",
         json: async () => ({}),
       }))
     );
@@ -322,7 +324,8 @@ describe("agent harness", () => {
       type: "done",
       reason: "error",
     });
-    expect(http.final).toMatch(/model call failed/);
+    expect(http.final).toContain("Your AI provider key was rejected");
+    expect(http.final).not.toContain("private-provider-body");
   });
 
   it("omits unsupported temperature for current Claude and stops re-sending old images", async () => {

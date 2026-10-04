@@ -8,13 +8,14 @@
 // The function verifies the session with auth.getUser (including new signing keys), so
 // only signed-in users can send. Password recovery is handled by Supabase
 // Auth with Resend SMTP, including Auth's native rate limits.
-// Body: { to, subject, html }.
+// Body: { to, subject, html, expected_org_id? }.
 
-import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { acceptedEmailId } from "../_shared/email-delivery.ts";
+import { EMAIL_WORKSPACE_CHANGED, emailWorkspaceMatches, validEmailWorkspaceIntent } from "../_shared/email-workspace.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit } from "../_shared/rateLimit.ts";
+import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
 
 // SECURITY: per-user DAILY cap so a compromised account can't mass-mail from
 // our domain. Reserve each attempt before contacting Resend; a failed or
@@ -33,15 +34,20 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     let body;
-    try { body = await req.json(); } catch { return json({ error: "Invalid JSON payload" }, 400); }
-    if (!body || typeof body !== "object") return json({ error: "Invalid payload" }, 400);
+    // 20 MiB covers the existing 15M base64 attachments + escaped 500K HTML
+    // allowance without buffering arbitrarily large unauthenticated requests.
+    try { body = JSON.parse(await readBillingBody(req, 20 * 1024 * 1024)); }
+    catch (error) {
+      return json({ error: error instanceof BillingRequestError ? "Email request is too large" : "Invalid JSON payload" }, error instanceof BillingRequestError ? 413 : 400);
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid payload" }, 400);
+    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const RESEND = Deno.env.get("RESEND_API_KEY");
     const FROM = Deno.env.get("EMAIL_FROM") ?? "";
     const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
@@ -50,6 +56,16 @@ serve(async (req) => {
     if (authError || !auth.user) return json({ error: "Session expired. Sign in again." }, 401);
     if (!mfaAllowed(auth.user, jwt)) return json(MFA_REQUIRED, 403);
     const userId = auth.user.id;
+    const expectedOrg = body.expected_org_id;
+    if (!validEmailWorkspaceIntent(expectedOrg)) return json({ error: EMAIL_WORKSPACE_CHANGED }, 409);
+    // Pin a new client's review to the authenticated account's selected org.
+    // Check status too, before revealing sender configuration. Older clients
+    // omit intent and keep their existing account-level endpoint behavior.
+    const scopedProfile = expectedOrg === undefined ? null : await supa.from("profiles")
+      .select("org_id").eq("id", userId).maybeSingle();
+    if (scopedProfile?.error) return json({ error: "Email permissions are temporarily unavailable. Please retry later." }, 503);
+    if (!emailWorkspaceMatches(expectedOrg, scopedProfile?.data?.org_id))
+      return json({ error: EMAIL_WORKSPACE_CHANGED }, 409);
     if (body.action === "status") return json({ configured: !!RESEND && !!FROM, from: FROM || null });
     const { to, subject, html, attachments, requestId } = body;
     if (requestId !== undefined && (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)))
@@ -89,18 +105,25 @@ serve(async (req) => {
     // Resolve the user's tier from their org's plan (service role bypasses
     // RLS). Mirrors resolveTier() in src/lib/license.ts.
     let paid = false;
-    const { data: prof } = await supa
+    const { data: prof, error: profileError } = scopedProfile ?? await supa
       .from("profiles")
       .select("org_id")
       .eq("id", userId)
       .maybeSingle();
+    if (profileError) return json({ error: "Email permissions are temporarily unavailable. Please retry later." }, 503);
     const orgId = prof?.org_id as string | undefined;
     if (orgId && orgId !== "default") {
-      const { data: org } = await supa
+      // A removed member's profile can retain their old paid org. Only an
+      // actual membership grants its plan's higher sending allowance.
+      const { data: member, error: membershipError } = await supa.from("org_members")
+        .select("role").eq("org_id",orgId).eq("user_id",userId).maybeSingle();
+      if (membershipError) return json({ error: "Email permissions are temporarily unavailable. Please retry later." }, 503);
+      const { data: org, error: orgError } = member ? await supa
         .from("organizations")
         .select("plan, plan_status")
         .eq("id", orgId)
-        .maybeSingle();
+        .maybeSingle() : {data:null,error:null};
+      if (orgError) return json({ error: "Email permissions are temporarily unavailable. Please retry later." }, 503);
       const plan = org?.plan as string | undefined;
       const status = org?.plan_status as string | undefined;
       paid =
@@ -108,18 +131,18 @@ serve(async (req) => {
         plan !== "free" &&
         (status === "active" || status === "trialing" || status === "past_due");
     }
-    // A one-time desktop (Lite) licence counts as paid. Offline users send
-    // through this same function but their org is usually 'default'/free, so
-    // without this they sat on the 10/day free-cloud cap they already paid to
-    // be out of.
+    // Existing one-time desktop licenses retain their hosted paid allowance.
+    // Local-mode delivery uses the user's personal provider connection and
+    // never calls this function or consumes Filey's hosted sending budget.
     if (!paid) {
-      const { data: lic } = await supa
+      const { data: lic, error: licenceError } = await supa
         .from("licenses")
         .select("id")
         .eq("user_id", userId)
         .eq("status", "active")
         .limit(1)
         .maybeSingle();
+      if (licenceError) return json({ error: "Email permissions are temporarily unavailable. Please retry later." }, 503);
       paid = !!lic;
     }
     const limit = paid ? PAID_DAILY_CEILING : FREE_DAILY_LIMIT;
@@ -132,6 +155,7 @@ serve(async (req) => {
     }
 
     const res = await fetch("https://api.resend.com/emails", {
+      redirect: "error",
       signal: AbortSignal.timeout(20000),
       method: "POST",
       headers: {
@@ -149,7 +173,7 @@ serve(async (req) => {
     });
 
     const data = await res.json().catch(() => null);
-    if (!res.ok) return json({ error: data?.message ?? "Send failed" }, res.status === 429 ? 429 : 422);
+    if (!res.ok) return json({ error: "Email could not be confirmed. Check delivery before retrying." }, res.status === 429 ? 429 : 422);
 
     const receipt = acceptedEmailId(data);
     if (!receipt) return json({error: "Email acceptance could not be confirmed. Check delivery before retrying."},502);
@@ -165,8 +189,8 @@ serve(async (req) => {
     if (ins.error) console.error("email_send audit insert failed", ins.error);
 
     return json({ id: receipt });
-  } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  } catch {
+    return json({ error: "Email is temporarily unavailable. Check delivery before retrying." }, 500);
   }
 });
 

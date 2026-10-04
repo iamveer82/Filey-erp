@@ -46,6 +46,11 @@ verify_jwt = false
 [functions.team-invite]
 verify_jwt = false
 
+# Public inquiries validate input and abuse limits inside the handler.
+# Preserve the existing deployment's public publishable-key entry point.
+[functions.lead-contact]
+verify_jwt = false
+
 # Keep the existing gateway JWT check; the handler also validates auth.getUser.
 [functions.run-tool]
 verify_jwt = true

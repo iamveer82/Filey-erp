@@ -18,6 +18,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ownedInputPath } from "./paths.js";
+import { finishWorkerClaim } from "./jobs.js";
+import { workerFetch, runConverter, reportConversionFailure } from "./runtime.js";
 
 const run = promisify(execFile);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -33,6 +35,7 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
 
 const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
+  global: { fetch: workerFetch() },
 });
 
 const INPUT_BUCKET = "tool-inputs";
@@ -45,10 +48,10 @@ const DOCX =
 const handlers = {
   // Word / Excel / PowerPoint / etc. -> PDF
   async office2pdf(dir, input, base) {
-    await run(
+    await runConverter(run,
       "soffice",
       ["--headless", "--convert-to", "pdf", "--outdir", dir, input],
-      { timeout: 180000 }
+      dir, 180000
     );
     const out = path.join(dir, `${base}.pdf`);
     return [{ name: `${base}.pdf`, file: out, type: PDF }];
@@ -56,7 +59,7 @@ const handlers = {
 
   // PDF -> editable Word (best-effort via LibreOffice's PDF import)
   async pdf2docx(dir, input, base) {
-    await run(
+    await runConverter(run,
       "soffice",
       [
         "--headless",
@@ -67,7 +70,7 @@ const handlers = {
         dir,
         input,
       ],
-      { timeout: 180000 }
+      dir, 180000
     );
     const out = path.join(dir, `${base}.docx`);
     return [{ name: `${base}.docx`, file: out, type: DOCX }];
@@ -76,17 +79,17 @@ const handlers = {
   // Make a scanned PDF searchable (OCR). --skip-text leaves existing text.
   async ocr(dir, input, base) {
     const out = path.join(dir, `${base}-ocr.pdf`);
-    await run("ocrmypdf", ["--skip-text", input, out], { timeout: 600000 });
+    await runConverter(run, "ocrmypdf", ["--skip-text", input, out], dir, 600000);
     return [{ name: `${base}-ocr.pdf`, file: out, type: PDF }];
   },
 
   // Archival PDF/A (ocrmypdf emits compliant PDF/A).
   async pdfa(dir, input, base) {
     const out = path.join(dir, `${base}-pdfa.pdf`);
-    await run(
+    await runConverter(run,
       "ocrmypdf",
       ["--skip-text", "--output-type", "pdfa", input, out],
-      { timeout: 600000 }
+      dir, 600000
     );
     return [{ name: `${base}-pdfa.pdf`, file: out, type: PDF }];
   },
@@ -94,7 +97,7 @@ const handlers = {
   // Strong compression via Ghostscript.
   async compress(dir, input, base) {
     const out = path.join(dir, `${base}-compressed.pdf`);
-    await run(
+    await runConverter(run,
       "gs",
       [
         "-sDEVICE=pdfwrite",
@@ -106,7 +109,7 @@ const handlers = {
         `-sOutputFile=${out}`,
         input,
       ],
-      { timeout: 300000 }
+      dir, 300000
     );
     return [{ name: `${base}-compressed.pdf`, file: out, type: PDF }];
   },
@@ -128,8 +131,8 @@ async function claimJob() {
       .limit(1);
     if (res.error) throw res.error;
     rows = res.data;
-  } catch (e) {
-    console.error("claimJob select failed:", (e && e.message) || e);
+  } catch {
+    console.error("claimJob select failed.");
     return null;
   }
   const job = rows?.[0];
@@ -145,8 +148,8 @@ async function claimJob() {
       .maybeSingle();
     if (error) throw error;
     return claimed ?? null; // null = another worker took it
-  } catch (e) {
-    console.error(`claimJob update failed for ${job.id}:`, (e && e.message) || e);
+  } catch {
+    console.error(`claimJob update failed for ${job.id}.`);
     return null;
   }
 }
@@ -167,8 +170,8 @@ async function requeueStuckJobs() {
     if (data?.length) {
       console.log(`↻ requeued ${data.length} stuck job(s): ${data.map((r) => r.id).join(", ")}`);
     }
-  } catch (e) {
-    console.error("requeueStuckJobs failed:", (e && e.message) || e);
+  } catch {
+    console.error("requeueStuckJobs failed.");
   }
 }
 
@@ -208,28 +211,16 @@ async function processJob(job) {
       total += buf.length;
     }
 
-    const { error: completionError } = await sb
-      .from("tool_jobs")
-      .update({
+    const completed = await finishWorkerClaim(sb, job, {
         status: "done",
         output_paths: paths,
         size_bytes: total,
         updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.id);
-    if (completionError) throw completionError;
+      });
+    if (!completed) { console.log(`Stale worker completion withheld for ${job.id}.`); return; }
     console.log(`✓ ${job.tool} ${job.id} -> ${paths.length} file(s)`);
-  } catch (e) {
-    const msg = (e && e.message) || String(e);
-    await sb
-      .from("tool_jobs")
-      .update({
-        status: "error",
-        error: msg.slice(0, 500),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.id);
-    console.error(`✗ ${job.id}: ${msg}`);
+  } catch {
+    await reportConversionFailure(sb, job, finishWorkerClaim);
   } finally {
     await fs.rm(work, { recursive: true, force: true });
   }
@@ -246,8 +237,8 @@ async function main() {
       const job = await claimJob();
       if (job) await processJob(job);
       else await sleep(POLL_MS);
-    } catch (e) {
-      console.error("loop error:", (e && e.message) || e);
+    } catch {
+      console.error("Worker loop failed; retrying after the polling interval.");
       await sleep(POLL_MS);
     }
   }

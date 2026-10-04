@@ -126,23 +126,27 @@ export interface ConnectLink {
   connected_account_id?: string;
   error?: { message: string };
 }
+function connectionIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 256 && !/[^a-zA-Z0-9_-]/.test(value);
+}
 
 /** Start connecting a toolkit for the signed-in account and workspace. */
 export async function composioConnect(
   toolkit: string
 ): Promise<ConnectLink> {
+  if (!connectionIdentifier(toolkit)) throw new Error("Choose a valid app to connect.");
   const link = await request<ConnectLink>("connect", "composio_connect", { toolkit });
-  if (link.redirect_url) {
+  if (link && typeof link.redirect_url === "string" && connectionIdentifier(link.connected_account_id)) {
     // The provider's reply is data, never permission to execute a custom scheme
     // in a browser tab or through the desktop OS opener.
     let url: URL;
     try { url = new URL(link.redirect_url); }
     catch { throw new Error("The connection provider returned an invalid sign-in link."); }
-    if (url.protocol !== "https:" || url.username || url.password || link.redirect_url.length > 8192 || [...link.redirect_url].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+    if (url.protocol !== "https:" || url.username || url.password || link.redirect_url.length > 8192 || [...link.redirect_url].some(char => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127))
       throw new Error("The connection provider returned an unsafe sign-in link.");
-    return { ...link, redirect_url: url.href };
+    return { redirect_url: url.href, connected_account_id: link.connected_account_id };
   }
-  return link;
+  throw new Error("The connection provider returned an invalid sign-in link.");
 }
 
 export interface ConnectionStatus {

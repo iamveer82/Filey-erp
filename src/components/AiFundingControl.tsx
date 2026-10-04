@@ -5,6 +5,7 @@ import CoinMark from "./CoinMark";
 import { Popover, PopoverContent, PopoverTrigger } from "./Popover";
 import {
   AI_CREDITS_EVENT,
+  FILEY_AI_MODEL,
   creditChoice,
   creditCoin,
   getCreditStatus,
@@ -42,14 +43,12 @@ export default function AiFundingControl({
   const [open, setOpen] = useState(false),
     [data, setData] = useState<CreditStatus | null>(null),
     [error, setError] = useState(""),
-    [loading, setLoading] = useState(false),
-    [search, setSearch] = useState("");
+    [loading, setLoading] = useState(false);
   useEffect(() => {
     const close = () => {
       setOpen(false);
       setData(null);
       setError("");
-      setSearch("");
     };
     window.addEventListener("filey:agent-storage", close);
     const subscription = supabase?.auth.onAuthStateChange((event) => {
@@ -80,22 +79,11 @@ export default function AiFundingControl({
       alive = false;
     };
   }, [open]);
-  const query = search.trim().toLowerCase();
-  const paidModels =
-    data?.models.filter(
-      (model) =>
-        isPaidCreditModel(model) &&
-        `${model.name} ${model.id}`.toLowerCase().includes(query)
-    ) ?? [];
-  const selectedPaid = data?.models.find(
-    (model) => isPaidCreditModel(model) && model.id === choice.model
-  );
-  const needsPaidChoice =
-    choice.funding === "credits" &&
-    (!choice.model || choice.model === "filey-ai" || (!!data && !selectedPaid));
-  const paidLabel = needsPaidChoice
-    ? "Choose a paid model"
-    : selectedPaid?.name || choice.model;
+  const model = data?.models.find(isPaidCreditModel);
+  const paidAvailable = !!data?.configured && !!model;
+  const label = choice.funding === "credits"
+    ? "Filey AI"
+    : choice.funding === "free" ? "Choose AI connection" : "My API key";
   function choose(funding: AiFunding, model?: string) {
     try {
       setCreditChoice(funding, model);
@@ -112,13 +100,7 @@ export default function AiFundingControl({
           className="composer-control max-w-full"
           disabled={disabled}
           aria-label="AI payment method"
-          title={
-            choice.funding === "free"
-              ? "My saved model"
-              : choice.funding === "credits"
-                ? paidLabel
-                : "My API key"
-          }
+          title={label}
         >
           {choice.funding === "credits" ? (
             <CoinMark />
@@ -126,11 +108,7 @@ export default function AiFundingControl({
             <KeyRound size={compact ? 18 : 14} />
           )}
           <span className={compact ? "sr-only" : "max-w-52 truncate"}>
-            {choice.funding === "free"
-              ? "My saved model"
-              : choice.funding === "credits"
-                ? paidLabel
-                : "My API key"}
+            {label}
           </span>
           {!compact && <ChevronDown size={12} />}
         </button>
@@ -160,18 +138,6 @@ export default function AiFundingControl({
           {choice.funding === "byok" && <Check size={16} />}
         </button>
         <div className="my-2 border-t border-border" />
-        {!!data?.models.some(isPaidCreditModel) && (
-          <div className="px-2 pb-3">
-            <input
-              type="search"
-              aria-label="Search AI models"
-              placeholder="Search models"
-              className="input min-h-11 w-full"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
-        )}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-1 text-[13px]">
           <span className="flex items-center gap-2 font-medium">
             <CoinMark /> Pay with Coin
@@ -188,7 +154,7 @@ export default function AiFundingControl({
             className="flex items-center gap-2 p-3 text-xs text-muted-foreground"
           >
             <FileySpinner size={16} />
-            Loading models…
+            Loading your wallet…
           </p>
         )}
         {error && (
@@ -196,72 +162,37 @@ export default function AiFundingControl({
             {error}
           </p>
         )}
-        {data?.notice && (
-          <p className="p-2 text-xs text-muted-foreground">{data.notice}</p>
-        )}
-        {needsPaidChoice && (
+        {choice.funding === "free" && (
           <p role="status" className="px-2 py-2 text-xs text-muted-foreground">
-            Choose a paid model to continue. Filey will use the model you select.
+            Your previous free connection is no longer available. Choose Filey AI
+            to pay with Coin, or use your own API key.
           </p>
         )}
-        <div className="max-h-64 overflow-y-auto">
-          {paidModels.map((model) => (
-            <button
-              type="button"
-              key={model.id}
-              disabled={!data?.configured}
-              aria-pressed={choice.funding === "credits" && choice.model === model.id}
-              onClick={() => choose("credits", model.id)}
-              className="flex min-h-11 w-full items-center gap-3 rounded-[8px] p-3 text-left hover:bg-hover disabled:opacity-50"
-            >
-              <span className="min-w-0 flex-1">
-                <span
-                  className="block truncate text-[13px] font-medium"
-                  title={model.name}
-                >
-                  {model.name}
-                </span>
-                <span
-                  className="block truncate text-xs text-muted-foreground"
-                  title={model.id}
-                >
-                  {model.id}
-                  {model.vision ? " · Vision" : ""}
-                </span>
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Up to {creditCoin(model.input * 1e12, true)} input ·{" "}
-                  {creditCoin(model.output * 1e12, true)} output / 1M tokens
-                </span>
-                {!!model.image && model.image > 0 && (
-                  <span className="block text-xs text-muted-foreground">
-                    Up to {creditCoin(Math.ceil(model.image * 1e6), true)} / input image
-                  </span>
-                )}
-              </span>
-              {choice.funding === "credits" && choice.model === model.id && (
-                <Check size={16} />
-              )}
-            </button>
-          ))}
-        </div>
-        {data && !data.models.some(isPaidCreditModel) && (
+        <button
+          type="button"
+          disabled={!paidAvailable}
+          aria-pressed={choice.funding === "credits"}
+          onClick={() => choose("credits", FILEY_AI_MODEL)}
+          className="flex min-h-11 w-full items-center gap-3 rounded-[8px] p-3 text-left hover:bg-hover disabled:opacity-50"
+        >
+          <CoinMark />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-medium">Filey AI</span>
+            <span className="block text-xs text-muted-foreground">
+              Usage is paid from your Coin balance.
+            </span>
+          </span>
+          {choice.funding === "credits" && <Check size={16} />}
+        </button>
+        {data && !paidAvailable && (
           <p className="p-2 text-xs text-muted-foreground">
-            Paid models are not available yet. You can use your own API key or a local model.
+            Filey AI is not available yet. You can use your own API key or a local model.
           </p>
         )}
-        {data && query && !paidModels.length && (
-          <p role="status" className="p-2 text-xs text-muted-foreground">
-            No matching models. Try a provider or model name.
-          </p>
-        )}
-        <p className="px-2 py-2 text-xs leading-relaxed text-muted-foreground">
-          Rates vary by provider, context and time. You pay actual usage; these rates are
-          spending estimates.
-        </p>
         <p className="px-2 py-2 text-xs leading-relaxed text-muted-foreground">
           1 Coin = $1. Available on Basic, Pro and Ultra.
-          Paid models use their actual provider cost, with no Filey usage markup. Changes
-          apply to new tasks; selecting a model does not charge you.
+          Changes apply to new tasks; selecting Filey AI
+          does not charge you.
         </p>
         <Link
           className="btn-ghost mt-1 w-full"

@@ -1,7 +1,7 @@
 import { fmtDate, money } from "../lib/format";
 import { amountInWords } from "../lib/words";
 import { docTotals, docLineAmount, docTaxBreakdown } from "../lib/docItems";
-import { ENFORCE_LICENSING, currentTier } from "../lib/license";
+import { showFreePlanBranding } from "../lib/license";
 import { applyRoundOff, type CalcMode } from "../lib/money";
 import { DRAGGABLE_SECTIONS, type CustomTemplate } from "./TemplateDesigner";
 import { useCustomTemplates } from "../lib/customTemplates";
@@ -292,8 +292,7 @@ export default function DocView({
       </div>
     ) : null;
 
-  // Free-tier branding line — volume+branding are the only free limits.
-  const freeWatermark = ENFORCE_LICENSING && currentTier() === "free";
+  const freeWatermark = showFreePlanBranding();
 
   const Footer = () => showFooter ? (
     <>

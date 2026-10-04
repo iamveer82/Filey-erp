@@ -408,6 +408,7 @@ function ReconcileModal({ open, onClose }: { open: boolean; onClose: () => void 
     setConfirmed(false);
     setRecorded(new Set());
     try {
+      if (file.size > 16 * 1024 * 1024) throw new Error("Use a bank statement CSV up to 16 MB.");
       const lines = parseStatementCsv(await file.text());
       if (!lines.length) {
         setErr(

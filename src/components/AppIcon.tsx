@@ -59,6 +59,7 @@ const iconMap: Record<string, LucideIcon> = {
   purchase: Wallet,
   lpo: ClipboardList,
   inventory: PackageOpen,
+  packing: PackageOpen,
   stock: PackageOpen,
   product: PackageOpen,
   products: PackageOpen,

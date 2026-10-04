@@ -1,6 +1,7 @@
 import { crm, billing, erp, quotes } from "./api";
 import { aed, money, getDisplayCurrency, todayYmd } from "./format";
 import { agentStorageScope } from "./agentStorage";
+import { canUseModule, loadModuleAccess, type ModuleAccess } from "./moduleAccess";
 
 /* Builds a compact, token-aware snapshot of the signed-in user's OWN business
  * data, injected into the copilot's system prompt so it can answer questions
@@ -24,6 +25,7 @@ const s = (v: unknown) => (typeof v === "string" ? v : v == null ? "" : String(v
  *  costs nothing because the agent looks the details up with tools anyway. */
 let cached: { at: number; key: string; text: string } | null = null;
 const CACHE_MS = 60_000;
+const accessKey = (access: ModuleAccess) => JSON.stringify([access.admin, access.modules?.slice().sort() ?? null]);
 
 export async function buildAiContext(companyName?: string): Promise<string> {
   const scope = agentStorageScope();
@@ -33,13 +35,24 @@ export async function buildAiContext(companyName?: string): Promise<string> {
     if (scope !== agentStorageScope() || currency !== getDisplayCurrency())
       throw new DOMException("Workspace changed before preparing the business brief.", "AbortError");
   };
-  const key = JSON.stringify([scope, currency, companyName ?? ""]);
-  if (cached && cached.key === key && Date.now() - cached.at < CACHE_MS) {
+  // Verify permissions before reusing a brief: a same-account revocation must
+  // not keep yesterday's accessible records in today's model context.
+  const access = await loadModuleAccess();
+  current();
+  const permissions = accessKey(access);
+  const key = JSON.stringify([scope, currency, companyName ?? "", permissions]);
+  // Staff visibility can narrow without changing the module list. Re-read
+  // through RLS instead of reusing rows that were shared earlier.
+  if (access.admin && cached && cached.key === key && Date.now() - cached.at < CACHE_MS) {
     return cached.text;
   }
-  const text = await composeContext(companyName, currency, current);
+  const text = await composeContext(companyName, currency, current, access);
   current();
-  cached = { at: Date.now(), key, text };
+  const latestAccess = await loadModuleAccess();
+  current();
+  if (accessKey(latestAccess) !== permissions)
+    throw new DOMException("Workspace access changed while preparing the business brief.", "AbortError");
+  cached = access.admin ? { at: Date.now(), key, text } : null;
   return text;
 }
 
@@ -48,22 +61,27 @@ export function clearAiContextCache(): void {
   cached = null;
 }
 
-async function composeContext(companyName: string | undefined, ccy: string, current: () => void): Promise<string> {
+async function composeContext(companyName: string | undefined, ccy: string, current: () => void, access: ModuleAccess): Promise<string> {
   const unreadable: string[] = [];
-  const section = (label: string, p: Promise<unknown[]>): Promise<Row[]> =>
-    p
+  const section = (label: string, module: string, read: () => Promise<unknown[]>): Promise<Row[]> => {
+    if (!canUseModule(access, module)) {
+      unreadable.push(`${label} (workspace access restricted)`);
+      return Promise.resolve([]);
+    }
+    return read()
       .then((rows) => rows as Row[])
       .catch(() => {
         unreadable.push(label);
         return [] as Row[];
       });
+  };
 
   const [customers, invoices, products, quoteDocs, orders] = await Promise.all([
-    section("customers", crm.customers()),
-    section("invoices", billing.listDocs()),
-    section("products", erp.products()),
-    section("quotations", quotes.listDocs()),
-    section("orders", erp.orders()),
+    section("customers", "customers", () => crm.customers()),
+    section("invoices", "invoicing", () => billing.listDocs()),
+    section("products", "inventory", () => erp.products()),
+    section("quotations", "quoting", () => quotes.listDocs()),
+    section("orders", "orders", () => erp.orders()),
   ]);
   current();
   // Identity is worth its handful of tokens: without the VAT rate and currency
