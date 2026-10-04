@@ -37,7 +37,7 @@ import { VideoJobCard } from "../components/AgentVideoPanel";
 import AgentMediaPanel, { MediaJobCard } from "../components/AgentMediaPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
 import AiFundingControl, { useAiFunding } from "../components/AiFundingControl";
-import { getActiveAiConfig } from "../lib/ai";
+import { getActiveAiConfig, getFileyAiReasoning, setFileyAiReasoning } from "../lib/ai";
 import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint";
 import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, selectAgentBrowser } from "../lib/desktopBrowser";
 import { enableComputerUse, disableComputerUse } from "../lib/computerUse";
@@ -307,10 +307,27 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     const saved = readAgentStorage("filey.agent.effort");
     return saved && Object.prototype.hasOwnProperty.call(EFFORT_LABELS, saved) ? saved as AiEffort : "auto";
   });
+  const [reasoningEnabled, setReasoningEnabled] = useState(getFileyAiReasoning);
+  useEffect(() => {
+    if (busy) return;
+    const refresh = () => setReasoningEnabled(getFileyAiReasoning());
+    refresh();
+    window.addEventListener(AGENT_STORAGE_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(AGENT_STORAGE_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, [busy]);
   const browserPanel = useSyncExternalStore(subscribeBrowserPanel, getBrowserPanelState);
   const changeEffort = (next: AiEffort) => {
     try { writeAgentStorage("filey.agent.effort", next, scope ?? undefined); setEffort(next); }
     catch { setErr("Could not save the effort setting. Try again."); }
+  };
+  const changeReasoning = (enabled: boolean) => {
+    if (busy) return;
+    try { setFileyAiReasoning(enabled, scope ?? undefined); setReasoningEnabled(enabled); }
+    catch { setErr("Could not save the reasoning setting. Try again."); }
   };
   /** Keep action receipts for continuation; the chat shows only a short status. */
   const [runProgress, setRunProgress] = useState<ChatTurn["run"]>();
@@ -631,8 +648,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         { role: "user", text: goalText, images },
       ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
-      const selectedEffort = aiEffortLevels(getActiveAiConfig()).includes(effort) ? effort : "auto";
-      const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort, computerSession, confirm: requestConfirm };
+      const selectedEffort = modelConfig.billing === "credits" ? "auto" : aiEffortLevels(modelConfig).includes(effort) ? effort : "auto";
+      const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort,
+        ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm };
       const stream = auto
         ? aiAutonomousStream(goalText, { ...options, history, images })
         : aiAgentStream(messages, options);
@@ -1145,7 +1163,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 }} />}
                 <div className="filey-composer-models">
                 {active && <AiFundingControl disabled={busy} compact />}
-                {active && <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort} />}
+                {active && <AgentEffortControl config={modelConfig} value={effort} disabled={busy} onChange={changeEffort}
+                  reasoningEnabled={reasoningEnabled} onReasoningChange={changeReasoning} />}
                 {/* Mic — dictation straight into the composer. Browser engine
                     (Chromium WebView2), free, no key. Hidden where the browser
                     doesn't ship SpeechRecognition. */}

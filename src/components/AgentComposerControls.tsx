@@ -44,14 +44,35 @@ export function AgentAccessControl({ mode, disabled, onChange, onCapabilities }:
   </Popover>;
 }
 
-export function AgentEffortControl({ config, value, disabled, onChange }: {
+export function AgentEffortControl(props: {
+  config: AiConfig; value: AiEffort; disabled: boolean; onChange: (value: AiEffort) => void;
+  reasoningEnabled?: boolean; onReasoningChange?: (enabled: boolean) => void;
+}) {
+  if (props.config.billing === "credits") {
+    const enabled = props.reasoningEnabled === true;
+    return <button type="button" role="switch" aria-label="Reasoning" aria-checked={enabled}
+      disabled={props.disabled || !props.onReasoningChange}
+      onClick={() => props.onReasoningChange?.(!enabled)}
+      title={enabled ? "Reasoning on · More thought for difficult tasks; replies can take longer" : "Reasoning off · Faster replies"}
+      className="composer-control text-foreground">
+      <span className="composer-detail">Reasoning</span>
+      <span className="composer-detail text-muted-foreground">{enabled ? "On" : "Off"}</span>
+      <span aria-hidden="true" className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors motion-reduce:transition-none", enabled ? "bg-foreground" : "bg-muted-foreground/40")}>
+        <span className={cn("absolute top-0.5 h-3 w-3 rounded-full bg-background transition-transform motion-reduce:transition-none", enabled ? "translate-x-3.5" : "translate-x-0.5")} />
+      </span>
+    </button>;
+  }
+  return <AgentProviderEffortControl {...props} />;
+}
+
+function AgentProviderEffortControl({ config, value, disabled, onChange }: {
   config: AiConfig; value: AiEffort; disabled: boolean; onChange: (value: AiEffort) => void;
 }) {
   const [open, setOpen] = useState(false);
   const levels = aiEffortLevels(config);
   const selected = levels.includes(value) ? value : "auto";
   const index = levels.indexOf(selected);
-  const model = config.billing === "credits" ? "Filey AI" : config.model.trim() || (config.billing ? "Choose a model" : "Select model in settings");
+  const model = config.model.trim() || (config.billing ? "Choose a model" : "Select model in settings");
   const percent = levels.length > 1 ? index / (levels.length - 1) * 100 : 0;
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>

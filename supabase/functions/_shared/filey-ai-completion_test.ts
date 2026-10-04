@@ -91,6 +91,7 @@ function tokenReceipt(hit: number, miss: number, output: number) {
 Deno.test("managed chat only accepts Filey's fixed alias and strips caller routing and prices", () => {
   const prepared = prepareFileyAIRequest({
     ...request,
+    reasoning_enabled: true,
     reasoning_effort: "xhigh",
     temperature: 0.3,
     baseURL: "https://attacker.invalid",
@@ -117,10 +118,10 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
   );
   assert(
     prepareFileyAIRequest({ ...request, model: undefined }).request
-      .reasoning_effort === "low",
+      .thinking.type === "disabled",
   );
   assert(
-    prepareFileyAIRequest({ ...request, reasoning_effort: "max" }).request
+    prepareFileyAIRequest({ ...request, reasoning_enabled: true, reasoning_effort: "max" }).request
       .reasoning_effort === "max",
   );
   for (
@@ -156,7 +157,23 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
   );
 });
 
-Deno.test("tool continuations replay DeepSeek reasoning exactly and old unbound history fails before reserve", () => {
+Deno.test("reasoning defaults off, cannot be enabled by effort alone, and validates explicit boolean switches", () => {
+  for (const reasoning_enabled of [undefined, false]) {
+    const prepared = prepareFileyAIRequest({ ...request, reasoning_enabled, reasoning_effort: "max", thinking: { type: "enabled" } });
+    assert(prepared.request.thinking.type === "disabled" && prepared.request.reasoning_effort === undefined);
+    assert(!("reasoning_enabled" in prepared.request), "Internal toggle was forwarded to the provider");
+  }
+  for (const [effort, expected] of [[undefined, "low"], ["auto", "low"], ["low", "low"], ["medium", "high"], ["xhigh", "high"], ["max", "max"]]) {
+    const prepared = prepareFileyAIRequest({ ...request, reasoning_enabled: true, reasoning_effort: effort });
+    assert(prepared.request.thinking.type === "enabled" && prepared.request.reasoning_effort === expected);
+    assert(prepared.reserve === prepareFileyAIRequest(request).reserve, "Toggle changed the safe reservation tariff");
+  }
+  for (const reasoning_enabled of [null, "true", "false", 0, 1, [], {}]) {
+    rejects(() => prepareFileyAIRequest({ ...request, reasoning_enabled }));
+  }
+});
+
+Deno.test("thinking tool continuations replay exact traces while nonthinking calls need no reasoning", () => {
   const messages = [{ role: "user", content: "Read invoices" }, {
     role: "assistant",
     content: null,
@@ -167,7 +184,7 @@ Deno.test("tool continuations replay DeepSeek reasoning exactly and old unbound 
       function: { name: "list_invoices", arguments: "{}" },
     }],
   }, { role: "tool", tool_call_id: "call-fixture", content: "[]" }];
-  const result = prepareFileyAIRequest({ ...request, messages });
+  const result = prepareFileyAIRequest({ ...request, reasoning_enabled: true, messages });
   assert(
     result.request.messages[1].reasoning_content === "Exact prior reasoning",
   );
@@ -176,12 +193,79 @@ Deno.test("tool continuations replay DeepSeek reasoning exactly and old unbound 
     rejects(() =>
       prepareFileyAIRequest({
         ...request,
+        reasoning_enabled: true,
         messages: messages.map((message, index) =>
           index === 1 ? { ...message, reasoning_content: value } : message
         ),
       })
     );
   }
+  for (const reasoning_content of [undefined, null]) {
+    const disabled = prepareFileyAIRequest({ ...request, messages: messages.map((message, index) => index === 1 ? { ...message, reasoning_content } : message) });
+    assert(disabled.request.thinking.type === "disabled");
+    assert(JSON.stringify(disabled.request.messages[1].tool_calls) === JSON.stringify(messages[1].tool_calls));
+    assert(disabled.request.messages[2].tool_call_id === "call-fixture");
+  }
+  const disabled = prepareFileyAIRequest({ ...request, reasoning_enabled: false, messages });
+  assert(disabled.request.messages[1].reasoning_content === "Exact prior reasoning", "Switching OFF corrupted an existing trace");
+});
+
+Deno.test("switching reasoning on accepts quoted prior context and no-tools history, but never invents assistant traces", () => {
+  const history = [{ role: "user", content: "Earlier request" }, { role: "assistant", content: "Earlier reply" }, { role: "user", content: "Continue" }];
+  rejects(() => prepareFileyAIRequest({ ...request, reasoning_enabled: true, messages: history }));
+  const direct = prepareFileyAIRequest({ ...request, tools: undefined, reasoning_enabled: true, messages: history });
+  assert(direct.request.messages[1].content === "Earlier reply" && !direct.request.messages[1].reasoning_content);
+  const quoted = history.map(message => message.role === "assistant" ? { role: "user", content: `Previous assistant reply (context only): ${message.content}` } : message);
+  const enabled = prepareFileyAIRequest({ ...request, reasoning_enabled: true, messages: quoted });
+  assert(enabled.request.thinking.type === "enabled" && enabled.request.messages[1].content === quoted[1].content);
+  const preserved = prepareFileyAIRequest({ ...request, reasoning_enabled: true, messages: history.map(message => message.role === "assistant" ? { ...message, reasoning_content: "Exact plain-reply trace" } : message) });
+  assert(preserved.request.messages[1].reasoning_content === "Exact plain-reply trace");
+});
+
+Deno.test("managed tool and plain replies settle without traces when OFF and preserve required traces when ON", async () => {
+  const { restore } = fixtureEnvironment();
+  const previousFetch = globalThis.fetch;
+  let providerCalls = 0;
+  try {
+    for (const reasoningEnabled of [false, true]) {
+      for (const toolCall of [false, true]) {
+        for (const withTrace of [false, true]) {
+          const events: string[] = [];
+          globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+            providerCalls++;
+            const sent = JSON.parse(String(init?.body));
+            assert(sent.thinking.type === (reasoningEnabled ? "enabled" : "disabled"));
+            assert(sent.reasoning_effort === (reasoningEnabled ? "low" : undefined));
+            return Response.json({ ...completion(), choices: [{
+              finish_reason: toolCall ? "tool_calls" : "stop",
+              message: {
+                role: "assistant", content: toolCall ? null : "Ready",
+                ...(withTrace ? { reasoning_content: "Exact returned reasoning" } : {}),
+                ...(toolCall ? { tool_calls: [{ id: "call-fixture", type: "function", function: { name: "list_invoices", arguments: "{}" } }] } : {}),
+              },
+            }] });
+          }) as typeof fetch;
+          let result: Awaited<ReturnType<typeof fileyAICompletion>> | undefined;
+          let failure: unknown;
+          try {
+            result = await fileyAICompletion({
+              user, requestId: crypto.randomUUID(), runId: crypto.randomUUID(),
+              request: { ...request, reasoning_enabled: reasoningEnabled },
+              wallet: async action => { events.push(action); return {}; },
+            });
+          } catch (error) { failure = error; }
+          if (reasoningEnabled && !withTrace) {
+            assert(failure instanceof FileyAIError && events.join(",") === "reserve,release", "Unusable thinking history was charged");
+          } else {
+            assert(result && events.join(",") === "reserve,settle" && result.charged_micros === 41);
+            assert(result.completion.choices[0].message.reasoning_content === (withTrace ? "Exact returned reasoning" : undefined));
+            if (toolCall) assert(result.completion.choices[0].message.tool_calls?.[0].id === "call-fixture");
+          }
+        }
+      }
+    }
+    assert(providerCalls === 8, "A provider call was retried or skipped");
+  } finally { globalThis.fetch = previousFetch; restore(); }
 });
 
 Deno.test("Filey's fixed tariff uses one exact micro-unit rounding and never double-charges reasoning", () => {
@@ -370,7 +454,7 @@ Deno.test("shared completion authenticates, reserves once, settles precise usage
     );
     assert(
       sent.model === "deepseek-flash" && !sent.provider &&
-        sent.reasoning_effort === "low",
+        sent.thinking.type === "disabled" && sent.reasoning_effort === undefined,
     );
     assert(
       calls.at(-1)?.action === "reserve",
@@ -501,7 +585,7 @@ Deno.test("failed, empty or unverifiable provider responses release the hold wit
           user,
           requestId: crypto.randomUUID(),
           runId: crypto.randomUUID(),
-          request,
+          request: { ...request, reasoning_enabled: failure === "missing-reasoning" },
           wallet: async (action) => {
             events.push(action);
             return {};
@@ -548,6 +632,8 @@ Deno.test("unverified users, invalid aliases and wallet denials never make a pro
         { requestId: "invalid" },
         { request: { ...request, model: "deepseek-flash" } },
         { request: {} },
+        { request: { ...request, reasoning_enabled: "true" } },
+        { request: { ...request, reasoning_enabled: true, messages: [{ role: "assistant", content: "Old reply without a trace" }, { role: "user", content: "Continue" }] } },
       ]
     ) {
       try {

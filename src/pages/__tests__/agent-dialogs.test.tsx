@@ -20,7 +20,7 @@ import { billing, setCacheOrg } from "../../lib/api";
 import * as computer from "../../lib/computerUse";
 import { loadChats, saveChats, type Chat } from "../../lib/aiChats";
 import * as voice from "../../lib/voice";
-import { agentStorageScope } from "../../lib/agentStorage";
+import { agentStorageScope, writeAgentStorage } from "../../lib/agentStorage";
 
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
@@ -583,31 +583,76 @@ it("passes the chosen effort into the agent and remembers it for this workspace"
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(stream).toHaveBeenCalled());
   expect(stream.mock.calls[0][1]?.effort).toBe("xhigh");
+  expect(stream.mock.calls[0][1]).not.toHaveProperty("reasoningEnabled");
 });
 
-it("offers and preserves supported reasoning levels for default Filey AI", async () => {
+it("starts Filey AI with reasoning off and ignores an old managed effort choice", async () => {
+  writeAgentStorage("filey.agent.effort", "high");
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "text" as const, text: "Fast reply." }; return "Fast reply.";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const reasoning = screen.getByRole("switch", { name: "Reasoning" });
+  expect(reasoning).toHaveAttribute("aria-checked", "false");
+  expect(reasoning).toHaveTextContent("Off");
+  expect(reasoning).toHaveAttribute("title", "Reasoning off · Faster replies");
+  expect(screen.queryByRole("button", { name: /Reasoning effort/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("slider", { name: "Reasoning effort" })).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent(/filey-ai|DeepSeek|deepseek-flash/);
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Quick answer." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Fast reply.");
+  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: false, effort: "auto" });
+});
+
+it("turns Filey AI reasoning on and off for later turns and remembers only this workspace's choice", async () => {
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
     yield { type: "text" as const, text: "Managed reply." }; return "Managed reply.";
   });
   const view = render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  const effort = screen.getByRole("button", { name: "Reasoning effort: Default" });
-  expect(effort).toHaveTextContent("Filey AI");
-  expect(effort).toHaveAttribute("title", "Filey AI · Default effort");
-  expect(screen.queryByText("filey-ai")).not.toBeInTheDocument();
-  fireEvent.click(effort);
-  expect(screen.getByText("Filey AI", { selector: "p" })).toHaveAttribute("title", "Filey AI");
-  expect(document.body).not.toHaveTextContent(/filey-ai|DeepSeek|deepseek-flash/);
-  const slider = screen.getByRole("slider", { name: "Reasoning effort" });
-  expect(slider).toHaveAttribute("max", "3");
-  fireEvent.change(slider, { target: { value: "2" } });
-  expect(slider).toHaveAttribute("aria-valuetext", "High");
-  fireEvent.keyDown(slider, { key: "Escape" });
+  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Review this draft." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Managed reply.");
-  expect(stream.mock.calls[0][1]?.effort).toBe("high");
+  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: true, effort: "auto" });
   view.unmount();
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  expect(screen.getByRole("button", { name: "Reasoning effort: High" })).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
+  act(() => { setCacheOrg("other-org", "test-user"); });
+  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "false");
+  act(() => { setCacheOrg("test-org", "test-user"); });
+  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Quick follow-up." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Reasoning" })).not.toBeDisabled());
+  expect(stream.mock.calls[1][1]?.reasoningEnabled).toBe(false);
+});
+
+it("keeps the current reasoning selection fixed during a running task", async () => {
+  let finish!: () => void;
+  const done = new Promise<void>(resolve => { finish = resolve; });
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "text" as const, text: "Working." }; await done; return "Done.";
+  });
+  render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  fireEvent.click(screen.getByRole("switch", { name: "Reasoning" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Check this." } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Working.");
+  const reasoning = screen.getByRole("switch", { name: "Reasoning" });
+  expect(reasoning).toBeDisabled();
+  fireEvent.click(reasoning);
+  act(() => { ai.setFileyAiReasoning(false, agentStorageScope()!); });
+  expect(reasoning).toHaveAttribute("aria-checked", "true");
+  expect(stream.mock.calls[0][1]?.reasoningEnabled).toBe(true);
+  await act(async () => { finish(); });
+  expect(await screen.findByText("Done.")).toBeInTheDocument();
+  expect(screen.getByRole("switch", { name: "Reasoning" })).not.toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "false");
 });
