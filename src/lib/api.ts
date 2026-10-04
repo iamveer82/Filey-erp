@@ -961,6 +961,8 @@ async function workflowRegistry<T>(key: string, checkScope: () => void, change: 
     let rows: Record<string, PendingWorkflow>;
     try { rows = found.data ? structuredClone(found.data.requests) : (raw ? JSON.parse(raw) : {}); } catch { throw new Error("Pending saves could not be read. Reopen Filey before retrying."); }
     if (!rows || typeof rows !== "object" || Array.isArray(rows)) throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
+    await compactPendingWorkflowKeys(rows);
+    checkScope();
     const value = change(rows);
     if (found.data) await sUpdate("local_business_workflow_pending", found.data.id, { requests: rows }, client);
     else await sInsert("local_business_workflow_pending", { registry_key: key, requests: rows }, client);
@@ -973,6 +975,44 @@ function canonicalWorkflow(value: any): any {
   if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort()
     .filter(key => value[key] !== undefined).map(key => [key, canonicalWorkflow(value[key])]));
   return value;
+}
+/** Keep document images out of durable request identities. The reviewed payload
+ * remains intact; only its identity is stored as a bounded cryptographic digest. */
+async function workflowFingerprint(serialized: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(serialized));
+  return `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+function isLegacyWorkflowFingerprint(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith("{")) return false;
+  try { return JSON.stringify(canonicalWorkflow(JSON.parse(value))) === value; }
+  catch { return false; }
+}
+/** Old registries embedded the complete canonical JSON in every object key.
+ * Migrate identities inside the same CAS commit, preserving request UUIDs and
+ * active ownership so an unacknowledged action can still recover its receipt. */
+async function compactPendingWorkflowKeys(rows: Record<string, PendingWorkflow>): Promise<void> {
+  for (const [key, pending] of Object.entries(rows)) {
+    if (!pending || typeof pending.request !== "string") continue;
+    const start = key.indexOf(":"), second = key.indexOf(":", start + 1);
+    const suffix = `:${pending.request}`;
+    if (start < 0 || second < 0 || !key.endsWith(suffix)) continue;
+    const fingerprint = key.slice(second + 1, -suffix.length);
+    if (!isLegacyWorkflowFingerprint(fingerprint)) continue;
+    const compact = `${key.slice(0, second + 1)}${await workflowFingerprint(fingerprint)}${suffix}`;
+    if (rows[compact] && JSON.stringify(canonicalWorkflow(rows[compact])) !== JSON.stringify(canonicalWorkflow(pending)))
+      throw new Error("Pending saves have conflicting request identities. Your saved records were not changed.");
+    rows[compact] = pending;
+    delete rows[key];
+  }
+}
+async function compactLocalWorkflowReceipts(client: any, scope: string | null): Promise<any[]> {
+  const receipts = await sList<any>("local_business_workflow_requests", undefined, "*", client);
+  for (const receipt of receipts) {
+    if (!String(receipt.request_key).startsWith(`${scope}:`) || !isLegacyWorkflowFingerprint(receipt.fingerprint)) continue;
+    receipt.fingerprint = await workflowFingerprint(receipt.fingerprint);
+    await sUpdate("local_business_workflow_requests", receipt.id, { fingerprint: receipt.fingerprint }, client);
+  }
+  return receipts;
 }
 /** A lost acknowledgement retains the same request and reviewed FX snapshot.
  * Independent active calls have distinct identities. Only an unconfirmed retry
@@ -992,7 +1032,8 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
     return value;
   };
   const logical = normalize(requested ?? payload);
-  const fingerprint = JSON.stringify(canonicalWorkflow(logical));
+  const serialized = JSON.stringify(canonicalWorkflow(logical));
+  const fingerprint = await workflowFingerprint(serialized);
   const storedKey = `business-workflow:${local ? "local" : "cloud"}:${scope}`;
   const prefix = `${kind}:${action}:${fingerprint}:`;
   let pending: PendingWorkflow | undefined;
@@ -1011,7 +1052,7 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.request) || !value.payload || typeof value.payload !== "object")
         throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
       const previousLogical = normalize(value.payload);
-      if (JSON.stringify(canonicalWorkflow(previousLogical)) !== fingerprint) throw new Error("Pending changes differ from this request. Reopen the document before retrying.");
+      if (JSON.stringify(canonicalWorkflow(previousLogical)) !== serialized) throw new Error("Pending changes differ from this request. Reopen the document before retrying.");
       if (!prior && Object.keys(rows).length >= 64) throw new Error("Review the pending document actions before starting more. Reopen and retry any unconfirmed save or payment.");
       durableId = prefix + value.request;
       rows[durableId] = value;
@@ -1024,11 +1065,12 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       result = await withLocalTransaction(async client => {
         checkScope();
         const receiptKey = `${scope}:${pending!.request}`;
-        const previous = await client.from("local_business_workflow_requests").select("*").eq("request_key", receiptKey).maybeSingle();
-        if (previous.error) throw previous.error;
-        if (previous.data) {
-          if (previous.data.fingerprint !== fingerprint) throw new Error("This request was already used for different changes.");
-          return previous.data.result as WorkflowResult;
+        const receipts = await compactLocalWorkflowReceipts(client, scope);
+        checkScope();
+        const previous = receipts.find(receipt => receipt.request_key === receiptKey);
+        if (previous) {
+          if (previous.fingerprint !== fingerprint) throw new Error("This request was already used for different changes.");
+          return previous.result as WorkflowResult;
         }
         await assertLocalWorkflowAuthority(kind, action, pending!.payload, client, capturedActor);
         const output = await localRun(client, pending!.payload);

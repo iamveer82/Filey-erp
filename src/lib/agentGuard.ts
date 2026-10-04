@@ -92,16 +92,27 @@ const shortNote = (name: string, result: unknown): string => {
   return `${name}: done`;
 };
 
-/** Wrap a tool result so a failure reads as "try another way", not "stop".
+/** Wrap recoverable failures without widening the user's requested work.
  *
  *  A bare {error: "..."} is what made the agent give up on the first refusal:
  *  it looks terminal. Telling it how many steps remain, and that adapting is
  *  expected, is the difference between one failed call ending the task and the
  *  agent routing around it. */
 export function coachResult(result: unknown, roundsLeft: number): unknown {
-  if ((result as { retry_safe?: boolean } | null)?.retry_safe === false) return result;
   const err = toolFailure(result);
   if (!err) return result;
+  const storageQuota = /QuotaExceededError|^The quota has been exceeded\.?$|(?:localStorage|sessionStorage|(?:browser|device|local) storage)[\s\S]*(?:quota|full)|(?:setItem|setting the value)[\s\S]*exceeded (?:the )?quota/i.test(err);
+  const planLimit = /\bplan limit reached\b/i.test(err);
+  if (storageQuota || planLimit) return {
+    ...(result as Record<string, unknown>),
+    error: err,
+    failure_kind: storageQuota ? "storage_quota" : "plan_limit",
+    steps_remaining: roundsLeft,
+    what_to_do: storageQuota
+      ? "Browser or device storage is full. This error does not establish an invoice count or a plan limit; do not infer either from existing records. Explain the storage failure. Do not probe other writes or create a quotation, order, purchase document or other substitute unless the user requested it. Verify any uncertain save before retrying the requested invoice."
+      : "Respect this explicit plan limit. Do not retry through a different tool, change workspaces or create another document to bypass it. Explain the reported limit without inventing a usage count; continue only with independently requested work.",
+  };
+  if ((result as { retry_safe?: boolean } | null)?.retry_safe === false) return result;
   const refused =
     /not approve|owner-only|capability.*(off|disabled)|Plan mode|permission|access.*(disabled|enable|expired|denied|revoked)|requires? (an? )?(owner|admin)|role.*(required|allowed|does not)|only a workspace owner|not allowed|cannot control this computer|personal browser is unavailable/i.test(
       String(err)
@@ -114,11 +125,36 @@ export function coachResult(result: unknown, roundsLeft: number): unknown {
       ? "Respect this access or approval boundary. Do not retry through a different tool or channel. Explain what access or decision is needed; continue only with independently authorized work."
       : roundsLeft <= 1
         ? "This was the last step. Tell the user plainly what worked, what didn't, and what you'd try next."
-        : "This attempt failed — that is normal, not a reason to stop. Try a DIFFERENT approach: another tool, different arguments, or look up the thing you assumed. Repeating this identical call will be refused.",
+        : "This attempt failed. Try a DIFFERENT approach within the user's requested work: correct the arguments or use read tools to check the cause. Do not probe unrelated writes or substitute a quotation, order, purchase document or other record unless the user requested it. Repeating this identical call will be refused.",
   };
 }
 
-export function createGuard(): AgentGuard {
+// These creators save different business documents; none is a diagnostic probe
+// or an equivalent route to saving the invoice the user requested.
+const DOCUMENT_CREATORS: Record<string, "quote" | "order" | "purchase_order" | "bill"> = {
+  create_quote: "quote",
+  create_order: "order",
+  create_purchase_order: "purchase_order",
+  create_purchase_invoice_draft: "bill",
+};
+
+function requestedDocument(kind: typeof DOCUMENT_CREATORS[string], request: string): boolean {
+  const noun = {
+    quote: "(?:quotes?|quotations?)",
+    order: "(?:sales\\s+orders?|orders?)",
+    purchase_order: "(?:purchase\\s+orders?|POs?)",
+    bill: "(?:supplier\\s+(?:bills?|invoices?)|purchase\\s+invoices?|bills?)",
+  }[kind];
+  const article = "(?:(?:an?|the|new|draft)\\s+)*";
+  const action = "\\b(?:create|draft|prepare|make|generate|raise|issue|add)\\s+";
+  if (new RegExp(`\\b(?:do not|don't|never)\\s+(?:create|draft|prepare|make|generate|raise|issue|add)\\b[^.!?\\n]*\\b${noun}\\b|\\bwithout\\s+${article}${noun}\\b`, "i").test(request)) return false;
+  // Accept an explicit imperative or a separately named document in a creation
+  // request. A source reference such as "invoice from quote QT-1" grants none.
+  return new RegExp(`${action}${article}${noun}\\b`, "i").test(request) ||
+    (new RegExp(action, "i").test(request) && new RegExp(`(?:\\band\\b|\\bplus\\b|[,;])\\s+${article}${noun}\\b`, "i").test(request));
+}
+
+export function createGuard(userRequest = ""): AgentGuard {
   const seen = new Map<string, unknown>();
   const log: Step[] = [];
   const unresolvedFailures = () => [...new Map(log.map(step => [keyOf(step.name, step.args), step])).values()].filter(step => {
@@ -132,6 +168,16 @@ export function createGuard(): AgentGuard {
 
   return {
     before(name, args) {
+      const documentKind = DOCUMENT_CREATORS[name];
+      if (documentKind && unresolvedFailures().some(step => ["create_invoice_draft", "revise_invoice"].includes(step.name)) &&
+          !requestedDocument(documentKind, userRequest)) return {
+        short: {
+          error: "The requested invoice failed. Creating a different business document was not requested, so this action was not run.",
+          code: "unrequested_document_fallback",
+          retry_safe: false,
+          hint: "Keep the requested document type. Check the invoice failure with read tools, correct valid invoice arguments, or ask whether the user wants a different document. Do not use another write as a probe.",
+        },
+      };
       if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (

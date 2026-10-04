@@ -19,6 +19,7 @@ import { isLocalMode } from "./dataMode";
 import { todayYmd } from "./format";
 import { PUSH_TABLES } from "./syncTables";
 import { agentStorageScope } from "./agentStorage";
+import { readDeviceValue } from "./deviceStorage";
 
 /** Gates desktop features behind the four-tier plan model. Flipped on for the
  *  v2.3.0 licensing launch — the matching server-side cap (supabase/
@@ -135,7 +136,7 @@ const LOCAL_DATA_KEYS = PUSH_TABLES.map(table => `localdb:${table}`);
  *  switch can warn before dropping someone into an empty local workspace. */
 export async function hasLocalData(): Promise<boolean> {
   for (const k of LOCAL_DATA_KEYS) {
-    const raw = await kvGet(k);
+    const raw = await readDeviceValue(k);
     if (raw && raw !== "[]" && raw !== "null") return true;
   }
   return false;

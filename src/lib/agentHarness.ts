@@ -691,7 +691,7 @@ export async function* runAgentStream(
   const maxRounds = Number.isFinite(opts.maxRounds)
     ? Math.min(64, Math.max(1, Math.floor(opts.maxRounds!)))
     : MAX_TOOL_ROUNDS;
-  const guard = opts.runGuard ?? createGuard();
+  const guard = opts.runGuard ?? createGuard([...messages].reverse().find(message => message.role === "user")?.text ?? "");
   const unresolvedFailures = () => guard.unresolvedFailures();
   const budget = opts.budget ?? { requests: maxRounds, tools: 128 };
   const scope = agentStorageScope();

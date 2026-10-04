@@ -107,9 +107,46 @@ describe("coaching a failure", () => {
   it.each(["Your workspace role does not have access to invoicing.", "Only a workspace owner or administrator can use computer, shell or unrestricted network tools."])("respects the verified workspace boundary: %s", error => {
     expect(coachResult({ error }, 6)).toMatchObject({ what_to_do: expect.stringContaining("Do not retry through a different tool") });
   });
+  it.each([
+    "QuotaExceededError: The quota has been exceeded.",
+    "The quota has been exceeded.",
+    "Failed to execute 'setItem' on 'Storage': Setting the value of 'pending' exceeded the quota.",
+    "Browser storage is full. Reopen Filey before retrying.",
+  ])("does not invent an invoice cap from browser storage failure: %s", error => {
+    const result = coachResult({ error }, 6);
+    expect(result).toMatchObject({ failure_kind: "storage_quota", what_to_do: expect.stringContaining("does not establish an invoice count or a plan limit") });
+    expect(result).toMatchObject({ what_to_do: expect.stringContaining("Do not probe other writes") });
+  });
+  it("respects an explicit plan limit while leaving provider quota errors unclassified", () => {
+    expect(coachResult({ error: "Basic plan limit reached (5 cloud invoices this month)." }, 6)).toMatchObject({ failure_kind: "plan_limit" });
+    expect(coachResult({ error: "Provider quota exceeded" }, 6)).not.toHaveProperty("failure_kind");
+  });
   it("contains a malformed cyclic provider error", () => {
     const error: Record<string, unknown> = {}; error.self = error;
     expect(toolFailure({ error })).toBe("The action returned an error.");
+  });
+});
+
+describe("invoice recovery scope", () => {
+  const invoice = { customer_name: "Mark", items: [{ description: "6RC drums", qty: 6, unit_price: 0.2 }] };
+  const creators = ["create_quote", "create_order", "create_purchase_order", "create_purchase_invoice_draft"];
+  it.each(creators)("blocks %s after an invoice failure without a request for that document", name => {
+    const g = createGuard("Create an invoice for Mark.");
+    g.after("create_invoice_draft", invoice, { error: "The quota has been exceeded." });
+    expect(g.before(name, {})).toMatchObject({ short: { code: "unrequested_document_fallback", retry_safe: false } });
+    expect(g.before("get_invoice", { invoice_number: "INV-1" })).toEqual({});
+    expect(g.before("create_customer", { name: "Separately requested customer" })).toEqual({});
+    expect(g.before("create_invoice_draft", { ...invoice, items: [{ description: "6RC drums", qty: 6, unit_price: 0.2, custom: { total_liters: "1200" } }] })).toEqual({});
+  });
+  it.each(creators)("preserves separately requested multi-document work: %s", name => {
+    const g = createGuard("Create an invoice and a quotation, a sales order, a purchase order and a supplier bill.");
+    g.after("create_invoice_draft", invoice, { error: "Invoice save failed" });
+    expect(g.before(name, {})).toEqual({});
+  });
+  it.each(["Create an invoice from quotation QT-1.", "Create an invoice from the quote for Mark.", "Do not create a quotation. Create an invoice for Mark.", "Don't create an invoice and a quote."])("does not treat a referenced or refused quotation as authorization: %s", request => {
+    const g = createGuard(request);
+    g.after("create_invoice_draft", invoice, { error: "Invoice save failed" });
+    expect(g.before("create_quote", {})).toMatchObject({ short: { code: "unrequested_document_fallback" } });
   });
 });
 

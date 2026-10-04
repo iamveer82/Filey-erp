@@ -72,15 +72,13 @@ const renderApp = () => root.render(
     </ErrorBoundary>
   </React.StrictMode>
 );
-if (isNativeApp()) {
-  void restoreNativeOwnership().then(renderApp).catch(() => root.render(
+void restoreNativeOwnership().then(renderApp).catch(() => root.render(
     <div className="min-h-dvh grid place-items-center p-6"><div className="card max-w-sm space-y-3" role="alert">
       <h1 className="text-lg font-semibold">Couldn't open your saved workspace</h1>
       <p>Your records are preserved. Restart Filey and try again.</p>
       <button className="btn-primary" onClick={() => window.location.reload()}>Try again</button>
     </div></div>
-  ));
-} else renderApp();
+));
 
 // Service worker: the network-first PWA cache is for the hosted web build only.
 // The Tauri desktop app serves its assets from the embedded bundle, so a SW adds

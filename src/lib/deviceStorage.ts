@@ -2,13 +2,240 @@ import { invoke } from "@tauri-apps/api/core";
 import { Preferences } from "@capacitor/preferences";
 import { isNativeApp } from "./nativePlatform";
 import { localWorkspaceOwner } from "./localAuth";
+import { isLocalMode } from "./dataMode";
+import { PUSH_SET } from "./syncTables";
 
 const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export const transactionalDeviceStorage = hasTauri || isNativeApp();
 let database: Promise<IDBDatabase> | undefined;
+let browserDatabase: Promise<IDBDatabase> | undefined;
 const OWNER_KEY = "filey_local_workspace_owner";
 const DURABLE_OWNER_KEY = "filey:device-owner";
 const workspaceKey = (key: string) => typeof key === "string" && (key.startsWith("localdb:") || key.startsWith("fileblob:") || key === "syncjournal");
+const BROWSER_BACKEND_KEY = "filey:browser-backend";
+const BROWSER_BACKEND = "indexeddb-v1";
+const browserManagedKey = (key: string) => workspaceKey(key) || key.startsWith("cache:") || key.startsWith("business-workflow:") || key === "outbox";
+const browserBooksKey = (key: string) => key.startsWith("fileblob:") || (key.startsWith("localdb:") && PUSH_SET.has(key.slice(8)));
+const bookValue = (key: string, value: unknown) => browserBooksKey(key) && value !== undefined && value !== null && value !== "" && value !== "[]" && value !== "null";
+class BrowserOwnershipError extends Error {
+  constructor() { super("The original owner of these browser records could not be verified. Your records were not changed."); }
+}
+const unknownBrowserOwner = () => new BrowserOwnershipError();
+
+/** Only callers already holding filey:local-data may bypass its Web Lock. */
+type DeviceWriteOptions = { lockHeld?: boolean };
+
+function hostedDatabase(): Promise<IDBDatabase> {
+  if (!browserDatabase) browserDatabase = new Promise<IDBDatabase>((resolve, reject) => {
+    let blocked = false;
+    const request = indexedDB.open("filey-browser-device", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("values");
+    request.onsuccess = () => {
+      if (blocked) { request.result.close(); return; }
+      request.result.onversionchange = () => { request.result.close(); browserDatabase = undefined; };
+      resolve(request.result);
+    };
+    request.onerror = () => { browserDatabase = undefined; reject(request.error); };
+    request.onblocked = () => { blocked = true; browserDatabase = undefined; reject(new Error("Close the other Filey window and retry browser storage.")); };
+  });
+  return browserDatabase;
+}
+
+function isQuotaError(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+}
+
+function browserRecoveryError(cause: unknown): Error {
+  const error = new Error("Browser storage could not be expanded. Your previous records are preserved.");
+  Object.defineProperty(error, "cause", { value: cause });
+  return error;
+}
+
+/** Keep the old browser backend until its first quota failure. Roll back every
+ * changed key before propagating errors or starting the overflow migration. */
+function writeBrowserLegacy(entries: readonly (readonly [string, string | null])[]): void {
+  const previous = new Map(entries.map(([key]) => [key, localStorage.getItem(key)]));
+  try {
+    for (const [key, value] of entries) {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    }
+  } catch (error) {
+    try {
+      const changed = [...previous].filter(([key, value]) => localStorage.getItem(key) !== value);
+      // Free all staged increases first; the complete original snapshot fits.
+      for (const [key] of changed) localStorage.removeItem(key);
+      for (const [key, value] of changed) if (value !== null) localStorage.setItem(key, value);
+    } catch {
+      throw new Error("Browser storage could not restore the interrupted save. Reopen Filey before retrying.");
+    }
+    throw error;
+  }
+}
+
+function browserWriteLock<T>(run: () => Promise<T>, options?: DeviceWriteOptions): Promise<T> {
+  return !options?.lockHeld && typeof navigator !== "undefined" && navigator.locks
+    ? navigator.locks.request("filey:local-data", run)
+    : run();
+}
+
+function inspectBrowserBooks(store: IDBObjectStore, done: (present: boolean) => void, fail: (error: unknown) => void): void {
+  const request = store.openCursor();
+  request.onsuccess = () => {
+    try {
+      const cursor = request.result;
+      if (!cursor) done(false);
+      else if (bookValue(String(cursor.key), cursor.value)) done(true);
+      else cursor.continue();
+    } catch (error) { fail(error); }
+  };
+}
+
+async function readBrowserValue(key: string): Promise<string | null> {
+  if (typeof indexedDB === "undefined") return localStorage.getItem(key);
+  const db = await hostedDatabase();
+  return new Promise<string | null>((resolve, reject) => {
+    const tx = db.transaction("values", "readonly");
+    const store = tx.objectStore("values");
+    let result: string | null = null;
+    const backend = store.get(BROWSER_BACKEND_KEY);
+    backend.onsuccess = () => {
+      try {
+        if (backend.result === undefined) result = localStorage.getItem(key);
+        else if (backend.result === BROWSER_BACKEND) {
+          let savedOwner: unknown;
+          const protect = isLocalMode() && workspaceKey(key);
+          if (protect) {
+            const owner = store.get(DURABLE_OWNER_KEY);
+            owner.onsuccess = () => { savedOwner = owner.result; };
+          }
+          const request = store.get(key);
+          request.onsuccess = () => {
+            try {
+              // Managed keys never fall back after migration, including deletions.
+              result = request.result === undefined
+                ? (browserManagedKey(key) ? null : localStorage.getItem(key))
+                : request.result;
+              if (protect) {
+                if (savedOwner === null) throw unknownBrowserOwner();
+                if (savedOwner !== undefined) checkOwner(savedOwner);
+                else if (bookValue(key, result)) throw unknownBrowserOwner();
+              }
+            } catch (error) { tx.abort(); reject(error); }
+          };
+        } else throw new Error("Browser storage could not be read. Your saved records were not changed.");
+      } catch (error) { tx.abort(); reject(error); }
+    };
+    tx.oncomplete = () => resolve(result);
+    tx.onabort = () => reject(tx.error ?? new Error("Browser storage could not be read. Your saved records were not changed."));
+  });
+}
+
+/** The marker, migrated snapshot, pending writes and CAS read set share one
+ * IndexedDB transaction. No await separates the legacy comparison/snapshot.
+ * Every browser writer cooperates with localdb's existing cross-tab Web Lock. */
+async function commitBrowserValues(
+  entries: readonly (readonly [string, string | null])[],
+  expected?: readonly (readonly [string, string | null])[],
+): Promise<boolean> {
+  if (typeof indexedDB === "undefined") {
+    if (expected?.some(([key, value]) => localStorage.getItem(key) !== value)) return false;
+    try { writeBrowserLegacy(entries); }
+    catch (error) {
+      if (isQuotaError(error)) throw new Error("Browser storage is full and IndexedDB is unavailable. Your previous records are preserved.");
+      throw error;
+    }
+    return true;
+  }
+  const db = await hostedDatabase();
+  return new Promise<boolean>((resolve, reject) => {
+    const tx = db.transaction("values", "readwrite");
+    const store = tx.objectStore("values");
+    let matches = true, migrating = false, unownedBooks = false;
+    let legacy: Map<string, string | null> | undefined;
+    let ownerToSave: string | undefined;
+    const save = () => {
+      if (ownerToSave) store.put(ownerToSave, DURABLE_OWNER_KEY);
+      for (const [key, value] of entries) store.put(value, key);
+    };
+    const backend = store.get(BROWSER_BACKEND_KEY);
+    backend.onsuccess = () => {
+      try {
+        if (backend.result === BROWSER_BACKEND) {
+          const publish = () => {
+            let remaining = expected?.length ?? 0;
+            if (!remaining) save();
+            for (const [key, value] of expected ?? []) {
+              const request = store.get(key);
+              request.onsuccess = () => {
+                try {
+                  if ((request.result === undefined ? null : request.result) !== value) matches = false;
+                  if (--remaining === 0 && matches) save();
+                } catch (error) { tx.abort(); reject(error); }
+              };
+            }
+          };
+          const creatingBooks = entries.some(([key, value]) => bookValue(key, value));
+          const protect = isLocalMode() && [...entries, ...(expected ?? [])].some(([key]) => workspaceKey(key));
+          if (protect || creatingBooks) {
+            const owner = store.get(DURABLE_OWNER_KEY);
+            owner.onsuccess = () => {
+              try {
+                if (owner.result !== undefined) {
+                  if (typeof owner.result !== "string" || !owner.result) throw unknownBrowserOwner();
+                  if (protect) checkOwner(owner.result);
+                  publish();
+                } else inspectBrowserBooks(store, present => {
+                  if (present) throw unknownBrowserOwner();
+                  if (creatingBooks) ownerToSave = checkOwner(undefined);
+                  publish();
+                }, error => { tx.abort(); reject(error); });
+              } catch (error) { tx.abort(); reject(error); }
+            };
+          } else publish();
+          return;
+        }
+        if (backend.result !== undefined) throw new Error("Browser storage could not be read. Your saved records were not changed.");
+        if (expected?.some(([key, value]) => localStorage.getItem(key) !== value)) { matches = false; return; }
+        try { writeBrowserLegacy(entries); }
+        catch (error) {
+          if (!isQuotaError(error)) throw error;
+          migrating = true;
+          legacy = new Map();
+          for (let index = 0; index < localStorage.length; index++) {
+            const key = localStorage.key(index);
+            if (key !== null && browserManagedKey(key)) legacy.set(key, localStorage.getItem(key));
+          }
+          // Include caller-owned keys even if a future caller adds a new prefix.
+          for (const [key] of entries) if (!legacy.has(key)) legacy.set(key, localStorage.getItem(key));
+          // Cloud workflow bookkeeping is not proof of an owned local book.
+          const owner = localWorkspaceOwner();
+          unownedBooks = !owner && [...legacy].some(([key, value]) => bookValue(key, value));
+          if (!owner && !unownedBooks && entries.some(([key, value]) => bookValue(key, value))) throw unknownBrowserOwner();
+          for (const [key, value] of legacy) store.put(value, key);
+          // Pin unknown ownership along with the unchanged books. A later
+          // sign-in must not turn those old records into that account's books.
+          if (unownedBooks) store.put(null, DURABLE_OWNER_KEY);
+          else save();
+          if (owner) store.put(owner, DURABLE_OWNER_KEY);
+          store.put(BROWSER_BACKEND, BROWSER_BACKEND_KEY);
+        }
+      } catch (error) { tx.abort(); reject(migrating && !(error instanceof BrowserOwnershipError) ? browserRecoveryError(error) : error); }
+    };
+    tx.oncomplete = () => {
+      // Only remove the exact committed legacy snapshot. IDB is authoritative
+      // even if browser settings block cleanup or another old tab rewrites it.
+      if (legacy) for (const [key, value] of legacy) {
+        try { if (localStorage.getItem(key) === value) localStorage.removeItem(key); } catch { /* committed copy remains authoritative */ }
+      }
+      if (unownedBooks) reject(unknownBrowserOwner());
+      else resolve(matches);
+    };
+    tx.onabort = () => reject(migrating
+      ? browserRecoveryError(tx.error)
+      : (tx.error ?? new Error("Browser storage could not save your changes. Your previous records are preserved.")));
+  });
+}
 
 function checkOwner(saved: unknown): string {
   const current = localWorkspaceOwner();
@@ -20,10 +247,44 @@ function checkOwner(saved: unknown): string {
   return owner;
 }
 
+/** Restore the original local owner before rendering native or migrated web books. */
 export async function restoreNativeOwnership(): Promise<void> {
-  if (!isNativeApp()) return;
-  const saved = await readDeviceValue(DURABLE_OWNER_KEY);
-  if (saved !== null) checkOwner(saved);
+  if (hasTauri) return;
+  if (isNativeApp()) {
+    const saved = await readDeviceValue(DURABLE_OWNER_KEY);
+    if (saved !== null) checkOwner(saved);
+    return;
+  }
+  if (typeof indexedDB === "undefined") return;
+  const db = await hostedDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction("values", "readonly"), store = tx.objectStore("values");
+    const fail = (error: unknown) => { tx.abort(); reject(error); };
+    const backend = store.get(BROWSER_BACKEND_KEY);
+    backend.onsuccess = () => {
+      try {
+        if (backend.result === undefined) return;
+        if (backend.result !== BROWSER_BACKEND) throw new Error("Browser storage could not be read. Your saved records were not changed.");
+        const owner = store.get(DURABLE_OWNER_KEY);
+        owner.onsuccess = () => {
+          try {
+            if (owner.result === undefined) {
+              if (isLocalMode()) inspectBrowserBooks(store, present => { if (present) throw unknownBrowserOwner(); }, fail);
+            } else if (owner.result === null) {
+              if (isLocalMode()) throw unknownBrowserOwner();
+            } else if (isLocalMode()) checkOwner(owner.result);
+            else {
+              if (typeof owner.result !== "string" || !owner.result) throw unknownBrowserOwner();
+              // The cloud account may differ; its local books keep their owner.
+              if (localStorage.getItem(OWNER_KEY) !== owner.result) localStorage.setItem(OWNER_KEY, owner.result);
+            }
+          } catch (error) { fail(error); }
+        };
+      } catch (error) { fail(error); }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("Browser ownership could not be restored. Your records were not changed."));
+  });
 }
 
 function mobileDatabase(): Promise<IDBDatabase> {
@@ -42,7 +303,7 @@ function mobileDatabase(): Promise<IDBDatabase> {
 
 export async function readDeviceValue(key: string): Promise<string | null> {
   if (hasTauri) return invoke<string | null>("cache_get", { key });
-  if (!isNativeApp()) return localStorage.getItem(key);
+  if (!isNativeApp()) return readBrowserValue(key);
   const db = await mobileDatabase();
   const legacy = localStorage.getItem(key);
   let migrated = false;
@@ -78,7 +339,7 @@ export async function readDeviceValue(key: string): Promise<string | null> {
   return value;
 }
 
-export async function writeDeviceValues(entries: readonly (readonly [string, string | null])[]): Promise<void> {
+export async function writeDeviceValues(entries: readonly (readonly [string, string | null])[], options?: DeviceWriteOptions): Promise<void> {
   if (hasTauri) {
     await invoke("cache_set_many", { entries: entries.map(([key, value]) => [key, value ?? ""]) });
     return;
@@ -109,33 +370,13 @@ export async function writeDeviceValues(entries: readonly (readonly [string, str
     }
     return;
   }
-  // Hosted browser behavior stays compatible, including rollback on quota failure.
-  const previous = entries.map(([key]) => [key, localStorage.getItem(key)] as const);
-  try {
-    for (const [key, value] of entries) {
-      if (value === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, value);
-    }
-  } catch (error) {
-    let restored = true;
-    for (const [key, value] of previous) {
-      try {
-        if (localStorage.getItem(key) === value) continue;
-        if (value === null) localStorage.removeItem(key);
-        else localStorage.setItem(key, value);
-      } catch { restored = false; }
-    }
-    if (!restored) throw new Error("Device storage is unavailable. Keep using Filey Cloud until storage has been repaired.");
-    throw error;
-  }
+  await browserWriteLock(() => commitBrowserValues(entries), options);
 }
 
-export async function writeDeviceValue(key: string, value: string | null): Promise<void> {
+export async function writeDeviceValue(key: string, value: string | null, options?: DeviceWriteOptions): Promise<void> {
   if (hasTauri) await invoke("cache_set", { key, value: value ?? "" });
   else if (isNativeApp()) await writeDeviceValues([[key, value]]);
-  // Browser setItem is already atomic for one key; a failed save needs no undo.
-  else if (value === null) localStorage.removeItem(key);
-  else localStorage.setItem(key, value);
+  else await writeDeviceValues([[key, value]], options);
 }
 
 /** Compare the entire read set and publish all writes in one storage transaction.
@@ -185,11 +426,8 @@ export async function compareDeviceValues(
     }
     return committed;
   }
-  // The caller owns the cross-tab Web Lock. Comparison and writes have no await
-  // boundary, so another cooperating tab cannot interleave this commit.
-  if (expected.some(([key, value]) => localStorage.getItem(key) !== value)) return false;
-  await writeDeviceValues(entries);
-  return true;
+  // The caller owns filey:local-data; acquiring it again would deadlock.
+  return commitBrowserValues(entries, expected);
 }
 
 // Only the Supabase session uses preferences. Provider API keys stay in memory.
