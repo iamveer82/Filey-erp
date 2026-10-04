@@ -58,6 +58,13 @@ try {
   run('psql', stocktakeArgs, 'delete from stock_movements where product_id=8001; delete from products where id in (8001,8002);');
   const customFieldsMigration = sql('supabase/2026-09-28-crm-custom-fields.sql');
   const crmArgs = ['-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'];
+  // Supabase supplies Storage separately from the app schema. Match the managed
+  // table shapes in supabase-prerequisites.sql for the full catalog exporter;
+  // Storage policy behavior is exercised in its own disposable database.
+  run('psql', crmArgs, `create schema storage;
+    create table storage.buckets(id text primary key,name text,public boolean default false,file_size_limit bigint,allowed_mime_types text[]);
+    create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text,owner uuid,metadata jsonb default '{}',created_at timestamptz default now());
+    alter table storage.objects enable row level security;`);
   // The earlier module fixture has only id/key/value. Reproduce the actual
   // legacy user/key constraint before checking its narrow packaging exception.
   run('psql', crmArgs, `alter table app_settings add column user_id uuid not null default '00000000-0000-0000-0000-000000000001';
