@@ -2403,7 +2403,7 @@ function Editor({
       />
       <div role="group" aria-label="Invoice actions" className="mb-6 flex flex-wrap items-center gap-2">
           <button className="btn-ghost" onClick={onBack} disabled={saving}><ArrowLeft size={15} /> Back</button>
-          <button className="btn-ghost" onClick={() => setViewOpen(true)}>
+          <button data-guide="invoice-preview" className="btn-ghost" onClick={() => setViewOpen(true)}>
             <Maximize2 size={15} /> Preview
           </button>
           <button
@@ -2419,6 +2419,7 @@ function Editor({
             onClick={onSave}
             disabled={saving}
             title="Save without sending (Ctrl+S)"
+            data-guide="invoice-save"
           >
             <Save size={15} /> {saving ? "Saving…" : "Save"}
           </button>
@@ -2430,6 +2431,7 @@ function Editor({
               disabled={saving || exportingXml}
               onClick={() => setEInvoiceOpen(true)}
               title="Check required UAE e-invoice details and export XML for free"
+              data-guide="invoice-einvoice"
             >
               <FileCode size={15} /> Check E-invoice
             </button>
@@ -2554,7 +2556,7 @@ function Editor({
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
               <div className="space-y-3">
                 <Field label={partyLabel}>
-                  <div className="flex gap-2">
+                  <div data-guide="invoice-customer" className="flex gap-2">
                     <SelectMenu
                       ariaLabel={`Select saved ${partyLabel.toLowerCase()}`}
                       disabled={loadingParties || !!partyError || saving}
@@ -2950,7 +2952,7 @@ function Editor({
           </Step>
           <div className="mt-4 flex justify-end"><button type="button" className="btn-ghost" onClick={() => setEditorTab("items")}>Continue to items →</button></div>
           </TabsContent>
-          <TabsContent value="items" forceMount hidden={editorTab !== "items"}>
+          <TabsContent data-guide="invoice-items" value="items" forceMount hidden={editorTab !== "items"}>
           {/* Items */}
           <Step title="Items" action={
             <div role="group" aria-label="Invoice line controls" className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-2">

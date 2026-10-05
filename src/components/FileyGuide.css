@@ -1,0 +1,23 @@
+.filey-guide-launcher { display: inline-flex; align-items: center; gap: .4rem; flex-shrink: 0; min-width: 40px; min-height: 40px; justify-content: center; padding: 0 .65rem; border-radius: 999px; color: hsl(var(--muted-foreground)); font-size: 12px; }
+.filey-guide-launcher:hover, .filey-guide-icon:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.filey-guide-panel { position: fixed; z-index: 45; top: 76px; right: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); display: flex; flex-direction: column; color: hsl(var(--foreground)); background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 20px; box-shadow: 0 10px 40px #00000012; overflow: hidden; }
+.filey-guide-icon { display: inline-grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 999px; color: hsl(var(--muted-foreground)); }
+.filey-guide-body { overflow-y: auto; overscroll-behavior: contain; min-height: 0; flex: 1; padding: 0 20px 20px; }
+.filey-guide-footer { padding: 12px 20px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
+.filey-guide-figure { display: block; width: 230px; max-width: 100%; margin: 0 auto; aspect-ratio: 5 / 4; outline-offset: -2px; }
+.filey-guide-figure svg { display: block; width: 100%; height: 100%; }
+.filey-guide-figure[data-hairline] { --hairline-plate: hsl(var(--card)); --hairline-hi: hsl(var(--foreground)); --hairline-edge: hsl(var(--foreground)); --hairline-mid: hsl(var(--muted-foreground)); --hairline-lo: hsl(var(--border)); }
+.filey-guide-figure svg path { fill: hsl(var(--card)); stroke: hsl(var(--muted-foreground)); }
+.filey-guide-figure svg .sil { stroke: color-mix(in srgb, hsl(var(--foreground)) 60%, hsl(var(--card))); }
+.filey-guide-figure svg .hi { stroke: hsl(var(--foreground)); }
+.filey-guide-figure svg .lo { stroke: hsl(var(--border)); }
+.filey-guide-figure svg .nf { fill: none; }
+.filey-guide-figure svg .fo { stroke: none; }
+[data-guide-highlight] { outline: 2px solid hsl(var(--foreground)); outline-offset: 4px; border-radius: 8px; }
+.filey-guide-panel button:focus-visible, .filey-guide-panel a:focus-visible, .filey-guide-launcher:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+@media (max-width: 639px) {
+  .filey-guide-panel { top: auto; bottom: 0; right: 0; width: 100%; max-height: 72dvh; border-radius: 24px 24px 0 0; }
+  .filey-guide-icon, .filey-guide-launcher { min-width: 44px; min-height: 44px; }
+  .filey-guide-figure { width: 170px; }
+  .filey-guide-footer .btn-primary, .filey-guide-footer .btn-secondary { min-height: 44px; }
+}
