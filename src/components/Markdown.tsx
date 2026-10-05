@@ -44,7 +44,7 @@ function inline(text: string, keyBase: string): ReactNode[] {
     } else if (tok.startsWith("[")) {
       const cut = tok.indexOf("](");
       const href = tok.slice(cut + 2, -1);
-      // Only verified letter links can navigate within the workspace. Other
+      // Only valid letter links can navigate within the workspace. Other
       // model-supplied routes and executable protocols stay plain text.
       const letterLink = /^#\/letters\?letter=[A-Za-z0-9_-]{1,100}$/.test(href);
       const safe = /^https?:\/\//i.test(href) || letterLink;

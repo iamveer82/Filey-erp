@@ -5578,7 +5578,11 @@ export async function runTool(
     return { error: `"${name}" is owner-only — only the business owner can run it.` };
   }
   const invalid = validateToolArgs(tool.parameters, args);
-  if (invalid) return { error: invalid, code: "invalid_arguments", retry_safe: true, hint: "Correct the arguments using the tool schema. Nothing was executed." };
+  if (invalid) {
+    const result = { error: invalid, code: "invalid_arguments", retry_safe: true, hint: "Correct the arguments using the tool schema. Nothing was executed." };
+    argumentRejections.add(result);
+    return result;
+  }
   try { await requireToolModuleAccess(name, args); }
   catch (error) { return { error: errMsg(error) }; }
   const browserAction = ["computer_use", "workspace_browser", "agent_computer"].includes(name) && !(name === "agent_computer" && args.action === "stop");

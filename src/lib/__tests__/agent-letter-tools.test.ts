@@ -3,6 +3,7 @@ import { billing, crm, setCacheOrg, suppliers, tools as settings } from "../api"
 import { aiAgent, setAiConfig } from "../ai";
 import { endTurn, isToolArgumentRejection, runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
+import { createGuard } from "../agentGuard";
 import { setCapabilityEnabled } from "../capabilities";
 import { setDataMode } from "../dataMode";
 import { allocateDocumentNumber } from "../documentNumbers";
@@ -107,6 +108,20 @@ describe("letter tools use the real permission and action gates", () => {
 });
 
 describe("validated letter writes and output ownership", () => {
+  it("can correct a rejected schema field without retaining a false uncertain-write failure", async () => {
+    const saved = await call("create_letter_draft", input()) as { id: string; revision: number };
+    const guard = createGuard("Revise the existing letter.");
+    const args = { letter_id: saved.id, expected_revision: 0, changes: { title: "Updated wording" } };
+    const invalid = await call("revise_letter_draft", args);
+    expect(invalid).toMatchObject({ code: "invalid_arguments", retry_safe: true });
+    expect(isToolArgumentRejection(invalid)).toBe(true);
+    guard.after("revise_letter_draft", args, invalid, isToolArgumentRejection(invalid));
+    const corrected = { ...args, expected_revision: saved.revision };
+    const result = await call("revise_letter_draft", corrected);
+    expect(result).toMatchObject({ ok: true, revision: saved.revision + 1 });
+    guard.after("revise_letter_draft", corrected, result);
+    expect(guard.unresolvedFailures()).toEqual([]);
+  });
   it("rejects status, private asset URLs and supplied block IDs before saving", async () => {
     const write = vi.spyOn(letters, "saveLetter");
     for (const extra of [{ status: "issued" }, { signature: { data: "private-image" } }, { show_stamp: true },
