@@ -21,6 +21,7 @@ import SidebarIcon from "./SidebarIcon";
 import Logo from "./Logo";
 import CoinMark from "./CoinMark";
 import ErrorBoundary from "./ErrorBoundary";
+import GuideLauncher from "./GuideLauncher";
 import BrowserPanel from "./BrowserPanel";
 import { PageContextProvider } from "../lib/pageContext";
 import { cn, todayYmd, CURRENCIES } from "../lib/format";
@@ -517,6 +518,7 @@ export default function Layout({ children, persistentContent }: { children: Reac
                     : "Filey"}
             </span>
 
+            <GuideLauncher />
             <div className="ml-auto flex items-center gap-2">
               <button
                 aria-label="Open search"

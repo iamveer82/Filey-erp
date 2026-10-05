@@ -299,6 +299,7 @@ export default function CompanyDetails() {
       >
         <FormField label="Company Name" error={fieldErrors.name} required>
           <input
+            data-guide="company-identity"
             className="input"
             value={c.name}
             onChange={(e) => {
@@ -428,7 +429,7 @@ export default function CompanyDetails() {
         title={`${regime.taxLabel} settings`}
         description="Choose your business country and defaults for new documents."
       >
-        <CountryTaxFields
+        <div data-guide="company-country"><CountryTaxFields
           company={c}
           onChange={(next) => {
             setC(next);
@@ -436,7 +437,7 @@ export default function CompanyDetails() {
             setBankErr({});
             setSaved(false);
           }}
-        />
+        /></div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {" "}
           <FormField label={`${regime.taxLabel} collection`}>
@@ -570,7 +571,7 @@ export default function CompanyDetails() {
         title="Bank Details"
         description="Payment details you can include on invoices and other documents."
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div data-guide="company-bank" className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {bankFields(country).map((f) => (
             <FormField
               key={f.key}
@@ -637,7 +638,7 @@ export default function CompanyDetails() {
             <Check size={15} /> Saved - applied to all documents
           </span>
         )}
-        <button className="btn-primary" disabled={saving} onClick={save}>
+        <button data-guide="company-save" className="btn-primary" disabled={saving} onClick={save}>
           {saving ? "Saving…" : "Save Changes"}
         </button>
       </div>
