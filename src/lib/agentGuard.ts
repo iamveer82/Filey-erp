@@ -131,11 +131,12 @@ export function coachResult(result: unknown, roundsLeft: number): unknown {
 
 // These creators save different business documents; none is a diagnostic probe
 // or an equivalent route to saving the invoice the user requested.
-const DOCUMENT_CREATORS: Record<string, "quote" | "order" | "purchase_order" | "bill"> = {
+const DOCUMENT_CREATORS: Record<string, "quote" | "order" | "purchase_order" | "bill" | "letter"> = {
   create_quote: "quote",
   create_order: "order",
   create_purchase_order: "purchase_order",
   create_purchase_invoice_draft: "bill",
+  create_letter_draft: "letter",
 };
 
 function requestedDocument(kind: typeof DOCUMENT_CREATORS[string], request: string): boolean {
@@ -144,6 +145,7 @@ function requestedDocument(kind: typeof DOCUMENT_CREATORS[string], request: stri
     order: "(?:sales\\s+orders?|orders?)",
     purchase_order: "(?:purchase\\s+orders?|POs?)",
     bill: "(?:supplier\\s+(?:bills?|invoices?)|purchase\\s+invoices?|bills?)",
+    letter: "(?:(?:company|authorization|declaration)\\s+)?letters?",
   }[kind];
   const article = "(?:(?:an?|the|new|draft)\\s+)*";
   const action = "\\b(?:create|draft|prepare|make|generate|raise|issue|add)\\s+";
@@ -161,7 +163,7 @@ export function createGuard(userRequest = ""): AgentGuard {
     if (step.ok) return false;
     if (!step.invalidArguments) return true;
     // ponytail: bounded run history; index rejected calls by target if task budgets grow.
-    const target = ["invoice_number", "id", "record_id", "customer_name", "employee_name", "name"].find(key => step.args[key] !== undefined);
+    const target = ["invoice_number", "letter_id", "letter_number", "id", "record_id", "customer_name", "employee_name", "name"].find(key => step.args[key] !== undefined);
     if (!target) return true; // No record identity: another success cannot prove this request was corrected.
     return !log.slice(log.indexOf(step) + 1).some(next => next.ok && next.name === step.name && next.args[target] === step.args[target]);
   });
@@ -178,7 +180,7 @@ export function createGuard(userRequest = ""): AgentGuard {
           hint: "Keep the requested document type. Check the invoice failure with read tools, correct valid invoice arguments, or ask whether the user wants a different document. Do not use another write as a probe.",
         },
       };
-      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf"].includes(name)) return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf", "export_letter_pdf"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "agent_computer" || name === "browser") &&
@@ -208,8 +210,10 @@ export function createGuard(userRequest = ""): AgentGuard {
     after(name, args, result, validationRejected = false) {
       const k = keyOf(name, args);
       const failed = !!toolFailure(result);
-      if (!failed && !isReadOnly(name)) {
-        // Verify against current records after a write, not the pre-write cache.
+      if (!validationRejected && !isReadOnly(name)) {
+        // A failed acknowledgement can follow a committed mutation. Verify
+        // current records even after errors; only trusted preflight proves no
+        // write ran. Keep the write receipt below to prevent duplicate actions.
         for (const key of seen.keys())
           if (isReadOnly(key.split(":")[0])) seen.delete(key);
       }

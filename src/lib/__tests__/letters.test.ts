@@ -15,8 +15,11 @@ import {
   type LetterRecord,
 } from "../letters";
 
-const identity = vi.hoisted(() => ({ scope: "org:user:account", userId: "account" }));
-vi.mock("../api", () => ({ getCacheScope: () => identity.scope || null }));
+const identity = vi.hoisted(() => ({ scope: "org:user:account", userId: "account", generation: 0 }));
+vi.mock("../api", () => ({
+  getCacheScope: () => identity.scope || null,
+  getCacheIdentity: () => identity.generation,
+}));
 vi.mock("../realtime", () => ({ notifyDataChanged: vi.fn() }));
 vi.mock("../moduleAccess", () => ({ requireModuleAccess: vi.fn(async () => {}) }));
 vi.mock("../supabase", async () => {
@@ -77,6 +80,7 @@ const cloud = (org = "org", user = "account") => {
   localStorage.setItem("filey_data_mode", "cloud");
   identity.userId = user;
   identity.scope = `${org}:user:${user}`;
+  identity.generation++;
 };
 const seed = async (records: LetterRecord[], extra = {}) => {
   const result = await localClient
@@ -123,7 +127,8 @@ beforeEach(() => {
   localStorage.setItem("filey_data_mode", "local");
   identity.scope = "org:user:account";
   identity.userId = "account";
-  vi.mocked(requireModuleAccess).mockResolvedValue();
+  identity.generation = 0;
+  vi.mocked(requireModuleAccess).mockClear().mockResolvedValue();
   vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -499,6 +504,170 @@ it("rejects delayed operations after a workspace or account switch", async () =>
   cloud();
   identity.userId = "different-account";
   await expect(loadLetters()).rejects.toThrow("cloud account changed");
+});
+
+it("rejects both active and queued saves after switching away and back to the same workspace", async () => {
+  let finish!: () => void;
+  vi.mocked(requireModuleAccess).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+  const outcomes = Promise.allSettled([
+    saveLetter(form("LTR-ACTIVE")),
+    saveLetter(form("LTR-QUEUED")),
+  ]);
+  await vi.waitFor(() => expect(requireModuleAccess).toHaveBeenCalledTimes(1));
+  const originalScope = identity.scope;
+  identity.scope = "other-org:user:account";
+  identity.generation++;
+  identity.scope = originalScope;
+  identity.generation++;
+  finish();
+  const results = await outcomes;
+  for (const result of results) {
+    expect(result.status).toBe("rejected");
+    if (result.status === "rejected") expect(result.reason.message).toContain("workspace changed");
+  }
+  expect(stored()).toEqual([]);
+  expect(requireModuleAccess).toHaveBeenCalledTimes(1);
+  const current = await saveLetter(form("LTR-CURRENT"));
+  expect(await loadLetters()).toEqual([current]);
+});
+
+it("rejects a delayed read after workspace ABA even when the scope string matches again", async () => {
+  await saveLetter(form("LTR-PRIVATE"));
+  let finish!: () => void;
+  vi.mocked(requireModuleAccess).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+  const loading = loadLetters();
+  const originalScope = identity.scope;
+  identity.scope = "other-org:user:account";
+  identity.generation++;
+  identity.scope = originalScope;
+  identity.generation++;
+  finish();
+  await expect(loading).rejects.toThrow("workspace changed");
+  expect((await loadLetters())[0].form.number).toBe("LTR-PRIVATE");
+});
+
+it.each(["local", "cloud"])("honors a cancelled caller guard after permission lookup before a %s save writes", async (mode) => {
+  if (mode === "cloud") cloud();
+  let cancelled = false;
+  const assertCurrent = vi.fn(() => {
+    if (cancelled) throw new Error("This agent request was cancelled.");
+  });
+  let finish!: () => void;
+  vi.mocked(requireModuleAccess).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+  const saving = saveLetter(form("LTR-CANCELLED"), undefined, undefined, undefined, assertCurrent);
+  await vi.waitFor(() => expect(requireModuleAccess).toHaveBeenCalledTimes(1));
+  cancelled = true;
+  finish();
+  await expect(saving).rejects.toThrow("request was cancelled");
+  expect(assertCurrent.mock.calls.length).toBeGreaterThan(1);
+  expect(stored()).toEqual([]);
+});
+
+it("honors a stale caller guard immediately before a cloud update executes", async () => {
+  cloud();
+  const original = await saveLetter(form("LTR-ORIGINAL"));
+  const bytes = localStorage.getItem("localdb:app_settings");
+  let stale = false;
+  raceOnUpdate(() => { stale = true; });
+  await expect(saveLetter(
+    { ...original.form, body: "Must not be saved" },
+    original.id,
+    original.revision,
+    original.updated_at,
+    () => { if (stale) throw new Error("The originating request changed."); }
+  )).rejects.toThrow("originating request changed");
+  expect(localStorage.getItem("localdb:app_settings")).toBe(bytes);
+  expect(await loadLetters()).toEqual([original]);
+});
+
+it.each([
+  null,
+  {},
+  { id: 0 },
+  { id: -1 },
+  { id: "not-an-id" },
+  { id: true },
+  { id: [1] },
+  { id: NaN },
+  { id: Infinity },
+  { id: 1.5 },
+  { id: Number.MAX_SAFE_INTEGER + 1 },
+])("does not report or repeat a committed cloud insert with an invalid acknowledgement %j", async (acknowledgement) => {
+  cloud();
+  const from = localClient.from.bind(localClient);
+  let inserts = 0;
+  vi.spyOn(localClient, "from").mockImplementation((table) => {
+    const query = from(table), insert = query.insert.bind(query);
+    vi.spyOn(query, "insert").mockImplementation((values) => {
+      inserts++;
+      insert(values);
+      const single = query.single.bind(query);
+      vi.spyOn(query, "single").mockImplementation(() => (async () => {
+        const saved = await single();
+        expect(saved.error).toBeNull();
+        return { ...saved, data: acknowledgement };
+      })() as never);
+      return query;
+    });
+    return query;
+  });
+  await expect(saveLetter(form("LTR-UNCERTAIN"))).rejects.toThrow("save could not be confirmed");
+  expect(inserts).toBe(1);
+  const verified = await loadLetters();
+  expect(verified).toHaveLength(1);
+  expect(verified[0].form.number).toBe("LTR-UNCERTAIN");
+});
+
+it.each([
+  {},
+  { id: 0 },
+  { id: -1 },
+  { id: "not-an-id" },
+  { id: true },
+  { id: [1] },
+  { id: NaN },
+  { id: Infinity },
+  { id: 1.5 },
+  { id: Number.MAX_SAFE_INTEGER + 1 },
+  { id: 999999 },
+  { id: "999999" },
+])("does not report or repeat a committed cloud update with a malformed or wrong-ID acknowledgement %j", async (acknowledgement) => {
+  cloud();
+  const original = await saveLetter(form("LTR-REVISION"));
+  const settingId = stored()[0].id;
+  const from = localClient.from.bind(localClient);
+  let updates = 0;
+  vi.spyOn(localClient, "from").mockImplementation((table) => {
+    const query = from(table), update = query.update.bind(query);
+    vi.spyOn(query, "update").mockImplementation((values) => {
+      updates++;
+      update(values);
+      const maybeSingle = query.maybeSingle.bind(query);
+      vi.spyOn(query, "maybeSingle").mockImplementation(() => (async () => {
+        const saved = await maybeSingle();
+        expect(saved.error).toBeNull();
+        expect(saved.data.id).toBe(settingId);
+        return { ...saved, data: acknowledgement };
+      })() as never);
+      return query;
+    });
+    return query;
+  });
+  await expect(saveLetter(
+    { ...original.form, body: "Committed but not confirmed" },
+    original.id,
+    original.revision,
+    original.updated_at
+  )).rejects.toThrow("save could not be confirmed");
+  expect(updates).toBe(1);
+  const verified = await loadLetters();
+  expect(verified).toHaveLength(1);
+  expect(verified[0]).toMatchObject({
+    id: original.id,
+    revision: original.revision + 1,
+    form: { body: "Committed but not confirmed" },
+  });
+  expect(stored()[0].id).toBe(settingId);
 });
 
 it("keeps legacy style/reference defaults readable and gives new letters explicit prose defaults without a printed reference", async () => {

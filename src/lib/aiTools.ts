@@ -1,5 +1,9 @@
 import { work } from "./api";
 import { validateToolArgs } from "./agentToolSchema";
+import {
+  getAgentLetterContext, listAgentLetters, getAgentLetter, createAgentLetterDraft,
+  reviseAgentLetterDraft, exportAgentLetterDraft, letterEditableProperties, isLetterArgumentError,
+} from "./agentLetters";
 import { toolFailure } from "./agentGuard";
 import { newWorkItem, type WorkKind } from "./workItems";
 import {
@@ -84,7 +88,7 @@ import {
 // provider-supplied code or retry flag cannot erase an uncertain write.
 const argumentRejections = new WeakSet<object>();
 export const isToolArgumentRejection = (value: unknown): boolean =>
-  !!value && typeof value === "object" && argumentRejections.has(value);
+  !!value && typeof value === "object" && (argumentRejections.has(value) || isLetterArgumentError(value));
 function documentInputError(message: string): Error {
   const error = new Error(message);
   argumentRejections.add(error);
@@ -774,6 +778,58 @@ const NAV_PAGES = [
 ];
 
 export const TOOLS: ToolDef[] = [
+  {
+    name: "get_letter_context",
+    description: "Read saved company text, available letterhead and letter layouts before drafting. Private signature, stamp and letterhead images are never returned. Letters do not require a customer or supplier record.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    run: getAgentLetterContext,
+  },
+  {
+    name: "list_letters",
+    description: "Find saved company letters by title, number or recipient. Use the exact returned letter ID to read, revise or export a letter.",
+    parameters: { type: "object", additionalProperties: false, properties: {
+      query: { type: "string", maxLength: 200 }, status: { type: "string", enum: ["draft", "issued"] },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    } },
+    run: listAgentLetters,
+  },
+  {
+    name: "get_letter",
+    description: "Read the exact saved draft or issued letter and its revision. Read after creation to verify the saved content, and before revisions. Issued letters are immutable snapshots.",
+    parameters: { type: "object", additionalProperties: false, required: ["letter_id"], properties: {
+      letter_id: { type: "string", minLength: 1, maxLength: 100 },
+    } },
+    run: getAgentLetter,
+  },
+  {
+    name: "create_letter_draft",
+    description: "Save a new unsigned company letter draft with a unique reference and an editable link. First read get_letter_context. Use blocks for the ordered main content; body is an optional introduction before blocks. Leave unknown optional fields blank or editable placeholders instead of inventing details. Never applies saved signatures or stamps and never issues or sends the letter.",
+    parameters: { type: "object", additionalProperties: false, required: ["title"], properties: letterEditableProperties },
+    run: createAgentLetterDraft,
+  },
+  {
+    name: "revise_letter_draft",
+    description: "Revise a saved draft using the exact ID and latest revision from get_letter. Supply only changed fields. Supplying blocks replaces the entire ordered block list; preserve unchanged paragraphs. To rewrite the whole letter, clear body and replace blocks. Issued letters cannot be edited. A lost save acknowledgement must be verified with get_letter before another write.",
+    parameters: { type: "object", additionalProperties: false, required: ["letter_id", "expected_revision", "changes"], properties: {
+      letter_id: { type: "string", minLength: 1, maxLength: 100 },
+      expected_revision: { type: "integer", minimum: 1 },
+      changes: { type: "object", additionalProperties: false, properties: letterEditableProperties },
+    } },
+    run: reviseAgentLetterDraft,
+  },
+  {
+    name: "export_letter_pdf",
+    description: "Export the actual saved letter layout to a downloadable PDF in this chat when requested. Drafts stay drafts; issued letters use their frozen snapshot. Does not issue, sign or send anything.",
+    parameters: { type: "object", additionalProperties: false, required: ["letter_id"], properties: {
+      letter_id: { type: "string", minLength: 1, maxLength: 100 },
+    } },
+    run: async (args, signal) => {
+      const tid = activeTurnId;
+      const { result, output } = await exportAgentLetterDraft(args, signal);
+      pushTurnOutput(tid, output);
+      return result;
+    },
+  },
   {
     name: "list_work_items",
     description:
@@ -5434,20 +5490,37 @@ export const TOOLS: ToolDef[] = [
  *  save_secret's value outright, plus any key that reads like it carries a
  *  secret — including nested ones like http_fetch headers. */
 const SECRET_KEY_RE = /secret|passwo?rd|token|api_?key|authorization|credential/i;
+const LETTER_DRAFT_TOOLS = new Set(["create_letter_draft", "revise_letter_draft"]);
+const LETTER_CONTENT_KEYS = new Set([
+  "title", "recipient_name", "recipient_address", "salutation", "body", "closing",
+  "signatory_name", "signatory_title", "text", "label", "value",
+]);
 export const isRemoteAgentRun = (agentId?: string): boolean => /^(whatsapp|telegram):/.test(agentId ?? "");
 export function redactArgs(
   name: string,
   args: Record<string, unknown>
 ): Record<string, unknown> {
+  return redactToolArgs(name, args, true);
+}
+
+/** Letter text can contain personal identifiers and contact details. Logs need
+ * field/layout metadata; approval needs the proposal. Secrets stay masked in
+ * both paths, including unexpected nested fields supplied by a caller. */
+function redactToolArgs(
+  name: string,
+  args: Record<string, unknown>,
+  diagnostic: boolean
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    if (SECRET_KEY_RE.test(k) || name === "save_secret" && k === "value") {
+    if (SECRET_KEY_RE.test(k) || name === "save_secret" && k === "value" ||
+        diagnostic && LETTER_DRAFT_TOOLS.has(name) && LETTER_CONTENT_KEYS.has(k)) {
       out[k] = "********";
     } else if (Array.isArray(v)) {
-      const redactItems = (value: unknown): unknown => Array.isArray(value) ? value.map(redactItems) : value && typeof value === "object" ? redactArgs(name, value as Record<string, unknown>) : value;
+      const redactItems = (value: unknown): unknown => Array.isArray(value) ? value.map(redactItems) : value && typeof value === "object" ? redactToolArgs(name, value as Record<string, unknown>, diagnostic) : value;
       out[k] = v.map(redactItems);
     } else if (v && typeof v === "object") {
-      out[k] = redactArgs(name, v as Record<string, unknown>);
+      out[k] = redactToolArgs(name, v as Record<string, unknown>, diagnostic);
     } else if (
       (name === "save_secret" && k === "value") ||
       ((name === "computer_use" || name === "agent_computer") && k === "text") ||
@@ -5467,7 +5540,7 @@ export function approvalArgs(
   name: string,
   args: Record<string, unknown>
 ): Record<string, unknown> {
-  const preview = redactArgs(name, args);
+  const preview = redactToolArgs(name, args, false);
   if ((name === "computer_use" || name === "agent_computer") && typeof args.text === "string") preview.text = args.text;
   if (name === "browser" && typeof args.value === "string") preview.value = args.value;
   if ((name === "workspace_browser" || name === "agent_computer") && typeof args.url === "string")
@@ -5606,6 +5679,6 @@ export async function runTool(
     log.error("agent", `${name} threw`, e);
     // A failed acknowledgement can follow a committed document or outbound
     // action. Never coach another write without verifying the original result.
-    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" || ["create_quote", "create_purchase_order"].includes(name) ? { retry_safe: false } : {}) };
+    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" || ["create_quote", "create_purchase_order", "create_letter_draft", "revise_letter_draft"].includes(name) ? { retry_safe: false } : {}) };
   }
 }

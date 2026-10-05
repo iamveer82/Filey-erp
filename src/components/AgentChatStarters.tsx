@@ -1,7 +1,8 @@
-import { ChartNoAxesCombined, FilePlus2, ListChecks, Paperclip } from "lucide-react";
+import { ChartNoAxesCombined, FilePenLine, FilePlus2, ListChecks, Paperclip } from "lucide-react";
 
 const starters = [
   { label: "Create an invoice", icon: FilePlus2, prompt: "Create a new draft invoice. Ask me for the customer and items you need." },
+  { label: "Draft a letter", icon: FilePenLine, prompt: "Draft a company letter using my saved company details. Ask me for its purpose and wording, leave missing optional details editable, and save it as a draft." },
   { label: "Review payments", icon: ListChecks, prompt: "Show me unpaid and overdue invoices, with amounts grouped by currency." },
   { label: "Business overview", icon: ChartNoAxesCombined, prompt: "Summarize my business using current workspace data, with totals grouped by currency." },
 ] as const;

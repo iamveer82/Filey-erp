@@ -79,6 +79,21 @@ action results. Autonomous mode follows the same approval mode and capability
 switches as normal chat. Stop cancels pending approvals and remaining actions;
 it cannot undo an action already accepted by another app or service.
 
+### Drafting company letters
+
+Ask Filey to make a letter and give it the recipient, purpose and any facts the
+letter should contain. The agent reads the current workspace's company details
+and letterhead, saves an editable draft in **Tools → Letter**, and reads it back
+before reporting its number and edit link. A letter recipient does not have to
+be a customer or supplier. Missing optional references, email addresses and
+mobile numbers stay blank or become clearly labelled placeholders; the agent
+reports what still needs completion instead of inventing it or blocking a draft.
+
+Draft creation does not issue the letter, apply a signature or stamp, or send it.
+Those are separate requests subject to the current approval mode and available
+capabilities. Ask for a PDF when you need an export. Existing drafts are revised
+against their current revision so a newer edit is not silently overwritten.
+
 ### Scanning documents
 
 Attach a PDF or photo to the chat. The agent can:

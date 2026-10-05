@@ -49,6 +49,15 @@ it("the file starter opens the existing picker without starting a request", () =
   expect(input()).toHaveValue("");
 });
 
+it("the letter starter prepares an editable draft prompt without a paid request", () => {
+  const stream = vi.spyOn(ai, "aiAgentStream");
+  showChat();
+  fireEvent.click(screen.getByRole("button", { name: "Draft a letter" }));
+  expect(input()).toHaveValue("Draft a company letter using my saved company details. Ask me for its purpose and wording, leave missing optional details editable, and save it as a draft.");
+  expect(input()).toHaveFocus();
+  expect(stream).not.toHaveBeenCalled();
+});
+
 it("manual chat titles survive another agent reply and transcript export contains the conversation", async () => {
   seedChat(); vi.spyOn(ai, "aiReady").mockReturnValue(true);
   vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () { yield { type: "text", text: "Invoice checked." }; return "Invoice checked."; });
