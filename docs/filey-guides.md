@@ -6,7 +6,7 @@ The first document walkthroughs cover company setup and creating an invoice. All
 
 ## Interaction
 
-- Desktop: a nonmodal side panel. Mobile: a scrollable bottom sheet with fixed Back/Next controls and safe-area padding.
+- Desktop: a nonmodal side panel. Mobile: a scrollable bottom sheet with fixed Back/Next controls, safe-area padding and Filey's visual-viewport sizing so keyboard panning cannot hide its footer.
 - Opening starts in manual mode. Explicit Play advances the text at a reading pace; Pause, Replay, Back and Next remain available. Playback stops when hidden, minimized, navigating away or switching identity.
 - Minimize keeps the document usable. Resume loads the reading position saved on this device.
 - Find this control highlights a known, visible control and minimizes the panel. It never opens an editor, changes a field or clicks a business action. Missing/hidden controls explain which editor/tab to open.
