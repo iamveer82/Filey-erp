@@ -16,8 +16,14 @@
 [data-guide-highlight] { outline: 2px solid hsl(var(--foreground)); outline-offset: 4px; border-radius: 8px; }
 .filey-guide-panel button:focus-visible, .filey-guide-panel a:focus-visible, .filey-guide-launcher:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 @media (max-width: 639px) {
+  .workspace-header:has(.filey-guide-launcher) { gap: 6px; }
+  .workspace-header:has(.filey-guide-launcher) > .ml-auto { gap: 4px; }
   .filey-guide-panel { top: calc(var(--filey-viewport-top, 0px) + var(--filey-viewport-height, 100dvh)); bottom: auto; transform: translateY(-100%); right: 0; width: 100%; max-height: calc(var(--filey-viewport-height, 100dvh) * .72); border-radius: 24px 24px 0 0; }
   .filey-guide-icon, .filey-guide-launcher { min-width: 44px; min-height: 44px; }
   .filey-guide-figure { width: 170px; }
   .filey-guide-footer .btn-primary, .filey-guide-footer .btn-secondary { min-height: 44px; }
+}
+@media (max-width: 359px) {
+  /* Search is also available inside the sidebar; keep the section title readable. */
+  .workspace-header:has(.filey-guide-launcher) .workspace-header-search { display: none; }
 }
