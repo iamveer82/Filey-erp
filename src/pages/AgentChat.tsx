@@ -29,10 +29,10 @@ import {
   SquarePen,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
-import { AnnotatedText } from "../components/AnnotatedText";
 import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
 import AgentRunProgress from "../components/AgentRunProgress";
+import AgentChatStarters from "../components/AgentChatStarters";
 import { VideoJobCard } from "../components/AgentVideoPanel";
 import AgentMediaPanel, { MediaJobCard } from "../components/AgentMediaPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
@@ -46,7 +46,7 @@ import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe } from "lucide-react";
 import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
-import { openFolder } from "../lib/localPaths";
+import { openFolder, saveBytes } from "../lib/localPaths";
 import { isNativeApp, shareNativeFile } from "../lib/nativePlatform";
 import { ErrorBanner, Modal } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
@@ -89,6 +89,9 @@ import {
   newChat,
   resolveOpeningChat,
   deriveTitle,
+  transcript,
+  repairChatHistory,
+  chatHistoryNeedsRecovery,
   TURN_CAP,
   type Chat,
   type ChatTurn,
@@ -113,6 +116,11 @@ const SYSTEM =
 /** Width both halves of the conversation share — messages and the composer sit
  *  on one measure so long replies don't stretch wider than where you type. */
 const COLUMN = "mx-auto w-full max-w-[760px]";
+const COIN_FAILURE = "Insufficient credit. Add Coin to continue.";
+const coinFailures = new Set([COIN_FAILURE,
+  `${COIN_FAILURE} Nothing was executed from that response.`,
+  `${COIN_FAILURE} Nothing was executed from that response. Check any earlier changes or files before asking me to continue.`]);
+const needsCoin = (text: string) => coinFailures.has(text);
 
 type PendingApproval = {
   id: number;
@@ -178,6 +186,12 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   const [histOpen, setHistOpen] = useState(false);
   const [chatList, setChatList] = useState<Chat[]>([]);
   const [historySearch, setHistorySearch] = useState("");
+  const [renameTarget, setRenameTarget] = useState<Chat | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Chat | null>(null);
+  const [historySaveFailed, setHistorySaveFailed] = useState(chatHistoryNeedsRecovery);
+  const [recoverHistoryOpen, setRecoverHistoryOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const historyToggleRef = useRef<HTMLButtonElement>(null);
   const historySearchRef = useRef<HTMLInputElement>(null);
@@ -233,6 +247,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setCapsOpen(false);
     setPlusOpen(false);
     setMoreOpen(false);
+    setRenameTarget(null);
+    setDeleteTarget(null);
+    setRecoverHistoryOpen(false);
     // Media cards/panels unmount below while hidden; preserve the selected view.
   }, [active]);
 
@@ -350,6 +367,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   /** Mirrors the streamed text for the catch block — reading the state there
    *  would get the value from the render that started the run, not the latest. */
   const streamedRef = useRef("");
+  const followUpEditedRef = useRef(false);
   const conversationRef = useRef<HTMLDivElement>(null);
   const followLatestRef = useRef(true);
   const scrolledChatRef = useRef<string | null>(null);
@@ -476,12 +494,19 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   useEffect(() => {
     if (!chat.turns.length || !scope || agentStorageScope() !== scope) return;
     const rest = loadChats().filter((c) => c.id !== chat.id);
-    saveChats(
-      [{ ...chat, title: deriveTitle(chat.turns), updatedAt: Date.now() }, ...rest],
+    const saved = saveChats(
+      [{ ...chat, title: chat.customTitle || deriveTitle(chat.turns), updatedAt: Date.now() }, ...rest],
       scope
     );
-    setActiveId(chat.id);
+    setHistorySaveFailed(!saved);
+    if (saved) setActiveId(chat.id);
   }, [chat, scope]);
+
+  useEffect(() => {
+    const failed = () => setHistorySaveFailed(true);
+    window.addEventListener("filey:chats:save-failed", failed);
+    return () => window.removeEventListener("filey:chats:save-failed", failed);
+  }, []);
 
   // The rail lists every stored chat, so re-read the store whenever the active
   // chat changes — the persist effect above writes, this is what sees it.
@@ -595,7 +620,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     const turnId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const withUser: Chat = {
       ...chat,
-      title: deriveTitle([...chat.turns, { role: "user", text: shownText }]),
+      title: chat.customTitle || deriveTitle([...chat.turns, { role: "user", text: shownText }]),
       turns: [...chat.turns, { role: "user", text: shownText }],
     };
     followLatestRef.current = true;
@@ -604,6 +629,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setBusy(true);
     setRunProgress(undefined);
     setStreaming(auto ? "Planning…" : "");
+    followUpEditedRef.current = false;
     const ctl = new AbortController();
     abortRef.current = ctl;
 
@@ -710,6 +736,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       // one shared slot above the composer, so asking a second question threw
       // away the first answer's output.
       made = endTurn(turnId);
+      if (trace.outcome === "error" && needsCoin(reply) && !trace.actions.length && !followUpEditedRef.current) {
+        setInput(raw);
+        attach(attached);
+      }
       setChat((c) => ({
         ...c,
         turns: [
@@ -744,8 +774,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       } else {
         const failedFiles = endTurn(turnId);
         setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
-        setInput(raw);
-        attach(attached);
+        if (!followUpEditedRef.current) {
+          setInput(raw);
+          attach(attached);
+        }
         if (trace.actions.length || streamedRef.current || failedFiles.length)
           setChat((c) => ({
             ...c,
@@ -798,13 +830,60 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     if ((workspaceRef.current?.clientWidth ?? 0) < 720) closeHistory();
   };
   const deleteChat = (id: string) => {
-    if (busy) return;
+    if (busy || !scope || scope !== agentStorageScope()) return;
     const next = loadChats().filter((c) => c.id !== id);
-    saveChats(next);
+    if (!saveChats(next, scope)) { setHistorySaveFailed(true); return; }
     setChatList(next.sort((a, b) => b.updatedAt - a.updatedAt));
     if (id === chat.id) startNew();
     draftsRef.current.delete(id);
+    setDeleteTarget(null);
   };
+
+  const beginRename = (target: Chat) => {
+    if (busy) return;
+    setMoreOpen(false);
+    setRenameText(target.customTitle || target.title);
+    setRenameTarget(target);
+  };
+  const renameChat = (automatic = false) => {
+    if (busy || !renameTarget || !scope || scope !== agentStorageScope()) return;
+    const history = loadChats();
+    const source = history.find(item => item.id === renameTarget.id);
+    if (!source) { setErr("This conversation is no longer available. Reopen chat history."); setRenameTarget(null); return; }
+    const title = automatic ? deriveTitle(source.turns) : renameText.trim().replace(/\s+/g, " ").slice(0, 120);
+    if (!title) return;
+    const next = { ...source, title, customTitle: automatic ? undefined : title, updatedAt: Date.now() };
+    if (!saveChats([next, ...history.filter(item => item.id !== next.id)], scope)) {
+      setHistorySaveFailed(true); return;
+    }
+    if (next.id === chat.id) setChat(next);
+    setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
+    setRenameTarget(null);
+  };
+  const exportChat = async () => {
+    if (exporting || !chat.turns.length || !scope || scope !== agentStorageScope()) return;
+    setMoreOpen(false);
+    setExporting(true);
+    try {
+      const filename = `Filey-chat-${chat.id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || "conversation"}.txt`;
+      await saveBytes(filename, new TextEncoder().encode(`${chat.title}\n\n${transcript(chat)}`), "text/plain;charset=utf-8");
+    } catch (error) {
+      if ((error as Error)?.name !== "AbortError") setErr("Could not export this conversation. Try again.");
+    } finally { setExporting(false); }
+  };
+  const recoverHistory = () => {
+    if (busy || !scope || scope !== agentStorageScope()) return;
+    if (!repairChatHistory(scope)) { setHistorySaveFailed(true); setErr("Could not recover chat history. Your original history is unchanged. Export this conversation before closing Filey."); return; }
+    const restored = loadChats().filter(item => item.id !== chat.id);
+    const saved = !chat.turns.length || saveChats([{ ...chat, title: chat.customTitle || deriveTitle(chat.turns), updatedAt: Date.now() }, ...restored], scope);
+    setHistorySaveFailed(!saved);
+    if (saved) setErr(null);
+    setChatList(loadChats().sort((a, b) => b.updatedAt - a.updatedAt));
+    setRecoverHistoryOpen(false);
+  };
+
+  const query = historySearch.trim().toLowerCase();
+  const matchingChats = chatList.filter(c => !query || `${c.title || "New chat"}\n${c.turns.map(turn => turn.text).join("\n")}`.toLowerCase().includes(query));
 
   const empty = chat.turns.length === 0;
 
@@ -840,14 +919,14 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         </label>
         {busy && <p className="px-2 pb-3 text-xs leading-relaxed text-muted-foreground">Finish or stop this reply to switch chats.</p>}
         <nav aria-label="Saved conversations" className="min-h-0 flex-1 overflow-y-auto overscroll-contain space-y-1">
-          {chatList.filter(c => (c.title || "New chat").toLowerCase().includes(historySearch.trim().toLowerCase())).map(c => <div key={c.id} className={cn("group flex items-center gap-0.5 rounded-xl hover:bg-hover", c.id === chat.id && "bg-hover")}>
+          {matchingChats.map(c => <div key={c.id} className={cn("group flex items-center gap-0.5 rounded-xl hover:bg-hover", c.id === chat.id && "bg-hover")}>
             <button type="button" disabled={busy} onClick={() => switchChat(c)} aria-current={c.id === chat.id ? "page" : undefined} className="min-h-11 min-w-0 flex-1 rounded-xl px-3 py-2 text-left text-[13px] disabled:opacity-50" title={c.title || "New chat"}>
               <span className="block truncate">{c.title || "New chat"}</span>
             </button>
-            <button type="button" disabled={busy} onClick={() => deleteChat(c.id)} aria-label={`Delete chat: ${c.title || "New chat"}`} className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 text-muted-foreground hover:!text-danger"><Trash2 size={14} /></button>
+            <button type="button" disabled={busy} onClick={() => setDeleteTarget(c)} aria-label={`Delete chat: ${c.title || "New chat"}`} className="btn-ghost w-10 shrink-0 !border-transparent !bg-transparent !px-0 text-muted-foreground hover:!text-danger"><Trash2 size={14} /></button>
           </div>)}
           {!chatList.length && <p className="px-3 py-4 text-xs leading-relaxed text-muted-foreground">Your conversations will appear here.</p>}
-          {!!chatList.length && !chatList.some(c => (c.title || "New chat").toLowerCase().includes(historySearch.trim().toLowerCase())) && <p className="px-3 py-4 text-xs text-muted-foreground">No chats match your search.</p>}
+          {!!chatList.length && !matchingChats.length && <p className="px-3 py-4 text-xs text-muted-foreground">No chats match your search.</p>}
         </nav>
       </aside>}
       {/* A full-width session header frames the centered conversation. */}
@@ -887,6 +966,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               <div ref={moreRef}>
                 <button type="button" onClick={() => setMoreOpen(v => !v)} className="filey-chat-icon" aria-label="Conversation options" aria-expanded={moreOpen} title="Conversation options"><MoreHorizontal size={20} /></button>
                 <MenuPopover open={active && moreOpen} onClose={() => setMoreOpen(false)} anchorRef={moreRef} align="end" className="w-56">
+                  {!empty && !busy && <MenuItemRow icon={<SquarePen size={15} />} label="Rename chat" onClick={() => beginRename(chat)} />}
+                  {!empty && !exporting && <MenuItemRow icon={<Download size={15} />} label="Export conversation" onClick={() => { void exportChat(); }} />}
+                  {!empty && <MenuSep />}
                   <MenuItemRow icon={<CoinMark />} label="Coin wallet" onClick={() => { setMoreOpen(false); navigate("/settings?section=credits"); }} />
                   <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
                   <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
@@ -926,7 +1008,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           aria-label="Conversation"
         >
           {empty && !busy ? (
-            <div className="mx-auto max-w-xl text-center">
+            <div className="filey-chat-empty mx-auto max-w-xl text-center">
               {/* The empty chat is where the bot has room to be itself, so this
                   one animates: it breathes, blinks and looks around while it
                   waits for a first question. */}
@@ -934,8 +1016,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 {active && <BloubBot size={48} state="idle" label="Filey AI" ambient />}
               </div>
               <h2 className="text-xl font-medium leading-tight text-foreground tracking-tight sm:text-2xl">
-                What shall we <AnnotatedText variant="wavy">work on?</AnnotatedText>
+                What shall we work on?
               </h2>
+              {!input.trim() && !files.length && <AgentChatStarters onDraft={text => { if (!busy && active) { setInput(text); textareaRef.current?.focus({ preventScroll: true }); } }} onAttach={() => { if (!busy && active) fileRef.current?.click(); }} />}
             </div>
           ) : (
             // Turns separate by spacing alone: ChatTurn carries no timestamp
@@ -960,6 +1043,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 <CoinMark /> Add Coin
               </Link>
             )}
+          </div>}
+          {historySaveFailed && <div className="space-y-2">
+            <ErrorBanner message="Chat history could not be saved on this device. Export this conversation before closing Filey." />
+            <div className="flex flex-wrap gap-2">
+              {!!chat.turns.length && <button type="button" className="btn-ghost" disabled={exporting} onClick={() => { void exportChat(); }}><Download size={15} />Export conversation</button>}
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => setRecoverHistoryOpen(true)}>Recover history</button>
+            </div>
           </div>}
 
           {/* Pairing QR, rendered from live bridge state rather than from the
@@ -1036,12 +1126,11 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 ref={textareaRef}
                 aria-label="Message Filey AI"
                 aria-describedby="filey-message-hint"
-                data-ph={auto ? "Describe a task…" : "Ask Filey…"}
+                data-ph={busy ? "Draft a follow-up…" : auto ? "Describe a task…" : "Ask Filey…"}
                 rows={1}
                 value={input}
-                disabled={busy}
-                placeholder={auto ? "Describe a task…" : "Ask Filey…"}
-                onChange={(e) => setInput(e.target.value)}
+                placeholder={busy ? "Draft a follow-up…" : auto ? "Describe a task…" : "Ask Filey…"}
+                onChange={(e) => { if (busy) followUpEditedRef.current = true; setInput(e.target.value); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches)) {
                     e.preventDefault();
@@ -1055,7 +1144,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                   const img = Array.from(e.clipboardData.files).find((f) =>
                     f.type.startsWith("image/")
                   );
-                  if (img) {
+                  if (img && !busy) {
                     e.preventDefault();
                     attach([...files, img]);
                   }
@@ -1224,13 +1313,38 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               </div>
             </div>
             <p id="filey-message-hint" className="filey-composer-hint mt-2 px-1 text-center text-[11px] text-muted-foreground">
-              <span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
-              <span className="filey-touch-hint">Tap the arrow to send</span>
+              {busy ? "Draft your next message while Filey works." : <><span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
+              <span className="filey-touch-hint">Tap the arrow to send</span></>}
             </p>
           </div>
         </div>
 
         {/* Closing an approval always resolves the waiting tool as denied. */}
+        <Modal open={active && !!renameTarget} onClose={() => setRenameTarget(null)} title="Rename chat">
+          <form onSubmit={event => { event.preventDefault(); renameChat(); }}>
+            <label className="block text-sm" htmlFor="filey-chat-name">Chat name</label>
+            <input id="filey-chat-name" autoFocus maxLength={120} required className="input mt-2 w-full" value={renameText} disabled={busy} onChange={event => setRenameText(event.target.value)} />
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              {renameTarget?.customTitle && <button type="button" disabled={busy} className="btn-ghost mr-auto" onClick={() => renameChat(true)}>Use automatic title</button>}
+              <button type="button" className="btn-ghost" onClick={() => setRenameTarget(null)}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={busy || !renameText.trim()}>Save name</button>
+            </div>
+          </form>
+        </Modal>
+        <Modal open={active && !!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete conversation?">
+          <p className="text-sm text-muted-foreground">Delete “{deleteTarget?.title}” from chat history on this device? This cannot be undone. Your business records are unaffected.</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
+            <button type="button" className="btn-primary" disabled={busy} onClick={() => { if (deleteTarget) deleteChat(deleteTarget.id); }}>Delete conversation</button>
+          </div>
+        </Modal>
+        <Modal open={active && recoverHistoryOpen} onClose={() => setRecoverHistoryOpen(false)} title="Recover chat history?">
+          <p className="text-sm text-muted-foreground">Keep readable conversations and remove damaged entries. Filey will retain the original history privately on this device before making changes. Recovery also needs enough free device storage.</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setRecoverHistoryOpen(false)}>Cancel</button>
+            <button type="button" className="btn-primary" disabled={busy} onClick={recoverHistory}>Recover history</button>
+          </div>
+        </Modal>
         {active && pendingConfirm && (
           <Modal key={pendingConfirm.id} open onClose={() => settleConfirm(pendingConfirm, false)} title="Approve action">
             <p className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -1328,28 +1442,31 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
  *  visible result at all and people click it twice. */
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
-  return (
+  const [failed, setFailed] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timeoutRef.current), []);
+  return <>
     <button
       type="button"
-      onClick={() => {
-        void navigator.clipboard?.writeText(text).then(
-          () => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1500);
-          },
-          () => {
-            /* clipboard blocked — nothing useful to say about it */
-          }
-        );
+      onClick={async () => {
+        clearTimeout(timeoutRef.current);
+        setDone(false);
+        setFailed(false);
+        try {
+          if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+          await navigator.clipboard.writeText(text);
+          setDone(true);
+          timeoutRef.current = setTimeout(() => setDone(false), 1500);
+        } catch { setFailed(true); }
       }}
       aria-label={done ? "Copied reply" : "Copy reply"}
       title={done ? "Copied" : "Copy reply"}
       className="filey-chat-icon filey-reply-copy text-muted-foreground"
     >
       {done ? <Check size={16} /> : <Copy size={16} />}
-      <span className="sr-only" role="status">{done ? "Copied" : ""}</span>
     </button>
-  );
+    <span className={failed ? "self-center text-xs text-muted-foreground" : "sr-only"} role="status">{failed ? "Could not copy. Select and copy the reply." : done ? "Copied" : ""}</span>
+  </>;
 }
 
 function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: boolean; active?: boolean }) {
@@ -1396,6 +1513,7 @@ function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: bo
           )}
         </div>
         <AgentRunProgress run={turn.run} pending={pending} />
+        {!pending && needsCoin(turn.text) && <Link to="/settings?section=credits" className="btn-ghost mt-2"><CoinMark />Add Coin</Link>}
         {!pending && turn.text.trim() && (
           <div className="mt-1 flex">
             <CopyButton text={turn.text} />

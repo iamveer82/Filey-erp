@@ -1,6 +1,6 @@
 import { setCacheOrg } from "../api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { aiAgentStream, setAiConfig } from "../ai";
+import { aiAgent, aiAgentStream, setAiConfig } from "../ai";
 import { runAgentStream, type AgentEvent } from "../agentHarness";
 import * as desktop from "../desktopBrowser";
 import { setDataMode } from "../dataMode";
@@ -8,6 +8,8 @@ import { runTool } from "../aiTools";
 import { headroomReset } from "../headroom";
 import { priorAgentProgress } from "../agentRunState";
 import { setAgentMode } from "../agentMode";
+import { agentStorageKey } from "../agentStorage";
+import { listRuns } from "../agentJournal";
 
 /* The loop is written once and shared by every provider. These tests pin the
  * two things that regressed when there were two copies of it:
@@ -84,6 +86,133 @@ it("discards a provider reply if the workspace changed away and back while it wa
   const stopped = expect(result).rejects.toMatchObject({ name: "AbortError" });
   release();
   await stopped;
+  expect(fetchFn).toHaveBeenCalledOnce();
+});
+
+describe("cancellation at a yielded completion boundary", () => {
+  it.each([
+    ["openai", "stop"], ["openai", "other-workspace"], ["openai", "away-and-back"],
+    ["anthropic", "stop"], ["anthropic", "other-workspace"], ["anthropic", "away-and-back"],
+  ] as const)("rejects %s %s after final text instead of declaring completion", async (provider, interruption) => {
+    const controller = new AbortController();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify(provider === "openai" ? oa("The answer is ready.") : an("The answer is ready."))));
+    const stream = runAgentStream([{ role: "user", text: "Answer a simple question" }], { signal: controller.signal }, {
+      cfg: { provider, baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" }, fetchFn,
+    });
+    expect((await stream.next()).value).toEqual({ type: "text", text: "The answer is ready." });
+    if (interruption === "stop") controller.abort();
+    else {
+      setCacheOrg("other-org", "test-user");
+      if (interruption === "away-and-back") setCacheOrg("test-org", "test-user");
+    }
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(await stream.next()).toEqual({ done: true, value: undefined });
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it.each(["stop", "away-and-back"] as const)("prioritizes %s over a provider transport error that arrives late", async interruption => {
+    let reject!: (error: Error) => void;
+    const controller = new AbortController();
+    const fetchFn = vi.fn(() => new Promise<Response>((_resolve, fail) => { reject = fail; }));
+    const stream = runAgentStream([{ role: "user", text: "Check the task" }], { signal: controller.signal }, {
+      cfg: { provider: "openai", baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" }, fetchFn,
+    });
+    const response = stream.next();
+    const stopped = expect(response).rejects.toMatchObject({ name: "AbortError" });
+    await vi.waitFor(() => expect(fetchFn).toHaveBeenCalledOnce());
+    if (interruption === "stop") controller.abort();
+    else { setCacheOrg("other-org", "test-user"); setCacheOrg("test-org", "test-user"); }
+    reject(new Error("Network error after the session was invalidated"));
+    await stopped;
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("does not accept an explicit finish call after the user stops on its accompanying text", async () => {
+    const controller = new AbortController();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify(oa("Finished.", [{ id: "finish", type: "function", function: {
+      name: "task_complete", arguments: '{"summary":"Finished.","status":"completed"}',
+    } }]))));
+    const stream = runAgentStream([{ role: "user", text: "Finish the task" }], {
+      signal: controller.signal, finishToolName: "task_complete", extraTools: [{ name: "task_complete", description: "Finish", parameters: {
+        type: "object", properties: { summary: { type: "string" }, status: { type: "string", enum: ["completed", "blocked"] } }, required: ["summary", "status"],
+      } }],
+    }, { cfg: { provider: "openai", baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" }, fetchFn });
+    expect((await stream.next()).value).toMatchObject({ type: "text" });
+    controller.abort();
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("honors Stop requested from the final progress callback instead of returning successful text", async () => {
+    setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "test" });
+    stubResponses([oa("Final answer.")]);
+    const controller = new AbortController(), progress = vi.fn(() => controller.abort());
+    await expect(aiAgent([{ role: "user", text: "Reply briefly" }], { signal: controller.signal, onProgress: progress }))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(progress).toHaveBeenCalledExactlyOnceWith("Final answer.");
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(listRuns()).toEqual([]);
+  });
+
+  it.each(["stop", "other-workspace", "away-and-back"] as const)("rejects %s after the final tool result instead of marking the run exhausted", async interruption => {
+    const controller = new AbortController();
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify(oa("", [{ id: "plan", type: "function", function: {
+      name: "update_plan", arguments: '{"steps":[{"step":"Check the task","status":"completed"}]}',
+    } }]))));
+    const stream = runAgentStream([{ role: "user", text: "Check a task" }], { signal: controller.signal, maxRounds: 1 }, {
+      cfg: { provider: "openai", baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" }, fetchFn,
+    });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_call" });
+    expect((await stream.next()).value).toMatchObject({ type: "plan" });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_result" });
+    if (interruption === "stop") controller.abort();
+    else {
+      setCacheOrg("other-org", "test-user");
+      if (interruption === "away-and-back") setCacheOrg("test-org", "test-user");
+    }
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the last completed action receipt stopped when its consumer cancels before exhaustion", async () => {
+    setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "test" });
+    stubResponses([oa("", [{ id: "recall", type: "function", function: { name: "recall", arguments: "{}" } }])]);
+    const controller = new AbortController();
+    const stream = aiAgentStream([{ role: "user", text: "Check what is remembered" }], { signal: controller.signal, maxRounds: 1, isOwner: true, agentId: "cancel-final-result" });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_call" });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_result" });
+    controller.abort();
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    const rows = JSON.parse(localStorage.getItem(agentStorageKey("filey.agent.progress")!)!);
+    expect(rows).toEqual([expect.objectContaining({ outcome: "stopped", actions: [expect.objectContaining({ name: "recall", status: "completed" })] })]);
+    expect(listRuns()).toEqual([]);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+});
+
+it("keeps canonical insufficient-Coin guidance in a managed agent failure without retrying or running tools", async () => {
+  const fetchFn = vi.fn(async () => { throw new Error("Insufficient credit. Add Coin to continue."); });
+  const result = await collect(runAgentStream([{ role: "user", text: "Make an invoice" }], {}, {
+    cfg: { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: "filey-ai", apiKey: "", billing: "credits" }, fetchFn,
+  }));
+  expect(result.events).toEqual([expect.objectContaining({ type: "done", reason: "error" })]);
+  expect(result.final).toContain("Insufficient credit. Add Coin to continue.");
+  expect(result.final).toContain("Nothing was executed from that response.");
+  expect(fetchFn).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ["credits", "Insufficient credit. Add Coin to continue. SQL SELECT private_customer_rows"],
+  ["credits", "Private provider failure: secret-key-fixture"],
+  [undefined, "Insufficient credit. Add Coin to continue."],
+] as const)("never forwards non-allowlisted %s diagnostics into its reply", async (billing, message) => {
+  const fetchFn = vi.fn(async () => { throw new Error(message); });
+  const result = await collect(runAgentStream([{ role: "user", text: "Make an invoice" }], {}, {
+    cfg: { provider: "openai", baseUrl: "https://example.test/v1", model: "fixture", apiKey: "", billing }, fetchFn,
+  }));
+  expect(result.final).toContain("Filey AI couldn't continue.");
+  expect(result.final).not.toContain(message);
+  expect(result.events).toEqual([expect.objectContaining({ type: "done", reason: "error" })]);
   expect(fetchFn).toHaveBeenCalledOnce();
 });
 

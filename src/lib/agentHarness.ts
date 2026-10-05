@@ -759,6 +759,7 @@ export async function* runAgentStream(
       // reported "the model call failed (Aborted)" as the agent's answer, and
       // the callers' Stop handling — which keys off the throw — never ran.
       if ((e as Error)?.name === "AbortError") throw e;
+      assertActive();
       const detail = e instanceof Error ? e.message : String(e);
       const msg = deps.cfg.apiKey.length > 4 ? detail.split(deps.cfg.apiKey).join("********") : detail;
       log.error("agent", "model call failed", msg);
@@ -769,14 +770,22 @@ export async function* runAgentStream(
         403: "This model isn't available with your current AI access. Check your AI settings.",
         404: "This AI model or address could not be found. Check your AI settings.",
       } as Record<number, string>)[status ?? 0];
-      const failure = providerHint ? new Error(providerHint) : await serviceError({ context: { status } }, "Filey AI couldn't continue. Please try again.");
+      // Only this exact managed-wallet message can offer a recharge action.
+      // Never forward provider strings merely because they share its prefix.
+      const walletHint = deps.cfg.billing === "credits" && detail === "Insufficient credit. Add Coin to continue."
+        ? detail : undefined;
+      const failure = walletHint ? new Error(walletHint) : providerHint ? new Error(providerHint) : await serviceError({ context: { status } }, "Filey AI couldn't continue. Please try again.");
       const text = `${failure.message} Nothing was executed from that response.${guard.steps().length ? " Check any earlier changes or files before asking me to continue." : ""}`;
+      assertActive();
       yield { type: "done", text, reason: "error" };
       return text;
     }
     const { text, calls } = turn;
 
     if (text) yield { type: "text", text };
+    // A consumer can Stop or change accounts while a yielded event is on screen.
+    // Recheck before declaring success, completing a plan, or dispatching tools.
+    assertActive();
 
     if (!calls.length) {
       const unfinished = plan.some(s => s.status === "pending" || s.status === "in_progress");
@@ -964,6 +973,7 @@ export async function* runAgentStream(
           if ((e as Error)?.name === "AbortError") throw e;
           report = "This part of the task could not finish. Verify its outcome before retrying.";
         }
+        assertActive();
         const result = {
           report,
           note: "This is the sub-agent's summary of its own work. Verify anything critical before acting on it, and fold it into your own report to the user.",
@@ -1019,6 +1029,7 @@ export async function* runAgentStream(
 
   // Running out of rounds used to produce an apology and nothing else. What
   // was actually done matters more — especially if some of it changed data.
+  assertActive();
   log.warn("agent", `ran out of rounds after ${maxRounds}`, guard.summary());
   const text = "I couldn't finish within this task's limit. Check any changes or files already created before asking me to continue.";
   yield { type: "done", text, reason: "exhausted" };

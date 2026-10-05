@@ -42,6 +42,13 @@
   padding: 8px 12px;
 }
 
+.filey-chat-starters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: min(100%, 440px); margin: 28px auto 0; }
+.filey-chat-starters button { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 14px; background: transparent; text-align: left; font-size: 13px; color: hsl(var(--muted-foreground)); transition: background-color 150ms ease-out, color 150ms ease-out; }
+.filey-chat-starters button:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.filey-chat-starters svg { flex-shrink: 0; }
+.filey-chat-icon:focus-visible, .filey-chat-starters button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
+.filey-chat-empty { width: 100%; }
+
 @container filey-agent (max-width: 719px) {
   .filey-chat-history {
     width: 100%;
@@ -63,6 +70,8 @@
   .filey-composer .composer-control { justify-content: center; width: 44px; height: 44px; padding: 0; }
   .filey-composer .filey-chat-icon { width: 44px; height: 44px; }
   .filey-composer-hint { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .filey-chat-starters { margin-top: 24px; gap: 8px; }
+  .filey-chat-starters button { padding: 11px; gap: 8px; }
 }
 
 @media (max-width: 1023px) {
@@ -90,5 +99,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .filey-composer, .filey-chat-icon { transition: none; }
+  .filey-composer, .filey-chat-icon, .filey-chat-starters button { transition: none; }
 }
