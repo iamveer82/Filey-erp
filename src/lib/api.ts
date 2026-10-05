@@ -1214,6 +1214,9 @@ async function saveDocumentLines(
   if (!isLocalMode()) {
     const { data, error } = await sb().rpc("filey_save_document", { p_table: table, p_header: row, p_items: items, p_id: id || null });
     if (error) throw error;
+    if ((typeof data !== "number" && typeof data !== "string") || String(data).trim() === ""
+      || !Number.isSafeInteger(Number(data)) || Number(data) <= 0 || (id && Number(data) !== id))
+      throw new Error("The document save could not be confirmed. Check the existing document before trying again.");
     return Number(data);
   }
   const save = async (client: any) => {

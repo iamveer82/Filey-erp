@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { deliverFile } from "../agentFiles";
 import { loadChats, newChat, saveChats } from "../aiChats";
-import { agentStorageScope, readAgentStorage } from "../agentStorage";
+import { agentStorageScope, readAgentStorage, writeAgentStorage } from "../agentStorage";
 import { setCacheOrg } from "../api";
 import { setDataMode } from "../dataMode";
 
@@ -43,6 +43,7 @@ it("releases outputs on account change and never restores them into another acco
   const firstScope = agentStorageScope()!;
   saveChats([chat], firstScope);
   setCacheOrg("other-account", "other-owner");
+  expect(revoke).toHaveBeenCalledExactlyOnceWith(file.url);
   expect(loadChats()).toEqual([]);
   expect(revoke).toHaveBeenCalledExactlyOnceWith(file.url);
   setCacheOrg("web-output-fixture", "owner");
@@ -53,5 +54,17 @@ it("releases outputs on account change and never restores them into another acco
   const persisted = JSON.parse(readAgentStorage("filey.ai.chats")!);
   persisted[0].turns[0].text = "Different message";
   localStorage.setItem(`filey.ai.chats:${encodeURIComponent(agentStorageScope()!)}`, JSON.stringify(persisted));
+  expect(loadChats()[0].turns[0].files).toEqual([]);
+});
+
+it("revokes outputs during A → B → A without requiring an intervening chat read", async () => {
+  const file = await deliverFile({ name: "Private.pdf", bytes: new Uint8Array([4]) });
+  const chat = { ...newChat(), turns: [{ role: "assistant" as const, text: "Private output", files: [file] }] };
+  expect(saveChats([chat])).toBe(true);
+  writeAgentStorage("filey.agent.mode", "manual");
+  expect(revoke).not.toHaveBeenCalled();
+  setCacheOrg("other-account", "other-owner");
+  setCacheOrg("web-output-fixture", "owner");
+  expect(revoke).toHaveBeenCalledExactlyOnceWith(file.url);
   expect(loadChats()[0].turns[0].files).toEqual([]);
 });

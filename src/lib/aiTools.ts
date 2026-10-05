@@ -177,6 +177,12 @@ function cashDocumentAmount(raw: unknown, label: string): number {
   return raw;
 }
 
+function confirmedDocumentId(id: number): number {
+  if (!Number.isSafeInteger(id) || id <= 0)
+    throw new Error("The document save could not be confirmed. Check the existing document before trying again.");
+  return id;
+}
+
 /** Validate the active operands before shared display math can normalize bad
  * strings to zero. Keep the persisted calculation metadata intact. */
 function documentPricing(
@@ -2412,7 +2418,7 @@ export const TOOLS: ToolDef[] = [
           : {}),
       }));
       const pricing = documentPricing(lineItems.map(it => ({ ...it, unit_price: it.rate })), cols, priceBy);
-      await (assertCurrent(), quoteApi.saveDoc({
+      const id = confirmedDocumentId(await (assertCurrent(), quoteApi.saveDoc({
         number: qtNo,
         status: "draft",
         template: "minimal",
@@ -2427,9 +2433,10 @@ export const TOOLS: ToolDef[] = [
         items: lineItems,
         ...(cols.length ? { custom_columns: cols } : {}),
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
-      }));
+      })));
       return {
         ok: true,
+        id,
         number: qtNo,
         ...pricing,
         priced_by: priceBy || "qty × rate",
@@ -2549,7 +2556,7 @@ export const TOOLS: ToolDef[] = [
           : {}),
       }));
       const { lines, total } = documentPricing(lineItems.map(it => ({ ...it, qty: it.quantity, unit_price: it.unit_cost })), cols, priceBy);
-      await (assertCurrent(), pos.save({
+      const id = confirmedDocumentId(await (assertCurrent(), pos.save({
         po_number: poNumber,
         status: "draft",
         template: "uae",
@@ -2568,12 +2575,13 @@ export const TOOLS: ToolDef[] = [
         items: lineItems,
         ...(cols.length ? { custom_columns: cols } : {}),
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
-      }));
+      })));
       const unknownParty = str(args.supplier_name)
         ? await partyCheck("supplier", args.supplier_name)
         : { warning: "No supplier named — the PO cannot be sent until one is set." };
       return {
         ok: true,
+        id,
         number: poNumber,
         ...(unknownParty ?? {}),
         lines,
@@ -5596,8 +5604,8 @@ export async function runTool(
       return result;
     }
     log.error("agent", `${name} threw`, e);
-    // A timeout after dispatch cannot prove that an outbound/payment action
-    // failed. Never coach the model to repeat it through another transport.
-    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" ? { retry_safe: false } : {}) };
+    // A failed acknowledgement can follow a committed document or outbound
+    // action. Never coach another write without verifying the original result.
+    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" || ["create_quote", "create_purchase_order"].includes(name) ? { retry_safe: false } : {}) };
   }
 }
