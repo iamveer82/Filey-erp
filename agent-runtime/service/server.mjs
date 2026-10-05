@@ -5,7 +5,7 @@ import { configuration, PublicError, UUID, TERMINAL } from './config.mjs';
 import { JobStore } from './store.mjs';
 import { authenticator } from './auth.mjs';
 import { creditProxy } from './credits.mjs';
-import { mcpRelay, processRunner } from './runner.mjs';
+import { mcpRelay, processRunner, SandboxCleanupError } from './runner.mjs';
 
 async function jsonBody(request, limit) {
   let size = 0, chunks = [];
@@ -34,19 +34,32 @@ export function createPilot(config, options = {}) {
   const complete = options.complete ?? creditProxy(config, authenticate);
   const execute = options.execute ?? processRunner(config);
   const relay = options.relay ?? mcpRelay;
-  const active = new Map(); let closing = false;
+  const active = new Map(); let closing = false, unavailable = false;
   const reply = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(body)); };
-  const finish = (job, status, text) => { store.finish(job.id, status, text); job.controller.abort(); };
+  const persist = operation => {
+    try { return operation(); }
+    catch (error) {
+      if (error instanceof PublicError) throw error;
+      unavailable = true; throw new PublicError('The agent journal is temporarily unavailable. Reconnect shortly.', 503);
+    }
+  };
+  const finish = (job, status, text) => {
+    try { persist(() => store.finish(job.id, status, text)); }
+    finally { job.controller.abort(); }
+  };
   async function run(job) {
-    store.running(job.id);
-    const timer = setTimeout(() => finish(job, 'interrupted', 'The task timed out. Review your saved reply before starting another task.'), config.timeout);
+    const timer = setTimeout(() => {
+      try { finish(job, 'interrupted', 'The task timed out. Review your saved reply before starting another task.'); }
+      catch { /* persist already stopped admission; abort happened even on disk failure. */ }
+    }, config.timeout);
     let text = '';
     try {
+      persist(() => store.running(job.id));
       await job.authenticate();
       await execute(job, event => {
         if (event.type !== 'text' || typeof event.text !== 'string' || job.controller.signal.aborted) return;
         text += event.text;
-        if (Buffer.byteLength(text) > 500_000 || !store.event(job.id, event))
+        if (Buffer.byteLength(text) > 500_000 || !persist(() => store.event(job.id, event)))
           finish(job, 'interrupted', 'The task reached its output limit. Review your saved reply.');
       });
       if (!job.controller.signal.aborted) {
@@ -54,11 +67,12 @@ export function createPilot(config, options = {}) {
         finish(job, 'completed', text.trim() || 'The agent did not produce a reply.');
       }
     } catch (error) {
+      if (error instanceof SandboxCleanupError) unavailable = true;
       if (!job.controller.signal.aborted) finish(job, 'failed', job.failure ?? (error instanceof PublicError ? error.message : 'The task could not finish. Review any saved reply before starting another task.'));
     } finally {
       clearTimeout(timer); job.mcp?.close(); active.delete(job.id);
       job.identity.token = ''; job.capability = '';
-      store.prune(Date.now() - config.retention);
+      persist(() => store.prune(Date.now() - config.retention));
     }
   }
   const server = createServer(async (req, res) => {
@@ -101,9 +115,11 @@ export function createPilot(config, options = {}) {
       if (url.pathname === '/v1/jobs' && req.method === 'POST') {
         const body = taskBody(await jsonBody(req, 64_000));
         const fingerprint = store.fingerprint(body);
-        if (!store.row(body.request_id) && (active.size >= config.concurrency || [...active.values()].filter(job => job.identity.userId === identity.userId).length >= config.perUser))
+        const prior = store.row(body.request_id);
+        if (!prior && unavailable) throw new PublicError('The agent is temporarily unavailable. Reconnect to your saved task.', 503);
+        if (!prior && (active.size >= config.concurrency || [...active.values()].filter(job => job.identity.userId === identity.userId).length >= config.perUser))
           throw new PublicError('Another task is running. Reconnect to it before starting a new task.', 429);
-        const admitted = store.create(body.request_id, identity.userId, identity.org, fingerprint, body);
+        const admitted = persist(() => store.create(body.request_id, identity.userId, identity.org, fingerprint, body));
         if (admitted.created) {
           const job = { id: body.request_id, identity, messages: body.messages, reasoning: body.reasoning,
             controller: new AbortController(), capability: randomBytes(32).toString('base64url'), completions: new Map() };
@@ -111,7 +127,7 @@ export function createPilot(config, options = {}) {
           active.set(job.id, job);
           // Admission is durable before acknowledgement, and browser disconnection
           // never cancels work. A duplicate POST returns this same journal entry.
-          queueMicrotask(() => { void run(job); });
+          queueMicrotask(() => { void run(job).catch(() => { unavailable = true; }); });
         }
         reply(res, 202, store.view(store.row(body.request_id))); return;
       }
@@ -136,7 +152,11 @@ export function createPilot(config, options = {}) {
   return { server, store, active,
     async close() {
       closing = true;
-      for (const job of active.values()) { finish(job, 'interrupted', 'The agent restarted. Review the saved reply before starting another task.'); job.mcp?.close(); }
+      for (const job of active.values()) {
+        try { finish(job, 'interrupted', 'The agent restarted. Review the saved reply before starting another task.'); }
+        catch { /* Still cancel and revoke the task if the journal cannot be written. */ }
+        job.mcp?.close();
+      }
       await new Promise(resolve => server.close(resolve));
       while (active.size) await new Promise(resolve => setTimeout(resolve, 10));
       store.close();

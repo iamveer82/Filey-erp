@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { mcpRelay, processRunner } from './runner.mjs';
+import { PassThrough } from 'node:stream';
+import { boundedLines, mcpRelay, processRunner, sandboxCleanup, SandboxCleanupError, sandboxNetwork } from './runner.mjs';
 
 const owner = '10000000-0000-4000-8000-000000000001';
 const other = '10000000-0000-4000-8000-000000000002';
@@ -36,6 +37,118 @@ async function eventually(predicate) {
     while (!predicate()) await new Promise(resolve => setTimeout(resolve, 10));
   })());
 }
+
+test('sandbox cleanup awaits exact container removal before detaching its network', async () => {
+  const name = `filey-hermes-${randomUUID()}`, removal = deferred(), started = deferred(), calls = [];
+  const finished = sandboxCleanup(name, { close: async () => { calls.push('network-close'); } }, async args => {
+    calls.push(args); started.resolve(); await removal.promise; return { stdout: '' };
+  });
+  await started.promise;
+  assert.equal(calls.length, 1, 'network must remain until the daemon acknowledges container removal');
+  assert.equal(calls[0].at(-1), name); assert.ok(calls[0].includes('--force'));
+  assert.ok(calls[0][0] === 'rm' || calls[0][0] === 'container' && calls[0][1] === 'rm');
+  removal.resolve(); await finished;
+  assert.equal(calls.at(-1), 'network-close');
+});
+
+test('cleanup accepts only this exact auto-removed container and fails closed on uncertain removal', async () => {
+  const name = `filey-hermes-${randomUUID()}`;
+  let detached = 0;
+  await sandboxCleanup(name, { close: async () => { detached++; } }, async () => {
+    throw Object.assign(new Error('Fixture command failed'), { stderr: `Error response from daemon: No such container: ${name}\n` });
+  });
+  assert.equal(detached, 1);
+  for (const stderr of ['PRIVATE_DOCKER_OPERATOR_DETAIL', `Error response from daemon: No such container: ${name}-other\n`]) {
+    detached = 0;
+    await assert.rejects(sandboxCleanup(name, { close: async () => { detached++; } }, async () => {
+      throw Object.assign(new Error('PRIVATE_DOCKER_OPERATOR_DETAIL'), { stderr });
+    }), error => error.status === 503 && !error.message.includes('PRIVATE_DOCKER_OPERATOR_DETAIL') && !error.message.includes(name));
+    assert.equal(detached, 0, 'an uncertain live container must keep its network attached');
+  }
+});
+
+test('a lost network creation acknowledgement still removes the exact possibly-created network', async () => {
+  const name = `filey-hermes-${randomUUID()}`, calls = [];
+  await assert.rejects(sandboxNetwork(name, async args => {
+    calls.push(args);
+    if (args[1] === 'create') throw new Error('PRIVATE_DOCKER_CREATE_ACK');
+    return { stdout: '' };
+  }), error => error.status === 503 && !(error instanceof SandboxCleanupError) && !error.message.includes('PRIVATE_DOCKER_CREATE_ACK'));
+  assert.deepEqual(calls, [['network', 'create', '--internal', '--driver', 'bridge', name], ['network', 'rm', name]]);
+});
+
+test('failed network creation accepts only an exact absent-network receipt as verified cleanup', async () => {
+  const name = `filey-hermes-${randomUUID()}`;
+  for (const stderr of [`Error response from daemon: network ${name} not found\n`,
+    `Error response from daemon: No such network: ${name}\n`, `Error: No such network: ${name}\n`]) {
+    const calls = [];
+    await assert.rejects(sandboxNetwork(name, async args => {
+      calls.push(args);
+      if (args[1] === 'create') throw new Error('PRIVATE_DOCKER_CREATE_ACK');
+      throw Object.assign(new Error('Fixture network already absent'), { stderr });
+    }), error => error.status === 503 && !(error instanceof SandboxCleanupError));
+    assert.deepEqual(calls.at(-1), ['network', 'rm', name]);
+  }
+});
+
+test('uncertain network cleanup raises the admission-blocking class with no private Docker diagnostics', async () => {
+  const name = `filey-hermes-${randomUUID()}`;
+  for (const stderr of ['PRIVATE_DOCKER_CLEANUP_DETAIL', `Error response from daemon: network ${name}-other not found\n`]) {
+    const calls = [];
+    await assert.rejects(sandboxNetwork(name, async args => {
+      calls.push(args);
+      throw Object.assign(new Error('PRIVATE_DOCKER_CLEANUP_DETAIL'), { stderr });
+    }), error => error instanceof SandboxCleanupError && error.status === 503 &&
+      error.message === 'The isolated agent cleanup could not be verified.');
+    assert.deepEqual(calls, [['network', 'create', '--internal', '--driver', 'bridge', name], ['network', 'rm', name]]);
+  }
+});
+
+test('byte framing handles fragmented UTF-8 and coalesced small lines without truncation', () => {
+  const stream = new PassThrough(), lines = [], violations = [];
+  const framing = boundedLines(stream, 4, line => lines.push(line), () => violations.push(true));
+  const bytes = Buffer.from('é\n');
+  stream.write(bytes.subarray(0, 1)); stream.write(bytes.subarray(1));
+  stream.write(Buffer.from('1\n22\n3\n'));
+  assert.deepEqual(lines, ['é', '1', '22', '3']); assert.equal(violations.length, 0);
+  framing.close(); stream.destroy();
+});
+
+test('an oversized unterminated child line is rejected in bytes before newline or further buffering', () => {
+  for (const chunks of [[Buffer.alloc(9, 97)], [Buffer.alloc(4, 97), Buffer.alloc(5, 98)], [Buffer.from('éééé')]]) {
+    const stream = new PassThrough(), lines = [], violations = [];
+    const framing = boundedLines(stream, 7, line => lines.push(line), () => violations.push(true));
+    for (const chunk of chunks) stream.write(chunk);
+    assert.equal(violations.length, 1); assert.deepEqual(lines, []);
+    stream.write(Buffer.from('\nagain\n')); assert.equal(violations.length, 1); assert.deepEqual(lines, []);
+    framing.close(); stream.destroy();
+  }
+});
+
+test('framing enforces total output separately and close releases its stream listeners', () => {
+  const stream = new PassThrough(), lines = [], violations = [];
+  const events = ['data', 'end', 'error'], baseline = events.map(event => stream.listenerCount(event));
+  const framing = boundedLines(stream, 20, line => lines.push(line), () => violations.push(true), 8);
+  stream.write(Buffer.from('ok\n')); stream.write(Buffer.from('12345\n'));
+  assert.deepEqual(lines, ['ok']); assert.equal(violations.length, 1);
+  framing.close(); framing.close();
+  assert.deepEqual(events.map(event => stream.listenerCount(event)), baseline);
+  stream.write(Buffer.from('after-close\n')); assert.deepEqual(lines, ['ok']); stream.destroy();
+  const openStream = new PassThrough(), openLines = [];
+  const openBaseline = events.map(event => openStream.listenerCount(event));
+  const open = boundedLines(openStream, 20, line => openLines.push(line), () => assert.fail('unexpected overflow'));
+  open.close(); assert.deepEqual(events.map(event => openStream.listenerCount(event)), openBaseline);
+  openStream.write(Buffer.from('closed\n')); assert.deepEqual(openLines, []); openStream.destroy();
+});
+
+test('a malformed-frame callback cannot escape the stream or process later frames', () => {
+  const stream = new PassThrough(); let calls = 0, violations = 0;
+  const framing = boundedLines(stream, 20, () => { calls++; throw new Error('Fixture parser rejected a frame'); }, () => { violations++; });
+  assert.doesNotThrow(() => stream.write(Buffer.from('first\nsecond\n')));
+  assert.equal(calls, 1); assert.equal(violations, 1);
+  stream.write(Buffer.from('third\n')); assert.equal(calls, 1); assert.equal(violations, 1);
+  framing.close(); stream.destroy();
+});
 
 /** No deployed Supabase access: this fixture independently enforces user JWT,
  * current organization and private/shared record visibility. MCP is the real
@@ -180,6 +293,38 @@ test('five concurrent authentication completions cannot bypass the four-request 
   assert.equal(state.reads.length, 4); assert.equal(state.writes, 0);
 });
 
+test('fictional MCP child null/array frames reject pending initialization without escaping into the parent', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'filey-malformed-mcp-')), script = join(directory, 'malformed.cjs');
+  writeFileSync(script, `process.stdin.once('data', () => {
+  process.stdout.write(process.argv[2] + '\\n');
+  process.stdout.write('null\\n');
+  setTimeout(() => process.exit(0), 50);
+});
+`, 'utf8');
+  t.after(() => {
+    assert.equal(dirname(resolve(directory)), resolve(tmpdir())); assert.ok(basename(directory).startsWith('filey-malformed-mcp-'));
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const spawn = childProcess.spawn; let frame = 'null';
+  const mocked = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    assert.equal(command, process.execPath); assert.ok(args[0].endsWith('index.js'));
+    return spawn(command, [script, frame], options);
+  });
+  syncBuiltinESMExports();
+  try {
+    for (frame of ['null', '[]']) {
+      const relay = mcpRelay({ base: 'https://fictional.invalid', anonKey }, {
+        id: randomUUID(), identity: { userId: owner, org: organization, token: tokens.get(owner) },
+        controller: new AbortController(), authenticate: async () => {},
+      });
+      try {
+        await assert.rejects(bounded(initialize(relay)), error => error.status === 503 && error.message === 'Record access is unavailable.');
+        await assert.rejects(relay.request(rpc('after-malformed', 'tools/list')), error => error.status === 409);
+      } finally { relay.close(); }
+    }
+  } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
+});
+
 // The protocol child deliberately does not import Hermes or any provider SDK.
 // A test-only spawn argument redirect keeps the real processRunner/stdout parser
 // under test while the Python executable, environment and child process are real.
@@ -199,7 +344,9 @@ assert raw['reasoning'] is False
 assert not any(key.startswith(('SUPABASE_', 'OPENAI_', 'DEEPSEEK_')) for key in os.environ)
 assert os.environ['FILEY_HERMES_PROXY_TOKEN'] == 'fixture-capability-only'
 assert os.environ['FILEY_HERMES_SOURCE_DIR']
-if mode == 'complete':
+if mode in ('null-frame', 'array-frame'):
+    print(json.dumps(None if mode == 'null-frame' else []), flush=True)
+elif mode == 'complete':
     print(json.dumps({'type': 'text', 'text': 'Fixture reply'}), flush=True)
     print(json.dumps({'type': 'done', 'reason': 'complete'}), flush=True)
 else:
@@ -226,7 +373,7 @@ else:
     assert.deepEqual(emitted, [{ type: 'text', text: 'Fixture reply' }]);
     await assert.rejects(execute(job('insufficient_credit'), () => {}), error =>
       error.status === 402 && error.message === 'Insufficient credit. Add Coin to continue.');
-    for (const code of ['runtime_error', 'unknown-untrusted-code'])
+    for (const code of ['runtime_error', 'unknown-untrusted-code', 'null-frame', 'array-frame'])
       await assert.rejects(execute(job(code), () => {}), error => error.status === 503 &&
         error.message === 'The agent could not finish this task. Review any saved reply.');
   } finally { mocked.mock.restore(); syncBuiltinESMExports(); }

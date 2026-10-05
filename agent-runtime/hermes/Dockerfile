@@ -5,6 +5,7 @@ COPY . /opt/filey/hermes/
 RUN python -m venv /opt/filey/venv \
     && /opt/filey/venv/bin/python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
     && python -B bootstrap.py --cache /var/lib/filey-hermes --source-only \
+    && chmod -R a+rX /var/lib/filey-hermes \
     && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin filey
 ENV FILEY_HERMES_SOURCE_DIR=/var/lib/filey-hermes/79af3f6cea8067284a7ea5725078578b3f790adb/hermes-agent-79af3f6cea8067284a7ea5725078578b3f790adb \
     PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PYTHONUTF8=1

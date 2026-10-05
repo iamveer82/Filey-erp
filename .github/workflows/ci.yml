@@ -7,7 +7,7 @@ on:
 
 jobs:
   hermes-core:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,6 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14.0'
+      - name: Audit the isolated Python dependency lock
+        run: |
+          python -m venv "$RUNNER_TEMP/filey-audit-venv"
+          "$RUNNER_TEMP/filey-audit-venv/bin/python" -m pip install pip-audit==2.9.0
+          "$RUNNER_TEMP/filey-audit-venv/bin/pip-audit" --requirement agent-runtime/hermes/requirements.lock --no-deps --disable-pip
       - name: Prepare isolated hash-locked runtime and checksum-pinned source
         run: |
           python -m venv "$RUNNER_TEMP/filey-hermes-venv"

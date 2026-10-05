@@ -40,6 +40,15 @@ Python environment. The MIT license and attribution are preserved in
 - Restarted queued/running jobs become interrupted, never replayed. The pilot is
   bounded to two global concurrent jobs, one per account, 12 model calls and a
   five-minute service deadline (the Hermes worker is more tightly bounded).
+- Child output is limited in bytes before buffering, even without a newline.
+  Cancellation awaits removal of the exact job container before removing its
+  network. A journal write fault or unverified sandbox cleanup blocks new tasks
+  until the service is repaired/restarted; authenticated saved receipts remain
+  readable when the journal itself is intact.
+- A persisted journal admits only one service instance. Its separate empty
+  SQLite `.lease` file holds an OS lock released on process termination, so a
+  second process cannot interrupt live jobs during startup. Do not delete the
+  lease file while running or run parallel replicas with separate journals.
 
 ## Local development
 
@@ -101,6 +110,15 @@ current authenticated JWT and original workspace. Missing, stale, unauthorized
 and uncertain jobs never authorize a fresh submission with another UUID.
 
 Checks: `npm run test:hermes`, `npm run smoke:pilot --prefix mcp-server`,
-the frontend `hermes-agent` tests, and `hermes/tests/test_runner.py`. The real-core
-smoke uses a fake model and fake read-only MCP fixture; it does not charge Coin,
-contact customer data, or prove production deployment/billing is ready.
+the frontend `hermes-agent` tests, and `python -B -m unittest discover -s
+agent-runtime/hermes/tests -v` with the prepared isolated interpreter/source.
+The thirteen Python cases include real-core policy/source checks and a JWT
+verification regression. CI also audits the hash-locked dependencies.
+
+The full service/MCP integration uses the actual Hermes core against fictional
+model and Supabase fixtures. Run it with `FILEY_HERMES_TEST_PYTHON` and
+`FILEY_HERMES_TEST_SOURCE_DIR`, or `FILEY_HERMES_TEST_IMAGE=sha256:...` for the
+production sandbox path. It does not charge Coin, contact customer data, or prove
+production deployment/billing is ready. CI builds the image, runs real-core
+tests as UID 10001 without an Internet route, and then exercises the complete
+service flow through a fresh internal worker network.

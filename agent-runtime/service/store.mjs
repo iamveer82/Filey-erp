@@ -11,10 +11,19 @@ export class JobStore {
     if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('Invalid encryption key');
     this.key = key;
     this.fingerprintKey = Buffer.from(hkdfSync('sha256', key, Buffer.alloc(0), 'filey-hermes-fingerprint-v1', 32));
-    if (path !== ':memory:') { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); }
-    this.db = new DatabaseSync(path);
-    if (path !== ':memory:') chmodSync(path, 0o600);
-    this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA busy_timeout=5000;
+    if (path !== ':memory:') {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      // An OS-backed SQLite lease is held on a separate empty file. It releases
+      // on process death and prevents another instance from interrupting live
+      // jobs. Keeping it separate allows normal journal transactions below.
+      this.lease = new DatabaseSync(`${path}.lease`);
+      try { chmodSync(`${path}.lease`, 0o600); this.lease.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE'); }
+      catch { this.lease.close(); throw new Error('Another pilot process owns this journal, or it is unavailable.'); }
+    }
+    try {
+      this.db = new DatabaseSync(path);
+      if (path !== ':memory:') chmodSync(path, 0o600);
+      this.db.exec(`PRAGMA journal_mode=DELETE; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, owner TEXT NOT NULL, org TEXT NOT NULL,
         fingerprint TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL,
@@ -24,13 +33,13 @@ export class JobStore {
         job TEXT NOT NULL REFERENCES jobs(id), sequence INTEGER NOT NULL,
         payload BLOB NOT NULL, PRIMARY KEY(job, sequence)
       );`);
-    const existing = this.db.prepare('SELECT id,owner,org,payload FROM jobs LIMIT 1').get();
-    try { if (existing) this.open(existing.id, existing.payload, existing); }
-    catch (error) { this.db.close(); throw error; }
-    // A restart never replays inference or tools. Receipts remain reconnectable.
-    for (const row of this.db.prepare("SELECT id FROM jobs WHERE status IN ('running','queued')").all()) {
-      this.finish(row.id, 'interrupted', 'This task was interrupted. Review the saved reply before starting another task.');
-    }
+      const existing = this.db.prepare('SELECT id,owner,org,payload FROM jobs LIMIT 1').get();
+      if (existing) this.open(existing.id, existing.payload, existing);
+      // A restart never replays inference or tools. Receipts remain reconnectable.
+      for (const row of this.db.prepare("SELECT id FROM jobs WHERE status IN ('running','queued')").all()) {
+        this.finish(row.id, 'interrupted', 'This task was interrupted. Review the saved reply before starting another task.');
+      }
+    } catch (error) { this.db?.close(); this.lease?.close(); throw error; }
   }
   fingerprint(value) { return createHmac('sha256', this.fingerprintKey).update(JSON.stringify(value)).digest('hex'); }
   seal(id, value, binding) {
@@ -96,5 +105,5 @@ export class JobStore {
     this.db.prepare('DELETE FROM events WHERE job IN (SELECT id FROM jobs WHERE created<? AND status NOT IN (\'running\',\'queued\'))').run(before);
     this.db.prepare("DELETE FROM jobs WHERE created<? AND status NOT IN ('running','queued')").run(before);
   }
-  close() { this.db.close(); }
+  close() { try { this.db.close(); } finally { this.lease?.close(); } }
 }
