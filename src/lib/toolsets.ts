@@ -52,6 +52,10 @@ export const CORE_TOOLS = [
 
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
+  letters: {
+    about: "Company letters: draft, revise, find and export saved correspondence using company details and letterhead.",
+    tools: ["get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
+  },
   video: {
     about: "Create brand/product videos from a brief or attached photo with the configured media provider. Video generation uses the user's own fal key; the user approves generation in the chat card. Track persistent jobs",
     tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],

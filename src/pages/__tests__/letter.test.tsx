@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate, type NavigateFunction } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
 import { UIProvider } from "../../lib/ui";
 import { billing } from "../../lib/api";
@@ -29,6 +29,7 @@ import Letter from "../Letter";
 const workspace = vi.hoisted(() => ({
   scope: "local:org:user:owner",
   records: [] as LetterRecord[],
+  previewPages: 1,
 }));
 vi.mock("../../lib/api", () => ({
   getCacheScope: () => "org:user:owner",
@@ -76,11 +77,11 @@ vi.mock("../../components/Letterhead", () => ({
   loadLetterhead: async () => ({ background: "" }),
 }));
 vi.mock("../../components/LetterDocument", () => ({
-  default: ({ form }: { form: LetterForm }) => (
-    <div data-testid="letter-document">{form.title}</div>
+  default: ({ form, pageIndex = 0 }: { form: LetterForm; pageIndex?: number }) => (
+    <div data-testid="letter-document">{form.title} · Page {pageIndex + 1}</div>
   ),
   LETTER_TEMPLATES: [{ id: "letter-standard", label: "Standard" }],
-  useLetterPages: () => [{}],
+  useLetterPages: () => Array.from({ length: workspace.previewPages }, () => ({})),
 }));
 vi.mock("../../components/FitPreview", () => ({
   default: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -147,14 +148,24 @@ function makeRecord(form: LetterForm, id = "letter-1", revision = 1): LetterReco
     issued_snapshot: form.status === "issued" ? structuredClone(form) : null,
   };
 }
-function mount() {
-  return render(
-    <MemoryRouter>
+function mount(initialEntry = "/letters") {
+  let navigate!: NavigateFunction;
+  function Navigation() {
+    navigate = useNavigate();
+    return null;
+  }
+  const rendered = render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Navigation />
       <UIProvider>
         <Letter />
       </UIProvider>
     </MemoryRouter>
   );
+  return {
+    ...rendered,
+    navigate: (to: string) => act(() => { void navigate(to); }),
+  };
 }
 async function newLetter() {
   mount();
@@ -172,9 +183,9 @@ function content() {
   change("Letter title", "Authorization letter");
   change("Text 1", "The company authorizes Mary to receive these documents.");
 }
-function switchWorkspace() {
+function switchWorkspace(records: LetterRecord[] = []) {
   workspace.scope = "cloud:another-org:user:teammate";
-  workspace.records = [];
+  workspace.records = records;
   act(() => {
     window.dispatchEvent(new Event(AGENT_STORAGE_EVENT));
   });
@@ -184,6 +195,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   workspace.scope = "local:org:user:owner";
   workspace.records = [];
+  workspace.previewPages = 1;
   vi.mocked(loadLetters).mockImplementation(async () =>
     structuredClone(workspace.records)
   );
@@ -204,6 +216,103 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+});
+
+it("waits for loaded records before opening the exact saved letter from an AI link", async () => {
+  const other = makeRecord({ ...blankLetterForm("LTR-0001"), title: "Similar letter" }, "letter-10");
+  const requested = makeRecord({ ...blankLetterForm("LTR-0002"), title: "Requested AI draft" }, "letter-1");
+  let resolveLetters!: (records: LetterRecord[]) => void;
+  vi.mocked(loadLetters).mockReturnValueOnce(new Promise((resolve) => { resolveLetters = resolve; }));
+  mount("/letters?letter=letter-1");
+  expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
+  await act(async () => { resolveLetters([other, requested]); });
+  expect(await screen.findByLabelText(/^Letter title/)).toHaveValue("Requested AI draft");
+  expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
+  expect(saveLetter).not.toHaveBeenCalled();
+  expect(pickDocNumber).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("button", { name: "New letter" });
+  expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
+});
+
+it("opens an issued AI link using its immutable snapshot without creating or issuing a letter", async () => {
+  const snapshot = { ...blankLetterForm("LTR-0003"), title: "Issued snapshot", status: "issued" as const, body: "Original issued wording" };
+  const record = makeRecord(snapshot);
+  record.form = { ...snapshot, title: "Changed live title", body: "Changed live wording" };
+  workspace.records = [record];
+  mount("/letters?letter=letter-1");
+  expect(await screen.findByLabelText(/^Letter title/)).toHaveValue("Issued snapshot");
+  expect(screen.getByLabelText("Introduction")).toHaveValue("Original issued wording");
+  expect(screen.getByLabelText(/^Letter title/)).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+  expect(saveLetter).not.toHaveBeenCalled();
+  expect(pickDocNumber).not.toHaveBeenCalled();
+});
+
+it("shows a useful missing-letter message without matching a number or another letter ID", async () => {
+  workspace.records = [makeRecord({ ...blankLetterForm("letter-1"), title: "Not the requested ID" }, "letter-10")];
+  mount("/letters?letter=letter-1");
+  await screen.findByText(/This letter was not found in this workspace/);
+  expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "New letter" })).toBeEnabled();
+  expect(saveLetter).not.toHaveBeenCalled();
+});
+
+it("keeps unsaved edits when a second AI link arrives and opens it only after the current draft is saved", async () => {
+  workspace.records = [
+    makeRecord({ ...blankLetterForm("LTR-0001"), title: "First draft" }, "letter-1"),
+    makeRecord({ ...blankLetterForm("LTR-0002"), title: "Second draft" }, "letter-2"),
+  ];
+  const view = mount("/letters?letter=letter-1");
+  await screen.findByLabelText(/^Letter title/);
+  change("Letter title", "Unsaved first draft");
+  view.navigate("/letters?letter=letter-2");
+  await screen.findByText(/This letter has unsaved changes/);
+  expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Unsaved first draft");
+  expect(saveLetter).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(saveLetter).mock.calls[0].slice(1)).toEqual(["letter-1", 1, "2026-10-03T10:00:01Z"]);
+  await waitFor(() => expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Second draft"));
+  expect(workspace.records.find((record) => record.id === "letter-1")?.form.title).toBe("Unsaved first draft");
+});
+
+it("does not auto-open the same linked ID from a different workspace or use a delayed old response", async () => {
+  let resolveLetters!: (records: LetterRecord[]) => void;
+  vi.mocked(loadLetters).mockReturnValueOnce(new Promise((resolve) => { resolveLetters = resolve; }));
+  mount("/letters?letter=letter-1");
+  const current = makeRecord({ ...blankLetterForm("LTR-9001"), title: "Another workspace letter" });
+  switchWorkspace([current]);
+  await screen.findByText("Another workspace letter");
+  await act(async () => {
+    resolveLetters([makeRecord({ ...blankLetterForm("LTR-0001"), title: "Private previous workspace letter" })]);
+  });
+  expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Private previous workspace letter")).not.toBeInTheDocument();
+  expect(screen.getByText("Another workspace letter")).toBeInTheDocument();
+  expect(screen.getByText(/Your workspace changed. Open this letter from Filey AI again/)).toBeInTheDocument();
+  expect(saveLetter).not.toHaveBeenCalled();
+});
+
+it("keeps page navigation and PDF export inside the keyboard-accessible modal scrolling region", async () => {
+  workspace.previewPages = 3;
+  workspace.records = [makeRecord({ ...blankLetterForm("LTR-0001"), title: "Long letter" })];
+  mount();
+  fireEvent.click(await screen.findByText("LTR-0001"));
+  const dialog = within(await screen.findByRole("dialog"));
+  const scrolling = dialog.getByRole("region", { name: "Letter preview" });
+  scrolling.focus();
+  expect(scrolling).toHaveFocus();
+  const reader = within(scrolling);
+  expect(reader.getByTestId("letter-document")).toHaveTextContent("Page 1");
+  fireEvent.click(reader.getByRole("button", { name: "Next preview page" }));
+  fireEvent.click(reader.getByRole("button", { name: "Next preview page" }));
+  expect(reader.getByTestId("letter-document")).toHaveTextContent("Page 3");
+  expect(reader.getByRole("button", { name: "Next preview page" })).toBeDisabled();
+  fireEvent.click(reader.getByRole("button", { name: "Download PDF" }));
+  await waitFor(() => expect(downloadFile).toHaveBeenCalledWith(pdf));
+  expect((vi.mocked(reactToPdfBytes).mock.calls[0][0] as ReactElement<{ form: LetterForm }>).props.form.number).toBe("LTR-0001");
+  expect(saveLetter).not.toHaveBeenCalled();
 });
 
 it("saves edited text, custom fields and dates in the chosen order without writing invoices", async () => {

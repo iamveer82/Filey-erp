@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   DndContext,
   KeyboardSensor,
@@ -106,9 +107,12 @@ const BLOCKS = [
 
 export default function Letter() {
   const { toast, confirm } = useUI();
+  const [params] = useSearchParams();
+  const requestedLetterId = params.get("letter");
   const [records, setRecords] = useState<LetterRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [linkError, setLinkError] = useState("");
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [marks, setMarks] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [letterhead, setLetterhead] = useState<LetterheadInfo>(EMPTY_LETTERHEAD);
@@ -126,19 +130,28 @@ export default function Letter() {
   const baseline = useRef("");
   const editorScope = useRef<string | null>(null);
   const workspaceScope = useRef(agentStorageScope());
+  const recordRequest = useRef(0);
+  const letterLink = useRef({
+    id: requestedLetterId,
+    scope: agentStorageScope(),
+    handled: false,
+  });
 
   const refresh = useCallback(async () => {
-    const scope = agentStorageScope();
+    const scope = agentStorageScope(),
+      request = ++recordRequest.current;
+    const current = () =>
+      scope === agentStorageScope() && request === recordRequest.current;
     try {
       const rows = await loadLetters();
-      if (scope === agentStorageScope()) {
+      if (current()) {
         setRecords(rows);
         setError("");
       }
     } catch (failure) {
-      if (scope === agentStorageScope()) setError(errMsg(failure));
+      if (current()) setError(errMsg(failure));
     } finally {
-      if (scope === agentStorageScope()) setLoading(false);
+      if (current()) setLoading(false);
     }
   }, []);
   const loadCompany = useCallback(async () => {
@@ -176,6 +189,12 @@ export default function Letter() {
       const scope = agentStorageScope();
       if (scope === workspaceScope.current) return;
       workspaceScope.current = scope;
+      letterLink.current.handled = true;
+      setLinkError(
+        letterLink.current.id
+          ? "Your workspace changed. Open this letter from Filey AI again in the correct workspace."
+          : ""
+      );
       operation.current = null;
       setBusy(false);
       setForm(null);
@@ -210,13 +229,49 @@ export default function Letter() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  const open = (next: LetterForm, record: LetterRecord | null = null) => {
+  const open = useCallback((next: LetterForm, record: LetterRecord | null = null) => {
     if (renderScope !== agentStorageScope()) return;
     editorScope.current = agentStorageScope();
     baseline.current = JSON.stringify(next);
     setEditing(record);
     setForm(next);
-  };
+  }, [renderScope]);
+  useEffect(() => {
+    if (letterLink.current.id !== requestedLetterId) {
+      letterLink.current = {
+        id: requestedLetterId,
+        scope: renderScope,
+        handled: false,
+      };
+      setLinkError("");
+    }
+    const request = letterLink.current;
+    if (!requestedLetterId || request.handled) return;
+    if (request.scope !== agentStorageScope() || renderScope !== agentStorageScope()) {
+      request.handled = true;
+      setLinkError("Your workspace changed. Open this letter from Filey AI again in the correct workspace.");
+      return;
+    }
+    if (loading || error || busy) return;
+    if (dirty) {
+      setLinkError("This letter has unsaved changes. Save your changes or go Back before opening the requested letter.");
+      return;
+    }
+    request.handled = true;
+    const record = records.find((letter) => letter.id === requestedLetterId);
+    if (!record) {
+      setLinkError("This letter was not found in this workspace. It may have been deleted. Open another saved letter or return to Filey AI.");
+      return;
+    }
+    try {
+      const displayed = letterDisplayForm(record);
+      setPreview(null);
+      setLinkError("");
+      open(displayed, record);
+    } catch (failure) {
+      setLinkError(errMsg(failure));
+    }
+  }, [requestedLetterId, records, loading, error, busy, dirty, renderScope, open]);
   const showPreview = (document: LetterForm) => {
     if (renderScope === agentStorageScope()) setPreview(document);
   };
@@ -364,6 +419,7 @@ export default function Letter() {
 
   return (
     <>
+      {linkError && <div className="mb-4"><ErrorBanner message={linkError} /></div>}
       {form ? (
         <LetterEditor
           form={form}
@@ -558,7 +614,8 @@ export default function Letter() {
         size="document"
       >
         {preview && (
-          <div className="mx-auto max-w-[900px]">
+          <div className="letter-preview-scroll" role="region" aria-label="Letter preview" tabIndex={0}>
+            <div className="mx-auto w-full max-w-[900px]">
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
@@ -572,6 +629,7 @@ export default function Letter() {
               </button>
             </div>
             <LetterPreview form={preview} />
+            </div>
           </div>
         )}
       </Modal>

@@ -46,6 +46,17 @@ describe("Markdown", () => {
     expect(container.textContent).not.toContain("##");
   });
 
+  it("opens saved letter links in this workspace while keeping arbitrary routes inert", () => {
+    const { container } = render(<Markdown text="[Open draft](#/letters?letter=abc-123_xyz) [Settings](#/settings?section=credentials) [Injected](#/letters?letter=abc%2Fsettings) [External](https://gofiley.com)" />);
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "#/letters?letter=abc-123_xyz");
+    expect(links[0]).not.toHaveAttribute("target");
+    expect(links[1]).toHaveAttribute("target", "_blank");
+    expect(container.textContent).toContain("Settings");
+    expect(container.textContent).toContain("Injected");
+  });
+
   it("survives an unterminated code fence mid-stream", () => {
     const { container } = render(<Markdown text={"Working:\n```\nhalf a line"} />);
     expect(container.querySelector("pre")?.textContent).toBe("half a line");

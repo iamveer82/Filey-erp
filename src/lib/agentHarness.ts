@@ -714,7 +714,11 @@ export async function* runAgentStream(
   };
   let plan: AgentPlanStep[] = [];
   /** Domains the model has asked for this run (see toolsets.ts). */
-  const opened = new Set<string>();
+  // Letter formatting schemas are useful for letters, expensive for ordinary
+  // chat. Preload only when the current user names a letter task; capability
+  // and access-mode gates still filter every offered tool and dispatched call.
+  const currentRequest = [...messages].reverse().find(message => message.role === "user")?.text ?? "";
+  const opened = new Set<string>(/\bletters?\b/i.test(currentRequest) ? ["letters"] : []);
   const discovered = new Set<string>();
   let observedThrough = 0;
   let completionChecks = 0;

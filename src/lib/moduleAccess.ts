@@ -43,6 +43,7 @@ const toolModules: Record<string,string> = {
   find_suppliers:"suppliers",create_supplier:"suppliers",financial_summary:"accounting",
   list_invoices:"invoicing",get_invoice:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",
   create_quote:"quoting",list_templates:"invoicing",create_order:"orders",
+  get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
   create_payment_receipt:"payment-receipts",list_payment_receipts:"payment-receipts",
   create_purchase_order:"purchase-orders",create_purchase_invoice_draft:"purchase-invoices",list_purchase_invoices:"purchase-invoices",
   list_bank_accounts:"bank-accounts",list_cheques:"cheques",record_cheque:"cheques",

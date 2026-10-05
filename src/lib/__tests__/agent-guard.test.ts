@@ -72,6 +72,45 @@ describe("repeated calls", () => {
     expect(g.before("list_invoices", {})).toEqual({});
     expect(g.before("create_invoice_draft", { customer: "Acme" }).short).toBeDefined();
   });
+  it("verifies a letter after an ambiguous revision without replaying the write or erasing its receipt", () => {
+    const g = createGuard();
+    const lookup = { letter_id: "letter-1" };
+    const revision = { ...lookup, expected_revision: 1, changes: { body: "Updated introduction" } };
+    g.after("get_letter", lookup, { id: "letter-1", revision: 1, body: "Original introduction" });
+    const uncertain = { error: "The save acknowledgement was lost. Verify the letter.", retry_safe: false };
+    // The database accepted revision 2 before the connection dropped. The
+    // next verification must read it, not reuse the prior revision snapshot.
+    g.after("revise_letter_draft", revision, uncertain);
+    expect(g.before("get_letter", lookup)).toEqual({});
+    g.after("get_letter", lookup, { id: "letter-1", revision: 2, body: "Updated introduction" });
+    expect(g.before("get_letter", lookup).short).toMatchObject({ revision: 2 });
+    expect(g.before("revise_letter_draft", revision).short).toMatchObject({ previous_result: uncertain, retry_safe: false });
+    expect(g.unresolvedFailures()).toMatchObject([{ name: "revise_letter_draft", args: revision }]);
+    expect(g.summary()).toContain(uncertain.error);
+  });
+  it("refreshes observations after an unconfirmed invoice send and still refuses a duplicate delivery", () => {
+    const g = createGuard();
+    const args = { invoice_number: "INV-1" };
+    g.after("get_invoice", args, { status: "draft" });
+    g.after("list_invoices", {}, { invoices: [{ number: "INV-1", status: "draft" }] });
+    const uncertain = { error: "Delivery unconfirmed", retry_safe: false };
+    g.after("send_invoice", args, uncertain);
+    expect(g.before("get_invoice", args)).toEqual({});
+    expect(g.before("list_invoices", {})).toEqual({});
+    g.after("get_invoice", args, { status: "sent" });
+    expect(g.before("send_invoice", args).short).toMatchObject({ previous_result: uncertain, retry_safe: false });
+    expect(g.unresolvedFailures()).toHaveLength(1);
+  });
+  it("retains reads after trusted preflight rejection but not provider-declared validation failures", () => {
+    const g = createGuard();
+    const lookup = { letter_id: "letter-1" };
+    const snapshot = { id: "letter-1", revision: 1 };
+    g.after("get_letter", lookup, snapshot);
+    g.after("revise_letter_draft", { ...lookup, expected_revision: "wrong" }, { error: "Invalid revision", code: "invalid_arguments" }, true);
+    expect(g.before("get_letter", lookup).short).toBe(snapshot);
+    g.after("revise_letter_draft", { ...lookup, expected_revision: 1 }, { error: "Outcome uncertain", code: "invalid_arguments", retry_safe: true });
+    expect(g.before("get_letter", lookup)).toEqual({});
+  });
   it("always takes a fresh computer screenshot", () => {
     const g = createGuard();
     g.after("computer_use", { action: "screenshot", window_id: "1" }, { snapshot_id: "old" });
@@ -151,6 +190,19 @@ describe("invoice recovery scope", () => {
 });
 
 describe("run summary", () => {
+  it.each(["letter_id", "letter_number"])("resolves only trusted letter schema failures for the same %s", target => {
+    const g = createGuard();
+    const name = "revise_letter_draft";
+    g.after(name, { [target]: "first", expected_revision: "wrong" }, { error: "Invalid revision" }, true);
+    g.after(name, { [target]: "second", expected_revision: 1 }, { ok: true });
+    expect(g.unresolvedFailures()).toMatchObject([{ args: { [target]: "first" }, invalidArguments: true }]);
+    g.after(name, { [target]: "first", expected_revision: 1 }, { ok: true });
+    expect(g.unresolvedFailures()).toEqual([]);
+    g.after(name, { [target]: "third", expected_revision: 1 }, { error: "Unknown save outcome", code: "invalid_arguments" });
+    g.after(name, { [target]: "third", expected_revision: 2 }, { ok: true });
+    expect(g.unresolvedFailures()).toMatchObject([{ args: { [target]: "third" } }]);
+    expect(g.unresolvedFailures()[0].invalidArguments).toBeUndefined();
+  });
   it("resolves trusted schema rejections only for the same invoice and preserves actual failed writes", () => {
     const g = createGuard();
     const name = "update_invoice_appearance";

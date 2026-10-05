@@ -60,6 +60,13 @@ export const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    id: "letters",
+    name: "Company letters",
+    description: "Create and revise letter drafts, read saved letters and export PDFs. Review and issue in Letter.",
+    tools: ["get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
+    readOnlyTools: ["get_letter_context", "list_letters", "get_letter"],
+  },
+  {
     id: "links",
     name: "Record links",
     description:

@@ -1,6 +1,6 @@
 import type { LetterheadInfo } from "../components/Letterhead";
 import type { StampSig } from "../components/StampSignature";
-import { getCacheScope } from "./api";
+import { getCacheIdentity, getCacheScope } from "./api";
 import { assertWorkspaceCurrent, effectiveDataMode } from "./dataMode";
 import { todayYmd } from "./format";
 import { withLocalTransaction } from "./localdb";
@@ -424,14 +424,26 @@ function parseRecords(value: string | undefined): LetterRecord[] {
   }
 }
 
-async function settingRow(expected: string, client: ReturnType<typeof sb>) {
-  scope(expected);
+/** Capture the account generation as well as its name. A queued operation must
+ * not become valid again after switching away from a workspace and back. */
+function executionCheck(assertCurrent?: () => void): () => void {
+  const identity = getCacheIdentity();
+  return () => {
+    assertCurrent?.();
+    if (identity !== getCacheIdentity())
+      throw new Error("Your workspace changed. Reopen Letter before continuing.");
+  };
+}
+
+async function settingRow(expected: string, client: ReturnType<typeof sb>, assertCurrent: () => void) {
+  const check = () => { scope(expected); assertCurrent(); };
+  check();
   await requireModuleAccess("letters");
-  scope(expected);
+  check();
   let userId: string | undefined, orgId: string | undefined;
   if (expected.startsWith("cloud:")) {
     const { data, error } = await supabase!.auth.getSession();
-    scope(expected);
+    check();
     if (error) throw error;
     userId = data.session?.user.id;
     const account = getCacheScope()!;
@@ -445,7 +457,7 @@ async function settingRow(expected: string, client: ReturnType<typeof sb>) {
     .eq("key", LETTER_SETTING_KEY);
   if (orgId) query = query.eq("org_id", orgId);
   const { data, error } = await query.limit(2);
-  scope(expected);
+  check();
   if (error) throw error;
   if (!Array.isArray(data) || data.length > 1)
     throw new Error(
@@ -475,34 +487,44 @@ async function settingRow(expected: string, client: ReturnType<typeof sb>) {
   return { row, records: parseRecords(row?.value), userId, orgId };
 }
 
-export async function loadLetters(): Promise<LetterRecord[]> {
+export async function loadLetters(assertCurrent?: () => void): Promise<LetterRecord[]> {
   const expected = scope();
-  return (await settingRow(expected, sb())).records;
+  const check = executionCheck(assertCurrent);
+  check();
+  return (await settingRow(expected, sb(), check)).records;
 }
 
 async function changeRecords<T>(
   expected: string,
   change: (records: LetterRecord[]) => { records: LetterRecord[]; result: T },
-  client: ReturnType<typeof sb>
+  client: ReturnType<typeof sb>,
+  assertCurrent: () => void
 ): Promise<T> {
   // Low-volume correspondence shares one JSON setting; CAS preserves edits
   // from another window without adding a separate document/sync subsystem.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { row, records, userId, orgId } = await settingRow(expected, client);
+    const { row, records, userId, orgId } = await settingRow(expected, client, assertCurrent);
+    assertCurrent();
     const next = change(records);
     scope(expected);
+    assertCurrent();
     const value = JSON.stringify(next.records);
     if (row) {
       let query = client.from("app_settings").update({ value }).eq("id", row.id);
       query = orgId
         ? query.eq("org_id", orgId).eq("sync_revision", row.sync_revision!)
         : query.eq("value", row.value);
+      assertCurrent();
       const { data, error } = await query.select("id").maybeSingle();
       scope(expected);
+      assertCurrent();
       if (error) throw error; // Unknown write outcomes must never be retried.
       if (!data) continue;
+      if (!["number", "string"].includes(typeof data.id) || !Number.isSafeInteger(Number(data.id)) || Number(data.id) <= 0 || Number(data.id) !== row.id)
+        throw new Error("The letter save could not be confirmed. Check your letters before trying again.");
     } else {
-      const { error } = await client
+      assertCurrent();
+      const { data, error } = await client
         .from("app_settings")
         .insert({
           key: LETTER_SETTING_KEY,
@@ -512,8 +534,11 @@ async function changeRecords<T>(
         .select("id")
         .single();
       scope(expected);
+      assertCurrent();
       if (error?.code === "23505") continue;
       if (error) throw error;
+      if (!data || !["number", "string"].includes(typeof data.id) || !Number.isSafeInteger(Number(data.id)) || Number(data.id) <= 0)
+        throw new Error("The letter save could not be confirmed. Check your letters before trying again.");
     }
     return next.result;
   }
@@ -521,18 +546,22 @@ async function changeRecords<T>(
 }
 
 function mutate<T>(
-  change: (records: LetterRecord[]) => { records: LetterRecord[]; result: T }
+  change: (records: LetterRecord[]) => { records: LetterRecord[]; result: T },
+  assertCurrent?: () => void
 ): Promise<T> {
   const expected = scope();
+  const check = executionCheck(assertCurrent);
   const operation = writes.then(async () => {
     scope(expected);
+    check();
     const client = sb();
     const result = expected.startsWith("local:")
       ? await withLocalTransaction((tx) =>
-          changeRecords(expected, change, tx as unknown as ReturnType<typeof sb>)
+          changeRecords(expected, change, tx as unknown as ReturnType<typeof sb>, check)
         )
-      : await changeRecords(expected, change, client);
+      : await changeRecords(expected, change, client, check);
     scope(expected);
+    check();
     notifyDataChanged(["app_settings"]);
     return result;
   });
@@ -547,7 +576,8 @@ export async function saveLetter(
   form: LetterForm,
   id?: string,
   expectedRevision?: number,
-  expectedUpdatedAt?: string
+  expectedUpdatedAt?: string,
+  assertCurrent?: () => void
 ): Promise<LetterRecord> {
   validateLetterForm(form);
   const content = savedForm(form);
@@ -594,7 +624,7 @@ export async function saveLetter(
       records: [record, ...records.filter((item) => item.id !== recordId)],
       result: record,
     };
-  });
+  }, assertCurrent);
 }
 
 export async function deleteLetter(
