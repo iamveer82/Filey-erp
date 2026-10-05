@@ -780,7 +780,7 @@ const NAV_PAGES = [
 export const TOOLS: ToolDef[] = [
   {
     name: "get_letter_context",
-    description: "Read saved company text, available letterhead and letter layouts before drafting. Private signature, stamp and letterhead images are never returned. Letters do not require a customer or supplier record.",
+    description: "Read saved company text, available letterhead and letter layouts before drafting. Load use_toolset('letters') in the same round if draft/edit tools are not yet offered. Private images are never returned. Letters do not require a customer or supplier record.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     run: getAgentLetterContext,
   },
