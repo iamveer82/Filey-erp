@@ -376,6 +376,7 @@ export const tools: ToolDef[] = [
         .select("id, number, customer_name, customer_email, status, issue_date, due_date, currency, doc_type, tax_rate, discount, round_off, unit_price_formula")
         .eq("org_id", ctx.orgId)
         .eq("number", args.number)
+        .or(SALES_ONLY)
         .maybeSingle();
       if (error) throw new Error(`invoice_docs query failed: ${error.message}`);
       if (!head) return { error: `Invoice '${args.number}' not found.` };

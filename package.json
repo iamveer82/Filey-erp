@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:hermes": "node --test agent-runtime/service/*.test.mjs",
     "test:rls": "node scripts/rls-test.mjs",
     "test:rls:local": "node scripts/test-rls-local.mjs",
     "typecheck": "tsc --noEmit",

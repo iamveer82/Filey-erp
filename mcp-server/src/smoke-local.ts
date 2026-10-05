@@ -147,6 +147,8 @@ async function main(): Promise<void> {
   assert.equal(one.items.length, 2, "line items joined by invoice_id");
   assert.equal(one.net, 300, "10*25 + 1*50");
   assert.equal(one.total, 315, "net + 5% tax");
+  assert.match((await call("get_invoice", { number: "BILL-2025-0007" })).error, /not found/,
+    "purchase documents are not accessible through a sales invoice lookup");
 
   const found = noError(await call("find_customer", { query: "acme" }), "find_customer");
   assert.equal(found.count, 1, "ilike is case-insensitive");

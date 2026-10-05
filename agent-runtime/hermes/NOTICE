@@ -1,0 +1,5 @@
+Filey Hermes pilot uses the pinned Nous Research Hermes Agent source.
+Upstream: https://github.com/NousResearch/hermes-agent
+Revision: 79af3f6cea8067284a7ea5725078578b3f790adb
+The upstream MIT license is retained in LICENSE.hermes and in every extracted source tree.
+Filey runner policy and HTTP bridge are separate integration code; no upstream source patches.

@@ -6,6 +6,35 @@ on:
   pull_request:
 
 jobs:
+  hermes-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --prefix mcp-server --no-audit --no-fund
+      - run: npm run build --prefix mcp-server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.0'
+      - name: Prepare isolated hash-locked runtime and checksum-pinned source
+        run: |
+          python -m venv "$RUNNER_TEMP/filey-hermes-venv"
+          "$RUNNER_TEMP/filey-hermes-venv/bin/python" -m pip install --require-hashes -r agent-runtime/hermes/requirements.lock
+          python -B agent-runtime/hermes/bootstrap.py --cache "$RUNNER_TEMP/filey-hermes-source" --source-only
+      - name: Verify actual Hermes core without paid inference or customer data
+        run: |
+          export FILEY_HERMES_TEST_SOURCE_DIR="$RUNNER_TEMP/filey-hermes-source/79af3f6cea8067284a7ea5725078578b3f790adb/hermes-agent-79af3f6cea8067284a7ea5725078578b3f790adb"
+          "$RUNNER_TEMP/filey-hermes-venv/bin/python" -B -m unittest discover -s agent-runtime/hermes/tests -v
+      - name: Build and verify a nonroot sandbox with no Internet route
+        run: |
+          docker build --tag filey-hermes-pilot agent-runtime/hermes
+          docker run --rm --read-only --user 10001:10001 --network none --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 768m --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 --env FILEY_HERMES_TEST_SOURCE_DIR=/var/lib/filey-hermes/79af3f6cea8067284a7ea5725078578b3f790adb/hermes-agent-79af3f6cea8067284a7ea5725078578b3f790adb --entrypoint /opt/filey/venv/bin/python filey-hermes-pilot -B -m unittest discover -s /opt/filey/hermes/tests -v
+      - name: Verify service through the actual isolated worker and scoped MCP relay
+        run: |
+          export FILEY_HERMES_TEST_IMAGE="$(docker inspect --format '{{.Id}}' filey-hermes-pilot)"
+          node --test agent-runtime/service/hermes-integration.test.mjs
   build:
     runs-on: ubuntu-latest
     steps:
@@ -39,6 +68,8 @@ jobs:
       - run: npm audit --omit=dev --prefix mcp-server
       - run: npm run build --prefix mcp-server
       - run: npm run smoke:local --prefix mcp-server
+      - run: npm run smoke:pilot --prefix mcp-server
+      - run: npm run test:hermes
       - run: npm run test:browser:tools
       - run: node tools/wa-bridge/check-media.mjs
       - uses: oven-sh/setup-bun@v2

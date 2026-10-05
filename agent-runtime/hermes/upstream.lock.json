@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "revision": "79af3f6cea8067284a7ea5725078578b3f790adb",
+  "archive_url": "https://codeload.github.com/NousResearch/hermes-agent/zip/79af3f6cea8067284a7ea5725078578b3f790adb",
+  "archive_sha256": "bbc63512443664d531e85484e11d43175c46fc48bf864e36c3fe55744071c82d",
+  "python": "3.14.0",
+  "source_patches": []
+}
