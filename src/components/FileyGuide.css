@@ -24,6 +24,7 @@
   .filey-guide-footer .btn-primary, .filey-guide-footer .btn-secondary { min-height: 44px; }
 }
 @media (max-width: 359px) {
-  /* Search is also available inside the sidebar; keep the section title readable. */
-  .workspace-header:has(.filey-guide-launcher) .workspace-header-search { display: none; }
+  /* The page still has its heading; retain every touch action on narrow phones. */
+  .workspace-header:has(.filey-guide-launcher) { gap: 4px; }
+  .workspace-header:has(.filey-guide-launcher) > span { display: none; }
 }
