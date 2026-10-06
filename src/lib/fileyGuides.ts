@@ -92,14 +92,14 @@ export const GUIDES: readonly FileyGuide[] = [
     "category": "Documents & data",
     "title": "Create and issue a company letter",
     "to": "/letters",
-    "summary": "Build custom correspondence on your company's letterhead and keep the issued copy.",
+    "summary": "Write and format a letter on a document page, then keep its issued company copy.",
     "steps": [
-      "Open Tools → Letter and choose New letter. Company details, logo, saved letterhead, signature and stamp are copied from Company Details; review them in Details and Appearance.",
-      "Enter a letter title and recipient. Start with authorization or general declaration wording, or write your own text. Replace bracketed starter instructions before issuing.",
-      "Use Add block for paragraphs, custom label/value fields, dates, signatures or stamps. Drag a block by its handle, use the up/down arrows, or use the keyboard to change its order.",
-      "In Content, choose a Formatting target: All body text, Letter title, or a specific paragraph, field or date. Clicking a paragraph also selects it. Apply a font, point size, bold, italic, underline, color, alignment, line spacing or paragraph spacing to that target.",
-      "In Appearance, choose a layout and use the switches for company details, saved company letterhead, company logo, saved signature and company stamp. Show letter reference is optional; the internal letter number still identifies the saved letter.",
-      "Review every preview page and save a draft while preparing the document. Choose Issue letter after reviewing the content. Issuing saves its content, formatting, layout and company asset references. Download the PDF; issuing alone does not send a message or prove the recipient received it. Find issued letters on the Letter dashboard. To revise an issued letter, duplicate it into a new draft. Cloud workspaces require the Letter migration and access to the Letter module."
+      "Open Tools → Letter and choose New letter. Enter a letter title above the page to identify it on your dashboard. Company details and saved images are copied from Company Details; review the issue date, internal number and layout in Page & company settings.",
+      "Click the blank letter canvas and type the recipient, address, subject, greeting, letter and sign-off directly on the page. Press Enter for a new paragraph or Shift + Enter for a line break. Select the words you want to format.",
+      "Use the top editing ribbon for text styles, fonts, bold, italic, underline, color and alignment. Enter your own point size, line spacing or paragraph spacing; After controls the gap after the selected paragraph. Use Undo and Redo, lists or quotes as needed. On a phone, choose More tools to reveal the additional controls.",
+      "Use Insert to add the issue date, authorization wording, a company signature or a company stamp at the cursor. Replace bracketed starter instructions with the correct details. Saved signature and stamp images appear when their switches are enabled; an empty slot provides space for manual signing or stamping.",
+      "In Page & company settings, choose a layout and use the switches for company details, saved company letterhead, company logo, saved signature and company stamp. Show letter reference is optional; the internal number still identifies the saved letter. Choose Preview to check the final A4 page breaks and every printed page.",
+      "Choose Save draft while preparing the letter. After reviewing it, choose Issue letter to keep its content, formatting, layout and company asset references, then download PDF. Issuing does not send a message or confirm receipt. Find issued copies on the Letter dashboard and use Duplicate draft to revise one. Cloud workspaces require the Letter migration and access to the Letter module."
     ],
     "moduleId": "letters"
   },

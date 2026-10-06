@@ -5,12 +5,15 @@ import { readFileSync } from 'node:fs';
 import { featureFunctionSources, featureSchemaIssues } from './runtime-schema-checks.mjs';
 
 const migration = name => readFileSync(new URL(`../supabase/${name}`, import.meta.url), 'utf8');
-const sources = featureFunctionSources(migration('2026-10-03-letters.sql'), migration('2026-10-03-stocktake-reliability.sql'));
+const sources = featureFunctionSources(migration('2026-10-03-letters.sql'), migration('2026-10-03-stocktake-reliability.sql'), migration('2026-10-06-letter-rich-document.sql'));
 const fixture = () => ({
   functions: [
     ['filey_can_use', 'text', 'boolean', true, false],
     ['filey_setting_access', 'text, boolean', 'boolean', true, false],
     ['filey_letter_text_style_valid', 'jsonb', 'boolean', false, true],
+    ['filey_letter_rich_text_units', 'text', 'integer', false, false],
+    ['filey_letter_rich_node_stats', 'jsonb, text, integer, integer', 'integer[]', false, false],
+    ['filey_letter_rich_document_valid', 'jsonb', 'boolean', false, false],
     ['filey_letter_form_format_valid', 'jsonb', 'boolean', false, true],
     ['filey_validate_letter_setting', '', 'trigger', false, true],
     ['filey_record_stocktake', 'bigint, numeric, numeric, uuid', 'numeric', false, false],
@@ -43,7 +46,7 @@ const check = catalog => featureSchemaIssues(catalog, sources);
 
 test('accepts the current migrated catalog including safe pure validation functions', () => {
   assert.deepEqual(check(fixture()), []);
-  assert.equal(sources.size, 5);
+  assert.equal(sources.size, 8);
 });
 test('rejects a Packaging replay after Letters even when declaration_letters contains letters', () => {
   const catalog = fixture();

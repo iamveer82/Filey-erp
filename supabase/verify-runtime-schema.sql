@@ -10,6 +10,7 @@ select jsonb_build_object(
    'service_role',has_function_privilege((select oid from pg_roles where rolname='service_role'),p.oid,'execute'),
    'executor',has_function_privilege((select oid from pg_roles where rolname='filey_workflow_executor'),p.oid,'execute'),'owner',pg_get_userbyid(p.proowner),
    'source',case when p.proname in ('filey_setting_access','filey_record_stocktake','filey_letter_text_style_valid','filey_letter_form_format_valid','filey_validate_letter_setting',
+     'filey_letter_rich_text_units','filey_letter_rich_node_stats','filey_letter_rich_document_valid',
      'filey_reserve_document_number','filey_document_numbers','filey_document_number_guard','filey_setting_number_guard',
      'filey_generate_recurring_invoice','filey_recurring_items_owned','filey_record_lead','filey_settle_stripe_checkout',
      'filey_workflow_children_owned','filey_workflow_totals',

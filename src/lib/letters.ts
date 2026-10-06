@@ -3,6 +3,7 @@ import type { StampSig } from "../components/StampSignature";
 import { getCacheIdentity, getCacheScope } from "./api";
 import { assertWorkspaceCurrent, effectiveDataMode } from "./dataMode";
 import { todayYmd } from "./format";
+import { letterRichText, validateLetterRichDocument, type LetterRichDocument } from "./letterRichText";
 import { withLocalTransaction } from "./localdb";
 import { requireModuleAccess } from "./moduleAccess";
 import { notifyDataChanged } from "./realtime";
@@ -63,6 +64,8 @@ export interface LetterForm {
   stamp?: StampSig;
   signature?: StampSig;
   blocks: LetterBlock[];
+  /** Optional safe editor JSON. Legacy forms remain unchanged until edited. */
+  rich_document?: LetterRichDocument;
 }
 
 export interface LetterRecord {
@@ -338,6 +341,10 @@ export function validateLetterForm(form: LetterForm): void {
   }
   if (length > 250_000)
     throw new Error("Letter content must be at most 250000 characters.");
+  if (form.rich_document !== undefined) {
+    validateLetterRichDocument(form.rich_document);
+    content = !!letterRichText(form.rich_document).trim();
+  }
   if (issued && !content) throw new Error("Add letter content before issuing.");
 }
 

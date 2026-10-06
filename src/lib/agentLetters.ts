@@ -16,6 +16,7 @@ import {
   type LetterRecord,
 } from "./letters";
 import type { DeliveredFile } from "./agentFiles";
+import { letterRichDocument, letterRichDocumentToLegacy, letterRichText } from "./letterRichText";
 
 const LAYOUTS = ["letter-standard", "letter-modern", "letter-formal"] as const;
 const TEXT_FIELDS = ["title", "issue_date", "recipient_name", "recipient_address", "salutation", "body", "closing", "signatory_name", "signatory_title", "accent"] as const;
@@ -181,11 +182,28 @@ export async function getAgentLetterContext(args: Record<string, unknown>, signa
 }
 
 function missing(form: LetterForm): string[] {
-  const fields = ["title", "company_name", "recipient_name", "signatory_name", "signatory_title"] as const;
-  const result: string[] = fields.filter(key => !form[key].trim());
-  if (!form.body.trim() && !form.blocks.some(block => block.type === "text" ? !!block.text.trim() : (block.type === "field" || block.type === "date") && !!block.value.trim())) result.push("content");
+  const fields = form.rich_document
+    ? (["title", "company_name"] as const)
+    : ([
+        "title",
+        "company_name",
+        "recipient_name",
+        "signatory_name",
+        "signatory_title",
+      ] as const);
+  const result: string[] = fields.filter((key) => !form[key].trim());
+  if (
+    !form.body.trim() &&
+    !form.blocks.some((block) =>
+      block.type === "text"
+        ? !!block.text.trim()
+        : (block.type === "field" || block.type === "date") && !!block.value.trim()
+    )
+  )
+    result.push("content");
   form.blocks.forEach((block, index) => {
-    if ((block.type === "field" || block.type === "date") && !block.value.trim()) result.push(`blocks.${index}.value`);
+    if ((block.type === "field" || block.type === "date") && !block.value.trim())
+      result.push(`blocks.${index}.value`);
   });
   return result;
 }
@@ -221,14 +239,47 @@ export async function listAgentLetters(args: Record<string, unknown>, signal?: A
   return { count: matches.length, letters: matches.slice(0, limit).map(summary), navigation: "/letters" };
 }
 
-export async function getAgentLetter(args: Record<string, unknown>, signal?: AbortSignal) {
+export async function getAgentLetter(
+  args: Record<string, unknown>,
+  signal?: AbortSignal
+) {
   object(args, ["letter_id"]);
-  const check = await execution(signal), record = await recordById(args, check), form = letterDisplayForm(record);
-  const editable = Object.fromEntries(PATCH_KEYS.map(key => [key, key === "blocks"
-    ? form.blocks.map(({ id: _id, ...block }) => block) : form[key as keyof LetterForm]]));
-  return { ...summary(record), form: { ...editable, company_name: form.company_name, company_address: form.company_address,
-    company_email: form.company_email, company_phone: form.company_phone, company_trn: form.company_trn },
-    assets_available: { letterhead: !!form.letterhead?.background, logo: !!form.company_logo, signature: !!form.signature?.data, stamp: !!form.stamp?.data } };
+  const check = await execution(signal),
+    record = await recordById(args, check),
+    form = letterDisplayForm(record);
+  const editable = Object.fromEntries(
+    PATCH_KEYS.map((key) => [
+      key,
+      key === "blocks"
+        ? form.blocks.map(({ id: _id, ...block }) => block)
+        : form[key as keyof LetterForm],
+    ])
+  );
+  return {
+    ...summary(record),
+    form: {
+      ...editable,
+      company_name: form.company_name,
+      company_address: form.company_address,
+      company_email: form.company_email,
+      company_phone: form.company_phone,
+      company_trn: form.company_trn,
+    },
+    ...(form.rich_document
+      ? {
+          editing_mode: "document",
+          document_text: letterRichText(form.rich_document),
+          editing_guidance:
+            "The canvas contains the complete letter, including recipient, subject and sign-off. For a rewrite, supply the complete new body and empty blocks; do not repeat the old separate prose fields.",
+        }
+      : {}),
+    assets_available: {
+      letterhead: !!form.letterhead?.background,
+      logo: !!form.company_logo,
+      signature: !!form.signature?.data,
+      stamp: !!form.stamp?.data,
+    },
+  };
 }
 
 function assertImages(form: LetterForm): void {
@@ -237,9 +288,60 @@ function assertImages(form: LetterForm): void {
 }
 
 function applyPatch(form: LetterForm, changes: Partial<LetterForm>): LetterForm {
-  return { ...form, ...changes,
-    text_style: changes.text_style ? { ...form.text_style, ...changes.text_style } : form.text_style,
-    title_style: changes.title_style ? { ...form.title_style, ...changes.title_style } : form.title_style };
+  const contentChanged = own(changes, "body") || own(changes, "blocks");
+  if (form.rich_document && own(changes, "blocks") && !own(changes, "body"))
+    throw argumentError(
+      "This letter uses a Word canvas. Supply the complete updated body together with blocks, so old canvas wording is explicitly replaced."
+    );
+  if (
+    form.rich_document &&
+    !contentChanged &&
+    [
+      "recipient_name",
+      "recipient_address",
+      "salutation",
+      "closing",
+      "signatory_name",
+      "signatory_title",
+      "text_style",
+      "title_style",
+    ].some((key) => own(changes, key))
+  )
+    throw argumentError(
+      "This letter uses a Word canvas. Read document_text, then supply the complete updated body and blocks to revise its wording or formatting without hiding existing content."
+    );
+  // A Word canvas is authoritative. Never let a legacy tool edit leave a stale
+  // rich copy hiding its changes, or replay separate fields into mirrored prose.
+  const base =
+    form.rich_document && contentChanged
+      ? {
+          ...form,
+          ...letterRichDocumentToLegacy(form.rich_document),
+          rich_document: undefined,
+          recipient_name: "",
+          recipient_address: "",
+          salutation: "",
+          closing: "",
+          signatory_name: "",
+          signatory_title: "",
+        }
+      : form;
+  if (form.rich_document && own(changes, "body") && !own(changes, "blocks"))
+    base.blocks = base.blocks.filter(
+      (block) => block.type === "signature" || block.type === "stamp"
+    );
+  const next = {
+    ...base,
+    ...changes,
+    text_style: changes.text_style
+      ? { ...form.text_style, ...changes.text_style }
+      : form.text_style,
+    title_style: changes.title_style
+      ? { ...form.title_style, ...changes.title_style }
+      : form.title_style,
+  };
+  if (form.rich_document && contentChanged) next.rich_document = letterRichDocument(next);
+  return next;
 }
 
 function savedResult(saved: LetterRecord, form: LetterForm, expectedId?: string, expectedRevision = 1) {

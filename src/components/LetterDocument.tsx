@@ -1,6 +1,11 @@
 import { useEffect, useReducer, type CSSProperties, type RefObject } from "react";
 import { fmtDate } from "../lib/format";
 import type { LetterAlignment, LetterForm, LetterTextStyle } from "../lib/letters";
+import {
+  LETTER_RICH_LIMITS,
+  type LetterRichDocument,
+  type LetterRichNode,
+} from "../lib/letterRichText";
 import { CompanyAssetImage } from "./CompanyAssetImage";
 import { A4_H, A4_W } from "./InvoiceExportSheet";
 import {
@@ -54,7 +59,7 @@ export interface LetterPart {
   kind: PartKind;
   /** Retains the original text, including line breaks, across page boundaries. */
   text: string;
-  align: LetterAlignment;
+  align: LetterAlignment | "justify";
   size: number;
   lineHeight: number;
   weight: number;
@@ -63,6 +68,23 @@ export interface LetterPart {
   asset?: StampSig;
   width?: number;
   font?: string;
+  italic?: boolean;
+  underline?: boolean;
+  color?: string;
+  /** Safe inline styles retained after a rich paragraph wraps onto another sheet. */
+  runs?: LetterInlineRun[];
+  inset?: number;
+  marker?: string;
+  markerSize?: number;
+  quote?: boolean;
+  justifyLine?: boolean;
+  headingLevel?: number;
+}
+export interface LetterInlineRun {
+  text: string;
+  font: string;
+  size: number;
+  weight: number;
   italic?: boolean;
   underline?: boolean;
   color?: string;
@@ -91,6 +113,15 @@ const STYLE_FONTS = {
   modern: "Inter, Arial, sans-serif",
   classic: "'Lora', Georgia, serif",
   mono: "'IBM Plex Mono', monospace",
+};
+const RICH_FONTS: Record<string, string> = {
+  Inter: STYLE_FONTS.modern,
+  Arial: "Arial, sans-serif",
+  Georgia: "Georgia, serif",
+  "Times New Roman": "'Times New Roman', serif",
+  "Courier New": "'Courier New', monospace",
+  Lora: STYLE_FONTS.classic,
+  "IBM Plex Mono": STYLE_FONTS.mono,
 };
 const mergedStyle = (
   global?: LetterTextStyle,
@@ -156,6 +187,292 @@ function wrapText(
     if (line) result.push(line);
   }
   return result;
+}
+
+function inlineStyle(node: LetterRichNode, base: LetterInlineRun): LetterInlineRun {
+  const result = { ...base, text: node.type === "hardBreak" ? "\n" : node.text || "" };
+  for (const mark of node.marks || []) {
+    if (mark.type === "bold") result.weight = 700;
+    if (mark.type === "italic") result.italic = true;
+    if (mark.type === "underline") result.underline = true;
+    if (mark.type !== "textStyle") continue;
+    const attrs = mark.attrs || {};
+    if (typeof attrs.fontFamily === "string" && RICH_FONTS[attrs.fontFamily])
+      result.font = RICH_FONTS[attrs.fontFamily];
+    if (typeof attrs.fontSize === "string" && /^\d+(?:\.\d+)?pt$/.test(attrs.fontSize))
+      result.size =
+        (Math.max(8, Math.min(36, Number.parseFloat(attrs.fontSize))) * 4) / 3;
+    if (typeof attrs.color === "string" && /^#[0-9a-f]{6}$/i.test(attrs.color))
+      result.color = attrs.color;
+  }
+  return result;
+}
+
+function runWidth(run: LetterInlineRun): number {
+  if (context) {
+    context.font = `${run.italic ? "italic " : ""}${run.weight} ${run.size}px ${run.font}`;
+    return context.measureText(run.text.replace(/\t/g, "    ")).width * 1.1;
+  }
+  return (
+    Array.from(run.text).reduce(
+      (sum, character) =>
+        sum +
+        (character.codePointAt(0)! > 255
+          ? 1.05
+          : /monospace/.test(run.font)
+            ? 0.62
+            : /[MWmw@%&]/.test(character)
+              ? 0.92
+              : /[ilI1.,:;!'| ]/.test(character)
+                ? 0.36
+                : 0.68),
+      0
+    ) *
+    run.size *
+    (run.weight >= 600 ? 1.05 : 1) *
+    (run.italic ? 1.04 : 1)
+  );
+}
+
+const Segmenter = (
+  Intl as typeof Intl & {
+    Segmenter?: new (
+      locale?: string,
+      options?: { granularity: "grapheme" }
+    ) => {
+      segment(value: string): Iterable<{ segment: string }>;
+    };
+  }
+).Segmenter;
+const segmenter = Segmenter
+  ? new Segmenter(undefined, { granularity: "grapheme" })
+  : null;
+
+/** Break words across mark boundaries as one word, retaining every styled character. */
+function wrapRuns(runs: LetterInlineRun[], width: number): LetterInlineRun[][] {
+  type Unit = { text: string; style: LetterInlineRun };
+  const tokens: Unit[][] = [];
+  let token: Unit[] = [];
+  let trailingSpace = false;
+  for (const run of runs) {
+    const text = run.text.replace(/\r\n?/g, "\n");
+    const characters = segmenter
+      ? Array.from(segmenter.segment(text), (unit) => unit.segment)
+      : Array.from(text);
+    for (const character of characters) {
+      const whitespace = /[^\S\n]/u.test(character);
+      if (character === "\n" || (!whitespace && trailingSpace)) {
+        if (token.length) tokens.push(token);
+        token = [];
+      }
+      if (character === "\n") tokens.push([{ text: character, style: run }]);
+      else token.push({ text: character, style: run });
+      trailingSpace = whitespace;
+    }
+  }
+  if (token.length) tokens.push(token);
+  const merge = (units: Unit[]): LetterInlineRun[] => {
+    const merged: LetterInlineRun[] = [];
+    let previous: LetterInlineRun | undefined;
+    for (const unit of units) {
+      if (previous === unit.style) merged[merged.length - 1].text += unit.text;
+      else {
+        merged.push({ ...unit.style, text: unit.text });
+        previous = unit.style;
+      }
+    }
+    return merged;
+  };
+  const lines: LetterInlineRun[][] = [];
+  let current: Unit[] = [];
+  let currentWidth = 0;
+  const flush = () => {
+    lines.push(merge(current));
+    current = [];
+    currentWidth = 0;
+  };
+  for (const next of tokens) {
+    if (next[0].text === "\n") {
+      current.push(next[0]);
+      flush();
+      continue;
+    }
+    const tokenWidth = merge(next).reduce((sum, run) => sum + runWidth(run), 0);
+    if (current.length && currentWidth + tokenWidth > width) flush();
+    if (tokenWidth <= width) {
+      current.push(...next);
+      currentWidth += tokenWidth;
+      continue;
+    }
+    for (const unit of next) {
+      const unitWidth = runWidth({ ...unit.style, text: unit.text });
+      if (current.length && currentWidth + unitWidth > width) flush();
+      current.push(unit);
+      currentWidth += unitWidth;
+    }
+  }
+  if (current.length || !lines.length) flush();
+  // A trailing hard break leaves an editable blank line after the preceding one.
+  if (runs[runs.length - 1]?.text.endsWith("\n")) lines.push([]);
+  return lines;
+}
+
+function richParts(
+  form: LetterForm,
+  document: LetterRichDocument,
+  addMark: (
+    sourceId: string,
+    kind: "signature" | "stamp",
+    label: string,
+    align: LetterAlignment,
+    target: LetterPart[]
+  ) => void
+): { parts: LetterPart[]; afterGap: number } {
+  const parts: LetterPart[] = [];
+  // Paragraph spacing is an "After" setting in the Word ribbon. The date /
+  // reference frame supplies the initial separation from the prose.
+  let nextGap = 22;
+  const global = form.text_style || {};
+  const size = (Math.max(8, Math.min(36, global.fontSize ?? 11)) * 4) / 3;
+  const base: LetterInlineRun = {
+    text: "",
+    font: (global.font && STYLE_FONTS[global.font]) || safeFont(form),
+    size,
+    weight: 400,
+    color:
+      global.color && /^#[0-9a-f]{6}$/i.test(global.color) ? global.color : undefined,
+  };
+  const walk = (
+    node: LetterRichNode | LetterRichDocument,
+    path: string,
+    inset = 0,
+    quote = false,
+    marker?: string,
+    depth = 0,
+    markerSize?: number
+  ) => {
+    if (depth > LETTER_RICH_LIMITS.depth) return;
+    if (node.type === "companySignature" || node.type === "companyStamp") {
+      const attrs = node.attrs || {};
+      const start = parts.length;
+      addMark(
+        path,
+        node.type === "companySignature" ? "signature" : "stamp",
+        typeof attrs.label === "string" ? attrs.label : "",
+        ["left", "center", "right"].includes(String(attrs.textAlign))
+          ? (attrs.textAlign as LetterAlignment)
+          : "left",
+        parts
+      );
+      if (parts.length > start) {
+        parts[start].gap = Math.max(nextGap, 20);
+        nextGap = 20;
+      }
+      return;
+    }
+    if (node.type === "paragraph" || node.type === "heading") {
+      const attrs = node.attrs || {};
+      const heading = node.type === "heading";
+      const headingLevel = Math.max(1, Math.min(3, Number(attrs.level) || 1));
+      const paragraphBase = heading
+        ? { ...base, size: ([24, 20, 16][headingLevel - 1] * 4) / 3, weight: 700 }
+        : base;
+      const align = ["left", "center", "right", "justify"].includes(
+        String(attrs.textAlign)
+      )
+        ? (attrs.textAlign as LetterPart["align"])
+        : global.align || "left";
+      const spacing = Math.max(
+        1,
+        Math.min(2.5, Number(attrs.lineSpacing) || global.lineSpacing || 1.5)
+      );
+      const paragraphSpacing = Math.max(
+        0,
+        Math.min(
+          32,
+          typeof attrs.paragraphSpacing === "number"
+            ? attrs.paragraphSpacing
+            : (global.paragraphSpacing ?? 16)
+        )
+      );
+      const runs = (node.content || [])
+        .filter((child) => child.type === "text" || child.type === "hardBreak")
+        .map((child) => inlineStyle(child, paragraphBase));
+      const lines = wrapRuns(runs, Math.max(64, bodyWidth(form) - inset));
+      lines.forEach((line, index) => {
+        const lineSize = line.length
+          ? Math.max(...line.map((run) => run.size))
+          : paragraphBase.size;
+        const lineHeight = lineSize * spacing;
+        parts.push({
+          id: `${path}-${index}`,
+          sourceId: path,
+          kind: "body",
+          text: line.map((run) => run.text).join(""),
+          align,
+          size: lineSize,
+          lineHeight,
+          weight: paragraphBase.weight,
+          gap: index ? 0 : nextGap,
+          height: lineHeight,
+          font: paragraphBase.font,
+          runs: line,
+          inset,
+          marker: index === 0 ? marker : undefined,
+          markerSize,
+          quote,
+          justifyLine:
+            align === "justify" &&
+            index < lines.length - 1 &&
+            !line.some((run) => run.text.endsWith("\n")),
+          headingLevel: heading && index === 0 ? headingLevel : undefined,
+        });
+      });
+      nextGap = paragraphSpacing;
+      return;
+    }
+    if (node.type === "bulletList" || node.type === "orderedList") {
+      const start =
+        node.type === "orderedList"
+          ? Math.max(1, Math.min(9999, Number(node.attrs?.start) || 1))
+          : 1;
+      (node.content || []).forEach((child, index) => {
+        const label = node.type === "orderedList" ? `${start + index}.` : "•";
+        const paragraph = child.content?.find((part) => part.type === "paragraph");
+        const text = paragraph?.content?.find((part) => part.type === "text");
+        const labelSize = text ? inlineStyle(text, base).size : base.size;
+        const indent = Math.max(
+          28,
+          Math.ceil(runWidth({ ...base, text: label, size: labelSize }) + 8)
+        );
+        walk(
+          child,
+          `${path}-${index}`,
+          Math.min(bodyWidth(form) - 64, inset + indent),
+          quote,
+          label,
+          depth + 1,
+          labelSize
+        );
+      });
+      return;
+    }
+    if (node.type === "doc" || node.type === "listItem" || node.type === "blockquote") {
+      (node.content || []).forEach((child, index) =>
+        walk(
+          child,
+          `${path}-${index}`,
+          Math.min(bodyWidth(form) - 64, inset + (node.type === "blockquote" ? 20 : 0)),
+          quote || node.type === "blockquote",
+          index === 0 ? marker : undefined,
+          depth + 1,
+          markerSize
+        )
+      );
+    }
+  };
+  walk(document, "rich");
+  return { parts, afterGap: nextGap };
 }
 
 /** An issued letter can only use the company images saved in its snapshot. */
@@ -252,7 +569,8 @@ function flowParts(form: LetterForm): LetterPart[] {
     kind: "signature" | "stamp",
     label: string,
     align: LetterAlignment,
-    manual = false
+    manual = false,
+    target = parts
   ) => {
     const enabled = kind === "signature" ? form.show_signature : form.show_stamp;
     const asset = enabled && form[kind]?.data ? form[kind] : undefined;
@@ -265,7 +583,7 @@ function flowParts(form: LetterForm): LetterPart[] {
       600
     );
     if (!asset) {
-      parts.push({
+      target.push({
         id: sourceId,
         sourceId,
         kind,
@@ -287,7 +605,7 @@ function flowParts(form: LetterForm): LetterPart[] {
     if (!markWidth) return;
     const markHeight = Math.min(360, markWidth * (kind === "signature" ? 0.5 : 1));
     // Label and image travel together, including when a custom block starts a page.
-    parts.push({
+    target.push({
       id: sourceId,
       sourceId,
       kind,
@@ -355,6 +673,24 @@ function flowParts(form: LetterForm): LetterPart[] {
     `${form.show_reference === false ? "" : `Reference: ${form.number || "—"}    `}Date: ${fmtDate(form.issue_date)}`,
     { size: 10.5, lineHeight: 18, gap: 24 }
   );
+  const richDocument = form.rich_document;
+  if (richDocument) {
+    const flow = richParts(form, richDocument, (id, kind, label, align, target) =>
+      addMark(id, kind, label, align, true, target)
+    );
+    parts.push(...flow.parts);
+    let afterGap = flow.afterGap;
+    for (const kind of ["signature", "stamp"] as const) {
+      if (parts.some((part) => part.kind === kind)) continue;
+      const start = parts.length;
+      addMark(`closing-${kind}`, kind, "", "left");
+      if (parts.length > start) {
+        parts[start].gap = Math.max(afterGap, 20);
+        afterGap = 20;
+      }
+    }
+    return parts;
+  }
   add("recipient-name", "recipient", form.recipient_name, { weight: 600, gap: 22 });
   add("recipient-address", "recipient", form.recipient_address, {
     size: 12,
@@ -593,12 +929,15 @@ export default function LetterDocument({
                   key={part.id}
                   data-letter-source={part.sourceId}
                   data-letter-kind={part.kind}
-                  className={`letter-part letter-${part.kind}`}
+                  className={`letter-part letter-${part.kind}${part.runs ? " letter-rich-line" : ""}${part.quote ? " letter-rich-quote" : ""}`}
                   role={
-                    part.kind === "title" && part.id === "title-0" ? "heading" : undefined
+                    part.headingLevel || (part.kind === "title" && part.id === "title-0")
+                      ? "heading"
+                      : undefined
                   }
                   aria-level={
-                    part.kind === "title" && part.id === "title-0" ? 1 : undefined
+                    part.headingLevel ??
+                    (part.kind === "title" && part.id === "title-0" ? 1 : undefined)
                   }
                   aria-label={
                     part.kind === "title" && part.id === "title-0"
@@ -609,6 +948,7 @@ export default function LetterDocument({
                     height: part.height,
                     marginTop: part.gap,
                     textAlign: part.align,
+                    textAlignLast: part.justifyLine ? "justify" : undefined,
                     fontSize: part.size,
                     lineHeight: `${part.lineHeight}px`,
                     fontWeight: part.weight,
@@ -616,6 +956,8 @@ export default function LetterDocument({
                     fontStyle: part.italic ? "italic" : undefined,
                     textDecoration: part.underline ? "underline" : undefined,
                     color: part.color,
+                    marginLeft: part.inset,
+                    width: part.inset ? `calc(100% - ${part.inset}px)` : undefined,
                   }}
                   dir="auto"
                 >
@@ -632,6 +974,33 @@ export default function LetterDocument({
                         display: "inline-block",
                       }}
                     />
+                  ) : part.runs ? (
+                    <>
+                      {part.marker && (
+                        <span
+                          className="letter-rich-marker"
+                          style={{ fontSize: part.markerSize }}
+                          aria-hidden="true"
+                        >
+                          {part.marker}
+                        </span>
+                      )}
+                      {part.runs.map((run, runIndex) => (
+                        <span
+                          key={runIndex}
+                          style={{
+                            fontFamily: run.font,
+                            fontSize: run.size,
+                            fontWeight: run.weight,
+                            fontStyle: run.italic ? "italic" : "normal",
+                            textDecoration: run.underline ? "underline" : "none",
+                            color: run.color,
+                          }}
+                        >
+                          {run.text.replace(/\r?\n$/, "")}
+                        </span>
+                      ))}
+                    </>
                   ) : (
                     part.text.replace(/\r?\n$/, "")
                   )}

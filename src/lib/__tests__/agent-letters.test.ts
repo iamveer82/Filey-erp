@@ -4,6 +4,7 @@ import { billing, tools } from "../api";
 import { requireModuleAccess } from "../moduleAccess";
 import { allocateDocumentNumber } from "../documentNumbers";
 import * as letters from "../letters";
+import { letterRichDocumentToLegacy, letterRichText, type LetterRichDocument } from "../letterRichText";
 import { reactToPdfBytes } from "../reactPdf";
 import { deliverFile } from "../agentFiles";
 import {
@@ -293,5 +294,95 @@ describe("letter PDF outputs", () => {
     vi.mocked(deliverFile).mockImplementationOnce(async file => { aba(); return { name: file.name, url: "blob:obsolete-letter" }; });
     await expect(exportAgentLetterDraft({ letter_id: saved.id })).rejects.toMatchObject({ name: "AbortError" });
     expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:obsolete-letter");
+  });
+});
+
+describe("Word canvas agent revisions", () => {
+  const richDocument = (): LetterRichDocument => ({ type: "doc", content: [
+    { type: "heading", attrs: { level: 2, textAlign: "center" }, content: [{ type: "text", text: "Authorization letter", marks: [{ type: "bold" }] }] },
+    { type: "paragraph", content: [{ type: "text", text: "Recipient and address" }] },
+    { type: "paragraph", content: [{ type: "text", text: "Original authorized responsibilities", marks: [
+      { type: "italic" }, { type: "textStyle", attrs: { fontFamily: "Lora", fontSize: "12.5pt", color: "#112233" } },
+    ] }] },
+    { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "First responsibility" }] }] }] },
+    { type: "companySignature", attrs: { label: "Authorized signature", textAlign: "right" } },
+  ] });
+  const saveRich = (rich = richDocument()) => letters.saveLetter({ ...letters.blankLetterForm("LTR-WORD"),
+    title: "Authorization letter", company_name: "Example Trading", recipient_name: "Old separate recipient", salutation: "Old separate salutation",
+    closing: "Old separate closing", signatory_name: "Old separate signer", signatory_title: "Old separate role",
+    ...letterRichDocumentToLegacy(rich), rich_document: rich });
+
+  it("reads full canvas prose and editing guidance without exposing company assets", async () => {
+    const draft = await saveRich();
+    const read = await getAgentLetter({ letter_id: draft.id });
+    expect(read).toMatchObject({ editing_mode: "document", document_text: letterRichText(draft.form.rich_document!),
+      editing_guidance: expect.stringContaining("complete new body") });
+    expect(read.field_names_needing_completion).not.toContain("recipient_name");
+    expect(JSON.stringify(read)).not.toContain("letters-user/company/");
+    expect(read.form).not.toHaveProperty("rich_document");
+  });
+
+  it("makes explicit body rewrites visible without stale prose or duplicate titles, retaining company slots", async () => {
+    const draft = await saveRich();
+    await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision,
+      changes: { body: "Authorization letter\nWe authorize the employee for the updated eDAS responsibilities." } });
+    const saved = records()[0];
+    expect(saved.form.rich_document).toBeDefined();
+    const text = letterRichText(saved.form.rich_document!);
+    expect(text).toContain("updated eDAS responsibilities");
+    expect(text.split("Authorization letter")).toHaveLength(2);
+    expect(text).not.toContain("Original authorized responsibilities");
+    expect(text).not.toContain("Old separate");
+    expect(saved.form.rich_document!.content.filter(node => node.type === "companySignature")).toEqual([
+      { type: "companySignature", attrs: { label: "Authorized signature", textAlign: "right" } },
+    ]);
+    expect(saved.form).toMatchObject({ recipient_name: "", recipient_address: "", salutation: "", closing: "", signatory_name: "", signatory_title: "" });
+  });
+
+  it("drops old projected text chunks when replacing a canvas longer than the legacy body limit", async () => {
+    const rich = richDocument();
+    rich.content.splice(1, 0, { type: "paragraph", content: [{ type: "text", text: "Original prefix ".repeat(4000) + "OLD_TAIL_MUST_BE_REMOVED" }] });
+    const draft = await saveRich(rich);
+    expect(draft.form.body).toHaveLength(50_000);
+    expect(draft.form.blocks.some(block => block.type === "text")).toBe(true);
+    await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision,
+      changes: { body: "Authorization letter\nEntirely replacement wording." } });
+    const saved = records()[0];
+    expect(letterRichText(saved.form.rich_document!)).toBe("Authorization letter\nEntirely replacement wording.\n");
+    expect(JSON.stringify(saved.form)).not.toContain("OLD_TAIL_MUST_BE_REMOVED");
+    expect(saved.form.blocks.every(block => block.type === "signature" || block.type === "stamp")).toBe(true);
+  });
+
+  it("retains the exact rich AST and marks for metadata-only revisions", async () => {
+    const draft = await saveRich(), rich = structuredClone(draft.form.rich_document);
+    await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision,
+      changes: { title: "New dashboard title", show_reference: true, issue_date: "2026-10-08" } });
+    expect(records()[0].form.rich_document).toEqual(rich);
+    expect(records()[0].form).toMatchObject({ title: "New dashboard title", show_reference: true, issue_date: "2026-10-08" });
+  });
+
+  it("refuses ambiguous separate prose or style edits before saving or losing rich formatting", async () => {
+    const draft = await saveRich(), before = JSON.stringify(records());
+    const save = vi.spyOn(letters, "saveLetter");
+    for (const changes of [{ recipient_name: "Replacement" }, { recipient_address: "New address" }, { salutation: "Dear person," },
+      { closing: "New closing" }, { signatory_name: "New signer" }, { signatory_title: "New role" },
+      { text_style: { fontSize: 14 } }, { title_style: { bold: false } }]) {
+      const error = await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision, changes }).catch(error => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toContain("Word canvas");
+      expect(isLetterArgumentError(error)).toBe(true);
+      expect(JSON.stringify(records())).toBe(before);
+    }
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("requires complete replacement body for rich block rewrites so removed wording cannot survive in the mirror", async () => {
+    const draft = await saveRich(), before = JSON.stringify(records()), save = vi.spyOn(letters, "saveLetter");
+    await expect(reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision, changes: { blocks: [] } })).rejects.toThrow("complete updated body");
+    expect(save).not.toHaveBeenCalled();
+    expect(JSON.stringify(records())).toBe(before);
+    await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision, changes: { body: "Authorization letter\nReplacement complete letter.", blocks: [] } });
+    expect(letterRichText(records()[0].form.rich_document!)).toBe("Authorization letter\nReplacement complete letter.");
+    expect(JSON.stringify(records()[0].form)).not.toContain("Original authorized responsibilities");
   });
 });
