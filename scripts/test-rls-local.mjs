@@ -80,7 +80,10 @@ try {
   const packagingMigration = sql('supabase/2026-10-01-packaging-lists.sql');
   console.log(run('psql', crmArgs, packagingMigration + '\n' + packagingMigration + '\n' + sql('scripts/fixtures/packaging-assertions.sql')).trim());
   const lettersMigration = sql('supabase/2026-10-03-letters.sql');
-  console.log(run('psql', crmArgs, lettersMigration + '\n' + lettersMigration + '\n' + sql('scripts/fixtures/letters-assertions.sql') + '\n' + sql('scripts/fixtures/packaging-assertions.sql')).trim());
+  const richLetterMigration = sql('supabase/2026-10-06-letter-rich-document.sql');
+  run('psql', crmArgs, 'create role service_role;');
+  console.log(run('psql', crmArgs, lettersMigration + '\n' + lettersMigration + '\n' + richLetterMigration + '\n' + richLetterMigration + '\n'
+    + sql('scripts/fixtures/letters-assertions.sql') + '\n' + sql('scripts/fixtures/letter-rich-assertions.sql') + '\n' + sql('scripts/fixtures/packaging-assertions.sql')).trim());
   // Emulate the already deployed production variant: the expected partial
   // indexes coexist with an older unconditional constraint/index. The checker
   // must fail before the repair, and the repair must preserve all stored values.
@@ -90,7 +93,7 @@ try {
     create unique index fixture_legacy_settings_pair on app_settings(key,user_id);
     create unique index fixture_unrelated_settings_index on app_settings(id,key);`);
   const legacyCatalog = JSON.parse(run('psql', [...crmArgs, '-tA'], sql('supabase/verify-runtime-schema.sql')));
-  assert.deepEqual(featureSchemaIssues(legacyCatalog, featureFunctionSources(lettersMigration, stocktakeMigration)).sort(), [
+  assert.deepEqual(featureSchemaIssues(legacyCatalog, featureFunctionSources(lettersMigration, stocktakeMigration, richLetterMigration)).sort(), [
     'Unexpected global settings uniqueness: app_settings_user_id_key',
     'Unexpected global settings uniqueness: app_settings_user_id_key_key',
     'Unexpected global settings uniqueness: fixture_legacy_settings_pair',
@@ -108,7 +111,7 @@ try {
   assert.equal(run('psql', [...crmArgs, '-tAc', 'select jsonb_agg(to_jsonb(s) order by id) from app_settings s']).trim(), settingsBeforeRepair);
   console.log('PASS: production-named and renamed legacy uniqueness repaired repeatably without changing setting rows.');
   const featureCatalog = JSON.parse(run('psql', [...crmArgs, '-tA'], sql('supabase/verify-runtime-schema.sql')));
-  assert.deepEqual(featureSchemaIssues(featureCatalog, featureFunctionSources(lettersMigration, stocktakeMigration)), []);
+  assert.deepEqual(featureSchemaIssues(featureCatalog, featureFunctionSources(lettersMigration, stocktakeMigration, richLetterMigration)), []);
   console.log('PASS: runtime catalog verifies document indexes/module guards/formatting and stocktake grants/RLS/receipt contract.');
   run('psql', crmArgs, customFieldsMigration + '\n' + customFieldsMigration);
   assert.equal(run('psql', [...crmArgs, '-tAc', "select count(*) from information_schema.columns where table_schema='public' and table_name in ('crm_leads','crm_opportunities','crm_tasks','crm_notes','crm_activities') and column_name='custom_fields' and data_type='jsonb'"]).trim(), '5');
@@ -166,7 +169,7 @@ try {
     `set role authenticated; set test.uid='00000000-0000-0000-0000-000000000001'; select public.register_device('race-${i}')->>'ok';`],{encoding:'utf8',windowsHide:true})));
   assert.equal(deviceRaces.filter(result=>result.stdout.trim()==='true').length,1);
   console.log('PASS: concurrent device registrations cannot exceed 20 slots.');
-  console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql')+'\n'
+  console.log(run('psql',basicArgs,sql('scripts/fixtures/billing-lifecycle-setup.sql').replace(/^create role service_role;\r?\n/m,'')+'\n'
     +sql('supabase/2026-09-19-billing-integrity.sql')+'\n'+sql('scripts/fixtures/billing-lifecycle-assertions.sql')).trim());
   const refundMigration=sql('supabase/2026-09-20-subscription-refunds.sql');
   console.log(run('psql',basicArgs,refundMigration+'\n'+refundMigration+'\n'+sql('scripts/fixtures/subscription-refund-assertions.sql')).trim());

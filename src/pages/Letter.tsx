@@ -1,36 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUp,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Download,
-  Eye,
-  GripVertical,
-  Plus,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Plus } from "lucide-react";
 import { billing, type CompanyProfile } from "../lib/api";
 import {
   AGENT_STORAGE_EVENT,
@@ -52,28 +22,20 @@ import {
   loadLetters,
   saveLetter,
   validateLetterForm,
-  type LetterBlock,
   type LetterForm,
   type LetterRecord,
-  type LetterTextStyle,
 } from "../lib/letters";
 import {
   Badge,
   Card,
   DataTable,
   ErrorBanner,
-  Field,
   FilterChip,
   Modal,
   PageHeader,
   SearchInput,
-  Switch,
 } from "../components/ui";
-import { DateField } from "../components/DatePicker";
-import { SelectMenu } from "../components/ui-menu";
 import { RowActions } from "../components/RowActions";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/Tabs";
-import { ResizablePanels } from "../components/ResizablePanels";
 import FitPreview from "../components/FitPreview";
 import {
   EMPTY_STAMP_SIG,
@@ -86,30 +48,22 @@ import {
   loadLetterhead,
   type LetterheadInfo,
 } from "../components/Letterhead";
-import LetterDocument, {
-  LETTER_TEMPLATES,
-  useLetterPages,
-} from "../components/LetterDocument";
-import { LetterFormatToolbar } from "../components/LetterFormatToolbar";
+import LetterDocument, { useLetterPages } from "../components/LetterDocument";
+
+import { LetterEditor } from "../components/LetterEditor";
+import { letterSearchText } from "../lib/letterRichText";
 
 const filename = (form: LetterForm) =>
   safeName(form.number || "letter")
     .replace(/\.+$/, "")
     .slice(0, 100) || "letter";
-const BLOCKS = [
-  { value: "", label: "Add block…" },
-  { value: "text", label: "Text / paragraph" },
-  { value: "field", label: "Custom field" },
-  { value: "date", label: "Date field" },
-  { value: "signature", label: "Signature" },
-  { value: "stamp", label: "Company stamp" },
-];
 
 export default function Letter() {
   const { toast, confirm } = useUI();
   const [params] = useSearchParams();
   const requestedLetterId = params.get("letter");
   const [records, setRecords] = useState<LetterRecord[]>([]);
+  const [editorSession, setEditorSession] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [linkError, setLinkError] = useState("");
@@ -229,13 +183,17 @@ export default function Letter() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
-  const open = useCallback((next: LetterForm, record: LetterRecord | null = null) => {
-    if (renderScope !== agentStorageScope()) return;
-    editorScope.current = agentStorageScope();
-    baseline.current = JSON.stringify(next);
-    setEditing(record);
-    setForm(next);
-  }, [renderScope]);
+  const open = useCallback(
+    (next: LetterForm, record: LetterRecord | null = null) => {
+      if (renderScope !== agentStorageScope()) return;
+      editorScope.current = agentStorageScope();
+      baseline.current = JSON.stringify(next);
+      setEditing(record);
+      setEditorSession((value) => value + 1);
+      setForm(next);
+    },
+    [renderScope]
+  );
   useEffect(() => {
     if (letterLink.current.id !== requestedLetterId) {
       letterLink.current = {
@@ -249,18 +207,24 @@ export default function Letter() {
     if (!requestedLetterId || request.handled) return;
     if (request.scope !== agentStorageScope() || renderScope !== agentStorageScope()) {
       request.handled = true;
-      setLinkError("Your workspace changed. Open this letter from Filey AI again in the correct workspace.");
+      setLinkError(
+        "Your workspace changed. Open this letter from Filey AI again in the correct workspace."
+      );
       return;
     }
     if (loading || error || busy) return;
     if (dirty) {
-      setLinkError("This letter has unsaved changes. Save your changes or go Back before opening the requested letter.");
+      setLinkError(
+        "This letter has unsaved changes. Save your changes or go Back before opening the requested letter."
+      );
       return;
     }
     request.handled = true;
     const record = records.find((letter) => letter.id === requestedLetterId);
     if (!record) {
-      setLinkError("This letter was not found in this workspace. It may have been deleted. Open another saved letter or return to Filey AI.");
+      setLinkError(
+        "This letter was not found in this workspace. It may have been deleted. Open another saved letter or return to Filey AI."
+      );
       return;
     }
     try {
@@ -281,34 +245,38 @@ export default function Letter() {
       records.map((record) => record.form.number),
       formats
     );
-  const create = () => run(async () => {
-    const blank = blankLetterForm(await nextNumber());
-    open({
-      ...blank,
-      company_name: company?.name || "",
-      company_address: company?.address || "",
-      company_trn: company?.trn || "",
-      company_phone: company?.phone || "",
-      company_email: company?.email || "",
-      company_logo: company?.logo || "",
-      show_logo: !!company?.logo,
-      use_letterhead: hasLetterhead(letterhead),
-      show_company_header: !hasLetterhead(letterhead),
-      letterhead: { ...letterhead },
-      stamp: marks.stamp && { ...marks.stamp, opacity: 100 },
-      signature: marks.signature && { ...marks.signature, opacity: 100 },
+  const create = () =>
+    run(async () => {
+      const blank = blankLetterForm(await nextNumber());
+      open({
+        ...blank,
+        closing: "",
+        blocks: [],
+        company_name: company?.name || "",
+        company_address: company?.address || "",
+        company_trn: company?.trn || "",
+        company_phone: company?.phone || "",
+        company_email: company?.email || "",
+        company_logo: company?.logo || "",
+        show_logo: !!company?.logo,
+        use_letterhead: hasLetterhead(letterhead),
+        show_company_header: !hasLetterhead(letterhead),
+        letterhead: { ...letterhead },
+        stamp: marks.stamp && { ...marks.stamp, opacity: 100 },
+        signature: marks.signature && { ...marks.signature, opacity: 100 },
+      });
     });
-  });
-  const duplicate = (record: LetterRecord) => run(async () => {
-    const source = structuredClone(letterDisplayForm(record));
-    open({
-      ...source,
-      number: await nextNumber(),
-      issue_date: todayYmd(),
-      status: "draft",
-      blocks: source.blocks.map((block) => ({ ...block, id: crypto.randomUUID() })),
+  const duplicate = (record: LetterRecord) =>
+    run(async () => {
+      const source = structuredClone(letterDisplayForm(record));
+      open({
+        ...source,
+        number: await nextNumber(),
+        issue_date: todayYmd(),
+        status: "draft",
+        blocks: source.blocks.map((block) => ({ ...block, id: crypto.randomUUID() })),
+      });
     });
-  });
   const run = async (action: () => Promise<void>) => {
     if (operation.current) return;
     const token = {},
@@ -408,20 +376,24 @@ export default function Letter() {
       toast.success("Letter deleted.");
     });
   const query = search.trim().toLocaleLowerCase();
-  const filtered = records.filter(
-    (record) =>
-      (filter === "all" || record.form.status === filter) &&
-      (!query ||
-        `${record.form.number} ${record.form.title} ${record.form.recipient_name}`
-          .toLocaleLowerCase()
-          .includes(query))
-  );
+  const filtered = records.filter((record) => {
+    const document = letterDisplayForm(record);
+    return (
+      (filter === "all" || document.status === filter) &&
+      (!query || letterSearchText(document).toLocaleLowerCase().includes(query))
+    );
+  });
 
   return (
     <>
-      {linkError && <div className="mb-4"><ErrorBanner message={linkError} /></div>}
+      {linkError && (
+        <div className="mb-4">
+          <ErrorBanner message={linkError} />
+        </div>
+      )}
       {form ? (
         <LetterEditor
+          key={editorSession}
           form={form}
           setForm={setForm}
           busy={busy}
@@ -543,8 +515,12 @@ export default function Letter() {
               {
                 key: "recipient",
                 label: "Recipient",
-                sortValue: (record) => record.form.recipient_name,
-                render: (record) => record.form.recipient_name || "—",
+                sortValue: (record) =>
+                  record.form.rich_document ? "" : record.form.recipient_name,
+                render: (record) =>
+                  record.form.rich_document
+                    ? "See letter"
+                    : record.form.recipient_name || "—",
               },
               {
                 key: "date",
@@ -614,21 +590,26 @@ export default function Letter() {
         size="document"
       >
         {preview && (
-          <div className="letter-preview-scroll" role="region" aria-label="Letter preview" tabIndex={0}>
+          <div
+            className="letter-preview-scroll"
+            role="region"
+            aria-label="Letter preview"
+            tabIndex={0}
+          >
             <div className="mx-auto w-full max-w-[900px]">
-            <div className="mb-4 flex justify-end">
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={busy}
-                onClick={() => {
-                  void download(preview);
-                }}
-              >
-                <Download size={15} /> Download PDF
-              </button>
-            </div>
-            <LetterPreview form={preview} />
+              <div className="mb-4 flex justify-end">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    void download(preview);
+                  }}
+                >
+                  <Download size={15} /> Download PDF
+                </button>
+              </div>
+              <LetterPreview form={preview} />
             </div>
           </div>
         )}
@@ -674,722 +655,5 @@ function LetterPreview({ form }: { form: LetterForm }) {
         </button>
       </div>
     </div>
-  );
-}
-
-function LetterEditor({
-  form,
-  setForm,
-  busy,
-  lookupError,
-  onRetry,
-  onBack,
-  onSave,
-  onIssue,
-  onPreview,
-  onDownload,
-  onDuplicate,
-}: {
-  form: LetterForm;
-  setForm: (form: LetterForm) => void;
-  busy: boolean;
-  lookupError: string;
-  onRetry: () => void;
-  onBack: () => void;
-  onSave: () => void;
-  onIssue: () => void;
-  onPreview: () => void;
-  onDownload: () => void;
-  onDuplicate?: () => void;
-}) {
-  const issued = form.status === "issued",
-    disabled = busy || issued;
-  const [formatTarget, setFormatTarget] = useState("body");
-  const formatBlock = form.blocks.find((block) => block.id === formatTarget);
-  const target =
-    formatTarget === "title"
-      ? "title"
-      : formatBlock &&
-          (formatBlock.type === "text" ||
-            formatBlock.type === "field" ||
-            formatBlock.type === "date")
-        ? formatTarget
-        : "body";
-  const legacyFont: LetterTextStyle["font"] =
-    /Lora|Georgia|serif/i.test(form.font) && !/sans-serif/i.test(form.font)
-      ? "classic"
-      : /mono/i.test(form.font)
-        ? "mono"
-        : "modern";
-  const formatValue: LetterTextStyle =
-    target === "title"
-      ? { font: legacyFont, fontSize: 17.25, bold: true, ...form.title_style }
-      : {
-          font: legacyFont,
-          fontSize: 9.75,
-          lineSpacing: 22 / 13,
-          paragraphSpacing: 16,
-          ...form.text_style,
-          ...(target !== "body"
-            ? {
-                align:
-                  formatBlock?.style?.align ??
-                  form.text_style?.align ??
-                  formatBlock?.align,
-                ...formatBlock?.style,
-              }
-            : {}),
-        };
-  const formatOptions = [
-    { value: "body", label: "All body text" },
-    { value: "title", label: "Letter title" },
-    ...form.blocks.flatMap((block, index) =>
-      block.type === "signature" || block.type === "stamp"
-        ? []
-        : [
-            {
-              value: block.id,
-              label: `${block.type === "text" ? "Paragraph" : block.type === "date" ? "Date" : "Field"} ${index + 1}`,
-            },
-          ]
-    ),
-  ];
-  const changeFormat = (style: LetterTextStyle) => {
-    if (target === "body") setForm({ ...form, text_style: style });
-    else if (target === "title") setForm({ ...form, title_style: style });
-    else {
-      const patch = Object.fromEntries(
-        Object.entries(style).filter(
-          ([key, value]) => value !== formatValue[key as keyof LetterTextStyle]
-        )
-      ) as LetterTextStyle;
-      setForm({
-        ...form,
-        blocks: form.blocks.map((block) =>
-          block.id === target
-            ? {
-                ...block,
-                style: { ...block.style, ...patch },
-                align: patch.align || block.align,
-              }
-            : block
-        ),
-      });
-    }
-  };
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-  const set = <K extends keyof LetterForm>(key: K, value: LetterForm[K]) =>
-    setForm({ ...form, [key]: value });
-  const input = (
-    key:
-      | "number"
-      | "title"
-      | "recipient_name"
-      | "company_name"
-      | "company_email"
-      | "company_phone"
-      | "company_trn"
-      | "salutation"
-      | "closing"
-      | "signatory_name"
-      | "signatory_title",
-    label: string,
-    max = 160
-  ) => (
-    <Field label={label} required={key === "number" || key === "title"}>
-      <input
-        className="input w-full"
-        maxLength={max}
-        value={form[key]}
-        onFocus={key === "title" ? () => setFormatTarget("title") : undefined}
-        onChange={(event) => set(key, event.target.value)}
-      />
-    </Field>
-  );
-  const add = (type: string) => {
-    if (!type || form.blocks.length >= 100) return;
-    const base = { id: crypto.randomUUID(), align: "left" as const };
-    const block: LetterBlock =
-      type === "text"
-        ? { ...base, type, text: "" }
-        : type === "date"
-          ? { ...base, type, label: "Date", value: todayYmd() }
-          : type === "signature" || type === "stamp"
-            ? {
-                ...base,
-                type,
-                label: type === "signature" ? "Authorized signature" : "Company stamp",
-              }
-            : { ...base, type: "field", label: "Field name", value: "" };
-    setForm({
-      ...form,
-      blocks: [...form.blocks, block],
-      ...(type === "signature" && form.signature?.data ? { show_signature: true } : {}),
-      ...(type === "stamp" && form.stamp?.data ? { show_stamp: true } : {}),
-    });
-  };
-  const move = (from: number, to: number) => {
-    if (to >= 0 && to < form.blocks.length)
-      set("blocks", arrayMove(form.blocks, from, to));
-  };
-  const starter = (type: string) => {
-    if (!type) return;
-    const field = (label: string): LetterBlock => ({
-      id: crypto.randomUUID(),
-      type: "field",
-      label,
-      value: "",
-      align: "left",
-    });
-    const text = (value: string): LetterBlock => ({
-      id: crypto.randomUUID(),
-      type: "text",
-      text: value,
-      align: "left",
-    });
-    const blocks =
-      type === "authorization"
-        ? [
-            field("Employee name"),
-            field("Email address"),
-            field("Mobile number"),
-            text(
-              `We, ${form.company_name || "[Company name]"}, authorize the person named above to [describe the responsibilities, scope and validity of this authorization].`
-            ),
-          ]
-        : [
-            text(
-              `We, ${form.company_name || "[Company name]"}, confirm that [enter the details and purpose of this declaration].`
-            ),
-            field("Reference"),
-          ];
-    setForm({
-      ...form,
-      title: type === "authorization" ? "Authorization letter" : "Declaration letter",
-      salutation: "To whom it may concern,",
-      blocks: [
-        ...form.blocks.filter((block) => block.type !== "text" || !!block.text.trim()),
-        ...blocks,
-      ],
-    });
-  };
-  return (
-    <>
-      <PageHeader
-        title={form.title || "New letter"}
-        subtitle={`${form.number} · ${issued ? "Issued letter" : "Draft"}`}
-        action={
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-ghost" disabled={busy} onClick={onBack}>
-              <ArrowLeft size={15} /> Back
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={onPreview}
-            >
-              <Eye size={15} /> Preview
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={onDownload}
-            >
-              <Download size={15} /> PDF
-            </button>
-            {issued ? (
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={busy || !onDuplicate}
-                onClick={onDuplicate}
-              >
-                <Copy size={15} /> Duplicate draft
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={busy}
-                  onClick={onSave}
-                >
-                  <Save size={15} /> Save draft
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={busy}
-                  onClick={onIssue}
-                >
-                  <Check size={15} /> {busy ? "Working…" : "Issue letter"}
-                </button>
-              </>
-            )}
-          </div>
-        }
-      />
-      {issued && (
-        <p role="status" className="mb-4 text-sm text-muted-foreground">
-          This issued copy keeps its saved content and company details. Duplicate it to
-          make changes.
-        </p>
-      )}
-      <ResizablePanels
-        defaultRightWidth={390}
-        minRightWidth={280}
-        left={
-          <Card className="!p-0 overflow-hidden">
-            <fieldset disabled={disabled} className="min-w-0">
-              <Tabs defaultValue="content">
-                <TabsList className="flex w-full px-2 sm:px-4" aria-label="Letter editor">
-                  <TabsTrigger value="details">Details</TabsTrigger>
-                  <TabsTrigger value="content">Content</TabsTrigger>
-                  <TabsTrigger value="appearance">Appearance</TabsTrigger>
-                </TabsList>
-                <div className="p-4 sm:p-5">
-                  {lookupError && !issued && (
-                    <div role="alert" className="mb-4 text-sm text-muted-foreground">
-                      {lookupError}
-                      <button type="button" className="btn-ghost ml-2" onClick={onRetry}>
-                        Retry
-                      </button>
-                    </div>
-                  )}
-                  <TabsContent value="details" className="mt-0 space-y-6">
-                    <section className="space-y-3">
-                      <h2 className="text-sm font-semibold">Letter details</h2>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {input("number", "Internal letter number", 100)}
-                        <Field label="Issue date" required>
-                          <DateField
-                            value={form.issue_date}
-                            onChange={(value) => set("issue_date", value)}
-                          />
-                        </Field>
-                        {input("title", "Letter title", 200)}
-                        {input("recipient_name", "Recipient name")}
-                      </div>
-                      <Field label="Recipient address">
-                        <textarea
-                          className="input min-h-20 w-full resize-y"
-                          maxLength={400}
-                          value={form.recipient_address}
-                          onChange={(event) =>
-                            set("recipient_address", event.target.value)
-                          }
-                        />
-                      </Field>
-                    </section>
-                    <section className="space-y-3">
-                      <h2 className="text-sm font-semibold">Company details</h2>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {input("company_name", "Company name")}
-                        {input("company_email", "Email", 254)}
-                        {input("company_phone", "Phone", 40)}
-                        {input("company_trn", "Tax registration number", 60)}
-                      </div>
-                      <Field label="Company address">
-                        <textarea
-                          className="input min-h-20 w-full resize-y"
-                          maxLength={400}
-                          value={form.company_address}
-                          onChange={(event) => set("company_address", event.target.value)}
-                        />
-                      </Field>
-                    </section>
-                    <section className="grid gap-3 sm:grid-cols-2">
-                      {input("signatory_name", "Authorized person's name")}
-                      {input("signatory_title", "Designation")}
-                    </section>
-                  </TabsContent>
-                  <TabsContent value="content" className="mt-0 space-y-4">
-                    <div className="space-y-2 rounded-xl border bg-muted/25 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Text formatting
-                        </span>
-                        <div className="w-44">
-                          <SelectMenu
-                            value={target}
-                            ariaLabel="Formatting target"
-                            options={formatOptions}
-                            disabled={disabled}
-                            onChange={setFormatTarget}
-                          />
-                        </div>
-                      </div>
-                      <LetterFormatToolbar
-                        value={formatValue}
-                        onChange={changeFormat}
-                        disabled={disabled}
-                        targetLabel={
-                          formatOptions.find((option) => option.value === target)?.label
-                        }
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Choose a paragraph or click its text to format it. All body text
-                        sets the default for paragraphs and field values.
-                      </p>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {input("title", "Letter title", 200)}
-                      <Field label="Add starter wording">
-                        <SelectMenu
-                          value=""
-                          ariaLabel="Add starter wording"
-                          disabled={disabled || form.blocks.length > 94}
-                          options={[
-                            { value: "", label: "Choose a starter…" },
-                            { value: "authorization", label: "Authorization letter" },
-                            { value: "declaration", label: "General declaration" },
-                          ]}
-                          onChange={starter}
-                        />
-                      </Field>
-                    </div>
-                    {input("salutation", "Salutation", 200)}
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h2 className="text-sm font-semibold">Letter content</h2>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Drag the handles, or use the arrows to reorder blocks.
-                        </p>
-                      </div>
-                      <div className="w-44">
-                        <SelectMenu
-                          value=""
-                          options={BLOCKS}
-                          ariaLabel="Add letter block"
-                          disabled={disabled || form.blocks.length >= 100}
-                          onChange={add}
-                        />
-                      </div>
-                    </div>
-                    {form.body && (
-                      <Field label="Introduction">
-                        <textarea
-                          className="input min-h-24 w-full resize-y"
-                          maxLength={50_000}
-                          value={form.body}
-                          onChange={(event) => set("body", event.target.value)}
-                        />
-                      </Field>
-                    )}
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={({ active, over }) => {
-                        if (!disabled && over && active.id !== over.id)
-                          move(
-                            form.blocks.findIndex((block) => block.id === active.id),
-                            form.blocks.findIndex((block) => block.id === over.id)
-                          );
-                      }}
-                    >
-                      <SortableContext
-                        items={form.blocks.map((block) => block.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        <div className="space-y-3">
-                          {form.blocks.map((block, index) => (
-                            <LetterBlockEditor
-                              key={block.id}
-                              block={block}
-                              index={index}
-                              count={form.blocks.length}
-                              disabled={disabled}
-                              alignment={
-                                block.style?.align ??
-                                form.text_style?.align ??
-                                block.align
-                              }
-                              onSelect={() => {
-                                if (block.type !== "signature" && block.type !== "stamp")
-                                  setFormatTarget(block.id);
-                              }}
-                              onChange={(next) =>
-                                set(
-                                  "blocks",
-                                  form.blocks.map((item) =>
-                                    item.id === block.id ? next : item
-                                  )
-                                )
-                              }
-                              onMove={(direction) => move(index, index + direction)}
-                              onRemove={() =>
-                                set(
-                                  "blocks",
-                                  form.blocks.filter((item) => item.id !== block.id)
-                                )
-                              }
-                            />
-                          ))}
-                        </div>
-                      </SortableContext>
-                    </DndContext>
-                    {!form.blocks.length && (
-                      <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
-                        Add text or a custom field to begin.
-                      </p>
-                    )}
-                    {input("closing", "Closing", 200)}
-                  </TabsContent>
-                  <TabsContent value="appearance" className="mt-0 space-y-5">
-                    <Field label="Layout">
-                      <SelectMenu
-                        value={form.template}
-                        ariaLabel="Letter layout"
-                        options={LETTER_TEMPLATES.map((template) => ({
-                          value: template.id,
-                          label: template.label,
-                        }))}
-                        onChange={(value) => set("template", value)}
-                      />
-                    </Field>
-                    <Field label="Accent color">
-                      <input
-                        type="color"
-                        className="h-10 w-16 cursor-pointer rounded-md border bg-transparent p-1"
-                        value={form.accent}
-                        onChange={(event) => set("accent", event.target.value)}
-                      />
-                    </Field>
-                    <div className="divide-y rounded-xl border px-3">
-                      {(
-                        [
-                          ["show_company_header", "Show company details", false],
-                          [
-                            "use_letterhead",
-                            "Use company letterhead",
-                            !form.letterhead?.background,
-                          ],
-                          ["show_logo", "Show company logo", !form.company_logo],
-                          ["show_reference", "Show letter reference", false],
-                          [
-                            "show_signature",
-                            "Use saved signature",
-                            !form.signature?.data,
-                          ],
-                          ["show_stamp", "Use saved company stamp", !form.stamp?.data],
-                        ] as const
-                      ).map(([key, label, unavailable]) => (
-                        <div
-                          key={key}
-                          className="flex min-h-14 items-center justify-between gap-3 py-2"
-                        >
-                          <div>
-                            <p className="text-sm">{label}</p>
-                            {unavailable && (
-                              <p className="text-xs text-muted-foreground">
-                                Add this image in Company Details
-                              </p>
-                            )}
-                            {key === "show_reference" && (
-                              <p className="text-xs text-muted-foreground">
-                                Optional on the letter. Its number is kept on your
-                                dashboard.
-                              </p>
-                            )}
-                          </div>
-                          <Switch
-                            label={label}
-                            checked={
-                              key === "show_company_header"
-                                ? (form[key] ??
-                                  !(form.use_letterhead && form.letterhead?.background))
-                                : key === "show_reference"
-                                  ? form[key] !== false
-                                  : !!form[key]
-                            }
-                            disabled={disabled || (unavailable && !form[key])}
-                            onChange={(value) => set(key, value)}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Company images come from Settings → Company Details. Add signature
-                      or stamp blocks to choose their place in the letter. New image
-                      blocks use full opacity.
-                    </p>
-                  </TabsContent>
-                </div>
-              </Tabs>
-            </fieldset>
-          </Card>
-        }
-        right={
-          <Card className="!p-3">
-            <LetterPreview form={form} />
-          </Card>
-        }
-      />
-    </>
-  );
-}
-
-function LetterBlockEditor({
-  block,
-  index,
-  count,
-  disabled,
-  alignment,
-  onSelect,
-  onChange,
-  onMove,
-  onRemove,
-}: {
-  block: LetterBlock;
-  index: number;
-  count: number;
-  disabled: boolean;
-  alignment: LetterBlock["align"];
-  onSelect: () => void;
-  onChange: (block: LetterBlock) => void;
-  onMove: (direction: -1 | 1) => void;
-  onRemove: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: block.id, disabled });
-  const kind =
-    block.type === "text"
-      ? "Text"
-      : block.type === "field"
-        ? "Custom field"
-        : block.type === "date"
-          ? "Date"
-          : block.type === "signature"
-            ? "Signature"
-            : "Stamp";
-  return (
-    <section
-      ref={setNodeRef}
-      onFocus={onSelect}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.5 : 1,
-      }}
-      className="rounded-xl border bg-background p-3"
-      aria-label={`${kind} block ${index + 1}`}
-    >
-      <div className="mb-3 flex min-w-0 items-center gap-1">
-        <button
-          type="button"
-          className="btn-ghost h-10 w-10 shrink-0 p-0"
-          aria-label={`Drag block ${index + 1}`}
-          disabled={disabled}
-          style={{ touchAction: "none" }}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical size={16} />
-        </button>
-        <span className="mr-auto text-xs font-medium text-muted-foreground">
-          {kind} · {index + 1}
-        </span>
-        <button
-          type="button"
-          className="btn-ghost h-10 w-10 p-0"
-          disabled={disabled || index === 0}
-          aria-label={`Move block ${index + 1} up`}
-          onClick={() => onMove(-1)}
-        >
-          <ArrowUp size={14} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost h-10 w-10 p-0"
-          disabled={disabled || index + 1 === count}
-          aria-label={`Move block ${index + 1} down`}
-          onClick={() => onMove(1)}
-        >
-          <ArrowDown size={14} />
-        </button>
-        <button
-          type="button"
-          className="btn-ghost h-10 w-10 p-0"
-          disabled={disabled}
-          aria-label={`Remove block ${index + 1}`}
-          onClick={onRemove}
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-      <div className="space-y-3">
-        {block.type === "text" ? (
-          <Field label={`Text ${index + 1}`}>
-            <textarea
-              className="input min-h-28 w-full resize-y"
-              maxLength={20_000}
-              value={block.text}
-              onChange={(event) => onChange({ ...block, text: event.target.value })}
-            />
-          </Field>
-        ) : (
-          <>
-            <Field label={`Label ${index + 1}`}>
-              <input
-                className="input w-full"
-                maxLength={200}
-                value={block.label}
-                onChange={(event) => onChange({ ...block, label: event.target.value })}
-              />
-            </Field>
-            {block.type === "field" && (
-              <Field label={`Value ${index + 1}`}>
-                <textarea
-                  className="input min-h-20 w-full resize-y"
-                  maxLength={10_000}
-                  value={block.value}
-                  onChange={(event) => onChange({ ...block, value: event.target.value })}
-                />
-              </Field>
-            )}
-            {block.type === "date" && (
-              <Field label={`Date ${index + 1}`}>
-                <DateField
-                  value={block.value}
-                  onChange={(value) => onChange({ ...block, value })}
-                />
-              </Field>
-            )}
-            {(block.type === "signature" || block.type === "stamp") && (
-              <p className="text-xs text-muted-foreground">
-                Uses the saved company {block.type} when enabled in Appearance, with a
-                blank sign-off space when no image is selected.
-              </p>
-            )}
-          </>
-        )}
-        <div className="max-w-44">
-          <Field label={`Alignment ${index + 1}`}>
-            <SelectMenu
-              value={alignment}
-              ariaLabel={`Block ${index + 1} alignment`}
-              disabled={disabled}
-              options={[
-                { value: "left", label: "Left" },
-                { value: "center", label: "Center" },
-                { value: "right", label: "Right" },
-              ]}
-              onChange={(value) =>
-                onChange({
-                  ...block,
-                  align: value as LetterBlock["align"],
-                  style: { ...block.style, align: value as LetterBlock["align"] },
-                })
-              }
-            />
-          </Field>
-        </div>
-      </div>
-    </section>
   );
 }

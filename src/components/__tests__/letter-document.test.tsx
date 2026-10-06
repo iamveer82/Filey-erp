@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { blankLetterForm, type LetterForm } from "../../lib/letters";
+import {
+  letterRichDocument,
+  validateLetterRichDocument,
+  type LetterRichDocument,
+  type LetterRichNode,
+} from "../../lib/letterRichText";
 import { SIGN_DEFAULT, STAMP_DEFAULT } from "../StampSignature";
 import LetterDocument, { LETTER_TEMPLATES, paginateLetter } from "../LetterDocument";
 
@@ -50,6 +56,417 @@ function documentFor(
 }
 
 describe("LetterDocument", () => {
+  it("prints the continuous rich canvas once in each template, preserving the surrounding company frame", () => {
+    const form = example();
+    form.rich_document = letterRichDocument(form);
+    // Prose in the document is authoritative; these compatibility fields must not duplicate it.
+    form.title = "Outdated title";
+    form.body = "Outdated body";
+    form.recipient_name = "Outdated recipient";
+    form.closing = "Outdated closing";
+    for (const template of LETTER_TEMPLATES) {
+      const host = documentFor({ ...form, template: template.id });
+      for (const prose of [
+        "Employment confirmation",
+        "Alex Morgan",
+        "We confirm your appointment.",
+        "Yours sincerely,",
+      ])
+        expect(host.textContent!.split(prose)).toHaveLength(2);
+      expect(host.textContent).not.toContain("Outdated");
+      expect(host.textContent).toContain("Northline Trading");
+      expect(host.textContent).toContain("Date:");
+      expect(host.firstElementChild!.getAttribute("data-letter-template")).toBe(
+        template.id
+      );
+      expect(host.querySelectorAll(".letter-rich-line").length).toBeGreaterThan(5);
+      expect(host.querySelectorAll("[data-letter-source=title]")).toHaveLength(0);
+    }
+  });
+
+  it("keeps selection marks and mixed font sizes in the exported DOM and measures the tallest run", () => {
+    const rich: LetterRichDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { textAlign: "right", lineSpacing: 1.75, paragraphSpacing: 7.5 },
+          content: [
+            { type: "text", text: "Plain ", marks: [] },
+            {
+              type: "text",
+              text: "Important",
+              marks: [
+                { type: "bold" },
+                { type: "italic" },
+                { type: "underline" },
+                {
+                  type: "textStyle",
+                  attrs: { fontFamily: "Georgia", fontSize: "18pt", color: "#234567" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const form = {
+      ...example(),
+      rich_document: rich,
+      text_style: { fontSize: 11, bold: true, italic: true, underline: true },
+    };
+    const part = paginateLetter(form)
+      .flatMap((page) => page.parts)
+      .find((part) => part.runs)!;
+    expect(part.text).toBe("Plain Important");
+    expect(part.lineHeight).toBe(42);
+    expect(part.height).toBe(42);
+    expect(part.gap).toBe(22);
+    expect(part.align).toBe("right");
+    expect(part.runs![0]).toEqual(expect.objectContaining({ weight: 400 }));
+    expect(part.runs![0].italic).toBeUndefined();
+    expect(part.runs![0].underline).toBeUndefined();
+    const host = documentFor(form);
+    const selected = Array.from(
+      host.querySelectorAll<HTMLSpanElement>(".letter-rich-line span")
+    ).find((span) => span.textContent === "Important")!;
+    expect(selected.style.fontSize).toBe("24px");
+    expect(selected.style.fontFamily).toBe("Georgia, serif");
+    expect(selected.style.fontWeight).toBe("700");
+    expect(selected.style.fontStyle).toBe("italic");
+    expect(selected.style.textDecoration).toBe("underline");
+    expect(selected.style.color).toBe("rgb(35, 69, 103)");
+  });
+
+  it("applies rich paragraph spacing after its own paragraph instead of before it", () => {
+    const rich: LetterRichDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { paragraphSpacing: 32 },
+          content: [{ type: "text", text: "First paragraph" }],
+        },
+        {
+          type: "paragraph",
+          attrs: { paragraphSpacing: 0 },
+          content: [{ type: "text", text: "Second paragraph" }],
+        },
+        {
+          type: "paragraph",
+          attrs: { paragraphSpacing: 7.5 },
+          content: [{ type: "text", text: "Third paragraph" }],
+        },
+        { type: "paragraph", content: [{ type: "text", text: "Fourth paragraph" }] },
+      ],
+    };
+    const form = { ...example(), rich_document: rich };
+    const parts = paginateLetter(form)
+      .flatMap((page) => page.parts)
+      .filter((part) => part.runs);
+    expect(parts.map((part) => part.gap)).toEqual([22, 32, 0, 7.5]);
+    const lines = documentFor(form).querySelectorAll<HTMLElement>(".letter-rich-line");
+    expect(Array.from(lines, (line) => line.style.marginTop)).toEqual([
+      "22px",
+      "32px",
+      "0px",
+      "7.5px",
+    ]);
+  });
+
+  it("uses a smaller selected paragraph font and keeps wide ordered markers inside the page", () => {
+    const form = {
+      ...example(),
+      rich_document: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { lineSpacing: 1 },
+            content: [
+              {
+                type: "text",
+                text: "Small note",
+                marks: [{ type: "textStyle", attrs: { fontSize: "8pt" } }],
+              },
+            ],
+          },
+          {
+            type: "orderedList",
+            attrs: { start: 9999 },
+            content: [
+              {
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [
+                      {
+                        type: "text",
+                        text: "Large list item",
+                        marks: [{ type: "textStyle", attrs: { fontSize: "36pt" } }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } as LetterRichDocument,
+    };
+    const parts = paginateLetter(form).flatMap((page) => page.parts);
+    const note = parts.find((part) => part.text === "Small note")!;
+    expect(note.size).toBeCloseTo((8 * 4) / 3);
+    expect(note.lineHeight).toBeCloseTo(note.size);
+    const numbered = parts.find((part) => part.marker === "9999.")!;
+    expect(numbered.inset).toBeGreaterThan(100);
+    expect(numbered.markerSize).toBe(48);
+    for (const page of paginateLetter(form))
+      expect(page.usedHeight).toBeLessThanOrEqual(page.availableHeight);
+  });
+
+  it("wraps long Unicode words at whole graphemes and justifies only continued visual lines", () => {
+    const source = "👩🏽‍💻e\u0301".repeat(200);
+    const form = {
+      ...example(),
+      rich_document: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { textAlign: "justify" },
+            content: [{ type: "text", text: source }],
+          },
+        ],
+      } as LetterRichDocument,
+    };
+    const parts = paginateLetter(form)
+      .flatMap((page) => page.parts)
+      .filter((part) => part.runs);
+    expect(parts.length).toBeGreaterThan(5);
+    expect(parts.map((part) => part.text).join("")).toBe(source);
+    for (const part of parts) {
+      expect(part.text).not.toMatch(/^[\u0301\u200d]/u);
+      expect(part.text).not.toMatch(/[\u200d]$/u);
+    }
+    expect(parts.slice(0, -1).every((part) => part.justifyLine)).toBe(true);
+    expect(parts[parts.length - 1].justifyLine).toBe(false);
+    const rendered = documentFor(form).querySelectorAll<HTMLElement>(".letter-rich-line");
+    expect(rendered[0].style.textAlignLast).toBe("justify");
+    expect(rendered[rendered.length - 1].style.textAlignLast).toBe("");
+  });
+
+  it("bounds deeply nested large-font list indentation without dropping valid document text", () => {
+    let list: LetterRichNode | undefined;
+    for (let level = 1; level <= 7; level++) {
+      const content: LetterRichNode[] = [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: `Nested level ${level}`,
+              marks: [{ type: "textStyle", attrs: { fontSize: "36pt" } }],
+            },
+          ],
+        },
+      ];
+      if (list) content.push(list);
+      list = {
+        type: "orderedList",
+        attrs: { start: 9999 },
+        content: [{ type: "listItem", content }],
+      };
+    }
+    const rich: LetterRichDocument = { type: "doc", content: [list!] };
+    validateLetterRichDocument(rich);
+    const parts = paginateLetter({ ...example(), rich_document: rich })
+      .flatMap((page) => page.parts)
+      .filter((part) => part.runs);
+    for (let level = 1; level <= 7; level++)
+      expect(parts.map((part) => part.text).join("")).toContain(`Nested level ${level}`);
+    for (const part of parts) expect(part.inset).toBeLessThanOrEqual(634);
+  });
+
+  it("renders ordered/nested lists, quotes and blank paragraphs with safe marks in their canvas order", () => {
+    const rich: LetterRichDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "heading",
+          attrs: { level: 2 },
+          content: [{ type: "text", text: "Authority" }],
+        },
+        {
+          type: "orderedList",
+          attrs: { start: 3 },
+          content: [
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "Manage eDAS services" }],
+                },
+                {
+                  type: "bulletList",
+                  content: [
+                    {
+                      type: "listItem",
+                      content: [
+                        {
+                          type: "paragraph",
+                          content: [{ type: "text", text: "Submit documents" }],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { type: "paragraph" },
+        {
+          type: "blockquote",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Within the assigned duties." }],
+            },
+          ],
+        },
+        {
+          type: "companySignature",
+          attrs: { label: "Authorized person", textAlign: "right" },
+        },
+        { type: "paragraph", content: [{ type: "text", text: "Company approval" }] },
+        { type: "companyStamp", attrs: { label: "Company stamp" } },
+      ],
+    };
+    const form = { ...example(), rich_document: rich };
+    const parts = paginateLetter(form).flatMap((page) => page.parts);
+    expect(parts.filter((part) => part.runs && !part.text)).toHaveLength(1);
+    expect(parts.find((part) => part.marker === "3.")!.inset).toBe(28);
+    expect(parts.find((part) => part.marker === "•")!.inset).toBe(56);
+    expect(parts.find((part) => part.quote)!.inset).toBe(20);
+    const host = documentFor(form);
+    expect(host.querySelector('[role="heading"]')!.getAttribute("aria-level")).toBe("2");
+    expect(
+      Array.from(
+        host.querySelectorAll(".letter-rich-marker"),
+        (marker) => marker.textContent
+      )
+    ).toEqual(["3.", "•"]);
+    expect(host.querySelectorAll(".letter-rich-quote")).toHaveLength(1);
+    expect(host.querySelectorAll("[data-letter-manual-mark]")).toHaveLength(2);
+    expect(host.textContent!.indexOf("Authorized person")).toBeLessThan(
+      host.textContent!.indexOf("Company approval")
+    );
+    expect(host.textContent!.indexOf("Company approval")).toBeLessThan(
+      host.textContent!.indexOf("Company stamp")
+    );
+    expect(host.querySelectorAll("img,script")).toHaveLength(0);
+  });
+
+  it("preserves styled characters, long unbroken words and hard breaks across rich A4 pages", () => {
+    const first = "WWW and 日本語 with styled text. ".repeat(150);
+    const second = "W".repeat(1200) + " More exact content. ".repeat(150);
+    const rich: LetterRichDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { paragraphSpacing: 32, lineSpacing: 2.5 },
+          content: [
+            {
+              type: "text",
+              text: first,
+              marks: [
+                { type: "textStyle", attrs: { fontSize: "36pt", fontFamily: "Lora" } },
+                { type: "bold" },
+              ],
+            },
+            { type: "hardBreak" },
+            { type: "hardBreak" },
+            {
+              type: "text",
+              text: second,
+              marks: [
+                { type: "italic" },
+                {
+                  type: "textStyle",
+                  attrs: { fontSize: "27.5pt", fontFamily: "IBM Plex Mono" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    for (const template of LETTER_TEMPLATES) {
+      const form = {
+        ...example(),
+        template: template.id,
+        rich_document: rich,
+        show_company_header: false,
+        use_letterhead: true,
+        letterhead: { background: image },
+      };
+      const pages = paginateLetter(form);
+      const parts = pages.flatMap((page) => page.parts).filter((part) => part.runs);
+      expect(pages.length).toBeGreaterThan(10);
+      expect(parts.map((part) => part.text).join("")).toBe(`${first}\n\n${second}`);
+      expect(
+        parts
+          .flatMap((part) => part.runs!)
+          .filter((run) => run.italic)
+          .map((run) => run.text)
+          .join("")
+      ).toBe(second);
+      for (const page of pages)
+        expect(page.usedHeight).toBeLessThanOrEqual(page.availableHeight);
+    }
+  });
+
+  it("escapes rich text and uses issued assets only, without duplicating existing canvas marks", () => {
+    const rich: LetterRichDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "text",
+              text: '<img src="x" onerror="unsafe()"><script>unsafe()</script>',
+            },
+          ],
+        },
+        { type: "companySignature", attrs: { label: "" } },
+        { type: "companyStamp", attrs: { label: "" } },
+      ],
+    };
+    const assets = {
+      signature: { ...SIGN_DEFAULT, data: image },
+      stamp: { ...STAMP_DEFAULT, data: image },
+    };
+    const form = {
+      ...example(),
+      rich_document: rich,
+      show_signature: true,
+      show_stamp: true,
+    };
+    const draft = documentFor(form, assets);
+    expect(draft.querySelectorAll("[data-doc-mark]")).toHaveLength(2);
+    expect(draft.querySelectorAll("script")).toHaveLength(0);
+    expect(draft.querySelectorAll("img")).toHaveLength(2);
+    expect(draft.textContent).toContain('<img src="x" onerror="unsafe()">');
+    const issued = documentFor({ ...form, status: "issued" }, assets);
+    expect(issued.querySelectorAll("[data-doc-mark],img")).toHaveLength(0);
+    expect(issued.querySelectorAll("[data-letter-manual-mark]")).toHaveLength(2);
+  });
+
   it("renders every template as a complete A4 letter without invoice fields", () => {
     const layouts = new Set<string>();
     for (const template of LETTER_TEMPLATES) {
@@ -521,8 +938,15 @@ describe("LetterDocument", () => {
       body: "First paragraph.\nSecond paragraph.",
       text_style: style,
       title_style: style,
-      blocks: [{ id: "custom", type: "text" as const, align: "left" as const,
-        text: "Custom block paragraph.\nAnother custom paragraph.", style }],
+      blocks: [
+        {
+          id: "custom",
+          type: "text" as const,
+          align: "left" as const,
+          text: "Custom block paragraph.\nAnother custom paragraph.",
+          style,
+        },
+      ],
     };
     const pages = paginateLetter(form);
     expect(pages).toHaveLength(1);
@@ -536,7 +960,9 @@ describe("LetterDocument", () => {
         expect(part.height).toBeCloseTo(24.3);
         expect(part.gap).toBe(7.5);
       }
-      const rendered = host.querySelectorAll<HTMLElement>(`[data-letter-source="${source}"]`);
+      const rendered = host.querySelectorAll<HTMLElement>(
+        `[data-letter-source="${source}"]`
+      );
       expect(rendered).toHaveLength(textParts.length);
       for (const part of rendered) {
         expect(part.style.fontSize).toBe("18px");
@@ -544,7 +970,12 @@ describe("LetterDocument", () => {
         expect(part.style.marginTop).toBe("7.5px");
       }
     }
-    expect(parts.filter((part) => part.sourceId === "body").map((part) => part.text).join("")).toBe(form.body);
+    expect(
+      parts
+        .filter((part) => part.sourceId === "body")
+        .map((part) => part.text)
+        .join("")
+    ).toBe(form.body);
     expect(pages[0].usedHeight).toBeLessThanOrEqual(pages[0].availableHeight);
     expect((host.firstElementChild as HTMLElement).dataset.pdfSingle).toBe("true");
     expect(form.text_style).toEqual(style);

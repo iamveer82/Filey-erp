@@ -12,7 +12,7 @@ if (location.hostname !== '127.0.0.1' || location.port !== '${port}') throw new 
 if (!localStorage.getItem('filey_qa_initialized')) {
   if (Object.keys(localStorage).some(key => /^(localdb:|filey_local_|sb-)/.test(key))) throw new Error('QA origin already contains business data. Use a fresh browser profile.');
   const id = '00000000-0000-4000-8000-000000000722';
-  const profile = { id, email: 'qa@filey.invalid', name: 'Filey QA', company: 'Filey Test Trading', org_id: 'default' };
+  const profile = { id, email: 'qa@filey.invalid', name: 'Filey QA', company: 'Filey Test Trading', org_id: '00000000-0000-4000-8000-000000000723' };
   localStorage.setItem('filey_data_mode', 'local');
   localStorage.setItem('filey_local_credential', JSON.stringify({ email: profile.email, userId: id, verifiedAt: new Date().toISOString() }));
   localStorage.setItem('filey_local_profile', JSON.stringify(profile));

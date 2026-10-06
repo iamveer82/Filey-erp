@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SIGN_DEFAULT, STAMP_DEFAULT } from "../../components/StampSignature";
 import { localClient } from "../localdb";
 import { requireModuleAccess } from "../moduleAccess";
+import { letterRichDocumentToLegacy, type LetterRichDocument } from "../letterRichText";
 import {
   blankLetterForm,
   deleteLetter,
@@ -121,6 +122,60 @@ const raceOnUpdate = (race: () => void) => {
     return query;
   });
 };
+
+it("persists rich canvas JSON locally and freezes its formatting and company slots on issue", async () => {
+  const rich: LetterRichDocument = { type: "doc", content: [
+    { type: "heading", attrs: { level: 2, textAlign: "center" }, content: [{ type: "text", text: "Authorization" }] },
+    { type: "paragraph", content: [{ type: "text", text: "We authorize the employee to manage the requested services.", marks: [
+      { type: "bold" }, { type: "textStyle", attrs: { fontFamily: "Georgia", fontSize: "12.5pt", color: "#334455" } },
+    ] }] },
+    { type: "companySignature", attrs: { label: "Authorized person", textAlign: "left" } },
+  ] };
+  const initial = { ...form(), ...letterRichDocumentToLegacy(rich), rich_document: rich };
+  const draft = await saveLetter(initial);
+  expect((await loadLetters())[0].form.rich_document).toEqual(rich);
+  const issued = await saveLetter({ ...draft.form, status: "issued" }, draft.id, draft.revision, draft.updated_at);
+  expect(issued.issued_snapshot?.rich_document).toEqual(rich);
+  rich.content[1].content![0].text = "Changed external editor buffer";
+  expect(letterDisplayForm(issued).rich_document?.content[1].content?.[0].text).toContain("We authorize");
+  await expect(saveLetter({ ...issued.form, status: "draft" }, issued.id, issued.revision, issued.updated_at)).rejects.toThrow("Issued letters");
+});
+
+it("persists rich JSON in cloud mode and rejects unsupported direct canvas edits without changing saved data", async () => {
+  cloud();
+  const rich: LetterRichDocument = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Cloud canvas" }] }] };
+  const draft = await saveLetter({ ...form(), ...letterRichDocumentToLegacy(rich), rich_document: rich });
+  expect((await loadLetters())[0].form.rich_document).toEqual(rich);
+  await expect(saveLetter({ ...draft.form, rich_document: { type: "doc", content: [{ type: "image", attrs: { src: "http://tracker" } }] } } as unknown as LetterForm,
+    draft.id, draft.revision, draft.updated_at)).rejects.toThrow("Letter document");
+  expect((await loadLetters())[0].revision).toBe(draft.revision);
+});
+
+it("does not issue an empty rich canvas using stale text in legacy slots", () => {
+  const rich: LetterRichDocument = { type: "doc", content: [{ type: "paragraph" }, { type: "companyStamp", attrs: { label: "Stamp" } }] };
+  expect(() => validateLetterForm({ ...form(), status: "issued", rich_document: rich })).toThrow("Add letter content");
+});
+
+it("saves maximum rich prose plus 89 company marks within the 100-block legacy projection limit", async () => {
+  // Force the 50k body boundary through an emoji: safe splitting needs eleven
+  // remaining text chunks, leaving precisely 89 slots for company marks.
+  const prose = "x".repeat(49_999) + "😀" + "x".repeat(199_910);
+  const rich: LetterRichDocument = { type: "doc", content: [
+    { type: "paragraph", content: [{ type: "text", text: prose }] },
+    ...Array.from({ length: 89 }, (_, index) => ({
+      type: index % 2 ? "companySignature" as const : "companyStamp" as const,
+      attrs: { label: "", textAlign: "left" as const },
+    })),
+  ] };
+  const projection = letterRichDocumentToLegacy(rich);
+  expect(projection.body).toHaveLength(49_999);
+  expect(projection.blocks).toHaveLength(100);
+  expect(projection.blocks.filter(block => block.type === "text")).toHaveLength(11);
+  expect(projection.body.length + projection.blocks.reduce((sum, block) => sum + (block.type === "text" ? block.text.length : 0), 0)).toBe(250_000);
+  const saved = await saveLetter({ ...form(), ...projection, rich_document: rich });
+  expect((await loadLetters())[0].form.rich_document).toEqual(rich);
+  expect(saved.form.blocks).toHaveLength(100);
+});
 
 beforeEach(() => {
   localStorage.clear();

@@ -92,6 +92,9 @@ export function featureSchemaIssues(catalog, sources) {
   requireFunction('filey_can_use', 'text', 'boolean', true, true);
   requireFunction('filey_setting_access', 'text, boolean', 'boolean', true, true);
   requireFunction('filey_letter_text_style_valid', 'jsonb', 'boolean', false);
+  requireFunction('filey_letter_rich_text_units', 'text', 'integer', false, true);
+  requireFunction('filey_letter_rich_node_stats', 'jsonb, text, integer, integer', 'integer[]', false, true);
+  requireFunction('filey_letter_rich_document_valid', 'jsonb', 'boolean', false, true);
   requireFunction('filey_letter_form_format_valid', 'jsonb', 'boolean', false);
   requireFunction('filey_validate_letter_setting', '', 'trigger', false);
   requireFunction('filey_record_stocktake', 'bigint, numeric, numeric, uuid', 'numeric', false, true);

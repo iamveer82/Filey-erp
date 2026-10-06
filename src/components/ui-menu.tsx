@@ -188,6 +188,7 @@ export function SelectMenu({
   id,
   placeholder = "Choose an option",
   searchPlaceholder,
+  onCloseAutoFocus,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -201,6 +202,8 @@ export function SelectMenu({
   placeholder?: string;
   /** Enables a filter for longer lists while keeping the selected value. */
   searchPlaceholder?: string;
+  /** Rich editors can restore their text selection after an option is chosen. */
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -226,7 +229,7 @@ export function SelectMenu({
       <SelectTrigger id={id} aria-label={ariaLabel} size={size === "sm" ? "sm" : "default"} className={className}>
         <SelectValue>{current?.label ?? placeholder}</SelectValue>
       </SelectTrigger>
-      <SelectContent sideOffset={6} collisionPadding={8} onEscapeKeyDown={event => event.stopPropagation()}>
+      <SelectContent sideOffset={6} collisionPadding={8} onCloseAutoFocus={onCloseAutoFocus} onEscapeKeyDown={event => event.stopPropagation()}>
         {options.map(option => <SelectItem key={option.value} value={JSON.stringify(option.value)}>{option.label}</SelectItem>)}
       </SelectContent>
     </Select>;

@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useNavigate, type NavigateFunction } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
+import type { Editor } from "@tiptap/core";
 import { UIProvider } from "../../lib/ui";
 import { billing } from "../../lib/api";
 import { AGENT_STORAGE_EVENT } from "../../lib/agentStorage";
@@ -53,7 +54,10 @@ vi.mock("../../lib/numberFormat", () => ({
       `LTR-${String(existing.length + 1).padStart(4, "0")}`
   ),
 }));
-vi.mock("../../lib/documentNumbers", () => ({ allocateDocumentNumber: async (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args) }));
+vi.mock("../../lib/documentNumbers", () => ({
+  allocateDocumentNumber: async (...args: Parameters<typeof pickDocNumber>) =>
+    pickDocNumber(...args),
+}));
 vi.mock("../../lib/realtime", () => ({
   useLiveSync: () => {},
   notifyDataChanged: () => {},
@@ -78,7 +82,9 @@ vi.mock("../../components/Letterhead", () => ({
 }));
 vi.mock("../../components/LetterDocument", () => ({
   default: ({ form, pageIndex = 0 }: { form: LetterForm; pageIndex?: number }) => (
-    <div data-testid="letter-document">{form.title} · Page {pageIndex + 1}</div>
+    <div data-testid="letter-document">
+      {form.title} · Page {pageIndex + 1}
+    </div>
   ),
   LETTER_TEMPLATES: [{ id: "letter-standard", label: "Standard" }],
   useLetterPages: () => Array.from({ length: workspace.previewPages }, () => ({})),
@@ -164,24 +170,45 @@ function mount(initialEntry = "/letters") {
   );
   return {
     ...rendered,
-    navigate: (to: string) => act(() => { void navigate(to); }),
+    navigate: (to: string) =>
+      act(() => {
+        void navigate(to);
+      }),
   };
 }
 async function newLetter() {
   mount();
   const create = await screen.findByRole("button", { name: "New letter" });
   await waitFor(() => expect(create).toBeEnabled());
-  await act(async () => { fireEvent.click(create); });
+  await act(async () => {
+    fireEvent.click(create);
+  });
 }
 const change = (label: string, value: string) =>
   fireEvent.change(
     screen.getByLabelText(label === "Letter title" ? /^Letter title/ : label),
     { target: { value } }
   );
-const add = (value: string) => change("Add letter block", value);
+function canvas(value: string) {
+  const element = screen.getByRole("textbox", {
+    name: "Letter canvas",
+  }) as HTMLElement & { editor: Editor };
+  act(() => {
+    element.editor.commands.setContent({
+      type: "doc",
+      content: value.split("\n").map((text) => ({
+        type: "paragraph",
+        ...(text ? { content: [{ type: "text", text }] } : {}),
+      })),
+    });
+  });
+}
+function canvasValue() {
+  return screen.getByRole("textbox", { name: "Letter canvas" }).textContent;
+}
 function content() {
   change("Letter title", "Authorization letter");
-  change("Text 1", "The company authorizes Mary to receive these documents.");
+  canvas("The company authorizes Mary to receive these documents.");
 }
 function switchWorkspace(records: LetterRecord[] = []) {
   workspace.scope = "cloud:another-org:user:teammate";
@@ -219,13 +246,25 @@ afterEach(() => {
 });
 
 it("waits for loaded records before opening the exact saved letter from an AI link", async () => {
-  const other = makeRecord({ ...blankLetterForm("LTR-0001"), title: "Similar letter" }, "letter-10");
-  const requested = makeRecord({ ...blankLetterForm("LTR-0002"), title: "Requested AI draft" }, "letter-1");
+  const other = makeRecord(
+    { ...blankLetterForm("LTR-0001"), title: "Similar letter" },
+    "letter-10"
+  );
+  const requested = makeRecord(
+    { ...blankLetterForm("LTR-0002"), title: "Requested AI draft" },
+    "letter-1"
+  );
   let resolveLetters!: (records: LetterRecord[]) => void;
-  vi.mocked(loadLetters).mockReturnValueOnce(new Promise((resolve) => { resolveLetters = resolve; }));
+  vi.mocked(loadLetters).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveLetters = resolve;
+    })
+  );
   mount("/letters?letter=letter-1");
   expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
-  await act(async () => { resolveLetters([other, requested]); });
+  await act(async () => {
+    resolveLetters([other, requested]);
+  });
   expect(await screen.findByLabelText(/^Letter title/)).toHaveValue("Requested AI draft");
   expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
   expect(saveLetter).not.toHaveBeenCalled();
@@ -236,13 +275,22 @@ it("waits for loaded records before opening the exact saved letter from an AI li
 });
 
 it("opens an issued AI link using its immutable snapshot without creating or issuing a letter", async () => {
-  const snapshot = { ...blankLetterForm("LTR-0003"), title: "Issued snapshot", status: "issued" as const, body: "Original issued wording" };
+  const snapshot = {
+    ...blankLetterForm("LTR-0003"),
+    title: "Issued snapshot",
+    status: "issued" as const,
+    body: "Original issued wording",
+  };
   const record = makeRecord(snapshot);
-  record.form = { ...snapshot, title: "Changed live title", body: "Changed live wording" };
+  record.form = {
+    ...snapshot,
+    title: "Changed live title",
+    body: "Changed live wording",
+  };
   workspace.records = [record];
   mount("/letters?letter=letter-1");
   expect(await screen.findByLabelText(/^Letter title/)).toHaveValue("Issued snapshot");
-  expect(screen.getByLabelText("Introduction")).toHaveValue("Original issued wording");
+  expect(canvasValue()).toContain("Original issued wording");
   expect(screen.getByLabelText(/^Letter title/)).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
   expect(saveLetter).not.toHaveBeenCalled();
@@ -250,7 +298,12 @@ it("opens an issued AI link using its immutable snapshot without creating or iss
 });
 
 it("shows a useful missing-letter message without matching a number or another letter ID", async () => {
-  workspace.records = [makeRecord({ ...blankLetterForm("letter-1"), title: "Not the requested ID" }, "letter-10")];
+  workspace.records = [
+    makeRecord(
+      { ...blankLetterForm("letter-1"), title: "Not the requested ID" },
+      "letter-10"
+    ),
+  ];
   mount("/letters?letter=letter-1");
   await screen.findByText(/This letter was not found in this workspace/);
   expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
@@ -272,31 +325,55 @@ it("keeps unsaved edits when a second AI link arrives and opens it only after th
   expect(saveLetter).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
-  expect(vi.mocked(saveLetter).mock.calls[0].slice(1)).toEqual(["letter-1", 1, "2026-10-03T10:00:01Z"]);
-  await waitFor(() => expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Second draft"));
-  expect(workspace.records.find((record) => record.id === "letter-1")?.form.title).toBe("Unsaved first draft");
+  expect(vi.mocked(saveLetter).mock.calls[0].slice(1)).toEqual([
+    "letter-1",
+    1,
+    "2026-10-03T10:00:01Z",
+  ]);
+  await waitFor(() =>
+    expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Second draft")
+  );
+  expect(workspace.records.find((record) => record.id === "letter-1")?.form.title).toBe(
+    "Unsaved first draft"
+  );
 });
 
 it("does not auto-open the same linked ID from a different workspace or use a delayed old response", async () => {
   let resolveLetters!: (records: LetterRecord[]) => void;
-  vi.mocked(loadLetters).mockReturnValueOnce(new Promise((resolve) => { resolveLetters = resolve; }));
+  vi.mocked(loadLetters).mockReturnValueOnce(
+    new Promise((resolve) => {
+      resolveLetters = resolve;
+    })
+  );
   mount("/letters?letter=letter-1");
-  const current = makeRecord({ ...blankLetterForm("LTR-9001"), title: "Another workspace letter" });
+  const current = makeRecord({
+    ...blankLetterForm("LTR-9001"),
+    title: "Another workspace letter",
+  });
   switchWorkspace([current]);
   await screen.findByText("Another workspace letter");
   await act(async () => {
-    resolveLetters([makeRecord({ ...blankLetterForm("LTR-0001"), title: "Private previous workspace letter" })]);
+    resolveLetters([
+      makeRecord({
+        ...blankLetterForm("LTR-0001"),
+        title: "Private previous workspace letter",
+      }),
+    ]);
   });
   expect(screen.queryByLabelText(/^Letter title/)).not.toBeInTheDocument();
   expect(screen.queryByText("Private previous workspace letter")).not.toBeInTheDocument();
   expect(screen.getByText("Another workspace letter")).toBeInTheDocument();
-  expect(screen.getByText(/Your workspace changed. Open this letter from Filey AI again/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Your workspace changed. Open this letter from Filey AI again/)
+  ).toBeInTheDocument();
   expect(saveLetter).not.toHaveBeenCalled();
 });
 
 it("keeps page navigation and PDF export inside the keyboard-accessible modal scrolling region", async () => {
   workspace.previewPages = 3;
-  workspace.records = [makeRecord({ ...blankLetterForm("LTR-0001"), title: "Long letter" })];
+  workspace.records = [
+    makeRecord({ ...blankLetterForm("LTR-0001"), title: "Long letter" }),
+  ];
   mount();
   fireEvent.click(await screen.findByText("LTR-0001"));
   const dialog = within(await screen.findByRole("dialog"));
@@ -311,293 +388,150 @@ it("keeps page navigation and PDF export inside the keyboard-accessible modal sc
   expect(reader.getByRole("button", { name: "Next preview page" })).toBeDisabled();
   fireEvent.click(reader.getByRole("button", { name: "Download PDF" }));
   await waitFor(() => expect(downloadFile).toHaveBeenCalledWith(pdf));
-  expect((vi.mocked(reactToPdfBytes).mock.calls[0][0] as ReactElement<{ form: LetterForm }>).props.form.number).toBe("LTR-0001");
+  expect(
+    (vi.mocked(reactToPdfBytes).mock.calls[0][0] as ReactElement<{ form: LetterForm }>)
+      .props.form.number
+  ).toBe("LTR-0001");
   expect(saveLetter).not.toHaveBeenCalled();
 });
 
-it("saves edited text, custom fields and dates in the chosen order without writing invoices", async () => {
+it("saves continuous canvas prose and keeps optional page settings without writing invoices", async () => {
   await newLetter();
   content();
-  add("field");
-  change("Label 2", "Employee name");
-  change("Value 2", "Mark");
-  change("Value 2", "Mary");
-  change("Block 2 alignment", "right");
-  add("date");
-  change("Label 3", "Effective from");
-  change("Date 3", "2026-10-12");
-  add("text");
-  change("Text 4", "Remove this temporary paragraph.");
-  fireEvent.click(screen.getByRole("button", { name: "Remove block 4" }));
-  expect(screen.queryByLabelText("Text 4")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Move block 3 up" }));
-  fireEvent.click(screen.getByRole("button", { name: "Move block 2 up" }));
-  expect(screen.getByRole("region", { name: "Date block 1" })).toBeInTheDocument();
+  canvas(
+    "Authorization letter\nEmployee name: Mary Smith\nEmail: mary@example.invalid\nEffective from: 12 October 2026"
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Page & company settings/ }));
+  expect(screen.getByRole("switch", { name: "Show letter reference" })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
+  fireEvent.click(screen.getByRole("switch", { name: "Show letter reference" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show company details" }));
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
   const saved = vi.mocked(saveLetter).mock.calls[0][0];
-  expect(saved.blocks).toEqual([
-    expect.objectContaining({
-      type: "date",
-      label: "Effective from",
-      value: "2026-10-12",
-      align: "left",
-    }),
-    expect.objectContaining({
-      type: "text",
-      text: "The company authorizes Mary to receive these documents.",
-      align: "left",
-    }),
-    expect.objectContaining({
-      type: "field",
-      label: "Employee name",
-      value: "Mary",
-      align: "right",
-    }),
-  ]);
-  expect(new Set(saved.blocks.map((block) => block.id)).size).toBe(3);
+  expect(saved.rich_document?.content).toHaveLength(4);
+  expect(saved.body).toContain("Employee name: Mary Smith");
+  expect(saved.body).toContain("Effective from: 12 October 2026");
+  expect(saved.show_reference).toBe(true);
+  expect(saved.show_company_header).toBe(false);
+  expect(billing.saveDoc).not.toHaveBeenCalled();
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled()
   );
-  change("Value 3", "Mary Smith");
-  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(2));
-  expect(vi.mocked(saveLetter).mock.calls[1]).toEqual([
-    expect.objectContaining({
-      blocks: [
-        expect.anything(),
-        expect.anything(),
-        expect.objectContaining({ value: "Mary Smith" }),
-      ],
-    }),
-    "letter-1",
-    1,
-    "2026-10-03T10:00:01Z",
-  ]);
-  expect(billing.saveDoc).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
 });
 
-it("keeps formatting and optional reference switches with the saved letter", async () => {
-  await newLetter();
-  content();
-  change("Formatting target", "body");
-  change("Font", "classic");
-  change("Font size", "14");
-  fireEvent.click(screen.getByRole("button", { name: "Align right" }));
-  fireEvent.focus(screen.getByLabelText("Text 1"));
-  expect(screen.getByRole("button", { name: "Align right" })).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
-  fireEvent.click(screen.getByRole("button", { name: "Italic" }));
-  change("Line spacing", "2");
-  change("Formatting target", "title");
-  change("Text style", "title");
-  fireEvent.mouseDown(screen.getByRole("tab", { name: "Appearance" }), {
-    button: 0,
-    ctrlKey: false,
-  });
-  expect(
-    await screen.findByRole("switch", { name: "Show letter reference" })
-  ).toHaveAttribute("aria-checked", "false");
-  fireEvent.click(screen.getByRole("switch", { name: "Show letter reference" }));
-  fireEvent.click(screen.getByRole("switch", { name: "Show company details" }));
-  expect(screen.getByRole("switch", { name: "Use company letterhead" })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
-  const form = vi.mocked(saveLetter).mock.calls[0][0];
-  expect(form.text_style).toEqual(
-    expect.objectContaining({ font: "classic", fontSize: 14, align: "right" })
-  );
-  expect(form.blocks[0].style).toEqual({ bold: true, italic: true, lineSpacing: 2 });
-  expect(form.title_style).toEqual(expect.objectContaining({ fontSize: 24, bold: true }));
-  expect(form.show_reference).toBe(true);
-  expect(form.show_company_header).toBe(false);
-});
-
-it("keeps body defaults live while individual block formatting and alignment stay independent", async () => {
-  await newLetter();
-  content();
-  change("Formatting target", "body");
-  fireEvent.click(screen.getByRole("button", { name: "Align center" }));
-  expect(screen.getByLabelText("Block 1 alignment")).toHaveValue("center");
-  fireEvent.focus(screen.getByLabelText("Text 1"));
-  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
-  change("Block 1 alignment", "right");
-  change("Formatting target", "body");
-  change("Font size", "20");
-  fireEvent.focus(screen.getByLabelText("Text 1"));
-  expect(screen.getByLabelText("Font size")).toHaveValue("20");
-  expect(screen.getByRole("button", { name: "Align right" })).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
-  const saved = vi.mocked(saveLetter).mock.calls[0][0];
-  expect(saved.text_style).toEqual(
-    expect.objectContaining({ fontSize: 20, align: "center" })
-  );
-  expect(saved.blocks[0].style).toEqual({ bold: true, align: "right" });
-});
-
-it("keeps manually typed decimal formatting through save, reload, issue and PDF export", async () => {
-  await newLetter();
-  content();
-  change("Formatting target", "body");
-  for (const [label, value] of [
-    ["Font size", "13.5"], ["Line spacing", "1.35"], ["Paragraph spacing", "7.5"],
-  ]) {
-    const input = screen.getByRole("textbox", { name: label });
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value } });
-    fireEvent.blur(input);
-    expect(input).toHaveValue(value);
-  }
-  const custom = { fontSize: 13.5, lineSpacing: 1.35, paragraphSpacing: 7.5 };
-  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
-  expect(vi.mocked(saveLetter).mock.calls[0][0].text_style).toEqual(expect.objectContaining(custom));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Back" }));
-  await screen.findByRole("button", { name: "New letter" });
-  fireEvent.click(await screen.findByRole("button", { name: "Quick view" }));
-  await screen.findByRole("textbox", { name: "Font size" });
-  expect(screen.getByRole("textbox", { name: "Font size" })).toHaveValue("13.5");
-  expect(screen.getByRole("textbox", { name: "Line spacing" })).toHaveValue("1.35");
-  expect(screen.getByRole("textbox", { name: "Paragraph spacing" })).toHaveValue("7.5");
-  fireEvent.click(screen.getByRole("button", { name: "Issue letter" }));
-  fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Issue letter" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(2));
-  const snapshot = workspace.records[0].issued_snapshot;
-  expect(snapshot?.status).toBe("issued");
-  expect(snapshot?.text_style).toEqual(expect.objectContaining(custom));
-  await waitFor(() => expect(screen.getByRole("button", { name: "PDF" })).toBeEnabled());
-  for (const label of ["Font size", "Line spacing", "Paragraph spacing"])
-    expect(screen.getByRole("textbox", { name: label })).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "PDF" }));
-  await waitFor(() => expect(reactToPdfBytes).toHaveBeenCalledTimes(1));
-  const exported = (vi.mocked(reactToPdfBytes).mock.calls[0][0] as ReactElement<{ form: LetterForm }>).props.form;
-  expect(exported).toEqual(snapshot);
-  expect(exported.text_style).toEqual(expect.objectContaining(custom));
-});
-
-it("preserves every draft field after a failed save so the same draft can be retried", async () => {
+it("preserves canvas content after a failed save so it can be retried", async () => {
   vi.mocked(saveLetter).mockRejectedValueOnce(new Error("Storage unavailable"));
   await newLetter();
   content();
-  add("field");
-  change("Label 2", "Reference");
-  change("Value 2", "JOB-42");
+  canvas("Employee name: Mary\nReference: JOB-42");
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await screen.findByText("Storage unavailable");
-  expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Authorization letter");
-  expect(screen.getByLabelText("Text 1")).toHaveValue(
-    "The company authorizes Mary to receive these documents."
-  );
-  expect(screen.getByLabelText("Value 2")).toHaveValue("JOB-42");
+  expect(canvasValue()).toContain("Reference: JOB-42");
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(2));
   expect(vi.mocked(saveLetter).mock.calls[1][0]).toEqual(
     vi.mocked(saveLetter).mock.calls[0][0]
   );
-  expect(vi.mocked(saveLetter).mock.calls[1].slice(1)).toEqual([
-    undefined,
-    undefined,
-    undefined,
-  ]);
 });
 
-it("adds starter wording without removing an existing introduction or custom content", async () => {
-  const form = {
-    ...blankLetterForm("LTR-0042"),
-    title: "Existing draft",
-    body: "Keep this saved introduction.\nIt contains agreed terms.",
-    blocks: [
-      {
-        id: "saved-text",
-        type: "text" as const,
-        text: "Keep this custom paragraph.",
-        align: "left" as const,
-      },
-      {
-        id: "saved-field",
-        type: "field" as const,
-        label: "Existing reference",
-        value: "JOB-42",
-        align: "right" as const,
-      },
-    ],
-  };
-  workspace.records = [makeRecord(form)];
-  mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Quick view" }));
-  await screen.findByLabelText("Introduction");
-  change("Add starter wording", "authorization");
-  expect(screen.getByLabelText("Introduction")).toHaveValue(form.body);
-  expect(screen.getByLabelText("Text 1")).toHaveValue("Keep this custom paragraph.");
-  expect(screen.getByLabelText("Value 2")).toHaveValue("JOB-42");
-  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
-  const saved = vi.mocked(saveLetter).mock.calls[0][0];
-  expect(saved.body).toBe(form.body);
-  expect(saved.blocks.slice(0, 2)).toEqual(form.blocks);
-  expect(saved.blocks).toHaveLength(6);
-  expect(saved.blocks[5]).toEqual(
-    expect.objectContaining({
-      type: "text",
-      text: expect.stringContaining("authorize the person named above"),
-    })
+it("replaces legacy prose without stale recipient metadata and finds recipients typed on the canvas", async () => {
+  workspace.records = [
+    makeRecord({
+      ...blankLetterForm("LTR-OLD"),
+      title: "Authorization letter",
+      recipient_name: "Mary",
+      salutation: "Dear Mary,",
+      body: "Original responsibilities",
+      signatory_name: "Original signer",
+    }),
+  ];
+  mount("/letters?letter=letter-1");
+  await screen.findByRole("textbox", { name: "Letter canvas" });
+  canvas(
+    "Authorization letter\nWe authorize John Smith to manage these services.\nNew signer"
   );
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() => expect(saveLetter).toHaveBeenCalledOnce());
+  const saved = vi.mocked(saveLetter).mock.calls[0][0];
+  expect(saved.body).toContain("John Smith");
+  expect(saved).toMatchObject({
+    recipient_name: "",
+    recipient_address: "",
+    salutation: "",
+    closing: "",
+    signatory_name: "",
+    signatory_title: "",
+  });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("button", { name: "New letter" });
+  fireEvent.change(screen.getByPlaceholderText("Search letters…"), {
+    target: { value: "John Smith" },
+  });
+  expect(screen.getByRole("button", { name: "Quick view" })).toBeInTheDocument();
+  expect(screen.getByText("See letter")).toBeInTheDocument();
+  fireEvent.change(screen.getByPlaceholderText("Search letters…"), {
+    target: { value: "Mary" },
+  });
+  expect(screen.queryByRole("button", { name: "Quick view" })).not.toBeInTheDocument();
 });
 
-it("confirms issue, locks the issued snapshot and duplicates it into a fresh editable draft", async () => {
+it("confirms issue, locks the rich snapshot and duplicates into a fresh editable draft", async () => {
   await newLetter();
   content();
   fireEvent.click(screen.getByRole("button", { name: "Issue letter" }));
   const cancelled = within(await screen.findByRole("alertdialog"));
-  expect(cancelled.getByText("Issue this letter?")).toBeInTheDocument();
-  expect(saveLetter).not.toHaveBeenCalled();
   fireEvent.click(cancelled.getByRole("button", { name: "Cancel" }));
-  await waitFor(() => expect(screen.getByLabelText("Text 1")).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Issue letter" })).toBeEnabled()
+  );
+  expect(saveLetter).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Issue letter" }));
   fireEvent.click(
     within(await screen.findByRole("alertdialog")).getByRole("button", {
       name: "Issue letter",
     })
   );
-  await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(1));
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Duplicate draft" })).toBeEnabled()
   );
-  expect(screen.getByLabelText("Text 1")).toBeDisabled();
-  expect(screen.getByLabelText("Add letter block")).toBeDisabled();
+  expect(screen.getByRole("textbox", { name: "Letter canvas" })).toHaveAttribute(
+    "contenteditable",
+    "false"
+  );
+  expect(screen.getByRole("button", { name: "Bold" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
-  const issued = workspace.records[0];
-  expect(issued.issued_snapshot).toEqual(issued.form);
-  expect(issued.form.status).toBe("issued");
-  const issuedBlockIds = issued.form.blocks.map((block) => block.id);
+  const issued = structuredClone(workspace.records[0]);
+  expect(issued.issued_snapshot?.rich_document).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Duplicate draft" }));
-  await waitFor(() => expect(screen.getByLabelText("Text 1")).toBeEnabled());
-  change("Text 1", "Editable duplicate wording.");
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Letter canvas" })).toHaveAttribute(
+      "contenteditable",
+      "true"
+    )
+  );
+  canvas("Editable duplicate wording.");
   fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
   await waitFor(() => expect(saveLetter).toHaveBeenCalledTimes(2));
-  const copy = vi.mocked(saveLetter).mock.calls[1];
-  expect(copy[0]).toEqual(
+  expect(vi.mocked(saveLetter).mock.calls[1][0]).toEqual(
     expect.objectContaining({
       number: "LTR-0002",
       status: "draft",
-      blocks: [expect.objectContaining({ text: "Editable duplicate wording." })],
+      body: "Editable duplicate wording.",
     })
   );
-  expect(copy.slice(1)).toEqual([undefined, undefined, undefined]);
-  expect(copy[0].blocks.every((block) => !issuedBlockIds.includes(block.id))).toBe(true);
-  expect(workspace.records).toHaveLength(2);
+  expect(vi.mocked(saveLetter).mock.calls[1].slice(1)).toEqual([
+    undefined,
+    undefined,
+    undefined,
+  ]);
   expect(
     workspace.records.find((record) => record.id === issued.id)?.issued_snapshot
   ).toEqual(issued.issued_snapshot);
-  expect(pickDocNumber).toHaveBeenLastCalledWith("letter", ["LTR-0001"], {});
 });
 
 it("exports and previews the saved issued snapshot rather than changed live form data", async () => {
@@ -635,7 +569,7 @@ it("exports and previews the saved issued snapshot rather than changed live form
   await waitFor(() =>
     expect(screen.getByLabelText(/^Letter title/)).toHaveValue("Original issued letter")
   );
-  expect(screen.getByLabelText("Text 1")).toHaveValue("Frozen original wording.");
+  expect(canvasValue()).toContain("Frozen original wording.");
   fireEvent.click(screen.getByRole("button", { name: "Preview" }));
   const preview = within(await screen.findByRole("dialog"));
   expect(preview.getByTestId("letter-document")).toHaveTextContent(
@@ -685,7 +619,9 @@ it("does not download an export that completes after switching workspaces", asyn
     expect(screen.getByRole("button", { name: "New letter" })).toBeEnabled()
   );
   expect(downloadFile).not.toHaveBeenCalled();
-  expect(screen.queryByLabelText("Text 1")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("textbox", { name: "Letter canvas" })
+  ).not.toBeInTheDocument();
 });
 
 it("blocks a stale table-row preview before the workspace notification arrives", async () => {
@@ -718,7 +654,9 @@ it("does not reopen a saved draft when its response arrives after a workspace sw
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "New letter" })).toBeEnabled()
   );
-  expect(screen.queryByLabelText("Text 1")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("textbox", { name: "Letter canvas" })
+  ).not.toBeInTheDocument();
   expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
 });
 
