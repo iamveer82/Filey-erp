@@ -1,6 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {featureFunctionSources,workflowSchemaIssues} from './runtime-schema-checks.mjs';
 const sources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql']
   .map(name=>readFileSync(new URL('../supabase/'+name,import.meta.url),'utf8')));
@@ -52,6 +56,41 @@ const fixture=()=>({
   ],
 });
 const check=c=>workflowSchemaIssues(c,sources);
+
+test('the full catalog CLI treats only an absent fresh-installer ledger as optional',t=>{
+  const directory=mkdtempSync(join(tmpdir(),'filey-catalog-check-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const run=catalog=>{
+    const path=join(directory,'catalog.json');
+    writeFileSync(path,JSON.stringify({rows:[{catalog}]}));
+    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./check-cloud-schema.mjs',import.meta.url)),path],{
+      cwd:fileURLToPath(new URL('../',import.meta.url)),encoding:'utf8',windowsHide:true,
+    });
+    assert.equal(result.status,1,'Other deliberately omitted app tables must still fail the CLI');
+    assert.equal(result.stderr,'');
+    return JSON.parse(result.stdout).issues;
+  };
+  const minimal=()=>({functions:[],columns:[],tables:[],triggers:[],publication:[],indexes:[],policies:[],roles:[]});
+  const upgrade=run(minimal());
+  assert(!upgrade.some(issue=>issue.includes('filey_bootstrap_migrations')||issue.includes('bootstrap ledger')),
+    'A supported upgraded database must not be told to install fresh-only tracking');
+  assert(upgrade.includes('Missing table: app_settings'),'Required business tables cannot be made optional');
+  assert(upgrade.includes('Missing column: app_settings.key'),'Required business columns must still be checked');
+
+  const partial=minimal();
+  partial.tables.push({table:'filey_bootstrap_migrations',rls:false,authenticated:['SELECT'],anon:null});
+  const invalid=run(partial);
+  assert(invalid.includes('Missing column: filey_bootstrap_migrations.name'));
+  assert(invalid.includes('Missing column: filey_bootstrap_migrations.installed_at'));
+  assert(invalid.includes('Missing bootstrap ledger column: source_sha256'));
+  assert(invalid.includes('Unexpected bootstrap ledger authority'),'Presence never exempts ledger privacy');
+
+  partial.tables[0]={table:'filey_bootstrap_migrations',rls:true,authenticated:null,anon:null};
+  partial.columns=['name','source_sha256','installed_at'].map(column=>({table:'filey_bootstrap_migrations',column}));
+  const tracked=run(partial);
+  assert(!tracked.some(issue=>issue.includes('filey_bootstrap_migrations')||issue.includes('bootstrap ledger')),
+    'A complete private fresh-installer ledger remains supported');
+});
 test('accepts exact current RPCs, private ledgers, narrow role and scoped immutable receipts',()=>assert.deepEqual(check(fixture()),[]));
 
 test('the real catalog exporter includes every checked workflow source body',()=>{

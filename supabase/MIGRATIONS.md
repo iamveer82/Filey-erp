@@ -590,3 +590,23 @@ No prompts are persisted by this cache. Local mode and BYOK requests retain
 their existing storage behavior. Account/workspace changes and Stop cannot
 execute late tool output. Disposable SQL and transport tests use synthetic data
 and do not call a paid provider.
+
+## Word-style Letter documents — applied 6 October 2026
+
+Applied `2026-10-06-letter-rich-document.sql` to the existing production project
+`voyrjqgaypiylwskkwpr` through its authenticated SQL editor. The transaction
+completed successfully. It adds bounded JSON document validators and updates
+the existing Letter formatting guard; it does not rewrite business records,
+issued snapshots or ownership.
+
+Read-only catalog exports before and after deployment verified the prerequisites
+and upgrade. The final `check-cloud-schema.mjs` run reports **zero issues** across
+93 tables, 1,207 columns and 127 named functions, including all 45 sync tables'
+RLS, revision triggers and Realtime publication. The fresh installer's source
+ledger remains optional on upgraded databases and is checked strictly when
+present. Never replay `schema.sql` against this production database.
+
+Cloud saves use the existing scoped revision checks. Desktop users sign in to
+the same account and select their existing Cloud workspace. Local records are
+uploaded only after the user confirms **Upload and use cloud** in Data and
+storage; an app update does not perform that upload automatically.

@@ -14,6 +14,10 @@ const functions = new Map(catalog.functions.map(f => [f.name, f]));
 const columns = new Set(catalog.columns.map(c => `${c.table}.${c.column}`));
 const tables = new Map(catalog.tables.map(t => [t.table, t]));
 const issues = new Set();
+// Upgraded databases do not acquire the fresh installer's source ledger.
+// When present it still needs every declared column and the strict privacy
+// checks in workflowSchemaIssues; absence must not prompt a baseline replay.
+const absentFreshLedger = table => table === 'filey_bootstrap_migrations' && !tables.has(table);
 
 // Static RPC names cover every current frontend/edge caller. Computed names
 // would need an explicit assertion here; none are inferred from arbitrary text.
@@ -27,8 +31,9 @@ for (const file of [...files('src'), ...files('supabase/functions')]
 for (const file of files('supabase').filter(file => file.endsWith('.sql') && !/[\\/]tests[\\/]|verify-/.test(file))) {
   const sql = text(file);
   for (const match of sql.matchAll(/alter\s+table\s+(?:if exists\s+)?(?:public\.)?(\w+)\s+add\s+column\s+(?:if not exists\s+)?(\w+)/gi))
-    if (!columns.has(`${match[1]}.${match[2]}`)) issues.add(`Missing column: ${match[1]}.${match[2]}`);
+    if (!absentFreshLedger(match[1]) && !columns.has(`${match[1]}.${match[2]}`)) issues.add(`Missing column: ${match[1]}.${match[2]}`);
   for (const match of sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?(\w+)\s*\(([\s\S]*?)\n\);/gi)) {
+    if (absentFreshLedger(match[1])) continue;
     if (!tables.has(match[1])) issues.add(`Missing table: ${match[1]}`);
     for (const line of match[2].split('\n')) {
       const column = line.trim().match(/^([a-z_]+)\s+(?:text|bigint|integer|numeric|boolean|uuid|jsonb|timestamptz|date|time|int|bigserial|serial)(?:\W|$)/i);
