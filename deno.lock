@@ -408,6 +408,12 @@
         "npm:@tauri-apps/plugin-updater@^2.10.1",
         "npm:@testing-library/jest-dom@^6.9.1",
         "npm:@testing-library/react@^16.3.2",
+        "npm:@tiptap/core@3.31.4",
+        "npm:@tiptap/extension-text-align@3.31.4",
+        "npm:@tiptap/extension-text-style@3.31.4",
+        "npm:@tiptap/pm@3.31.4",
+        "npm:@tiptap/react@3.31.4",
+        "npm:@tiptap/starter-kit@3.31.4",
         "npm:@types/react-dom@^19.2.0",
         "npm:@types/react@^19.2.0",
         "npm:@uiw/color-convert@^2.10.2",
@@ -433,7 +439,7 @@
         "npm:jsdom@^25.0.1",
         "npm:lenis@^1.3.25",
         "npm:lucide-react@^1.16.0",
-        "npm:mammoth@^1.12.0",
+        "npm:mammoth@^1.13.0",
         "npm:pdf-lib@^1.17.1",
         "npm:pdfjs-dist@^6.3.289",
         "npm:postcss@^8.5.15",
@@ -462,7 +468,10 @@
       "overrides": {
         "form-data": ">=4.0.6",
         "ws": ">=8.21.0",
-        "image-size": ">=2.0.4"
+        "image-size": ">=2.0.4",
+        "mammoth": {
+          "argparse": "2.0.1"
+        }
       }
     }
   }
