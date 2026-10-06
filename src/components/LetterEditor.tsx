@@ -54,6 +54,14 @@ export function LetterEditor({
     setForm({
       ...form,
       rich_document: document,
+      // The canvas includes these words. Remove their old separate copies so
+      // a changed recipient/sign-off cannot leave stale metadata behind.
+      recipient_name: "",
+      recipient_address: "",
+      salutation: "",
+      closing: "",
+      signatory_name: "",
+      signatory_title: "",
       ...letterRichDocumentToLegacy(document),
     });
   const input = (

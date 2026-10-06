@@ -51,6 +51,7 @@ import {
 import LetterDocument, { useLetterPages } from "../components/LetterDocument";
 
 import { LetterEditor } from "../components/LetterEditor";
+import { letterSearchText } from "../lib/letterRichText";
 
 const filename = (form: LetterForm) =>
   safeName(form.number || "letter")
@@ -375,14 +376,13 @@ export default function Letter() {
       toast.success("Letter deleted.");
     });
   const query = search.trim().toLocaleLowerCase();
-  const filtered = records.filter(
-    (record) =>
-      (filter === "all" || record.form.status === filter) &&
-      (!query ||
-        `${record.form.number} ${record.form.title} ${record.form.recipient_name}`
-          .toLocaleLowerCase()
-          .includes(query))
-  );
+  const filtered = records.filter((record) => {
+    const document = letterDisplayForm(record);
+    return (
+      (filter === "all" || document.status === filter) &&
+      (!query || letterSearchText(document).toLocaleLowerCase().includes(query))
+    );
+  });
 
   return (
     <>
@@ -515,8 +515,12 @@ export default function Letter() {
               {
                 key: "recipient",
                 label: "Recipient",
-                sortValue: (record) => record.form.recipient_name,
-                render: (record) => record.form.recipient_name || "—",
+                sortValue: (record) =>
+                  record.form.rich_document ? "" : record.form.recipient_name,
+                render: (record) =>
+                  record.form.rich_document
+                    ? "See letter"
+                    : record.form.recipient_name || "—",
               },
               {
                 key: "date",

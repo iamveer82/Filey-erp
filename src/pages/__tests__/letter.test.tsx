@@ -196,12 +196,10 @@ function canvas(value: string) {
   act(() => {
     element.editor.commands.setContent({
       type: "doc",
-      content: value
-        .split("\n")
-        .map((text) => ({
-          type: "paragraph",
-          ...(text ? { content: [{ type: "text", text }] } : {}),
-        })),
+      content: value.split("\n").map((text) => ({
+        type: "paragraph",
+        ...(text ? { content: [{ type: "text", text }] } : {}),
+      })),
     });
   });
 }
@@ -438,6 +436,48 @@ it("preserves canvas content after a failed save so it can be retried", async ()
   expect(vi.mocked(saveLetter).mock.calls[1][0]).toEqual(
     vi.mocked(saveLetter).mock.calls[0][0]
   );
+});
+
+it("replaces legacy prose without stale recipient metadata and finds recipients typed on the canvas", async () => {
+  workspace.records = [
+    makeRecord({
+      ...blankLetterForm("LTR-OLD"),
+      title: "Authorization letter",
+      recipient_name: "Mary",
+      salutation: "Dear Mary,",
+      body: "Original responsibilities",
+      signatory_name: "Original signer",
+    }),
+  ];
+  mount("/letters?letter=letter-1");
+  await screen.findByRole("textbox", { name: "Letter canvas" });
+  canvas(
+    "Authorization letter\nWe authorize John Smith to manage these services.\nNew signer"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+  await waitFor(() => expect(saveLetter).toHaveBeenCalledOnce());
+  const saved = vi.mocked(saveLetter).mock.calls[0][0];
+  expect(saved.body).toContain("John Smith");
+  expect(saved).toMatchObject({
+    recipient_name: "",
+    recipient_address: "",
+    salutation: "",
+    closing: "",
+    signatory_name: "",
+    signatory_title: "",
+  });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  await screen.findByRole("button", { name: "New letter" });
+  fireEvent.change(screen.getByPlaceholderText("Search letters…"), {
+    target: { value: "John Smith" },
+  });
+  expect(screen.getByRole("button", { name: "Quick view" })).toBeInTheDocument();
+  expect(screen.getByText("See letter")).toBeInTheDocument();
+  fireEvent.change(screen.getByPlaceholderText("Search letters…"), {
+    target: { value: "Mary" },
+  });
+  expect(screen.queryByRole("button", { name: "Quick view" })).not.toBeInTheDocument();
 });
 
 it("confirms issue, locks the rich snapshot and duplicates into a fresh editable draft", async () => {

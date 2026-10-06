@@ -322,6 +322,12 @@ describe("Word canvas agent revisions", () => {
     expect(read.form).not.toHaveProperty("rich_document");
   });
 
+  it("finds canvas wording without matching obsolete separate recipient fields", async () => {
+    const draft = await saveRich();
+    expect(await listAgentLetters({ query: "First responsibility" })).toMatchObject({ count: 1, letters: [{ id: draft.id, recipient_name: "" }] });
+    expect(await listAgentLetters({ query: "Old separate recipient" })).toMatchObject({ count: 0, letters: [] });
+  });
+
   it("makes explicit body rewrites visible without stale prose or duplicate titles, retaining company slots", async () => {
     const draft = await saveRich();
     await reviseAgentLetterDraft({ letter_id: draft.id, expected_revision: draft.revision,

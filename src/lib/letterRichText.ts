@@ -291,6 +291,29 @@ export function letterRichText(document: LetterRichDocument): string {
   return document.content.map(plain).join("\n");
 }
 
+/** Find recipients and wording typed on the canvas, without searching assets. */
+export function letterSearchText(form: LetterForm): string {
+  const prose = form.rich_document
+    ? letterRichText(form.rich_document)
+    : [
+        form.recipient_name,
+        form.recipient_address,
+        form.salutation,
+        form.body,
+        ...form.blocks.map((block) =>
+          block.type === "text"
+            ? block.text
+            : block.type === "field" || block.type === "date"
+              ? `${block.label} ${block.value}`
+              : ""
+        ),
+        form.closing,
+        form.signatory_name,
+        form.signatory_title,
+      ].join("\n");
+  return `${form.number} ${form.title}\n${prose}`;
+}
+
 const legacyFonts = { modern: "Inter", classic: "Lora", mono: "IBM Plex Mono" } as const;
 function legacyParagraph(text: string, style: LetterTextStyle): LetterRichNode {
   const marks: LetterRichMark[] = [];

@@ -16,7 +16,7 @@ import {
   type LetterRecord,
 } from "./letters";
 import type { DeliveredFile } from "./agentFiles";
-import { letterRichDocument, letterRichDocumentToLegacy, letterRichText } from "./letterRichText";
+import { letterRichDocument, letterRichDocumentToLegacy, letterRichText, letterSearchText } from "./letterRichText";
 
 const LAYOUTS = ["letter-standard", "letter-modern", "letter-formal"] as const;
 const TEXT_FIELDS = ["title", "issue_date", "recipient_name", "recipient_address", "salutation", "body", "closing", "signatory_name", "signatory_title", "accent"] as const;
@@ -211,7 +211,7 @@ function missing(form: LetterForm): string[] {
 function summary(record: LetterRecord) {
   const form = letterDisplayForm(record);
   return { id: record.id, number: form.number, revision: record.revision, title: form.title, status: form.status,
-    issue_date: form.issue_date, recipient_name: form.recipient_name, updated_at: record.updated_at, navigation: "/letters",
+    issue_date: form.issue_date, recipient_name: form.rich_document ? "" : form.recipient_name, updated_at: record.updated_at, navigation: "/letters",
     url: `#/letters?letter=${encodeURIComponent(record.id)}`, field_names_needing_completion: missing(form) };
 }
 
@@ -234,7 +234,7 @@ export async function listAgentLetters(args: Record<string, unknown>, signal?: A
   check();
   const matches = records.filter(record => {
     const form = letterDisplayForm(record);
-    return (!args.status || form.status === args.status) && (!query || `${form.number} ${form.title} ${form.recipient_name}`.toLowerCase().includes(query));
+    return (!args.status || form.status === args.status) && (!query || letterSearchText(form).toLowerCase().includes(query));
   });
   return { count: matches.length, letters: matches.slice(0, limit).map(summary), navigation: "/letters" };
 }
