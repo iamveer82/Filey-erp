@@ -8,6 +8,7 @@ import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 import { syncProfile } from "./profileSync";
+import { LOCAL_ID_MIN } from "./recordId";
 import { assertCloudTransfer, checkCloudTransfer, LOCAL_TRANSFER_REQUIRED, type CloudTransferPermit } from "./cloudTransfer";
 import {
   loadColl,
@@ -269,6 +270,12 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
     const conflicts = await listSyncConflicts();
     const knownConflicts = new Set(conflicts.map(c => c.id));
     const journal = await journalSnapshot();
+    // Older device IDs may identify a different cloud setting. A tombstone
+    // has no business key; only an acknowledged revision proves its cloud ID.
+    const settings = journal.tables.app_settings;
+    if (settings?.deleted.some(id => Number.isSafeInteger(Number(id)) && Number(id) >= 0 && Number(id) < LOCAL_ID_MIN
+      && settings.deletedRevisions?.[String(id)] == null))
+      throw new Error("A deleted company setting uses an older device ID and cannot be matched safely. Review this deletion before syncing. Your device data has not been changed.");
     const version = journal.v;
     const snapshot = new Map<string, Record<string, any>[]>();
     const orgId = orgCache!.orgId;
