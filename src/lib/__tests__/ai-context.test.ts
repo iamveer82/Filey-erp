@@ -15,7 +15,7 @@ beforeEach(async () => {
   setDisplayCurrency("AED");
   vi.mocked(loadModuleAccess).mockReset().mockResolvedValue({ admin: true, modules: null });
 });
-afterEach(() => { vi.restoreAllMocks(); clearAiContextCache(); setCacheOrg(null); setDisplayCurrency("AED"); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); clearAiContextCache(); setCacheOrg(null); setDisplayCurrency("AED"); });
 
 function mockBriefReads() {
   const customers = vi.spyOn(crm, "customers").mockResolvedValue([]);
@@ -28,6 +28,34 @@ function mockBriefReads() {
 }
 
 describe("the business brief", () => {
+  it("releases a stopped chat while a record fetch is stalled and ignores its late result", async () => {
+    const { customers, company } = mockBriefReads();
+    let finish!: (rows: Awaited<ReturnType<typeof crm.customers>>) => void;
+    customers.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const pending = buildAiContext(undefined, controller.signal);
+    await vi.waitFor(() => expect(customers).toHaveBeenCalledOnce());
+    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejection;
+    finish([]);
+    await Promise.resolve(); await Promise.resolve();
+    expect(company).not.toHaveBeenCalled();
+    expect(await buildAiContext()).toContain("Fixture company");
+    expect(customers).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the optional snapshot and explicitly describes unavailable data", async () => {
+    vi.useFakeTimers();
+    mockBriefReads().customers.mockReturnValueOnce(new Promise(() => {}));
+    const pending = buildAiContext();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(await pending).toContain("missing data is unknown, not empty");
+    expect(vi.getTimerCount()).toBe(0);
+    const controller = new AbortController(); controller.abort();
+    await expect(buildAiContext(undefined, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("states identity the agent would otherwise guess", async () => {
     await billing.saveCompany({
       name: "Rennox Trading",

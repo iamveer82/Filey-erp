@@ -4,6 +4,7 @@ import { onTelegramState, telegramState, telegramSaved, connectTelegram, disconn
 import { agentStorageScope } from "../lib/agentStorage";
 import { Copy, Send, ShieldCheck } from "lucide-react";
 import { useUI } from "../lib/ui";
+import { cn } from "../lib/format";
 
 export default function TelegramAgentConnection() {
   const [state, setState] = useState(telegramState);
@@ -16,6 +17,9 @@ export default function TelegramAgentConnection() {
   useEffect(() => onTelegramState(() => setState(telegramState())), []);
   const desktop = "__TAURI_INTERNALS__" in window;
   const connected = state.state === "connected" || state.state === "pairing";
+  const status = !desktop ? "Needs desktop app" : {
+    disconnected: "Not connected", connecting: "Connecting…", pairing: "Waiting for pairing", connected: "Connected", error: "Connection problem",
+  }[state.state];
   const act = async (work: () => Promise<unknown>) => {
     const scope = agentStorageScope();
     setBusy(true); setFeedback("");
@@ -27,8 +31,12 @@ export default function TelegramAgentConnection() {
     <section aria-label="Telegram agent connection" className="mb-6 overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex items-start gap-3 border-b border-border p-5">
         <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-muted"><Send size={18} /></span>
-        <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">Telegram</h2><p className="mt-1 text-sm text-muted-foreground">Chat with your Filey agent and receive documents in your private bot conversation.</p></div>
-        <span className="text-xs text-muted-foreground">{connected ? state.state === "pairing" ? "Pair your account" : "Connected" : "Desktop connection"}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-semibold">Telegram</h2>
+            <span role="status" className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", desktop && state.state === "connected" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground")}>{status}</span>
+          </div>
+          <p className="mt-1 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">Chat with Filey AI and receive documents in your private bot conversation.</p>
+        </div>
       </div>
       <div className="space-y-4 p-5">
         {!desktop ? <p className="text-sm text-muted-foreground">Open the installed Filey desktop app to connect Telegram. Keep it open while requesting work from your phone.</p> : <>

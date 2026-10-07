@@ -3,6 +3,7 @@ import { fmtDate } from "../lib/format";
 import type { LetterAlignment, LetterForm, LetterTextStyle } from "../lib/letters";
 import {
   LETTER_RICH_LIMITS,
+  LETTER_RICH_FONT_STACKS,
   type LetterRichDocument,
   type LetterRichNode,
 } from "../lib/letterRichText";
@@ -108,21 +109,17 @@ const hasBackground = (form: LetterForm) =>
 const bodyWidth = (form: LetterForm) =>
   A4_W - (hasBackground(form) ? DEFAULT_SIDE_SPACE : 48) * 2;
 const safeFont = (form: LetterForm) =>
-  form.font && /^[\w\s,'"-]+$/.test(form.font) ? form.font : "Inter, Arial, sans-serif";
+  form.font && /^[\w\s,'"-]+$/.test(form.font)
+    ? /^['"]?Inter['"]?(?:\s*,|$)/i.test(form.font.trim())
+      ? LETTER_RICH_FONT_STACKS.Inter
+      : form.font
+    : LETTER_RICH_FONT_STACKS.Inter;
 const STYLE_FONTS = {
-  modern: "Inter, Arial, sans-serif",
-  classic: "'Lora', Georgia, serif",
-  mono: "'IBM Plex Mono', monospace",
+  modern: LETTER_RICH_FONT_STACKS.Inter,
+  classic: LETTER_RICH_FONT_STACKS.Lora,
+  mono: LETTER_RICH_FONT_STACKS["IBM Plex Mono"],
 };
-const RICH_FONTS: Record<string, string> = {
-  Inter: STYLE_FONTS.modern,
-  Arial: "Arial, sans-serif",
-  Georgia: "Georgia, serif",
-  "Times New Roman": "'Times New Roman', serif",
-  "Courier New": "'Courier New', monospace",
-  Lora: STYLE_FONTS.classic,
-  "IBM Plex Mono": STYLE_FONTS.mono,
-};
+const RICH_FONTS: Record<string, string> = LETTER_RICH_FONT_STACKS;
 const mergedStyle = (
   global?: LetterTextStyle,
   local?: LetterTextStyle

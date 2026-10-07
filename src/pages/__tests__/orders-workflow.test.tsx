@@ -72,3 +72,22 @@ it("retains unsaved order changes when inventory refreshes in the background", a
   expect(screen.getByLabelText("Customer *")).toHaveValue("Unsaved customer edit");
   expect(mock.getOrder).toHaveBeenCalledTimes(1);
 });
+
+it("does not silently delete invalid or unlinked order lines when saving", async () => {
+  mock.getOrder.mockResolvedValueOnce({ ...detail(1), items: [{ product_id: null, quantity: 2, unit_price: 10 }] });
+  mount();
+  await edit("SO-0001");
+  await screen.findByLabelText("Quantity for Item");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("no longer linked to a product");
+  expect(mock.updateOrder).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await edit("SO-0002");
+  fireEvent.change(await screen.findByLabelText("Quantity for Product A"), { target: { value: "-2" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("zero or greater");
+  expect(mock.updateOrder).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Quantity for Product A"), { target: { value: "0" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(mock.updateOrder).toHaveBeenCalledWith(2, expect.objectContaining({ total: 0 }), [{ product_id: 10, quantity: 0, unit_price: 10 }]));
+});

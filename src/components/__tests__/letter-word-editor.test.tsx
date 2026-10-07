@@ -225,6 +225,30 @@ it("formats selected words with manual decimal size and spacing without changing
   expect(() => validateLetterRichDocument(saved)).not.toThrow();
 });
 
+it("renders Inter with the loaded face and preserves its stored label through editing and HTML roundtrips", async () => {
+  const rich: LetterRichDocument = {
+    type: "doc",
+    content: [{ type: "paragraph", content: [{
+      type: "text", text: "Hello Mary",
+      marks: [{ type: "textStyle", attrs: { fontFamily: "Inter" } }],
+    }] }],
+  };
+  const { editor, canvas, changed } = await mount({ ...blankLetterForm("LTR-1"), closing: "", blocks: [], rich_document: rich });
+  const font = (canvas.querySelector("span[style]") as HTMLElement).style.fontFamily;
+  expect(font).toContain("Inter Variable");
+  expect(font).toContain("Arial, sans-serif");
+  expect(canvas.closest<HTMLElement>(".letter-word-paper")!.style.getPropertyValue("--letter-font")).toContain("Inter Variable");
+  expect(screen.getByRole("combobox", { name: "Font" })).toHaveValue("Inter");
+  act(() => {
+    editor.commands.setContent(editor.getHTML());
+    editor.commands.setTextSelection({ from: 1, to: 11 });
+    editor.commands.setMark("textStyle", { fontSize: "13pt" });
+  });
+  const saved = changed.mock.calls[changed.mock.calls.length - 1][0] as LetterRichDocument;
+  expect(saved.content[0].content![0].marks).toContainEqual({ type: "textStyle", attrs: { fontFamily: "Inter", fontSize: "13pt", color: null } });
+  expect(() => validateLetterRichDocument(saved)).not.toThrow();
+});
+
 it("syncs a renamed legacy title but preserves a rich canvas heading when its document name changes", async () => {
   const legacy = {
     ...blankLetterForm("LTR-1"),

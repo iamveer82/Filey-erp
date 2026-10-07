@@ -1,19 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
 import Inventory from "../Inventory";
 
-const mock = vi.hoisted(() => ({ recordStocktake: vi.fn(), recordStockEntry: vi.fn(), products: vi.fn(), StocktakeChangedError: class StocktakeChangedError extends Error {} }));
+const mock = vi.hoisted(() => ({ recordStocktake: vi.fn(), recordStockEntry: vi.fn(), products: vi.fn(), updateProduct: vi.fn(), createProduct: vi.fn(), StocktakeChangedError: class StocktakeChangedError extends Error {} }));
 const products = [
   { id: 1, name: "Product A", sku: "A", quantity: 10, unit_price: 10, cost_price: 5, reorder_level: 0, category: "Stock", created_at: "2026-10-03" },
   { id: 2, name: "Product B", sku: "B", quantity: 20, unit_price: 20, cost_price: 5, reorder_level: 0, category: "Stock", created_at: "2026-10-03" },
 ];
-vi.mock("../../lib/api", () => ({ StocktakeChangedError: mock.StocktakeChangedError, erp: { products: mock.products, stockMovements: async () => ({}), recordStocktake: mock.recordStocktake, recordStockEntry: mock.recordStockEntry }, pos: { createDraftsFromLowStock: vi.fn() }, shareRecord: vi.fn(), insertedBefore: () => 0, billing: { listDocs: async () => [] } }));
+vi.mock("../../lib/api", () => ({ StocktakeChangedError: mock.StocktakeChangedError, erp: { products: mock.products, stockMovements: async () => ({}), recordStocktake: mock.recordStocktake, recordStockEntry: mock.recordStockEntry, updateProduct: mock.updateProduct, createProduct: mock.createProduct }, pos: { createDraftsFromLowStock: vi.fn() }, shareRecord: vi.fn(), insertedBefore: () => 0, billing: { listDocs: async () => [] } }));
 vi.mock("../../lib/realtime", () => ({ useLiveSync: () => {} }));
 vi.mock("../../components/BarcodeScanner", () => ({ default: () => null }));
 vi.mock("../../components/ImportCsvModal", () => ({ default: () => null }));
-vi.mock("../../components/RowActions", () => ({ RowActions: () => null, QuickViewModal: () => null, shareVia: vi.fn() }));
+vi.mock("../../components/RowActions", () => ({ RowActions: ({ onEdit }: { onEdit: () => void }) => <button onClick={onEdit}>Edit</button>, QuickViewModal: () => null, shareVia: vi.fn() }));
 beforeEach(() => { mock.products.mockImplementation(async () => products.map(p => ({ ...p }))); mock.recordStocktake.mockResolvedValue(undefined); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 async function mount() {
@@ -126,4 +126,32 @@ it("keeps an unsupported cloud count for retry without replaying an unsafe delta
   await screen.findByText("Cloud stocktake migration is required");
   expect(screen.getByLabelText("Counted quantity for Product A")).toHaveValue(12);
   expect(mock.recordStockEntry).not.toHaveBeenCalled();
+});
+
+it("routes existing count changes through Stocktake and keeps starting quantity editable for new products", async () => {
+  render(<MemoryRouter><UIProvider><Inventory /></UIProvider></MemoryRouter>);
+  const row = (await screen.findByText("Product A")).closest("tr")!;
+  fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+  expect(await screen.findByLabelText("Quantity")).toHaveAttribute("readonly");
+  expect(screen.getByText("Use Stocktake to adjust existing stock safely.")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "Renamed product" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(mock.updateProduct).toHaveBeenCalledOnce());
+  expect(mock.updateProduct.mock.calls[0][1]).not.toHaveProperty("quantity");
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Stock entry for Product A" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Adjust in Stocktake" }));
+  await screen.findByRole("dialog", { name: "Stocktake: physical count" });
+  count("Product A", "12");
+  fireEvent.click(screen.getByRole("button", { name: /Post adjustments/ }));
+  await waitFor(() => expect(mock.recordStocktake).toHaveBeenCalledWith(1, 12, 10, expect.any(String)));
+  expect(mock.recordStockEntry).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Add item" }));
+  expect(await screen.findByLabelText("Quantity")).not.toHaveAttribute("readonly");
+  fireEvent.change(screen.getByLabelText("SKU *"), { target: { value: "NEW" } });
+  fireEvent.change(screen.getByLabelText("Name *"), { target: { value: "New product" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "4.5" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+  await waitFor(() => expect(mock.createProduct).toHaveBeenCalledWith(expect.objectContaining({ quantity: 4.5 })));
 });

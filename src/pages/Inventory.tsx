@@ -12,7 +12,6 @@ import {
   ScanLine,
   Calendar,
   Hash,
-  Pencil,
   PackageMinus,
   PackagePlus,
   ShoppingCart,
@@ -773,6 +772,7 @@ export default function Inventory() {
         history={issueFor ? issues[String(issueFor.id)] ?? [] : []}
         onClose={() => setIssueFor(null)}
         onSaved={load}
+        onAdjust={() => { setIssueFor(null); void openStocktake(); }}
       />
 
       <StocktakeModal
@@ -1038,23 +1038,13 @@ function ProductModal({
           : undefined,
       };
       if (product) {
-        // Quantity changes go through the stock ledger (atomic + logged as an
-        // adjustment) instead of being silently overwritten with the rest of
-        // the form.
-        const qtyDiff = (Number(f.quantity) || 0) - (Number(product.quantity) || 0);
+        // Existing stock is adjusted through Stocktake, which checks concurrent
+        // changes and retains the exact request across acknowledgement failures.
         const { quantity: _q, ...rest } = payload;
         await erp.updateProduct(
           product.id,
           rest as Partial<Omit<Product, "id" | "created_at">>
         );
-        if (qtyDiff !== 0)
-          await erp.recordStockEntry(
-            product.id,
-            "adjust",
-            qtyDiff,
-            "",
-            "Edited in product form"
-          );
         toast.success("Product updated.");
       } else {
         await erp.createProduct({
@@ -1152,10 +1142,12 @@ function ProductModal({
           <input
             type="number"
             className="input"
+            readOnly={!!product}
             placeholder="0"
             value={f.quantity || ""}
             onChange={(e) => setF({ ...f, quantity: numInput(e.target.value) })}
           />
+          {product && <p className="mt-1 text-xs text-muted-foreground">Use Stocktake to adjust existing stock safely.</p>}
         </Field>
         <Field label="Reorder Level">
           <input
@@ -1483,17 +1475,18 @@ function IssueStockModal({
   history,
   onClose,
   onSaved,
+  onAdjust,
 }: {
   product: Product | null;
   history: StockMovement[];
   onClose: () => void;
   onSaved: () => void;
+  onAdjust: () => void;
 }) {
   const { toast } = useUI();
-  const [mode, setMode] = useState<"out" | "in" | "adjust">("out");
+  const [mode, setMode] = useState<"out" | "in">("out");
   const [invoice, setInvoice] = useState("");
   const [qty, setQty] = useState(0);
-  const [counted, setCounted] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [date, setDate] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1504,7 +1497,6 @@ function IssueStockModal({
     setMode("out");
     setInvoice("");
     setQty(0);
-    setCounted(null);
     setNote("");
     setDate(todayYmd());
     billing
@@ -1523,28 +1515,21 @@ function IssueStockModal({
 
   const stock = product.quantity;
   const issuedSoFar = history.reduce((s, m) => s + (m.qty < 0 ? -m.qty : 0), 0);
-  const delta = counted === null ? 0 : counted - stock;
-  const qtyErr =
-    mode === "adjust"
-      ? counted === null || counted < 0 || delta === 0
-      : qty <= 0 || (mode === "out" && qty > stock);
+  const qtyErr = !Number.isFinite(qty) || qty <= 0 || (mode === "out" && qty > stock);
   const invErr = mode === "out" && !invoice.trim();
   const after =
-    mode === "out" ? stock - qty : mode === "in" ? stock + qty : counted ?? stock;
+    mode === "out" ? stock - qty : stock + qty;
 
   const submit = async () => {
     if (saving) return;
     if (qtyErr || invErr) return;
     setSaving(true);
     try {
-      const q = mode === "adjust" ? delta : qty;
-      await erp.recordStockEntry(product.id, mode, q, invoice, note, date);
+      await erp.recordStockEntry(product.id, mode, qty, invoice, note, date);
       toast.success(
         mode === "out"
           ? `Issued ${qty} × ${product.name} to ${invoice.trim()}`
-          : mode === "in"
-            ? `Received ${qty} × ${product.name}`
-            : `Adjusted ${product.name} to ${counted} (${delta > 0 ? "+" : ""}${delta})`
+          : `Received ${qty} × ${product.name}`
       );
       onSaved();
       onClose();
@@ -1555,7 +1540,7 @@ function IssueStockModal({
     }
   };
 
-  const entryLabel = { out: "Stock out", in: "Stock in", adjust: "Adjust count" }[mode];
+  const entryLabel = { out: "Stock out", in: "Stock in" }[mode];
   const typeLabel: Record<string, string> = {
     sale: "Invoice",
     purchase: "Purchase",
@@ -1574,7 +1559,6 @@ function IssueStockModal({
           [
             ["out", "Stock out"],
             ["in", "Stock in"],
-            ["adjust", "Adjust"],
           ] as const
         ).map(([m, label]) => (
           <button
@@ -1587,6 +1571,7 @@ function IssueStockModal({
             {label}
           </button>
         ))}
+        <button type="button" className="btn-ghost" onClick={onAdjust}>Adjust in Stocktake</button>
       </div>
 
       <div className="mb-4 flex items-center gap-6 rounded-xl bg-brand-50 px-4 py-3 dark:bg-white/5">
@@ -1598,7 +1583,7 @@ function IssueStockModal({
           <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">Issued out</p>
           <p className="text-lg font-semibold text-brand-600">{issuedSoFar}</p>
         </div>
-        {!qtyErr && (qty > 0 || counted !== null) && (
+        {!qtyErr && qty > 0 && (
           <div className="ml-auto text-right">
             <p className="text-[11px] font-medium uppercase tracking-wider text-brand-400">After this</p>
             <p className="text-lg font-semibold text-ink">{after} left</p>
@@ -1626,31 +1611,12 @@ function IssueStockModal({
           <Field label="Reference (optional)">
             <input
               className="input"
-              placeholder={mode === "in" ? "GRN / PO / supplier ref" : "e.g. stock count"}
+              placeholder="GRN / PO / supplier ref"
               value={invoice}
               onChange={(e) => setInvoice(e.target.value)}
             />
           </Field>
         )}
-        {mode === "adjust" ? (
-          <Field label="Counted quantity *">
-            <input
-              type="number"
-              className={cn("input", counted !== null && counted < 0 && "border-danger")}
-              placeholder={String(stock)}
-              value={counted ?? ""}
-              onChange={(e) =>
-                setCounted(e.target.value === "" ? null : numInput(e.target.value))
-              }
-            />
-            {counted !== null && delta !== 0 && (
-              <p className={cn("mt-1 text-[11px]", delta < 0 ? "text-danger" : "text-brand-500")}>
-                {delta > 0 ? "+" : ""}
-                {delta} vs current stock
-              </p>
-            )}
-          </Field>
-        ) : (
           <Field label="Quantity *">
             <input
               type="number"
@@ -1663,7 +1629,6 @@ function IssueStockModal({
               <p className="mt-1 text-[11px] text-danger">Only {stock} in stock.</p>
             )}
           </Field>
-        )}
         <Field label="Date">
           <DateField value={date} onChange={setDate} clearable={false} />
         </Field>
@@ -1675,9 +1640,7 @@ function IssueStockModal({
             placeholder={
               mode === "out"
                 ? "e.g. delivered to customer site"
-                : mode === "in"
-                  ? "e.g. received from supplier"
-                  : "e.g. physical count correction"
+                : "e.g. received from supplier"
             }
             value={note}
             onChange={(e) => setNote(e.target.value)}
@@ -1721,8 +1684,6 @@ function IssueStockModal({
             <Loader2 size={15} className="animate-spin" />
           ) : mode === "in" ? (
             <PackagePlus size={15} />
-          ) : mode === "adjust" ? (
-            <Pencil size={15} />
           ) : (
             <PackageMinus size={15} />
           )}

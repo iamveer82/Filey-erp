@@ -1,24 +1,36 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   upload: vi.fn(),
+  download: vi.fn(),
   remove: vi.fn(),
-  single: vi.fn(),
   session: vi.fn(),
+  storage: vi.fn(),
+  scope: "workspace:user:person",
+  user: "person",
+  local: false,
 }));
 vi.mock("../supabase", () => ({
-  supabase: {
+  supabase: {},
+  sb: () => ({
     auth: { getSession: mock.session },
-    from: () => ({ select: () => ({ eq: () => ({ single: mock.single }) }) }),
-    storage: { from: () => ({ upload: mock.upload, remove: mock.remove }) },
-  },
+  }),
 }));
-vi.mock("../dataMode", () => ({ isLocalMode: () => false }));
-import { validateTeamAttachments, withTeamAttachments } from "../teamAttachments";
+vi.mock("../api", () => ({ getCacheScope: () => mock.scope }));
+vi.mock("../dataMode", () => ({ isLocalMode: () => mock.local, assertWorkspaceCurrent: () => {} }));
+vi.mock("../supabaseConfig", () => ({ supabaseUrl: "https://fixture.invalid", supabaseAnonKey: "fixture-key" }));
+vi.mock("@supabase/storage-js", () => ({ StorageClient: class {
+  constructor(...args: unknown[]) { mock.storage(...args); }
+  from() { return { upload: mock.upload, download: mock.download, remove: mock.remove }; }
+} }));
+import { readTeamAttachment, validateTeamAttachments, withTeamAttachments } from "../teamAttachments";
 beforeEach(() => {
   vi.resetAllMocks();
-  mock.session.mockResolvedValue({ data: { session: { user: { id: "person" } } } });
-  mock.single.mockResolvedValue({ data: { org_id: "workspace" } });
+  mock.scope = "workspace:user:person";
+  mock.user = "person";
+  mock.local = false;
+  mock.session.mockImplementation(async () => ({ data: { session: { user: { id: mock.user }, access_token: "reviewed-token" } } }));
   mock.upload.mockResolvedValue({ error: null });
+  mock.download.mockResolvedValue({ data: new Blob(["private attachment"]), error: null });
   mock.remove.mockResolvedValue({ error: null });
 });
 it("rejects empty, oversized, mislabeled or unsupported files before uploading", () => {
@@ -64,4 +76,37 @@ it("publishes only complete uploads and cleans up attempts on upload or workspac
     "Workspace changed"
   );
   expect(send).not.toHaveBeenCalled();
+});
+
+it("pins team storage to the reviewed account and refuses another workspace's attachments", async () => {
+  const attachment = { path: "workspace/person/photo.jpg", name: "photo.jpg", mime: "image/jpeg", size: 18 };
+  expect((await readTeamAttachment(attachment)).size).toBe(18);
+  expect(mock.storage).toHaveBeenCalledWith("https://fixture.invalid/storage/v1", {
+    apikey: "fixture-key", Authorization: "Bearer reviewed-token",
+  }, expect.any(Function));
+  mock.download.mockClear();
+  await expect(readTeamAttachment({ ...attachment, path: "another-workspace/person/photo.jpg" })).rejects.toThrow("original workspace");
+  expect(mock.download).not.toHaveBeenCalled();
+});
+
+it.each(["account", "workspace", "mode"])("withholds private attachment bytes after a %s change", async change => {
+  mock.download.mockImplementationOnce(async () => {
+    if (change === "account") mock.user = "next-person";
+    if (change === "workspace") mock.scope = "next-workspace:user:person";
+    if (change === "mode") mock.local = true;
+    return { data: new Blob(["private attachment"]), error: null };
+  });
+  await expect(readTeamAttachment({ path: "workspace/person/photo.jpg", name: "photo.jpg", mime: "image/jpeg", size: 18 })).rejects.toThrow("workspace changed");
+});
+
+it("does not publish uploaded files under the next signed-in account", async () => {
+  const send = vi.fn();
+  mock.upload.mockImplementationOnce(async () => {
+    // The session may change before the workspace listener updates its cache.
+    mock.user = "next-person";
+    return { error: null };
+  });
+  await expect(withTeamAttachments([new File(["private"], "photo.jpg")], send, () => {})).rejects.toThrow("workspace changed");
+  expect(send).not.toHaveBeenCalled();
+  expect(mock.upload.mock.calls[0][0]).toMatch(/^workspace\/person\//);
 });

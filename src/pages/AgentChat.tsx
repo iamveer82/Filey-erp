@@ -27,6 +27,7 @@ import {
   Film,
   MoreHorizontal,
   SquarePen,
+  Plug,
 } from "lucide-react";
 import BloubBot from "../components/BloubBot";
 import CoinMark from "../components/CoinMark";
@@ -665,7 +666,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     const trace: NonNullable<ChatTurn["run"]> = { plan: [], actions: [] };
     try {
       let reply = "";
-      const brief = await buildAiContext().catch(() => "");
+      const brief = await buildAiContext(undefined, ctl.signal).catch(() => "");
       ctl.signal.throwIfAborted();
       const history: AiMessage[] = chat.turns
         .slice(-TURN_CAP)
@@ -952,7 +953,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 <h1 className="truncate text-sm font-semibold leading-tight text-foreground" title={chat.title || "Filey AI"}>
                   {empty ? "New chat" : chat.title || "Conversation"}
                 </h1>
-                {empty && <p className="mt-1 text-[13px] text-muted-foreground">How can I help you today?</p>}
+                {(empty || busy) && <p role={busy ? "status" : undefined} className="mt-1 truncate text-xs text-muted-foreground">{busy ? pendingConfirm ? "Waiting for your approval" : "Working on your request…" : "How can I help you today?"}</p>}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -973,6 +974,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                   <MenuItemRow icon={<Brain size={15} />} label="Memory" onClick={() => { setMoreOpen(false); openMemory(); }} />
                   <MenuItemRow icon={<Film size={15} />} label="Images and videos" onClick={() => { setMoreOpen(false); setVideosOpen(true); }} />
                   <MenuSep />
+                  <MenuItemRow icon={<Plug size={15} />} label="Connections" onClick={() => { setMoreOpen(false); navigate("/integrations?tab=free"); }} />
                   <MenuItemRow icon={<Settings2 size={15} />} label="AI settings" onClick={() => { setMoreOpen(false); navigate("/settings?section=ai"); }} />
                 </MenuPopover>
               </div>
@@ -1068,6 +1070,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           className="filey-composer-dock"
         >
           <div className={COLUMN}>
+            {!ready && !busy && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>Choose an AI connection to start chatting.</span>
+              <Link to="/settings?section=ai" className="btn-secondary">Set up AI <Settings2 size={14} /></Link>
+            </div>}
             {/* A stable composer keeps Stop readable while a reply is running. */}
             <div className="filey-composer">
               {/* Attachment chips — one tile per file, remove always visible

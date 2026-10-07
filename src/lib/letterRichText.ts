@@ -12,6 +12,16 @@ export const LETTER_RICH_FONTS = [
   "IBM Plex Mono",
 ] as const;
 export type LetterRichFont = (typeof LETTER_RICH_FONTS)[number];
+/** Render saved font labels with Filey's self-hosted faces and platform fallbacks. */
+export const LETTER_RICH_FONT_STACKS: Record<LetterRichFont, string> = {
+  Inter: "'Inter Variable', Inter, Arial, sans-serif",
+  Arial: "Arial, sans-serif",
+  Georgia: "Georgia, serif",
+  "Times New Roman": "'Times New Roman', serif",
+  "Courier New": "'Courier New', monospace",
+  Lora: "'Lora', Georgia, serif",
+  "IBM Plex Mono": "'IBM Plex Mono', monospace",
+};
 export type LetterRichAlignment = "left" | "center" | "right" | "justify";
 export interface LetterRichAttributes {
   textAlign?: LetterRichAlignment | null;

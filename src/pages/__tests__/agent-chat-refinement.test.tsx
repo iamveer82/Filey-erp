@@ -9,7 +9,8 @@ import { setCacheOrg } from "../../lib/api";
 import { setDataMode } from "../../lib/dataMode";
 import { agentStorageScope } from "../../lib/agentStorage";
 
-vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
+const context = vi.hoisted(() => ({ build: vi.fn<(_name?: string, signal?: AbortSignal) => Promise<string>>() }));
+vi.mock("../../lib/aiContext", () => ({ buildAiContext: context.build }));
 vi.mock("../../components/BloubBot", async importOriginal => ({
   ...(await importOriginal<typeof import("../../components/BloubBot")>()), default: () => null,
 }));
@@ -17,6 +18,7 @@ vi.mock("../../components/AutomationsDrawer", () => ({ default: () => null }));
 vi.mock("../../components/SkillsDrawer", () => ({ default: () => null }));
 
 beforeEach(() => {
+  context.build.mockReset().mockResolvedValue("");
   localStorage.clear(); sessionStorage.clear();
   setDataMode("local"); setCacheOrg("test-org", "test-user");
 });
@@ -25,6 +27,22 @@ const showChat = () => render(<MemoryRouter><AgentChat /></MemoryRouter>);
 const input = () => screen.getByRole("textbox", { name: "Message Filey AI" });
 const savedChat = (id = "invoices"): Chat => ({ id, title: "Review invoices", turns: [{ role: "user", text: "Review invoices" }], createdAt: 1, updatedAt: 2 });
 const seedChat = () => { const chat = savedChat(); saveChats([chat]); setActiveId(chat.id); return chat; };
+
+it("stops during business-context preparation without starting a model request", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream");
+  context.build.mockImplementation(async (_name, signal) => {
+    if (!signal) return ""; // Background warm-up is independent of the turn.
+    return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  });
+  showChat();
+  fireEvent.change(input(), { target: { value: "Check accounts" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(context.build).toHaveBeenCalledWith(undefined, expect.any(AbortSignal)));
+  fireEvent.click(screen.getByRole("button", { name: "Stop generating" }));
+  await screen.findByRole("button", { name: "Send message" });
+  expect(stream).not.toHaveBeenCalled();
+});
 
 it("starter prompts prepare editable drafts without running the agent or replacing typed text", () => {
   const stream = vi.spyOn(ai, "aiAgentStream");
@@ -56,6 +74,15 @@ it("the letter starter prepares an editable draft prompt without a paid request"
   expect(input()).toHaveValue("Draft a company letter using my saved company details. Ask me for its purpose and wording, leave missing optional details editable, and save it as a draft.");
   expect(input()).toHaveFocus();
   expect(stream).not.toHaveBeenCalled();
+});
+
+it("offers an AI setup path before sending when no connection is configured", () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(false);
+  showChat();
+  expect(screen.getByText("Choose an AI connection to start chatting.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Set up AI" })).toHaveAttribute("href", "/settings?section=ai");
+  fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
+  expect(screen.getByRole("menuitem", { name: "Connections" })).toBeInTheDocument();
 });
 
 it("manual chat titles survive another agent reply and transcript export contains the conversation", async () => {

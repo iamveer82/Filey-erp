@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
-import { assertWorkspaceCurrent, isLocalMode } from "./dataMode";
+import { isLocalMode } from "./dataMode";
+import { fileOperation } from "./fileWorkspace";
 
 export interface TeamAttachment {
   path: string;
@@ -52,23 +53,17 @@ export async function withTeamAttachments(
   const mimes = validateTeamAttachments(files);
   if (!supabase || isLocalMode())
     throw new Error("Open a cloud workspace to share files with your team.");
-  const client = supabase;
-  const { data: session, error: sessionError } = await client.auth.getSession();
-  if (sessionError || !session.session)
-    throw new Error("Sign in to share files with your team.");
-  const uid = session.session.user.id;
-  const { data: profile, error } = await client
-    .from("profiles")
-    .select("org_id")
-    .eq("id", uid)
-    .single();
-  if (error || !profile?.org_id)
+  check();
+  const operation = await fileOperation();
+  check();
+  if (!operation.org || operation.local)
     throw new Error("Your workspace could not be loaded. Please try again.");
   const uploaded: TeamAttachment[] = [];
   try {
     for (const [index, file] of files.entries()) {
       check();
-      const path = `${profile.org_id}/${uid}/${crypto.randomUUID()}.${file.name.split(".").pop()!.toLowerCase()}`;
+      operation.current();
+      const path = `${operation.org}/${operation.uid}/${crypto.randomUUID()}.${file.name.split(".").pop()!.toLowerCase()}`;
       // Keep the attempted path for cleanup even if the upload response is lost.
       uploaded.push({
         path,
@@ -76,7 +71,7 @@ export async function withTeamAttachments(
         mime: mimes[index],
         size: file.size,
       });
-      const { error } = await client.storage
+      const { error } = await operation.storage
         .from(TEAM_ATTACHMENT_BUCKET)
         .upload(path, file, { contentType: mimes[index], upsert: false });
       if (error)
@@ -85,11 +80,13 @@ export async function withTeamAttachments(
         );
     }
     check();
+    await operation.assertSession();
+    check();
     await send(uploaded);
   } catch (error) {
     // Storage refuses deletion if a message committed before its response was lost.
     if (uploaded.length)
-      await client.storage
+      await operation.storage
         .from(TEAM_ATTACHMENT_BUCKET)
         .remove(uploaded.map((a) => a.path))
         .catch(() => {});
@@ -98,13 +95,15 @@ export async function withTeamAttachments(
 }
 
 export async function readTeamAttachment(attachment: TeamAttachment): Promise<Blob> {
-  assertWorkspaceCurrent();
   if (!supabase || isLocalMode())
     throw new Error("Open the cloud workspace to view this attachment.");
-  const { data, error } = await supabase.storage
+  const operation = await fileOperation();
+  if (operation.local || !operation.org || !attachment.path.startsWith(`${operation.org}/`))
+    throw new Error("Open the original workspace to view this attachment.");
+  const { data, error } = await operation.storage
     .from(TEAM_ATTACHMENT_BUCKET)
     .download(attachment.path);
-  assertWorkspaceCurrent();
+  await operation.assertSession();
   if (error || !data)
     throw new Error(
       "This file is unavailable or you no longer have access. Please try again."
