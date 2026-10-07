@@ -19,6 +19,7 @@ import {
 import WorkspaceNavigation from "./WorkspaceNavigation";
 import SidebarIcon from "./SidebarIcon";
 import Logo from "./Logo";
+import { ProfileAvatarImage } from "./ProfileAvatarImage";
 import CoinMark from "./CoinMark";
 import ErrorBoundary from "./ErrorBoundary";
 import GuideLauncher from "./GuideLauncher";
@@ -346,7 +347,7 @@ export default function Layout({ children, persistentContent }: { children: Reac
   /** Avatar disc — image if set, else initials on a neutral gradient. */
   const Avatar = ({ size }: { size: number }) =>
     profile?.avatar ? (
-      <img
+      <ProfileAvatarImage animate
         src={profile.avatar}
         alt={name}
         style={{ width: size, height: size }}

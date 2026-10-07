@@ -45,3 +45,87 @@ export function avatarChoice(value: string) {
   const colour = AVATAR_COLOURS.find((colour) => colour.id === match[2]);
   return shape && colour ? { shape, colour } : null;
 }
+
+// Page Mascot, MIT © 2026 Kamran Ahmed. See public/avatars/mascots/LICENSE.txt.
+export const MASCOT_GROUPS = {
+  Animals: [
+    "bear",
+    "bunny",
+    "cat",
+    "deer",
+    "dino",
+    "fox",
+    "frog",
+    "hamster",
+    "hedgehog",
+    "koala",
+    "mouse",
+    "otter",
+    "owl",
+    "panda",
+    "penguin",
+    "pug",
+    "raccoon",
+    "redpanda",
+    "sheep",
+    "sloth",
+    "tiger",
+  ],
+  People: [
+    "afro",
+    "astronaut",
+    "bald",
+    "ballerina",
+    "beard",
+    "builder",
+    "cap",
+    "chef",
+    "glasses",
+    "grandpa",
+    "granny",
+    "hijabi",
+    "kamran",
+    "nurse",
+    "pirate",
+    "scientist",
+    "sikh",
+    "skater",
+    "wizard",
+  ],
+  Robots: [
+    "clockwork",
+    "crt",
+    "cube",
+    "drone",
+    "gearbot",
+    "knight",
+    "lantern",
+    "postbot",
+    "radio",
+    "rocket",
+    "scout",
+    "toaster",
+    "tv",
+  ],
+} as const;
+export type MascotId = (typeof MASCOT_GROUPS)[keyof typeof MASCOT_GROUPS][number];
+export const MASCOT_AVATARS = Object.values(MASCOT_GROUPS).flat();
+export function mascotName(id: MascotId): string {
+  return (
+    (
+      {
+        redpanda: "Red panda",
+        gearbot: "Gear bot",
+        postbot: "Post bot",
+        crt: "Retro monitor",
+        tv: "TV",
+      } as Partial<Record<MascotId, string>>
+    )[id] ?? id[0].toUpperCase() + id.slice(1)
+  );
+}
+export function mascotUrl(id: MascotId): string {
+  return `/avatars/mascots/${id}.webp`;
+}
+export function mascotChoice(value: string): MascotId | null {
+  return MASCOT_AVATARS.find((id) => value === mascotUrl(id)) ?? null;
+}

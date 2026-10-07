@@ -1,0 +1,5 @@
+Page Mascot by Kamran Ahmed
+https://github.com/nilbuild/page-mascot
+Revision: 76a44ed9180063bf4852b9dd724b656f4a828ac7
+MIT license: LICENSE.txt
+Artwork resized to 160px cells; centered portraits extracted for static fallbacks.
