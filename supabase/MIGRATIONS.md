@@ -610,3 +610,38 @@ Cloud saves use the existing scoped revision checks. Desktop users sign in to
 the same account and select their existing Cloud workspace. Local records are
 uploaded only after the user confirms **Upload and use cloud** in Data and
 storage; an app update does not perform that upload automatically.
+
+## Removed team member personal workspace recovery — 7 October 2026
+
+Apply `2026-10-07-removed-member-workspace-recovery.sql` after team workspaces,
+owner integrity and workspace membership read integrity. Removing or leaving
+an active team workspace now returns the user's profile to their earliest
+existing owned workspace with a verified owner membership. Removing an inactive
+membership preserves the current workspace. The same transaction repairs earlier
+stale profiles; it never restores removed team access, moves business records,
+creates a new workspace or changes a valid active membership. Accounts without
+an existing owned owner membership remain denied for explicit recovery.
+
+Workspace switching and invitation acceptance hold a membership row lock until
+their profile update commits, preventing a concurrent removal from leaving a
+stale active organization. Permission responses include the authoritative
+`org_id` so clients cannot apply recovered personal-owner permissions to cached
+former-team records. The field is additive and compatible with existing desktop
+clients. The recovery trigger has no direct client or service execution grant;
+all existing RLS and owner-removal safeguards remain in force.
+
+The migration is repeatable and included in the fresh installer. Run
+`node scripts/test-schema-bootstrap-local.mjs --removed-member` for actual
+authenticated admin removal, self-leave, historic profile repair, former-team
+privacy, inactive membership preservation, rollback, account deletion and both
+concurrent switch/removal lock orders in a disposable PostgreSQL database.
+Deployment status must be verified against the production catalog before
+claiming this repair is live; never replay the fresh installer on production.
+
+Apply the additive follow-up `2026-10-07-profile-workspace-authority.sql` to deny
+direct client updates of only `profiles.org_id`. Table-level UPDATE grants are
+converted to the same existing grants on all other columns; limited column
+grants remain limited, and service-role writes are unchanged. Workspace switching
+and invitation acceptance use their locking RPCs. Normal personal profile edits
+and profile-completion upserts remain available. The same disposable suite
+verifies those paths and applies both upgrades twice without altering records.

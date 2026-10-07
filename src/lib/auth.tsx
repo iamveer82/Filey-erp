@@ -353,8 +353,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
     const reconnected = (event: Event) => {
-      if ((event as CustomEvent<{tables?: string[]}>).detail?.tables?.length) return;
-      // Catch up after sleep/reconnect without discarding a same-workspace draft.
+      const tables = (event as CustomEvent<{tables?: string[]}>).detail?.tables;
+      if (tables?.length && !tables.includes("org_members")) return;
+      // Membership removal can move this account back to its own workspace.
+      // Catch up even when the profile event was missed while disconnected,
+      // without discarding a verified same-workspace draft on a network blip.
       const expectedScope = getCacheScope();
       const preserve = profileLoaded && profile?.id === user.id && !profileError &&
         expectedScope !== null && loadedScope.current === expectedScope;
@@ -368,10 +371,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener("filey:cloud-profile",changed);
     window.addEventListener("filey:workspace-transition",transition);
     window.addEventListener("filey:cloud-change",reconnected);
+    window.addEventListener("focus",reconnected);
+    window.addEventListener("online",reconnected);
     return () => {
       window.removeEventListener("filey:cloud-profile",changed);
       window.removeEventListener("filey:workspace-transition",transition);
       window.removeEventListener("filey:cloud-change",reconnected);
+      window.removeEventListener("focus",reconnected);
+      window.removeEventListener("online",reconnected);
     };
   }, [local,user,profile?.id,profile?.org_id,profileLoaded,profileError,loadProfile]);
 

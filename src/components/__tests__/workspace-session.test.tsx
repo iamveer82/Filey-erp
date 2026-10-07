@@ -107,6 +107,56 @@ it("catches up on a workspace switch missed during disconnection without resetti
   expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "joined-org:owner");
 });
 
+it.each(["focus", "online", "membership"])("recovers a removed member's personal workspace after a missed profile event on %s", async event => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(screen.getByText("owner:Example:ready")).toBeTruthy());
+  let finish!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const draft = screen.getByLabelText("Retained workspace draft");
+  fireEvent.change(draft, { target: { value: "Current team draft" } });
+  act(() => window.dispatchEvent(event === "membership"
+    ? new CustomEvent("filey:cloud-change", { detail: { tables: ["org_members"] } })
+    : new Event(event)));
+  expect(draft).toHaveValue("Current team draft");
+  await act(async () => finish({ data: { ...fixture.user, name: "Owner", company: "My workspace", org_id: "personal-org" }, error: null }));
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "personal-org:owner");
+  expect(screen.getByText("owner:My workspace:ready")).toBeTruthy();
+  expect(screen.getByLabelText("Retained workspace draft")).not.toBe(draft);
+  expect(screen.getByLabelText("Retained workspace draft")).toHaveValue("");
+  expect(fixture.signOut).not.toHaveBeenCalled();
+});
+
+it.each(["focus", "online"])("preserves a same-workspace draft after a transport-only %s profile refresh failure", async event => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  const draft = screen.getByLabelText("Retained workspace draft");
+  fireEvent.change(draft, { target: { value: "Keep this draft" } });
+  fixture.profileRead.mockResolvedValueOnce({ data: null, error: { code: "", message: "TypeError: Failed to fetch" }, status: 0 });
+  act(() => window.dispatchEvent(new Event(event)));
+  await screen.findByRole("status");
+  expect(screen.getByLabelText("Retained workspace draft")).toBe(draft);
+  expect(draft).toHaveValue("Keep this draft");
+  expect(currentAuth.profileError).toBeNull();
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "org:owner");
+});
+
+it("ignores a late membership recovery response after the signed-in account changes", async () => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  let finish!: (value: unknown) => void;
+  fixture.profileRead.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  act(() => window.dispatchEvent(new CustomEvent("filey:cloud-change", { detail: { tables: ["org_members"] } })));
+  fixture.profileRead.mockResolvedValueOnce({ data: { id: "second", email: "second@example.test", company: "Second workspace", org_id: "second-org" }, error: null });
+  act(() => fixture.onAuth?.("SIGNED_IN", { user: { id: "second", email: "second@example.test" } }));
+  await waitFor(() => expect(currentAuth.profile?.id).toBe("second"));
+  await act(async () => finish({ data: { ...fixture.user, company: "Personal workspace", org_id: "personal-org" }, error: null }));
+  expect(currentAuth.profile?.id).toBe("second");
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "second-org:second");
+});
+
 it("keeps the verified same-account workspace mounted after a transport-only reconnect failure and on retry", async () => {
   localStorage.setItem("filey_data_mode", "cloud");
   render(<AuthProvider><SessionProbe /></AuthProvider>);
@@ -202,7 +252,7 @@ function SessionProbe() {
       {auth.loading || auth.profileLoading
         ? "Loading"
         : `${auth.user?.id}:${auth.profile?.company}:${auth.needsProfile ? "setup" : "ready"}`}
-      {!auth.loading && !auth.profileLoading && !auth.profileError && auth.profile && <input aria-label="Retained workspace draft" defaultValue="" />}
+      {!auth.loading && !auth.profileLoading && !auth.profileError && auth.profile && <input key={`${auth.user?.id}:${auth.profile.org_id}`} aria-label="Retained workspace draft" defaultValue="" />}
     </div>
   );
 }

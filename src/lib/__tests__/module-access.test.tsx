@@ -53,6 +53,25 @@ it("rejects a membership response from a previous workspace",async()=>{
   rpc.mockImplementationOnce(async()=>{setCacheOrg("other","staff");return {data:{allowed:true,admin:true,modules:null}};});
   await expect(loadModuleAccess()).rejects.toThrow("workspace changed");
 });
+it("does not apply restored personal administrator permissions to a removed team's cache", async () => {
+  const refresh = vi.fn();
+  window.addEventListener("filey:cloud-change", refresh);
+  try {
+    rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null, org_id: "personal-org" }, error: null });
+    await expect(loadModuleAccess()).rejects.toThrow("workspace changed");
+    expect(refresh).toHaveBeenCalledOnce();
+    const reads = query.select.mock.calls.length;
+    await expect(tools.settings()).rejects.toThrow("workspace changed");
+    expect(query.select).toHaveBeenCalledTimes(reads);
+    await expect(requireToolModuleAccess("list_employees", {})).rejects.toThrow("workspace changed");
+    setCacheOrg("personal-org", "staff");
+    await expect(loadModuleAccess()).resolves.toEqual({ admin: true, modules: null });
+  } finally { window.removeEventListener("filey:cloud-change", refresh); }
+});
+it.each([null, 42, ""])("rejects malformed authoritative workspace identity %j", async org_id => {
+  rpc.mockResolvedValue({ data: { allowed: true, admin: true, modules: null, org_id }, error: null });
+  await expect(loadModuleAccess()).rejects.toThrow("could not be verified");
+});
 it("keeps restricted pages blocked and shows an access error after a failed refresh",async()=>{
   render(<ModulesProvider><Consumer/></ModulesProvider>);
   await screen.findByText("People blocked");
