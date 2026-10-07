@@ -75,12 +75,14 @@ export function removeTask(id: string): void {
   saveTasks(loadTasks().filter((t) => t.id !== id));
 }
 
-/** Is the task due to run now? Time-based schedules fire once per occurrence. */
+/** Is the task due to run now? Time-based schedules fire once per occurrence.
+ *  A task created after today's occurrence waits for the next one rather than
+ *  firing immediately — "Daily 09:00" set up at 15:00 first runs tomorrow. */
 export function isDue(task: AgentTask, now = Date.now()): boolean {
   if (!task.enabled) return false;
   const s = task.schedule;
+  const base = task.lastRun ?? task.createdAt;
   if (s.type === "interval") {
-    const base = task.lastRun ?? task.createdAt;
     return now - base >= Math.max(1, s.minutes) * 60_000;
   }
   const [h, m] = s.time.split(":").map(Number);
@@ -88,12 +90,10 @@ export function isDue(task: AgentTask, now = Date.now()): boolean {
   target.setHours(h || 0, m || 0, 0, 0);
   const targetTs = target.getTime();
   if (s.type === "daily") {
-    return now >= targetTs && (task.lastRun ?? 0) < targetTs;
+    return now >= targetTs && base < targetTs;
   }
   // weekly: only on the chosen weekday, after the target time, once that day
-  return (
-    new Date(now).getDay() === s.day && now >= targetTs && (task.lastRun ?? 0) < targetTs
-  );
+  return new Date(now).getDay() === s.day && now >= targetTs && base < targetTs;
 }
 
 /** Human-readable schedule, e.g. "Every 30 min" / "Daily 09:00" / "Mon 08:30". */

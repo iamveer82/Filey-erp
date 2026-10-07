@@ -32,6 +32,26 @@ describe("reminders", () => {
     expect(next).toBeLessThanOrEqual(now + 86_400_000);
   });
 
+  it("nextOccurrence keeps the wall-clock time and day of month across repeats", () => {
+    const local = (y: number, m: number, d: number, h = 9) => new Date(y, m, d, h, 0, 0, 0).getTime();
+    // Daily/weekly: the next fire is the same local time on a later calendar day,
+    // never shifted by an hour after a DST change.
+    const daily = new Date(nextOccurrence(local(2026, 2, 1), "daily", local(2026, 2, 30, 12)));
+    expect([daily.getHours(), daily.getMinutes()]).toEqual([9, 0]);
+    expect(daily.getTime()).toBe(local(2026, 2, 31));
+    const weekly = new Date(nextOccurrence(local(2026, 0, 5), "weekly", local(2026, 10, 2, 12)));
+    expect(weekly.getDay()).toBe(1);
+    expect(weekly.getHours()).toBe(9);
+    // Monthly: fires on the anchor's day of month (clamped in short months) and
+    // does not drift the way a fixed 30-day step does.
+    expect(nextOccurrence(local(2026, 0, 31), "monthly", local(2026, 1, 1))).toBe(local(2026, 1, 28));
+    expect(nextOccurrence(local(2026, 0, 31), "monthly", local(2026, 2, 1))).toBe(local(2026, 2, 31));
+    expect(nextOccurrence(local(2026, 0, 15), "monthly", local(2027, 5, 20))).toBe(local(2027, 6, 15));
+    // Future reminders and one-off reminders are left alone.
+    expect(nextOccurrence(local(2030, 0, 1), "daily", local(2026, 0, 1))).toBe(local(2030, 0, 1));
+    expect(nextOccurrence(local(2020, 0, 1), "none", local(2026, 0, 1))).toBe(local(2020, 0, 1));
+  });
+
   it("isolates reminders by account, workspace and mode, preserving unattributed legacy data", () => {
     localStorage.setItem("filey.reminders", '[{"text":"legacy private reminder"}]');
     addReminder("Alice's private reminder", 1000);
