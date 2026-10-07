@@ -142,6 +142,10 @@ export default function DeliveryChallan() {
   const { toast, confirm } = useUI();
   const [records, setRecords] = useState<DcRecord[]>([]);
   const [form, setForm] = useState<DcForm | null>(null);
+  // The stored record behind the open editor. Saves target this id, so renaming
+  // a challan's number edits the same row instead of cloning it or overwriting
+  // whichever other challan happened to carry the new number.
+  const [editing, setEditing] = useState<DcRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const refresh = async () => {
@@ -197,15 +201,19 @@ export default function DeliveryChallan() {
   // ---- List-row actions (DEMO parity) ----
   const typeLabel = (t: string) => DC_TYPES.find((x) => x.id === t)?.label || t;
 
-  const editRecord = (r: DcRecord) =>
+  const editRecord = (r: DcRecord) => {
+    setEditing(r);
     setForm(formFromRecord(r, records.map((x) => x.number)));
+  };
 
   const createRecord = async () => {
     const scope = agentStorageScope();
     try {
       const next = blankDc(records.map(r => r.number));
       next.number = await allocateDocumentNumber("delivery_challan", records.map(r => r.number), dcFormats);
-      requireAgentStorageScope(scope ?? "signed-out"); setForm(next);
+      requireAgentStorageScope(scope ?? "signed-out");
+      setEditing(null);
+      setForm(next);
     } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
   const duplicateRecord = async (r: DcRecord) => {
@@ -214,6 +222,7 @@ export default function DeliveryChallan() {
     const existing = records.map((x) => x.number);
     const number = await allocateDocumentNumber("delivery_challan", existing, dcFormats);
     requireAgentStorageScope(scope ?? "signed-out");
+    setEditing(null);
     setForm({
       ...formFromRecord(r, existing),
       number,
@@ -254,14 +263,19 @@ export default function DeliveryChallan() {
         setForm={setForm}
         onBack={() => {
           setForm(null);
+          setEditing(null);
           void refresh();
         }}
         onSave={async () => {
           const next = await loadDcs();
-          const existing = next.findIndex((r) => r.number === form.number);
+          const existing = editing ? next.findIndex((r) => r.id === editing.id) : -1;
+          const number = form.number.trim();
+          if (!number) throw new Error("Enter a challan number before saving.");
+          const taken = next.some((r, i) => i !== existing && r.number.trim().toLowerCase() === number.toLowerCase());
+          if (taken) throw new Error(`Challan ${number} already exists. Use a different number.`);
           const record: DcRecord = {
             id: existing >= 0 ? next[existing].id : Date.now(),
-            number: form.number,
+            number,
             dc_type: form.dc_type,
             party_name: form.party_name,
             issue_date: form.issue_date,
@@ -271,13 +285,14 @@ export default function DeliveryChallan() {
             status: form.status,
             destination: form.destination,
             eta: form.eta,
-            created_at: new Date().toISOString(),
-            form,
+            created_at: existing >= 0 ? next[existing].created_at : new Date().toISOString(),
+            form: { ...form, number },
           };
           if (existing >= 0) next[existing] = record;
           else next.push(record);
           await saveDcs(next);
           setRecords(next);
+          setEditing(record);
           toast.success("Challan saved.");
         }}
       />
