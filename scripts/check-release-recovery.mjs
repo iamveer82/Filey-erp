@@ -93,4 +93,19 @@ assert.equal(sanitizeManifest(safe.manifest).changed, false, "Do not replace an 
 assert.throws(() => sanitizeManifest(manifest, false), /Published release assets must not be replaced/);
 assert.match(protect.run, /if \[ -f updater\/changed \]; then/, "Only changed drafts should be uploaded");
 assert.match(workflow.jobs.build.steps.find(step => step.name === "Upload installers as workflow artifacts").with.path, /\*\*\/\*\.app\.tar\.gz/);
-console.log("Release guards reject version mismatches and unsafe Linux fallback while preserving recovery and platform assets.");
+const bridgeBuild = workflow.jobs.build.steps.find(step => step.name === "Build WhatsApp bridge sidecar").run;
+assert.match(bridgeBuild, /set -euo pipefail/, "A failed native media check must stop packaging");
+assert.match(bridgeBuild, /bun build-sidecar\.mjs --outfile "\$HOST_BIN"/, "Host builds must include sharp's native addon and libvips");
+assert.match(bridgeBuild, /"\$HOST_BIN" --check-media --media-dir "\$MEDIA_DIR"/, "Exercise native media from the compiled host binary before packaging");
+assert.match(bridgeBuild, /bun build-sidecar\.mjs --target "\$\{\{ matrix\.bun_target \}\}"/, "Cross builds must select the target's native media");
+assert.doesNotMatch(bridgeBuild, /bun build --compile/, "Plain Bun compilation omits sharp's external native files");
+const tauri = JSON.parse(readFileSync(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+assert.equal(tauri.bundle.resources["binaries/wa-media/"], "wa-media/", "Preserve native addon/libvips directories at the runtime resource path; a glob would flatten them");
+for (const filename of ["build.ps1", "build-nosign.ps1"]) {
+  const script = readFileSync(new URL(`../${filename}`, import.meta.url), "utf8");
+  assert.match(script, /\$PSScriptRoot/, "Local builds must use their checkout rather than the primary workspace");
+  assert.match(script, /bun build-sidecar\.mjs/, "Local desktop builds need the same native media builder");
+  assert.match(script, /--check-media --media-dir/, "Local desktop builds must exercise the compiled native media before bundling");
+  assert.doesNotMatch(script, /bun build --compile/);
+}
+console.log("Release guards preserve safe recovery, version checks, updater targets and compiled native media packaging.");

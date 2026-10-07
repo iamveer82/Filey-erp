@@ -152,26 +152,26 @@ jobs:
       - name: Build WhatsApp bridge sidecar
         shell: bash
         run: |
+          set -euo pipefail
           cd tools/wa-bridge
           npm ci --no-audit --no-fund
           # Fail here, not three steps later inside the bundler.
           test -d node_modules/libsignal || { echo "libsignal missing"; exit 1; }
           # Native tests run on the host even when packaging a cross target.
           HOST_TRIPLE=$(rustc -vV | sed -n 's/host: //p')
-          if [ -n "${{ matrix.rust_target }}" ] && [ "${{ matrix.rust_target }}" != "$HOST_TRIPLE" ]; then
-            mkdir -p ../../src-tauri/binaries
-            bun build --compile index.mjs --outfile "../../src-tauri/binaries/filey-wa-bridge-$HOST_TRIPLE"
-          fi
-          # Package the actual target separately; never rename host bytes.
-          TRIPLE="${{ matrix.rust_target }}"
-          [ -n "$TRIPLE" ] || TRIPLE=$(rustc -vV | sed -n 's/host: //p')
           EXT=""
           [ "$RUNNER_OS" = "Windows" ] && EXT=".exe"
-          BUN_TARGET=""
-          [ -n "${{ matrix.bun_target }}" ] && BUN_TARGET="--target=${{ matrix.bun_target }}"
           mkdir -p ../../src-tauri/binaries
-          bun build --compile $BUN_TARGET index.mjs \
-            --outfile "../../src-tauri/binaries/filey-wa-bridge-$TRIPLE$EXT"
+          HOST_BIN="../../src-tauri/binaries/filey-wa-bridge-$HOST_TRIPLE$EXT"
+          bun build-sidecar.mjs --outfile "$HOST_BIN"
+          MEDIA_DIR=$(node -p "require('path').resolve('../../src-tauri/binaries/wa-media')")
+          "$HOST_BIN" --check-media --media-dir "$MEDIA_DIR"
+          # Package the actual target separately; never rename host bytes.
+          TRIPLE="${{ matrix.rust_target }}"
+          if [ -n "$TRIPLE" ] && [ "$TRIPLE" != "$HOST_TRIPLE" ]; then
+            bun build-sidecar.mjs --target "${{ matrix.bun_target }}" \
+              --outfile "../../src-tauri/binaries/filey-wa-bridge-$TRIPLE$EXT"
+          fi
           ls -la ../../src-tauri/binaries
 
       # Run after the bridge installs its own dependencies; its tests are part
