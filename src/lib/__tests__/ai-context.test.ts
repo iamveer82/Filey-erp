@@ -102,6 +102,9 @@ describe("the business brief", () => {
     // written before the agent could look anything up itself.
     expect(brief).not.toMatch(/open the relevant page/i);
     expect(brief).toMatch(/use the find\/list tools/i);
+    expect(brief).toMatch(/Never use its outstanding balance as an individual invoice total/);
+    expect(brief).toMatch(/Read get_invoice/);
+    expect(brief).not.toMatch(/live snapshot|counts are exact/i);
   });
 
   it("stays small enough to sit in every system prompt", async () => {

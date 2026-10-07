@@ -385,11 +385,12 @@ describe("advanced agent runtime", () => {
   it("does not retrieve compressed outputs from a previous run", async () => {
     headroomReset();
     const privateOutput = JSON.stringify(
-      Array.from({ length: 80 }, (_, id) => ({
+      Array.from({ length: 160 }, (_, id) => ({
         id,
         account: "another-workspace-private",
       }))
     );
+    expect(privateOutput.length).toBeGreaterThan(6000);
     const old = compressForModel("list_customers", privateOutput);
     expect(old.ccrId).toBeTruthy();
     const result = await run([
