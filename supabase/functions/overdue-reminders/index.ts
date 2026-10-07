@@ -21,6 +21,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
+import { secretMatches } from "../_shared/secret-compare.ts";
 import { runReminders } from "../_shared/overdue-reminders.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -36,7 +37,7 @@ Deno.serve(async (req) => {
   // SECURITY: fail-closed cron auth. Deployed with --no-verify-jwt, so
   // without this check anyone with the URL could trigger a mass email
   // blast to every customer.
-  if (!SECRET || req.headers.get("x-agent-secret") !== SECRET) {
+  if (!(await secretMatches(req.headers.get("x-agent-secret"), SECRET))) {
     return new Response("forbidden", { status: 403 });
   }
   if (!RESEND_API_KEY) {

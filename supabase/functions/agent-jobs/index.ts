@@ -23,6 +23,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 import { adminWorkspace } from "../_shared/admin-workspace.ts";
+import { secretMatches } from "../_shared/secret-compare.ts";
 import { runDigest, runLowStockPo, tell } from "../_shared/agent-jobs.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -35,7 +36,7 @@ const BOT = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
-  if (!SECRET || req.headers.get("x-agent-secret") !== SECRET) {
+  if (!(await secretMatches(req.headers.get("x-agent-secret"), SECRET))) {
     return new Response("forbidden", { status: 403 });
   }
   if (!OWNER) return Response.json({ error: "OWNER_USER_ID not set" }, { status: 400 });
