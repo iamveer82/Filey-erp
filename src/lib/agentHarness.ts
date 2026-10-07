@@ -704,6 +704,9 @@ export async function* runAgentStream(
     : MAX_TOOL_ROUNDS;
   const guard = opts.runGuard ?? createGuard([...messages].reverse().find(message => message.role === "user")?.text ?? "");
   const unresolvedFailures = () => guard.unresolvedFailures();
+  const unconfirmedSaveMessage = () => unresolvedFailures().some(step => step.unconfirmedSave)
+    ? "The invoice save could not be confirmed. It may already exist. Check the invoice before trying again; keep your supplied prices, quantities and calculation fields unchanged."
+    : undefined;
   const budget = opts.budget ?? { requests: maxRounds, tools: 128 };
   const scope = agentStorageScope();
   const identity = getCacheIdentity();
@@ -782,14 +785,16 @@ export async function* runAgentStream(
       const walletHint = deps.cfg.billing === "credits" && detail === "Insufficient credit. Add Coin to continue."
         ? detail : undefined;
       const failure = walletHint ? new Error(walletHint) : providerHint ? new Error(providerHint) : await serviceError({ message: deps.cfg.billing === "credits" ? detail : undefined, context: { status } }, "Filey AI couldn't continue. Please try again.");
-      const text = `${failure.message} Nothing was executed from that response.${guard.steps().length ? " Check any earlier changes or files before asking me to continue." : ""}`;
+      const text = unconfirmedSaveMessage() ?? `${failure.message} Nothing was executed from that response.${guard.steps().length ? " Check any earlier changes or files before asking me to continue." : ""}`;
       assertActive();
       yield { type: "done", text, reason: "error" };
       return text;
     }
     const { text, calls } = turn;
 
-    if (text) yield { type: "text", text };
+    // A model's reassurance is not evidence of rollback after a lost save
+    // acknowledgement. Keep both streaming and final replies grounded.
+    if (text && !unconfirmedSaveMessage()) yield { type: "text", text };
     // A consumer can Stop or change accounts while a yielded event is on screen.
     // Recheck before declaring success, completing a plan, or dispatching tools.
     assertActive();
@@ -803,7 +808,7 @@ export async function* runAgentStream(
       log.info("agent", `answered after ${round + 1} round(s)`);
       const failed = unresolvedFailures();
       const blocked = unfinished || plan.some(s => s.status === "blocked") || !!opts.finishToolName || failed.length > 0;
-      const answer = [text || "Filey AI returned no answer. Please try again.", unfinished ? "The task is still incomplete; the remaining work needs verification." : "", failed.length ? "Some requested work could not be completed or confirmed. Check any changes or files already created before retrying." : ""].filter(Boolean).join("\n\n");
+      const answer = unconfirmedSaveMessage() ?? [text || "Filey AI returned no answer. Please try again.", unfinished ? "The task is still incomplete; the remaining work needs verification." : "", failed.length ? "Some requested work could not be completed or confirmed. Check any changes or files already created before retrying." : ""].filter(Boolean).join("\n\n");
       yield { type: "done", text: answer, reason: blocked ? "blocked" : text ? "answered" : "error" };
       return answer;
     }
@@ -812,7 +817,7 @@ export async function* runAgentStream(
     for (const call of calls) {
       assertActive();
       if (budget.tools-- <= 0) {
-        const text = "This task reached its limit. Check any changes or files already created before asking me to continue.";
+        const text = unconfirmedSaveMessage() ?? "This task reached its limit. Check any changes or files already created before asking me to continue.";
         yield { type: "done", text, reason: "exhausted" };
         return text;
       }
@@ -861,7 +866,7 @@ export async function* runAgentStream(
           });
           continue;
         }
-        const summary = String(call.args.summary ?? text ?? "Task complete.").trim();
+        const summary = unconfirmedSaveMessage() ?? String(call.args.summary ?? text ?? "Task complete.").trim();
         yield {
           type: "done",
           text: summary,
@@ -1008,7 +1013,8 @@ export async function* runAgentStream(
             );
       } catch (error) {
         if ((error as Error)?.name === "AbortError") throw error;
-        raw = { error: "This action ended unexpectedly. Verify its actual outcome before attempting it again.", retry_safe: false };
+        raw = { error: "This action ended unexpectedly. Verify its actual outcome before attempting it again.", retry_safe: false,
+          ...(["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft", "retry_invoice_save"].includes(call.name) ? { save_outcome: "unconfirmed" } : {}) };
       }
       assertActive();
       const visual = toolImage(raw);
@@ -1038,7 +1044,7 @@ export async function* runAgentStream(
   // was actually done matters more — especially if some of it changed data.
   assertActive();
   log.warn("agent", `ran out of rounds after ${maxRounds}`, guard.summary());
-  const text = "I couldn't finish within this task's limit. Check any changes or files already created before asking me to continue.";
+  const text = unconfirmedSaveMessage() ?? "I couldn't finish within this task's limit. Check any changes or files already created before asking me to continue.";
   yield { type: "done", text, reason: "exhausted" };
   return text;
 }

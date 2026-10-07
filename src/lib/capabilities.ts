@@ -49,6 +49,7 @@ export const CAPABILITIES: Capability[] = [
     tools: [
       "create_invoice_draft",
       "revise_invoice",
+      "retry_invoice_save",
       "send_invoice",
       "export_invoice_pdf",
       "mark_invoice_paid",

@@ -190,6 +190,53 @@ describe("invoice recovery scope", () => {
 });
 
 describe("run summary", () => {
+  it.each(["Is the invoice done?", "Do not retry it.", "Continue the report but don't retry the invoice."])("does not replay a pending invoice without explicit retry intent: %s", request => {
+    expect(createGuard(request).before("retry_invoice_save", { request_id: "request-1" }).short).toBeDefined();
+  });
+
+  it.each(["Retry the invoice save", "Continue the earlier save", "Please try again"])("allows an exact saved-request recovery when asked: %s", request => {
+    expect(createGuard(request).before("retry_invoice_save", { request_id: "request-1" })).toEqual({});
+  });
+
+  it.each(["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft"])("blocks altered %s retries after an unconfirmed save while leaving verification available", name => {
+    const g = createGuard("Create the requested invoice.");
+    const original = { customer_name: "Acme", items: [{ qty: 6, unit_price: 0.2, custom: { liters: "1200" } }] };
+    g.after(name, original, { error: "Statement timeout", save_outcome: "unconfirmed", retry_safe: false });
+    expect(g.before(name, { ...original, items: [{ qty: 6, unit_price: 200 }] }).short).toMatchObject({ save_outcome: "unconfirmed", retry_safe: false });
+    expect(g.before("create_invoice_draft", { ...original, invoice_number: "NEW-NUMBER" }).short).toMatchObject({ save_outcome: "unconfirmed" });
+    expect(g.before("get_invoice", { invoice_number: "INV-1" })).toEqual({});
+    g.after("get_invoice", { invoice_number: "INV-1" }, { error: "Read timed out" });
+    expect(g.unresolvedFailures()).toContainEqual(expect.objectContaining({ name, unconfirmedSave: true }));
+    expect(g.before(name, original).short).toMatchObject({ save_outcome: "unconfirmed" });
+  });
+
+  it("allows trusted preflight invoice corrections without claiming an uncertain save", () => {
+    const g = createGuard();
+    g.after("create_invoice_draft", { customer_name: "Acme", items: [] }, { error: "Items required", retry_safe: false }, true);
+    expect(g.before("create_invoice_draft", { customer_name: "Acme", items: [{ qty: 6, unit_price: 0.2 }] })).toEqual({});
+    expect(g.steps()[0]).not.toHaveProperty("unconfirmedSave");
+  });
+
+  it("requires API payload verification and the exact invoice identity to reconcile a save", () => {
+    const g = createGuard();
+    const args = { invoice_number: "INV-1", notes: "New text" };
+    g.after("revise_invoice", args, { error: "Timeout", save_outcome: "unconfirmed", save_request_id: "request-1", invoice_number: "INV-1", invoice_id: 1 });
+    for (const result of [
+      { id: 1, number: "INV-1" },
+      { id: 1, number: "INV-1", verified_save_requests: [] },
+      { id: 1, number: "INV-1", verified_save_requests: ["other-request"] },
+      { id: 2, number: "INV-1", verified_save_requests: ["request-1"] },
+      { id: 1, number: "INV-2", verified_save_requests: ["request-1"] },
+    ]) {
+      g.after("get_invoice", { invoice_number: "INV-1" }, result);
+      expect(g.unresolvedFailures()).toHaveLength(1);
+    }
+    g.after("get_invoice", { invoice_number: "INV-1" }, { id: 1, number: "INV-1", verified_save_requests: ["request-1"] });
+    expect(g.unresolvedFailures()).toEqual([]);
+    expect(g.before("create_invoice_draft", { customer_name: "Other customer" })).toEqual({});
+    expect(g.before("revise_invoice", args).short).toMatchObject({ previous_result: { ok: true, id: 1, number: "INV-1" }, retry_safe: false });
+  });
+
   it.each(["letter_id", "letter_number"])("resolves only trusted letter schema failures for the same %s", target => {
     const g = createGuard();
     const name = "revise_letter_draft";

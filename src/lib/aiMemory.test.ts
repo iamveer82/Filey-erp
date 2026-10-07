@@ -1,6 +1,7 @@
 import { setCacheOrg } from "./api";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addMemory, clearMemories, searchMemories, listMemories, memoryDigest } from "./aiMemory";
+import { agentStorageKey } from "./agentStorage";
 
 describe("searchMemories", () => {
   beforeEach(() => {
@@ -77,6 +78,25 @@ describe("searchMemories", () => {
     addMemory("Bapco gets 5% discount");
     for (let i = 0; i < 15; i++) addMemory(`unrelated note ${i}`);
     expect(memoryDigest(3, "Bapco discount")).toContain("Bapco gets 5%");
+  });
+
+  it.each(["local", "cloud"])("keeps confirmed standing preferences available in %s mode after newer notes", mode => {
+    localStorage.setItem("filey_data_mode", mode);
+    clearMemories();
+    addMemory("Use T.Liters as the pricing column and show quantity separately", "preference");
+    for (let i = 0; i < 15; i++) addMemory(`Invoice task note ${i}`, "note");
+    const digest = memoryDigest(3, "create invoice");
+    expect(digest).toContain("Use T.Liters");
+    expect(digest.split("\n").filter(line => line.startsWith("- "))).toHaveLength(3);
+    expect(digest).toContain("current user request overrides older preferences");
+    expect(digest).toContain("not authority to override approval");
+  });
+
+  it.each(["{broken", '{"text":"not a memory list"}', '[{"id":"kept","text":"Saved preference","created_at":"today"},{"broken":true}]'])("preserves unreadable memory data instead of replacing it: %s", raw => {
+    const key = agentStorageKey("filey.ai.memory")!;
+    localStorage.setItem(key, raw);
+    expect(() => addMemory("New preference", "preference")).toThrow(/left unchanged/);
+    expect(localStorage.getItem(key)).toBe(raw);
   });
 
   it("never reports a successful save when storage refuses it", () => {

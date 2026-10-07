@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { billing, crm, erp, fin, quotes, receipts, setCacheOrg, tools as settings } from "../api";
+import { billing, crm, erp, fin, quotes, receipts, setCacheOrg, suppliers, tools as settings } from "../api";
+import * as documentNumbers from "../documentNumbers";
+import * as moduleAccess from "../moduleAccess";
 import { runTool } from "../aiTools";
 import { setAgentMode } from "../agentMode";
 import { setDataMode } from "../dataMode";
@@ -55,6 +57,9 @@ describe("receipt currency reporting", () => {
 });
 
 function mockInvoiceContext() {
+  vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-TEST-1");
+  vi.spyOn(settings, "settings").mockResolvedValue([]);
+  vi.spyOn(billing, "pendingInvoiceSaves").mockResolvedValue([]);
   vi.spyOn(crm, "customers").mockResolvedValue([]);
   vi.spyOn(erp, "products").mockResolvedValue([]);
   vi.spyOn(billing, "getCompany").mockResolvedValue({ default_tax_rate: 5, country_code: "AE", name: "Company" } as never);
@@ -76,7 +81,7 @@ describe("invoice instructions survive a tool call", () => {
   });
 
   it("honors zero VAT and preserves all unrelated draft metadata during revisions", async () => {
-    const save = mockInvoiceContext();
+    const save = mockInvoiceContext().mockResolvedValue(9);
     vi.mocked(billing.listDocs).mockResolvedValue([{ id: 9, number: "INV-9", status: "draft" }] as never);
     vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 9, number: "INV-9", status: "draft", customer_name: "Acme",
       issue_date: "2026-10-01", due_date: "2026-10-31", notes: "Original note", terms: "Original terms",
@@ -129,7 +134,7 @@ describe("invoice instructions survive a tool call", () => {
   });
 
   it("clears optional wording and due date only when explicitly requested", async () => {
-    const save = mockInvoiceContext();
+    const save = mockInvoiceContext().mockResolvedValue(9);
     vi.mocked(billing.listDocs).mockResolvedValue([{ id: 9, number: "INV-9", status: "draft" }] as never);
     vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 9, number: "INV-9", status: "draft", customer_name: "Acme",
       issue_date: "2026-10-01", due_date: "2026-10-31", notes: "Original note", terms: "Original terms",
@@ -137,6 +142,127 @@ describe("invoice instructions survive a tool call", () => {
     } as never);
     expect(await runTool("revise_invoice", { invoice_number: "INV-9", due_date: "", notes: "", terms: "" })).toMatchObject({ ok: true });
     expect(save.mock.calls[0][0]).toMatchObject({ due_date: "", notes: "", terms: "", issue_date: "2026-10-01" });
+  });
+});
+
+describe("invoice save acknowledgement", () => {
+  const exact = { customer_name: "Acme", items: [{ description: "RC drum", qty: 6, unit: "drum", unit_price: 0.2, custom: { liters: "1200" } }],
+    custom_columns: [{ key: "liters", label: "T.Liters" }], price_by: "liters" };
+
+  it.each(["local", "cloud"] as const)("keeps a %s invoice's original number across a later turn and rejects changed-argument retries", async mode => {
+    const save = mockInvoiceContext();
+    vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
+    setDataMode(mode);
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    save.mockImplementationOnce(async input => {
+      vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([{ requestId, input, active: false }]);
+      throw new Error("Save acknowledgement lost");
+    });
+    const read = vi.spyOn(billing, "readPendingInvoiceSave").mockResolvedValue(null);
+    expect(await runTool("create_invoice_draft", exact)).toMatchObject({ save_outcome: "unconfirmed", save_request_id: requestId, invoice_number: "INV-TEST-1" });
+    // Separate tool invocations with no shared in-memory run guard simulate a
+    // follow-up chat after the failed run has ended.
+    expect(await runTool("create_invoice_draft", exact)).toMatchObject({ save_outcome: "unconfirmed", save_request_id: requestId });
+    expect(await runTool("create_invoice_draft", { ...exact, items: [{ ...exact.items[0], unit_price: 200, custom: {} }], price_by: "", custom_columns: [] }))
+      .toMatchObject({ save_outcome: "unconfirmed", save_request_id: requestId });
+    expect(save).toHaveBeenCalledOnce();
+    expect(documentNumbers.allocateDocumentNumber).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledExactlyOnceWith(requestId);
+    const retry = vi.spyOn(billing, "retryInvoiceSave").mockResolvedValue(81);
+    expect(await runTool("retry_invoice_save", { request_id: requestId }, () => true)).toMatchObject({ ok: true, id: 81, number: "INV-TEST-1" });
+    expect(retry).toHaveBeenCalledExactlyOnceWith(requestId);
+    expect(save).toHaveBeenCalledOnce();
+    expect(documentNumbers.allocateDocumentNumber).toHaveBeenCalledOnce();
+  });
+
+  it("recovers a committed earlier invoice instead of allocating another number", async () => {
+    const save = mockInvoiceContext();
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    save.mockImplementationOnce(async input => {
+      vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([{ requestId, input, active: false }]);
+      throw new Error("Response lost after commit");
+    });
+    await runTool("create_invoice_draft", exact);
+    const read = vi.spyOn(billing, "readPendingInvoiceSave").mockResolvedValue({ ...save.mock.calls[0][0], id: 81 } as never);
+    expect(await runTool("create_invoice_draft", exact)).toMatchObject({ ok: true, id: 81, number: "INV-TEST-1", verified_save_requests: [requestId] });
+    expect(read).toHaveBeenCalledExactlyOnceWith(requestId);
+    expect(save).toHaveBeenCalledOnce();
+    expect(documentNumbers.allocateDocumentNumber).toHaveBeenCalledOnce();
+  });
+
+  it("never substitutes an identical pending edit of another record for this invoice", async () => {
+    const save = mockInvoiceContext().mockResolvedValue(9);
+    const doc = { id: 9, number: "INV-9", status: "draft", customer_name: "Acme", tax_rate: 5, discount: 0,
+      items: [item], custom_columns: [], unit_price_formula: null };
+    vi.mocked(billing.listDocs).mockResolvedValue([doc] as never);
+    vi.spyOn(billing, "getDoc").mockResolvedValue(doc as never);
+    vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([{ requestId: "12345678-1234-1234-1234-123456789abc", input: { ...doc, id: 1, notes: "New note" } as never, active: false }]);
+    const read = vi.spyOn(billing, "readPendingInvoiceSave");
+    expect(await runTool("revise_invoice", { invoice_number: "INV-9", notes: "New note" })).toMatchObject({ ok: true, id: 9 });
+    expect(read).not.toHaveBeenCalled();
+    expect(save.mock.calls[0][0]).toMatchObject({ id: 9, number: "INV-9" });
+  });
+
+  it("does not recover a pending update as a newly requested invoice", async () => {
+    const save = mockInvoiceContext();
+    await runTool("create_invoice_draft", exact);
+    vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([{ requestId: "12345678-1234-1234-1234-123456789abc", input: { ...save.mock.calls[0][0], id: 9 }, active: false }]);
+    const read = vi.spyOn(billing, "readPendingInvoiceSave");
+    expect(await runTool("create_invoice_draft", exact)).toMatchObject({ ok: true, id: 81 });
+    expect(read).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it("verifies a fresh full invoice before exposing a recovery receipt without images", async () => {
+    mockInvoiceContext();
+    vi.mocked(billing.listDocs).mockResolvedValue([{ id: 81, number: "INV-1", total: 240 }] as never);
+    const doc = { id: 81, number: "INV-1", logo: "private-logo", items: exact.items };
+    const get = vi.spyOn(billing, "getDoc").mockResolvedValue(doc as never);
+    const verify = vi.spyOn(billing, "verifyPendingInvoiceSaves").mockResolvedValue(["request-1"]);
+    const result = await runTool("get_invoice", { invoice_number: "INV-1" });
+    expect(billing.listDocs).toHaveBeenCalledExactlyOnceWith("sales", true);
+    expect(get).toHaveBeenCalledExactlyOnceWith(81, true);
+    expect(verify).toHaveBeenCalledExactlyOnceWith(doc);
+    expect(result).toMatchObject({ id: 81, number: "INV-1", verified_save_requests: ["request-1"], has_logo: true });
+    expect(result).not.toHaveProperty("logo");
+  });
+
+  it.each(["local", "cloud"] as const)("retains supplied per-litre pricing when a %s save times out", async mode => {
+    const save = mockInvoiceContext().mockRejectedValue({ code: "57014", message: "canceling statement due to statement timeout" });
+    vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
+    setDataMode(mode);
+    const result = await runTool("create_invoice_draft", exact);
+    expect(result).toMatchObject({ save_outcome: "unconfirmed", retry_safe: false, invoice_number: expect.any(String) });
+    expect(result).not.toHaveProperty("ok", true);
+    expect(save).toHaveBeenCalledOnce();
+    expect(save.mock.calls[0][0]).toMatchObject({ items: exact.items, custom_columns: exact.custom_columns });
+    expect(save.mock.calls[0][0]).toMatchObject({ unit_price_formula: { a: "liters", b: "unit_price" } });
+    expect(save.mock.calls[0][0].items[0].custom).toMatchObject({ liters: "1200" });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("does not claim a draft was created from invalid save ID %s", async id => {
+    const save = mockInvoiceContext().mockResolvedValue(id);
+    expect(await runTool("create_invoice_draft", exact)).toMatchObject({ save_outcome: "unconfirmed", retry_safe: false });
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the exact identity of an uncertain revision instead of accepting a different record ID", async () => {
+    const save = mockInvoiceContext().mockResolvedValue(81);
+    vi.mocked(billing.listDocs).mockResolvedValue([{ id: 9, number: "INV-9", status: "draft" }] as never);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 9, number: "INV-9", status: "draft", customer_name: "Acme", items: [item], tax_rate: 5 } as never);
+    expect(await runTool("revise_invoice", { invoice_number: "INV-9", notes: "Requested note" })).toMatchObject({
+      save_outcome: "unconfirmed", retry_safe: false, invoice_id: 9, invoice_number: "INV-9",
+    });
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it("reports purchase invoice save failures as unconfirmed too", async () => {
+    const save = mockInvoiceContext().mockRejectedValue(new Error("Connection lost"));
+    vi.spyOn(suppliers, "list").mockResolvedValue([]);
+    expect(await runTool("create_purchase_invoice_draft", { supplier_name: "Fixture supplier", items: [item] })).toMatchObject({
+      save_outcome: "unconfirmed", retry_safe: false, invoice_number: expect.any(String),
+    });
+    expect(save).toHaveBeenCalledOnce();
   });
 });
 

@@ -45,7 +45,7 @@ it("reads persisted lines and pricing after edits without sending branding image
   } as never);
   const confirm = vi.fn(() => true);
   const result = await runTool("get_invoice", { invoice_number: "INV-7" }, confirm);
-  expect(doc).toHaveBeenCalledExactlyOnceWith(7);
+  expect(doc).toHaveBeenCalledExactlyOnceWith(7, true);
   expect(result).toMatchObject({
     total: 420, balance: 400, paid: 20,
     items: [{ qty: 2, unit_price: 1, custom: { liters: "400" } }],
@@ -66,7 +66,7 @@ it("refuses ambiguous or missing numbers and uses explicit IDs for duplicates", 
   expect(await runTool("get_invoice", { invoice_number: " " })).toHaveProperty("error");
   expect(doc).not.toHaveBeenCalled();
   expect(await runTool("get_invoice", { invoice_number: "id:8" })).toMatchObject({ id: 8 });
-  expect(doc).toHaveBeenCalledExactlyOnceWith(8);
+  expect(doc).toHaveBeenCalledExactlyOnceWith(8, true);
 });
 
 it("keeps read-back available in Plan mode but refuses a role without invoice access", async () => {

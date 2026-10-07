@@ -29,7 +29,7 @@ import {
 } from "./links";
 import { notifyDataChanged } from "./realtime";
 import { log } from "./log";
-import { withLocalTransaction } from "./localdb";
+import { localClient, withLocalTransaction } from "./localdb";
 import { loadModuleAccess } from "./moduleAccess";
 import { validateExpense, type ExpenseDetails } from "./expenseDetails";
 import { localWorkspaceOwner } from "./localAuth";
@@ -957,20 +957,32 @@ async function online<T>(run: () => Promise<T>, mutates = true): Promise<T> {
 type WorkflowResult = { id: number; payment_id?: number | null; removed?: number };
 type PendingWorkflow = { request: string; payload: Record<string, any>; activeUntil?: number; owner?: string; preflightChecked?: boolean };
 const workflowRenderer = crypto.randomUUID();
+const invoiceOutcomes = new WeakMap<object, "rejected" | "unconfirmed">();
+export function invoiceSaveOutcome(error: unknown): "rejected" | "unconfirmed" | undefined {
+  return error && typeof error === "object" ? invoiceOutcomes.get(error) : undefined;
+}
+function markInvoiceOutcome(error: unknown, outcome: "rejected" | "unconfirmed"): unknown {
+  if (error && typeof error === "object") invoiceOutcomes.set(error, outcome);
+  return error;
+}
+async function readWorkflowRegistry(client: any, key: string, checkScope: () => void) {
+  const found = await client.from("local_business_workflow_pending").select("*").eq("registry_key", key).maybeSingle();
+  if (found.error) throw found.error;
+  const raw = found.data ? null : await readDeviceValue(key); checkScope();
+  let rows: Record<string, PendingWorkflow>;
+  try { rows = found.data ? structuredClone(found.data.requests) : (raw ? JSON.parse(raw) : {}); } catch { throw new Error("Pending saves could not be read. Reopen Filey before retrying."); }
+  if (!rows || typeof rows !== "object" || Array.isArray(rows)) throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
+  await compactPendingWorkflowKeys(rows);
+  checkScope();
+  return { record: found.data, rows };
+}
 async function workflowRegistry<T>(key: string, checkScope: () => void, change: (rows: Record<string, PendingWorkflow>) => T): Promise<T> {
   return withLocalTransaction(async client => {
     checkScope();
-    const found = await client.from("local_business_workflow_pending").select("*").eq("registry_key", key).maybeSingle();
-    if (found.error) throw found.error;
     // Preserve requests created before the CAS-backed registry was introduced.
-    const raw = found.data ? null : await readDeviceValue(key); checkScope();
-    let rows: Record<string, PendingWorkflow>;
-    try { rows = found.data ? structuredClone(found.data.requests) : (raw ? JSON.parse(raw) : {}); } catch { throw new Error("Pending saves could not be read. Reopen Filey before retrying."); }
-    if (!rows || typeof rows !== "object" || Array.isArray(rows)) throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
-    await compactPendingWorkflowKeys(rows);
-    checkScope();
+    const { record, rows } = await readWorkflowRegistry(client, key, checkScope);
     const value = change(rows);
-    if (found.data) await sUpdate("local_business_workflow_pending", found.data.id, { requests: rows }, client);
+    if (record) await sUpdate("local_business_workflow_pending", record.id, { requests: rows }, client);
     else await sInsert("local_business_workflow_pending", { registry_key: key, requests: rows }, client);
     checkScope();
     return value;
@@ -1020,6 +1032,77 @@ async function compactLocalWorkflowReceipts(client: any, scope: string | null): 
   }
   return receipts;
 }
+
+/** Compare authored invoice fields, including every ordered line. Database
+ * identities/defaults are not user changes; unknown authored fields are kept. */
+export function invoiceSaveIntentMatches(expected: Partial<InvoiceDocInput>, actual: Partial<InvoiceDocInput>): boolean {
+  const matches = (a: any, b: any): boolean => {
+    if (a == null) return b == null;
+    if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((value, index) => matches(value, b[index]));
+    if (typeof a === "object") return !!b && typeof b === "object" && !Array.isArray(b) && Object.entries(a)
+      .filter(([, value]) => value !== undefined).every(([key, value]) => matches(value, b[key]));
+    return a === b;
+  };
+  const ignore = new Set(["id", "number", "user_id", "org_id", "created_at", "updated_at", "sync_revision", "shared", "shared_with"]);
+  const header = (doc: Partial<InvoiceDocInput>) => Object.fromEntries(Object.entries(doc).filter(([key]) => key !== "items" && !ignore.has(key)));
+  const lines = (items: InvoiceDocInput["items"]) => items.map(item => Object.fromEntries(Object.entries(item)
+    .filter(([key]) => !["id", "invoice_id", "position", "user_id", "org_id", "created_at", "updated_at", "sync_revision"].includes(key))));
+  const equal = (a: unknown, b: unknown) => JSON.stringify(canonicalWorkflow(a)) === JSON.stringify(canonicalWorkflow(b));
+  // Missing calculation metadata means ordinary quantity pricing, not permission
+  // to accept an extra formula/manual amount that silently changes the total.
+  return equal(expected.unit_price_formula ?? null, actual.unit_price_formula ?? null) &&
+    equal(expected.custom_columns ?? [], actual.custom_columns ?? []) &&
+    Number(expected.tax_rate ?? 0) === Number(actual.tax_rate ?? 0) && Number(expected.discount ?? 0) === Number(actual.discount ?? 0) &&
+    Number(expected.advance_applied ?? 0) === Number(actual.advance_applied ?? 0) &&
+    (expected.doc_type === "purchase") === (actual.doc_type === "purchase") && (expected.invoice_type_code || "380") === (actual.invoice_type_code || "380") &&
+    Boolean(expected.round_off) === Boolean(actual.round_off) && matches(header(expected), header(actual)) &&
+    (expected.items === undefined || !!actual.items && matches(lines(expected.items), lines(actual.items)) && expected.items.every((item, index) =>
+      equal(item.custom ?? {}, actual.items![index].custom ?? {}) && (item.tax_category || "S") === (actual.items![index].tax_category || "S")));
+}
+export type PendingInvoiceSave = { requestId: string; input: InvoiceDocInput; active: boolean };
+async function pendingInvoiceSaves(): Promise<PendingInvoiceSave[]> {
+  const checkScope = workspaceGuard(), key = `business-workflow:${isLocalMode() ? "local" : "cloud"}:${activeCacheOrg}`;
+  const { rows } = await readWorkflowRegistry(localClient, key, checkScope);
+  return Object.entries(rows).filter(([key]) => key.startsWith("invoice:save:")).map(([, pending]) => {
+    if (!pending || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(pending.request) ||
+      !pending.payload?.header || !Array.isArray(pending.payload.items)) throw new Error("Pending invoice saves could not be read. Reopen Filey before retrying.");
+    return { requestId: pending.request, input: { ...pending.payload.header, ...(pending.payload.id ? { id: pending.payload.id } : {}), items: pending.payload.items } as InvoiceDocInput,
+      active: !!pending.activeUntil && pending.activeUntil > Date.now() };
+  });
+}
+async function verifyPendingInvoiceSaves(doc: InvoiceDoc): Promise<string[]> {
+  const checkScope = workspaceGuard(), local = isLocalMode(), scope = activeCacheOrg;
+  const key = `business-workflow:${local ? "local" : "cloud"}:${scope}`;
+  const { rows } = await readWorkflowRegistry(localClient, key, checkScope);
+  const verified: string[] = [];
+  for (const [entryKey, pending] of Object.entries(rows)) {
+    if (!entryKey.startsWith("invoice:save:") || pending.activeUntil && pending.activeUntil > Date.now()) continue;
+    const payload = pending.payload;
+    if (!payload?.header || !Array.isArray(payload.items) || payload.header.number !== doc.number ||
+      payload.id != null && Number(payload.id) !== doc.id || !invoiceSaveIntentMatches({ ...payload.header, items: payload.items }, doc)) continue;
+    const receipt = local
+      ? await localClient.from("local_business_workflow_requests").select("*").eq("request_key", `${scope}:${pending.request}`).maybeSingle()
+      : await sb().from("business_workflow_requests").select("action,payload,result").eq("user_id", getCacheScope()?.split(":user:").slice(-1)[0])
+          .eq("org_id", getCacheOrg()).eq("request_id", pending.request).maybeSingle();
+    checkScope();
+    if (receipt.error) throw receipt.error;
+    if (!receipt.data || Number(receipt.data.result?.id) !== doc.id) continue;
+    if (local) {
+      const fingerprint = isLegacyWorkflowFingerprint(receipt.data.fingerprint) ? await workflowFingerprint(receipt.data.fingerprint) : receipt.data.fingerprint;
+      if (fingerprint !== entryKey.slice("invoice:save:".length, -(pending.request.length + 1))) continue;
+    } else if (receipt.data.action !== "invoice:save" || JSON.stringify(canonicalWorkflow(receipt.data.payload)) !== JSON.stringify(canonicalWorkflow(payload))) continue;
+    checkScope();
+    const removed = await workflowRegistry(key, checkScope, current => {
+      const held = current[entryKey];
+      if (held && !(held.activeUntil && held.activeUntil > Date.now()) && JSON.stringify(canonicalWorkflow(held.payload)) === JSON.stringify(canonicalWorkflow(payload))) {
+        delete current[entryKey]; return true;
+      }
+      return false;
+    });
+    if (removed) verified.push(pending.request);
+  }
+  return verified;
+}
 /** A lost acknowledgement retains the same request and reviewed FX snapshot.
  * Independent active calls have distinct identities. Only an unconfirmed retry
  * reuses its receipt; callers can also supply an explicit request identity. */
@@ -1039,11 +1122,12 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
   };
   const logical = normalize(requested ?? payload);
   const serialized = JSON.stringify(canonicalWorkflow(logical));
-  const fingerprint = await workflowFingerprint(serialized);
+  let fingerprint = await workflowFingerprint(serialized);
   const storedKey = `business-workflow:${local ? "local" : "cloud"}:${scope}`;
   const prefix = `${kind}:${action}:${fingerprint}:`;
   let pending: PendingWorkflow | undefined;
   let durableId = "";
+  let replaying = false;
   try {
     checkScope();
     pending = await workflowRegistry(storedKey, checkScope, rows => {
@@ -1052,15 +1136,21 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       // own identity unless the caller explicitly supplies the same request ID.
       if (!requestId && Object.entries(rows).some(([key, value]) => key.startsWith(prefix) && value?.owner !== workflowRenderer && value?.activeUntil && value.activeUntil > Date.now()))
         throw new Error("An unconfirmed action is still active in another window. Reopen that window or retry after five minutes to recover its receipt.");
-      const prior = Object.entries(rows).find(([key, value]) => key.startsWith(prefix) && value &&
-        (requestId ? value.request === requestId : !(value.activeUntil && value.activeUntil > Date.now())));
+      const prior = Object.entries(rows).find(([key, value]) => value && (requestId
+        ? key.startsWith(`${kind}:${action}:`) && value.request === requestId
+        : key.startsWith(prefix) && !(value.activeUntil && value.activeUntil > Date.now())));
+      replaying = !!prior;
       const value: PendingWorkflow = prior?.[1] ?? { request: requestId || crypto.randomUUID(), payload: JSON.parse(JSON.stringify(payload)) };
       if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.request) || !value.payload || typeof value.payload !== "object")
         throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
       const previousLogical = normalize(value.payload);
-      if (JSON.stringify(canonicalWorkflow(previousLogical)) !== serialized) throw new Error("Pending changes differ from this request. Reopen the document before retrying.");
+      const exactReplay = !!prior && !!requestId && JSON.stringify(canonicalWorkflow(value.payload)) === JSON.stringify(canonicalWorkflow(payload));
+      if (JSON.stringify(canonicalWorkflow(previousLogical)) !== serialized && !exactReplay) throw new Error("Pending changes differ from this request. Reopen the document before retrying.");
       if (!prior && Object.keys(rows).length >= 64) throw new Error("Review the pending document actions before starting more. Reopen and retry any unconfirmed save or payment.");
-      durableId = prefix + value.request;
+      // Replaying the frozen payload retains the original logical fingerprint,
+      // even when the first attempt inferred country/FX fields before saving.
+      if (exactReplay) fingerprint = prior![0].slice(`${kind}:${action}:`.length, -(value.request.length + 1));
+      durableId = prior?.[0] ?? prefix + value.request;
       rows[durableId] = value;
       value.activeUntil = Date.now() + 5 * 60_000; value.owner = workflowRenderer;
       return value;
@@ -1092,8 +1182,8 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       if (preflight && !pending.preflightChecked) {
         try { await preflight(); checkScope(); }
         catch (error) {
-          await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; }).catch(() => {});
-          throw error;
+          if (!replaying) await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; }).catch(() => {});
+          throw markInvoiceOutcome(error, replaying ? "unconfirmed" : "rejected");
         }
         await workflowRegistry(storedKey, checkScope, rows => { rows[durableId].preflightChecked = true; });
       }
@@ -1106,10 +1196,11 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       if (error) {
         // A SQL rejection rolled back. Transport failures may arrive after a
         // commit and retain the exact reviewed payload/FX for reconciliation.
-        if (error.code && !["PGRST000", "PGRST001", "PGRST002", "57014"].includes(error.code))
+        const rejected = !replaying && ((/^[0-9A-Z]{5}$/.test(error.code ?? "") && !/^08/.test(error.code) && !["40003", "57014"].includes(error.code)) || ["PGRST202", "PGRST204"].includes(error.code));
+        if (rejected)
           await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; });
-        if (["PGRST202", "42883"].includes(error.code)) throw new Error("This workflow needs the latest cloud database update. Nothing was posted.");
-        throw error;
+        if (["PGRST202", "42883"].includes(error.code)) throw markInvoiceOutcome(new Error(`This workflow needs the latest cloud database update.${rejected ? " Nothing was posted." : " The earlier save still needs verification."}`), rejected ? "rejected" : "unconfirmed");
+        throw markInvoiceOutcome(error, rejected ? "rejected" : "unconfirmed");
       }
       result = data as WorkflowResult;
     }
@@ -4140,7 +4231,7 @@ async function localOrderWorkflow(action: string, payload: Record<string, any>, 
 }
 
 export const billing = {
-  listDocs: (docType: "sales" | "purchase" = "sales") =>
+  listDocs: (docType: "sales" | "purchase" = "sales", fresh = false) =>
     readCached<InvoiceDocSummary[]>(
       `billing_docs:${docType}`,
       async () => {
@@ -4237,9 +4328,9 @@ export const billing = {
           };
         }) as InvoiceDocSummary[];
       },
-      [], ["invoice_docs", "invoice_doc_items", "invoice_payments"]
+      [], ["invoice_docs", "invoice_doc_items", "invoice_payments"], true, fresh
     ),
-  getDoc: (docId: number) =>
+  getDoc: (docId: number, fresh = false) =>
     readCached<InvoiceDoc>(
       `invoice_doc:${docId}`,
       async () => {
@@ -4281,10 +4372,38 @@ export const billing = {
             })),
         } as InvoiceDoc;
       },
-      null as unknown as InvoiceDoc
+      null as unknown as InvoiceDoc, undefined, true, fresh
     ),
-  saveDoc: (input: InvoiceDocInput, requestId?: string) =>
-    online(async () => {
+  pendingInvoiceSaves,
+  verifyPendingInvoiceSaves,
+  readPendingInvoiceSave: async (requestId: string): Promise<InvoiceDoc | null> => {
+    const checkScope = workspaceGuard(), local = isLocalMode(), scope = activeCacheOrg;
+    const pending = (await pendingInvoiceSaves()).find(save => save.requestId === requestId);
+    checkScope();
+    if (!pending || pending.active) return null;
+    const receipt = local
+      ? await localClient.from("local_business_workflow_requests").select("*").eq("request_key", `${scope}:${requestId}`).maybeSingle()
+      : await sb().from("business_workflow_requests").select("action,result").eq("user_id", getCacheScope()?.split(":user:").slice(-1)[0])
+          .eq("org_id", getCacheOrg()).eq("request_id", requestId).maybeSingle();
+    checkScope();
+    if (receipt.error) throw receipt.error;
+    const id = Number(receipt.data?.result?.id);
+    if (!receipt.data || !Number.isSafeInteger(id) || id <= 0 || !local && receipt.data.action !== "invoice:save") return null;
+    const doc = await billing.getDoc(id, true);
+    checkScope();
+    return (await verifyPendingInvoiceSaves(doc)).includes(requestId) ? doc : null;
+  },
+  retryInvoiceSave: async (requestId: string): Promise<number> => {
+    const checkScope = workspaceGuard();
+    const pending = (await pendingInvoiceSaves()).find(save => save.requestId === requestId);
+    checkScope();
+    if (!pending) throw new Error("This pending invoice save is no longer available in this workspace. Read the invoice before starting another save.");
+    if (pending.active) throw new Error("This invoice save is still active. Wait for its result before retrying.");
+    return billing.saveDoc(pending.input, requestId);
+  },
+  saveDoc: (input: InvoiceDocInput, requestId?: string) => {
+    let preparing = true;
+    return online(async () => {
       const checkScope = workspaceGuard();
       const { items, id, ...docFields } = input;
       if (items.length > 500) throw new Error("A document supports at most 500 lines.");
@@ -4316,6 +4435,7 @@ export const billing = {
       const requested = { id: id || null, header: clean(docFields as Record<string, unknown>), items: storedItems };
       checkScope();
       if (!isLocalMode()) {
+        preparing = false;
         const output = await businessWorkflow("invoice", "save", { id: id || null, header: row, items: storedItems }, async () => { throw new Error("Cloud workflow is required."); }, requestId, requested,
           id ? undefined : () => checkFreeInvoiceCap(invoicesThisMonth));
         return output.id;
@@ -4402,8 +4522,10 @@ export const billing = {
         await allocateLocalAdvance(docRow, Number(row.advance_applied) || 0, client, previousDoc);
         return { id: docId };
       };
+      preparing = false;
       return (await businessWorkflow("invoice", "save", { id: id || null, header: row, items: storedItems }, saveAndPost, requestId, requested)).id;
-    }),
+    }).catch(error => { if (preparing) markInvoiceOutcome(error, "rejected"); throw error; });
+  },
   // Appearance edits must not replace lines or reverse/repost stock and payments.
   updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature">>) =>
     online(async () => {

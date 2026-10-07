@@ -15,7 +15,7 @@ vi.mock("../supabase", () => ({
     return q;
   } }),
 }));
-import { erp, setCacheOrg } from "../api";
+import { billing, erp, setCacheOrg } from "../api";
 
 const result = (name: string) => ({ data: [{ id: 1, name }], error: null });
 beforeEach(() => {
@@ -53,6 +53,18 @@ it("requires a fresh acknowledged product read for reconciliation and never fall
   expect(cloud.read).toHaveBeenCalledTimes(2);
   cloud.read.mockRejectedValue(new Error("Connection lost"));
   await expect(erp.products({ fresh: true })).rejects.toThrow("Connection lost");
+});
+
+it("never uses an invoice snapshot as proof of a save when a fresh reconciliation read fails", async () => {
+  cloud.read.mockResolvedValueOnce({ data: { id: 7, number: "INV-7", status: "draft" }, error: null })
+    .mockResolvedValueOnce({ data: [{ invoice_id: 7, description: "Oil", qty: 2, unit_price: 10 }], error: null });
+  expect((await billing.getDoc(7)).items).toHaveLength(1);
+  cloud.read.mockRejectedValue(new Error("Invoice connection lost"));
+  await expect(billing.getDoc(7, true)).rejects.toThrow("Invoice connection lost");
+  cloud.read.mockResolvedValue({ data: [], error: null });
+  expect(await billing.listDocs("sales")).toEqual([]);
+  cloud.read.mockRejectedValue(new Error("Invoice list connection lost"));
+  await expect(billing.listDocs("sales", true)).rejects.toThrow("Invoice list connection lost");
 });
 
 it.each(["cloud", "local"])("rejects a fresh %s product read after an account switch without caching the old result", async mode => {

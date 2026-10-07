@@ -40,6 +40,15 @@ function letterGuidance(prompt: string) {
 }
 
 describe("shared letter drafting instructions", () => {
+  it("preserves supplied invoice instructions and treats timed-out writes as uncertain", () => {
+    const prompt = buildSystemPrompt("Assist in Filey.", getPersona());
+    expect(prompt).not.toContain("If a tool failed, the thing did not happen");
+    expect(prompt).toContain("failed or timed-out write may already have committed");
+    expect(prompt).toContain("Preserve explicit values such as a 0.20 rate");
+    expect(prompt).toContain("Preserve requested custom columns and pricing multipliers such as T.Liters");
+    expect(prompt).toContain("Ask only for missing required values or a real ambiguity");
+  });
+
   it("uses the saved company context, draft tools and read-back result instead of sending the user to another page", () => {
     const guidance = letterGuidance(buildSystemPrompt("Assist in Filey.", getPersona()));
     expect(guidance).toContain("search_tools");
