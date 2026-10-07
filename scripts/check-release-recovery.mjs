@@ -108,4 +108,14 @@ for (const filename of ["build.ps1", "build-nosign.ps1"]) {
   assert.match(script, /--check-media --media-dir/, "Local desktop builds must exercise the compiled native media before bundling");
   assert.doesNotMatch(script, /bun build --compile/);
 }
-console.log("Release guards preserve safe recovery, version checks, updater targets and compiled native media packaging.");
+// Frontend storage mocks cannot catch an unknown native IPC command.
+const deviceStorage = readFileSync(new URL("../src/lib/deviceStorage.ts", import.meta.url), "utf8");
+const nativeHandler = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const nativeCache = readFileSync(new URL("../src-tauri/src/modules/sync.rs", import.meta.url), "utf8");
+const cacheCommands = [...new Set([...deviceStorage.matchAll(/invoke(?:<[^()]*>)?\(\s*"(cache_[a-z_]+)"/g)].map(match => match[1]))];
+assert.ok(cacheCommands.includes("cache_compare_set_many"), "Cover the durable local save command");
+for (const command of cacheCommands) {
+  assert.ok(nativeHandler.includes(`modules::sync::${command},`), `Native cache command is not registered: ${command}`);
+  assert.match(nativeCache, new RegExp(`pub async fn ${command}\\b`), `Native cache command is not implemented: ${command}`);
+}
+console.log("Release guards preserve safe recovery, version checks, updater targets, native cache commands and compiled media packaging.");

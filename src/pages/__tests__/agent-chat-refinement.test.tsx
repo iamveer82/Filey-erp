@@ -121,7 +121,7 @@ it("does not prepare a replay when credit runs out after an action already execu
   await screen.findByText(failure);
   expect(screen.getByRole("link", { name: "Add Coin" })).toBeInTheDocument();
   expect(input()).toHaveValue("");
-  expect(loadChats()[0].turns.slice(-1)[0]?.run?.actions[0]).toMatchObject({ id: "saved", status: "completed" });
+  await waitFor(() => expect(loadChats()[0].turns.slice(-1)[0]?.run?.actions[0]).toMatchObject({ id: "saved", status: "completed" }));
 });
 
 it("does not treat arbitrary appended diagnostics as a trusted Coin failure", async () => {

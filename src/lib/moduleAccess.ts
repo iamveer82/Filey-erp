@@ -1,11 +1,11 @@
 import { supabase } from "./supabase";
 import { assertWorkspaceCurrent, isLocalMode } from "./dataMode";
-import { getCacheOrg, getCacheScope } from "./api";
+import { getCacheIdentity, getCacheOrg, getCacheScope } from "./api";
 import { setOf } from "./toolsets";
 import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 
 export interface ModuleAccess { admin: boolean; modules: string[] | null }
-let pending: { scope: string; promise: Promise<ModuleAccess> } | null = null;
+let pending: { scope: string; identity: number; promise: Promise<ModuleAccess> } | null = null;
 
 /** No persisted permission cache: revocation or a failed lookup must not
  * authorize old cached records. Concurrent reads share only the in-flight RPC. */
@@ -13,12 +13,14 @@ export async function loadModuleAccess(): Promise<ModuleAccess> {
   assertWorkspaceCurrent();
   if (isLocalMode()) return {admin:true,modules:null};
   const scope = getCacheScope();
+  const identity = getCacheIdentity();
   if (!scope || !supabase) throw new Error("Sign in to load workspace permissions.");
-  if (pending?.scope === scope) return pending.promise;
+  if (pending?.scope === scope && pending.identity === identity) return pending.promise;
   const promise = (async () => {
     const { data, error, status } = await supabase.rpc("filey_module_access");
     assertWorkspaceCurrent();
-    if (scope !== getCacheScope()) throw new Error("Your workspace changed. Reopen this section.");
+    if (scope !== getCacheScope() || identity !== getCacheIdentity())
+      throw new Error("Your workspace changed. Reopen this section.");
     if (error && isTransientConnectionError(error, status))
       throw new ConnectionUnavailableError("Workspace connection is unavailable. Your current task is preserved; reconnect to verify access.");
     if (error || !data || data.allowed !== true || typeof data.admin !== "boolean" ||
@@ -37,7 +39,7 @@ export async function loadModuleAccess(): Promise<ModuleAccess> {
     }
     return {admin:data.admin,modules:data.modules} as ModuleAccess;
   })();
-  pending = {scope,promise};
+  pending = {scope,identity,promise};
   try { return await promise; } finally { if (pending?.promise === promise) pending = null; }
 }
 
