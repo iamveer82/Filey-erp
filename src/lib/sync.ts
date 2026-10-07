@@ -29,8 +29,8 @@ const ENABLED_KEY = "filey_auto_sync";
 // Embedded logos, signatures and document snapshots can be several MiB per
 // row. Read these bodies individually; metadata still uses full-size pages.
 const LARGE_BODY_TABLES = new Set([
-  "company_profile", "app_settings", "orders", "invoice_docs", "quotations",
-  "quotation_templates", "purchase_orders", "payment_receipts", "tool_runs", "user_assets",
+  "company_profile", "app_settings", "invoice_docs", "quotations",
+  "purchase_orders", "payment_receipts", "user_assets",
 ]);
 
 // Retained exports keep older callers harmless. A saved legacy flag cannot
