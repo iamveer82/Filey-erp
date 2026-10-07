@@ -70,7 +70,11 @@ describe("challan storage", () => {
 
   it("refuses to replace a corrupt legacy document collection with an empty one", async () => {
     localStorage.setItem(DC_STORAGE_KEY, "{not json");
-    await expect(loadChallans()).rejects.toThrow();
+    await expect(loadChallans()).rejects.toThrow(/could not be read/);
+    expect(localStorage.getItem(DC_STORAGE_KEY)).toBe("{not json");
+    await saveChallans([challanRecord(blankChallanForm("DC-NEW"))]);
+    settings.set(`local:${DC_SETTING_KEY}`, "{not json");
+    await expect(loadChallans()).rejects.toThrow(/could not be read/);
   });
 
   it("keeps local records separate from cloud records and leaves the legacy blob untouched", async () => {

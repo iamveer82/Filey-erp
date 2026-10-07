@@ -332,7 +332,8 @@ export default function PurchaseOrders() {
   const receivedCount = rows.filter((r) => r.status === "received").length;
 
   const filtered = rows
-    .filter((r) => statusFilter === "all" || r.status === statusFilter)
+    // Rows saved without a status are drafts (the KPI above counts them that way).
+    .filter((r) => statusFilter === "all" || (r.status || "draft") === statusFilter)
     .filter((r) =>
       search
         ? r.po_number.toLowerCase().includes(search.toLowerCase()) ||
@@ -501,7 +502,7 @@ export default function PurchaseOrders() {
           <FilterChip
             active={statusFilter === "draft"}
             onClick={() => setStatusFilter("draft")}
-            count={rows.filter((r) => r.status === "draft").length}
+            count={draftCount}
           >
             Draft
           </FilterChip>

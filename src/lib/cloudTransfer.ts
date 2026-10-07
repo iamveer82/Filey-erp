@@ -10,7 +10,12 @@ const permits = new WeakMap<CloudTransferPermit, { client: SupabaseClient; uid: 
 function workspace(): string {
   const owner = localWorkspaceOwner();
   if (owner && !isLocalSignedIn()) throw new Error("Sign in to this device's workspace first.");
-  const profile = JSON.parse(localStorage.getItem("filey_local_profile") || "{}");
+  let profile: { id?: unknown; org_id?: unknown } | null = null;
+  try {
+    profile = JSON.parse(localStorage.getItem("filey_local_profile") || "{}");
+  } catch {
+    throw new Error("This device's profile could not be read. Sign in to this device's workspace again before transferring records.");
+  }
   return JSON.stringify([owner, profile?.id ?? null, profile?.org_id ?? null, localStorage.getItem("filey_cloud_workspace")]);
 }
 

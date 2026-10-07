@@ -150,6 +150,17 @@ describe("buildSif", () => {
     ).toMatch(/before period start/i);
   });
 
+  it("rejects fractional or non-numeric leave days", () => {
+    for (const leaveDays of [2.5, NaN]) {
+      expect(
+        validateWps(input({ employees: [{ ...input().employees[0], leaveDays }] })).join(" ")
+      ).toMatch(/whole number/i);
+    }
+    expect(
+      validateWps(input({ employees: [{ ...input().employees[0], leaveDays: 3 }] }))
+    ).toEqual([]);
+  });
+
   it("rounds amounts to exactly two decimals", () => {
     const file = buildSif(
       input({

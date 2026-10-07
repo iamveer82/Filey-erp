@@ -1693,10 +1693,16 @@ export function PaymentsModal({
       .finally(() => { if (current()) setPaymentsLoading(false); });
   }, [documentId]);
   useEffect(() => { load(); }, [load]);
+  // The modal stays mounted between invoices, so a draft amount/method/date
+  // typed for one invoice must not be posted against the next one opened.
+  useEffect(() => {
+    setAmount(0); setMethod("bank transfer"); setPaidAt(todayYmd());
+  }, [documentId]);
 
   const total = doc?.total ?? 0;
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
-  const balance = Math.max(0, total - paid);
+  const advanceApplied = Number(doc?.advance_applied) || 0;
+  const balance = Math.max(0, total - paid - advanceApplied);
 
   const add = async () => {
     if (!doc || amount <= 0 || busy || paymentsLoading || paymentError) return;
@@ -2217,6 +2223,9 @@ function Editor({
     setForm({
       ...form,
       customer_id: c.id,
+      // Advance credit belongs to the customer it was received from; a new
+      // customer starts from zero until their own credit is applied.
+      advance_applied: c.id === form.customer_id ? form.advance_applied : 0,
       einvoice: { ...form.einvoice, buyer: readEInvoiceParty(c.custom_fields?.einvoice_identity) },
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",

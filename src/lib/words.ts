@@ -9,7 +9,7 @@ const ONES = [
   "Seventeen", "Eighteen", "Nineteen",
 ];
 const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-const SCALE = ["", " Thousand", " Million", " Billion"];
+const SCALE = ["", " Thousand", " Million", " Billion", " Trillion"];
 
 function threeDigits(n: number): string {
   const h = Math.floor(n / 100);
@@ -38,22 +38,54 @@ export function numberToWords(n: number): string {
   return groups.join(" ");
 }
 
-const CURRENCY_WORDS: Record<string, { main: string; sub: string }> = {
+/** Every currency offered by the pickers (format.ts CURRENCIES). `digits` is the
+ *  minor-unit exponent (ISO 4217), matching how money() prints the figure:
+ *  three decimals for the Gulf dinars/rial, none for yen. An empty `sub` means
+ *  the minor unit is not used in practice, so fractions are rounded away. */
+const CURRENCY_WORDS: Record<string, { main: string; sub: string; digits?: number }> = {
   AED: { main: "UAE Dirhams", sub: "Fils" },
   USD: { main: "US Dollars", sub: "Cents" },
   EUR: { main: "Euros", sub: "Cents" },
   GBP: { main: "Pounds Sterling", sub: "Pence" },
   INR: { main: "Indian Rupees", sub: "Paise" },
   SAR: { main: "Saudi Riyals", sub: "Halalas" },
+  QAR: { main: "Qatari Riyals", sub: "Dirhams" },
+  KWD: { main: "Kuwaiti Dinars", sub: "Fils", digits: 3 },
+  BHD: { main: "Bahraini Dinars", sub: "Fils", digits: 3 },
+  OMR: { main: "Omani Rials", sub: "Baisa", digits: 3 },
+  CHF: { main: "Swiss Francs", sub: "Rappen" },
+  CAD: { main: "Canadian Dollars", sub: "Cents" },
+  AUD: { main: "Australian Dollars", sub: "Cents" },
+  NZD: { main: "New Zealand Dollars", sub: "Cents" },
+  SGD: { main: "Singapore Dollars", sub: "Cents" },
+  ZAR: { main: "South African Rand", sub: "Cents" },
+  CZK: { main: "Czech Koruna", sub: "Haleru" },
+  DKK: { main: "Danish Kroner", sub: "Ore" },
+  SEK: { main: "Swedish Kronor", sub: "Ore" },
+  PLN: { main: "Polish Zloty", sub: "Groszy" },
+  RON: { main: "Romanian Lei", sub: "Bani" },
+  HUF: { main: "Hungarian Forints", sub: "", digits: 0 },
+  JPY: { main: "Japanese Yen", sub: "", digits: 0 },
 };
 
 /** "UAE Dirhams Three Thousand Three Hundred Twenty and Fils Ten Only" */
 export function amountInWords(amount: number, currency = "AED"): string {
   if (!Number.isFinite(amount)) return "";
-  const cur = CURRENCY_WORDS[currency] ?? { main: currency, sub: "" };
-  const whole = Math.floor(Math.abs(amount));
-  const frac = Math.round((Math.abs(amount) - whole) * 100);
+  const known = CURRENCY_WORDS[currency];
+  const cur = known ?? { main: currency, sub: "" };
+  const digits = cur.digits ?? 2;
+  const unit = 10 ** digits;
+  // Round to the minor unit first, then split. Splitting first and rounding
+  // the fraction turns 9.996 into "Nine and Fils One Hundred" instead of "Ten".
+  const minor = Math.round(Math.abs(amount) * unit);
+  const whole = Math.floor(minor / unit);
+  const frac = minor % unit;
   let out = `${cur.main} ${numberToWords(whole)}`;
-  if (frac > 0 && cur.sub) out += ` and ${cur.sub} ${numberToWords(frac)}`;
+  if (frac > 0) {
+    if (cur.sub) out += ` and ${cur.sub} ${numberToWords(frac)}`;
+    // Unknown code: no minor-unit name to use, but the fraction must not be
+    // silently dropped from a legal document — use the cheque-style "50/100".
+    else if (!known) out += ` and ${frac}/${unit}`;
+  }
   return `${out} Only`;
 }

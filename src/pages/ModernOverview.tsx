@@ -150,8 +150,10 @@ export default function ModernOverview() {
     const count = (statuses: string[]) =>
       orders.filter((o) => statuses.includes((o.status || "").toLowerCase())).length;
     return {
-      completed: count(["completed", "done", "delivered"]),
-      progress: count(["in progress", "processing", "pending", "open", "new"]),
+      // Same vocabulary as the Orders page: its status flow is
+      // draft → confirmed → delivered, so those must count here too.
+      completed: count(["completed", "done", "delivered", "paid"]),
+      progress: count(["draft", "confirmed", "in progress", "processing", "pending", "open", "new"]),
       total: orders.length,
     };
   }, [orders]);

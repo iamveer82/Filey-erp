@@ -85,8 +85,14 @@ export async function loadChallans(): Promise<DcRecord[]> {
   // into cloud mode, or mirror cloud reads over them when switching modes.
   const value = saved ?? (isLocalMode() ? localStorage.getItem(DC_STORAGE_KEY) : null);
   if (value == null) return [];
-  const records: unknown = JSON.parse(value);
-  if (!Array.isArray(records)) throw new Error("Delivery challan data could not be read.");
+  let records: unknown;
+  try {
+    records = JSON.parse(value);
+  } catch {
+    records = null;
+  }
+  if (!Array.isArray(records))
+    throw new Error("Delivery challan data could not be read. Saved challans were not changed.");
   return records as DcRecord[];
 }
 

@@ -69,7 +69,19 @@ describe("task scheduling (isDue)", () => {
   });
 
   it("daily task fires after its time, once per day", () => {
-    expect(isDue(mk({ type: "daily", time: "00:00" }))).toBe(true);
-    expect(isDue(mk({ type: "daily", time: "00:00" }, { lastRun: Date.now() }))).toBe(false);
+    const yesterday = Date.now() - 86_400_000;
+    expect(isDue(mk({ type: "daily", time: "00:00" }, { createdAt: yesterday }))).toBe(true);
+    expect(isDue(mk({ type: "daily", time: "00:00" }, { createdAt: yesterday, lastRun: Date.now() }))).toBe(false);
+  });
+
+  it("time-based tasks created after today's occurrence wait for the next one", () => {
+    // 10:00 local on a Wednesday; a 09:00 task created at 09:30 must not fire now.
+    const now = new Date(2026, 9, 7, 10, 0, 0, 0).getTime();
+    const createdAfter = new Date(2026, 9, 7, 9, 30, 0, 0).getTime();
+    const createdBefore = new Date(2026, 9, 7, 8, 0, 0, 0).getTime();
+    expect(isDue(mk({ type: "daily", time: "09:00" }, { createdAt: createdAfter }), now)).toBe(false);
+    expect(isDue(mk({ type: "daily", time: "09:00" }, { createdAt: createdBefore }), now)).toBe(true);
+    expect(isDue(mk({ type: "weekly", day: 3, time: "09:00" }, { createdAt: createdAfter }), now)).toBe(false);
+    expect(isDue(mk({ type: "weekly", day: 3, time: "09:00" }, { createdAt: createdBefore }), now)).toBe(true);
   });
 });

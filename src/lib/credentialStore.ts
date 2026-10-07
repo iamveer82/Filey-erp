@@ -91,8 +91,16 @@ export async function quarantineLegacyCredentials(): Promise<void> {
   for (const key of ["filey.ai.config", "filey.ai.image", "filey_reach_config"]) {
     const raw = localStorage.getItem(key);
     if (!raw) continue;
-    const config = JSON.parse(raw);
-    if (!config.apiKey) continue;
+    let config: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") continue;
+      config = parsed as Record<string, unknown>;
+    } catch {
+      // One unreadable legacy blob must not abort moving the remaining keys.
+      continue;
+    }
+    if (typeof config.apiKey !== "string" || !config.apiKey) continue;
     await invoke("credential_quarantine", { name: key, value: config.apiKey });
     // A concurrent settings change must not be erased by this migration.
     if (localStorage.getItem(key) === raw) {

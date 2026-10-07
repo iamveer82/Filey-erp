@@ -13,7 +13,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, chartAmount, num, cn, todayYmd } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
@@ -53,11 +53,13 @@ export default function SalesTab({ data }: { data: ReportsData }) {
   );
 
   const overdueCount = useMemo(() => {
-    const now = Date.now();
+    // Due dates are calendar days: an invoice due today is not overdue until
+    // tomorrow, in the user's timezone — the same predicate Invoicing uses.
+    const today = todayYmd();
     return data.invoices.filter((i) => {
       if (i.status === "overdue") return true;
       if (CLOSED.includes(i.status) || !i.due_date) return false;
-      return +new Date(i.due_date) < now;
+      return i.due_date.slice(0, 10) < today;
     }).length;
   }, [data.invoices]);
 

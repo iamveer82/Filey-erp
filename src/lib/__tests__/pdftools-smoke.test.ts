@@ -136,3 +136,14 @@ test("PDF toolkit: every headless tool runs and produces valid output", async ()
   }
   expect(failures).toEqual([]);
 }, 60_000); // Runs over 40 real operations, including crypto initialization under parallel load.
+
+test("rotatePdf normalises a negative source /Rotate into 0..359", async () => {
+  const T = await import("../pdfTools");
+  const { degrees } = await import("pdf-lib");
+  const doc = await PDFDocument.create();
+  doc.addPage([200, 100]).setRotation(degrees(-270));
+  const file = new File([new Uint8Array(await doc.save())], "neg.pdf", { type: "application/pdf" });
+  const out = await T.rotatePdf(file, 90);
+  const back = await PDFDocument.load(out.bytes);
+  expect(back.getPage(0).getRotation().angle).toBe(180);
+});

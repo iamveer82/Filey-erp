@@ -118,3 +118,21 @@ describe("advances.applyToInvoice", () => {
     expect(await advances.creditFor(acme)).toBe(5000);
   });
 });
+
+describe("billing.listDocs outstanding balance", () => {
+  it("nets allocated advance credit off the balance like a payment", async () => {
+    await deposit(acme, 5000);
+    const id = await savedInvoice();
+    const doc = await billing.getDoc(id);
+    await billing.saveDoc({ ...doc, status: "sent", advance_applied: 2000 });
+    await billing.addPayment(id, 1000, "cash", "2026-07-02");
+
+    const summary = (await billing.listDocs()).find((row) => row.id === id)!;
+    expect(summary.total).toBe(5000);
+    expect(summary.paid).toBe(1000);
+    expect(summary.advance_applied).toBe(2000);
+    // 5000 − 1000 cash − 2000 credit. Before the fix this read 4000 and the
+    // payments dialog asked for money the advance had already covered.
+    expect(summary.balance).toBe(2000);
+  });
+});

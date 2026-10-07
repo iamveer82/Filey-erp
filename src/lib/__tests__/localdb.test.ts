@@ -106,6 +106,18 @@ describe("localdb query shim", () => {
     expect(data[0].name).toBe("A2");
   });
 
+  it("upsert and insert treat a string id as the same row as its numeric twin", async () => {
+    await c.from("w").insert({ id: 5, name: "A" });
+    // A route param or synced payload may carry the id as text; it must update
+    // the stored row rather than add a twin that every eq() filter also matches.
+    await c.from("w").upsert({ id: "5", name: "A2" });
+    const { data } = await c.from("w").select();
+    expect(data).toHaveLength(1);
+    expect(data[0].name).toBe("A2");
+    const { error } = await c.from("w").insert({ id: "5", name: "A3" });
+    expect(error?.message).toMatch(/already exists/);
+  });
+
   it("persists across separate builder calls (same store)", async () => {
     await c.from("p").insert({ name: "keep" });
     const raw = localStorage.getItem("localdb:p");
