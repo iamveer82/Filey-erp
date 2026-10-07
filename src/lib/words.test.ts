@@ -20,6 +20,11 @@ describe("amountInWords", () => {
       "UAE Dirhams Three Thousand Three Hundred Twenty and Fils Ten Only"
     );
   });
+  it("carries sub-unit rounding into the whole amount", () => {
+    expect(amountInWords(9.996)).toBe("UAE Dirhams Ten Only");
+    expect(amountInWords(1.995)).toBe("UAE Dirhams Two Only");
+    expect(amountInWords(0.5)).toBe("UAE Dirhams Zero and Fils Fifty Only");
+  });
   it("falls back to the currency code for unknown currencies", () => {
     expect(amountInWords(5, "XYZ")).toBe("XYZ Five Only");
   });

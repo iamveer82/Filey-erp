@@ -51,8 +51,11 @@ const CURRENCY_WORDS: Record<string, { main: string; sub: string }> = {
 export function amountInWords(amount: number, currency = "AED"): string {
   if (!Number.isFinite(amount)) return "";
   const cur = CURRENCY_WORDS[currency] ?? { main: currency, sub: "" };
-  const whole = Math.floor(Math.abs(amount));
-  const frac = Math.round((Math.abs(amount) - whole) * 100);
+  // Round to cents first, then split. Splitting first and rounding the
+  // fraction turns 9.996 into "Nine and Fils One Hundred" instead of "Ten".
+  const cents = Math.round(Math.abs(amount) * 100);
+  const whole = Math.floor(cents / 100);
+  const frac = cents % 100;
   let out = `${cur.main} ${numberToWords(whole)}`;
   if (frac > 0 && cur.sub) out += ` and ${cur.sub} ${numberToWords(frac)}`;
   return `${out} Only`;
