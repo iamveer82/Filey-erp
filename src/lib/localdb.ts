@@ -11,7 +11,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
-import { nextLocalId } from "./recordId";
+import { LOCAL_ID_MIN, nextLocalId } from "./recordId";
 import { validateNumberedCollection } from "./documentNumberRules";
 import { readDeviceValue, writeDeviceValue, compareDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
 
@@ -468,15 +468,57 @@ export function resolveLocalSyncConflicts(coll: string, choices: ConflictChoice[
   return serializeWrite(async () => {
     const { journal, raw } = await journalState();
     const { rows, json: originalJson } = await collectionSnapshot(coll);
-    const byId = new Map(rows.map(row => [row.id, row]));
+    let byId = new Map(rows.map(row => [row.id, row]));
     for (const { id, reviewedLocal } of captured) {
       if (JSON.stringify(byId.get(id) ?? null) !== JSON.stringify(reviewedLocal))
         throw new Error("This local record changed while you were reviewing it. Close and review the conflict again.");
     }
     const entry = journal.tables[coll] ??= { changed: [], deleted: [] };
-    const changed = new Set(entry.all ? rows.map(row => row.id) : entry.changed);
-    const deleted = new Set(entry.deleted);
-    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of captured) {
+    let changed = new Set(entry.all ? rows.map(row => row.id) : entry.changed);
+    let deleted = new Set(entry.deleted);
+    let resolved = captured;
+    if (coll === "app_settings") {
+      // Device settings have independent IDs and no foreign-key references.
+      // Plan all moves from the reviewed snapshot before changing any row: a
+      // cloud ID may be another setting's old ID, including a complete swap.
+      const targets = new Map<string | number, string | number>();
+      const remap = new Map<string | number, string | number>();
+      for (const { id, remote } of captured) if (remote) {
+        if (targets.has(remote.id) && targets.get(remote.id) !== id)
+          throw new Error("Company settings changed on this device. Sync again before choosing a version.");
+        targets.set(remote.id, id);
+        remap.set(id, remote.id);
+      }
+      for (const id of deleted) if (targets.has(id) && targets.get(id) !== id && !remap.has(id) && !byId.has(id))
+        throw new Error("Company settings changed on this device. Sync again before choosing a version.");
+      const used = [...rows, ...captured.map(choice => ({ id: choice.id })),
+        ...Array.from(targets.keys(), id => ({ id })), ...Array.from(changed, id => ({ id })), ...Array.from(deleted, id => ({ id }))];
+      const fresh = new Set<string | number>();
+      const deviceOnly = new Set(captured.filter(choice => !choice.remote && choice.reviewedLocal).map(choice => choice.id));
+      // An absent business-key match does not make a legacy sequential ID
+      // available: another cloud setting/account may already own that ID.
+      for (const row of rows) if (!remap.has(row.id) && ((targets.has(row.id) && targets.get(row.id) !== row.id)
+        || (deviceOnly.has(row.id) && typeof row.id === "number" && row.id < LOCAL_ID_MIN))) {
+        const id = nextLocalId(used);
+        used.push({ id });
+        remap.set(row.id, id);
+        fresh.add(id);
+      }
+      const targetId = (id: string | number) => remap.get(id) ?? id;
+      changed = new Set(Array.from(changed, targetId));
+      deleted = new Set(Array.from(deleted, targetId));
+      for (const id of fresh) if (!deleted.has(id)) changed.add(id);
+      if (entry.deletedRevisions) {
+        const revisionIds = new Map(Array.from(remap, ([id, target]) => [String(id), String(target)]));
+        entry.deletedRevisions = Object.fromEntries(Object.entries(entry.deletedRevisions).map(([id, revision]) => [revisionIds.get(id) ?? id, revision]));
+      }
+      byId = new Map(rows.map(row => {
+        const id = targetId(row.id);
+        return [id, id === row.id ? row : { ...row, id, ...(fresh.has(id) ? { sync_revision: null } : {}) }];
+      }));
+      resolved = captured.map(choice => ({ ...choice, id: targetId(choice.id) }));
+    }
+    for (const { id, remote, keepLocal: preference = keepLocal, localOrgId } of resolved) {
       const targetId = remote && ["company_profile", "app_settings"].includes(coll) ? remote.id : id;
       if (targetId !== id && byId.has(targetId))
         throw new Error("Company settings changed on this device. Sync again before choosing a version.");

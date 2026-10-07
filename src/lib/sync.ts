@@ -8,6 +8,7 @@ import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
 import { assertLocalAccount, localWorkspaceOwner, isLocalSignedIn, getLocalCredential } from "./localAuth";
 import { PUSH_TABLES } from "./syncTables";
 import { syncProfile } from "./profileSync";
+import { LOCAL_ID_MIN } from "./recordId";
 import { assertCloudTransfer, checkCloudTransfer, LOCAL_TRANSFER_REQUIRED, type CloudTransferPermit } from "./cloudTransfer";
 import {
   loadColl,
@@ -24,6 +25,13 @@ import {
 
 const FILES_BUCKET = "files";
 const ENABLED_KEY = "filey_auto_sync";
+
+// Embedded logos, signatures and document snapshots can be several MiB per
+// row. Read these bodies individually; metadata still uses full-size pages.
+const LARGE_BODY_TABLES = new Set([
+  "company_profile", "app_settings", "invoice_docs", "quotations",
+  "purchase_orders", "payment_receipts", "user_assets",
+]);
 
 // Retained exports keep older callers harmless. A saved legacy flag cannot
 // authorize any background transfer. Never erase records or journal entries.
@@ -269,6 +277,12 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
     const conflicts = await listSyncConflicts();
     const knownConflicts = new Set(conflicts.map(c => c.id));
     const journal = await journalSnapshot();
+    // Older device IDs may identify a different cloud setting. A tombstone
+    // has no business key; only an acknowledged revision proves its cloud ID.
+    const settings = journal.tables.app_settings;
+    if (settings?.deleted.some(id => Number.isSafeInteger(Number(id)) && Number(id) >= 0 && Number(id) < LOCAL_ID_MIN
+      && settings.deletedRevisions?.[String(id)] == null))
+      throw new Error("A deleted company setting uses an older device ID and cannot be matched safely. Review this deletion before syncing. Your device data has not been changed.");
     const version = journal.v;
     const snapshot = new Map<string, Record<string, any>[]>();
     const orgId = orgCache!.orgId;
@@ -305,8 +319,9 @@ export async function resolveSyncConflicts(keepLocal: boolean, client?: Supabase
       // device. Match their business key, not an unrelated generated row ID.
       const companyRows = table === "company_profile" ? await pullPaged(supa, table, "*") : null;
       if (companyRows && companyRows.length > 1) throw new Error("Your company settings need attention. Contact Filey support before syncing.");
-      for (let offset = 0; offset < group.length; offset += 500) {
-        const batch = group.slice(offset, offset + 500);
+      const batchSize = LARGE_BODY_TABLES.has(table) ? 1 : 500;
+      for (let offset = 0; offset < group.length; offset += batchSize) {
+        const batch = group.slice(offset, offset + batchSize);
         const { data, error } = await supa.from(table).select("*").in("id", batch.map(c => c.recordId));
         if (error || !Array.isArray(data)) throw new Error("Couldn't read cloud changes. Your device data is safe. Reconnect and try again.");
         const remote = new Map(data.map(row => [String(row.id), row]));
@@ -683,15 +698,16 @@ export async function pullPaged(
   cols: string
 ): Promise<Record<string, any>[]> {
   const rows: Record<string, any>[] = [];
-  for (let from = 0; ; from += 1000) {
+  const pageSize = cols === "*" && LARGE_BODY_TABLES.has(t) ? 1 : 1000;
+  for (let from = 0; ; from += pageSize) {
     const { data, error } = await supa
       .from(t)
       .select(cols)
       .order("id", { ascending: true })
-      .range(from, from + 999);
+      .range(from, from + pageSize - 1);
     if (error) throw new Error(`${t}: ${error.message}`);
     rows.push(...((data ?? []) as any[]));
-    if ((data ?? []).length < 1000) break;
+    if ((data ?? []).length < pageSize) break;
   }
   return rows;
 }
@@ -720,8 +736,9 @@ export async function pullIncremental(
   });
 
   const fetched = new Map<string, Record<string, any>>();
-  for (let i = 0; i < stale.length; i += 500) {
-    const ids = stale.slice(i, i + 500).map((m) => m.id);
+  const batchSize = LARGE_BODY_TABLES.has(t) ? 1 : 500;
+  for (let i = 0; i < stale.length; i += batchSize) {
+    const ids = stale.slice(i, i + batchSize).map((m) => m.id);
     const { data, error } = await supa.from(t).select("*").in("id", ids);
     if (error) throw new Error(`${t}: ${error.message}`);
     for (const r of (data ?? []) as any[]) fetched.set(String(r.id), r);
