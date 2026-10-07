@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import type { SyncStatus } from "../sync";
 const state = vi.hoisted(() => ({
   user: { id: "owner", email: "owner@example.test" } as {
     id: string;
@@ -10,6 +11,7 @@ const state = vi.hoisted(() => ({
   syncCalls: 0,
   copies: 0,
   busy: false,
+  syncStatus: { state: "idle" } as SyncStatus,
   beforeProfile: () => {},
   beforeVerification: () => {},
 }));
@@ -45,8 +47,9 @@ vi.mock("../auth", () => ({
   adoptLocalProfile: (p: unknown) =>
     localStorage.setItem("filey_local_profile", JSON.stringify(p)),
 }));
-vi.mock("../sync", () => ({
-  getSyncStatus: () => ({ state: "idle" }),
+vi.mock("../sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sync")>()),
+  getSyncStatus: () => state.syncStatus,
   isMigrating: () => state.migrating || state.busy,
   autoSyncEnabled: () => localStorage.getItem("filey_auto_sync") === "on",
   syncCycle: async () => {
@@ -55,7 +58,7 @@ vi.mock("../sync", () => ({
     state.syncCalls++;
     return state.syncOk;
   },
-  resolveSyncConflicts: vi.fn(),
+  resolveSyncConflicts: vi.fn(async () => true),
   setMigrating: (v: boolean) => {
     state.migrating = v;
   },
@@ -71,6 +74,7 @@ vi.mock("../migrate", () => ({
   },
 }));
 import { switchWorkspace } from "../switchWorkspace";
+import { resolveSyncConflicts } from "../sync";
 import { getLocalCredential, isLocalSignedIn } from "../localAuth";
 
 beforeEach(() => {
@@ -81,9 +85,36 @@ beforeEach(() => {
   state.migrating = false;
   state.busy = false;
   state.syncOk = true;
+  state.syncStatus = { state: "idle" };
+  vi.mocked(resolveSyncConflicts).mockClear().mockResolvedValue(true);
   state.syncCalls = state.copies = 0;
   state.beforeProfile = () => {};
   state.beforeVerification = () => {};
+});
+
+it("reconciles settings conflicts together with owner records from a retired workspace", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  state.syncOk = false;
+  state.syncStatus = { state: "error", failures: [
+    { table: "app_settings", recordId: 1, kind: "conflict", message: "Review the local and cloud versions before uploading." },
+    { table: "invoice_docs", recordId: 2, kind: "permission", message: "This record belongs to a different company. Switch to its original workspace before uploading." },
+  ] };
+  await switchWorkspace("cloud");
+  expect(resolveSyncConflicts).toHaveBeenCalledOnce();
+  expect(resolveSyncConflicts).toHaveBeenCalledWith(true, expect.anything(), expect.objectContaining({ pendingOnly: true, transfer: expect.anything() }));
+  expect(localStorage.getItem("filey_data_mode")).toBe("cloud");
+});
+
+it.each(["permission", "schema"] as const)("does not treat a real %s rejection as permission to reconnect a workspace", async kind => {
+  localStorage.setItem("filey_data_mode", "local");
+  state.syncOk = false;
+  state.syncStatus = { state: "error", error: "private SQL details", failures: [
+    { table: "app_settings", recordId: 1, kind: "conflict", message: "Review the local and cloud versions before uploading." },
+    { table: "invoice_docs", recordId: 2, kind, message: "Server rejected this record; private SQL details" },
+  ] };
+  await expect(switchWorkspace("cloud")).rejects.toThrow(kind === "schema" ? "needs a sync update" : "aren't accessible");
+  expect(resolveSyncConflicts).not.toHaveBeenCalled();
+  expect(localStorage.getItem("filey_data_mode")).toBe("local");
 });
 it("round-trips storage without changing records or losing the account", async () => {
   localStorage.setItem("localdb:products", '[{"id":7,"name":"Local only"}]');
@@ -136,7 +167,8 @@ it("keeps local mode without re-enabling legacy background sync after a failed u
   localStorage.setItem("filey_data_mode", "local");
   localStorage.setItem("filey_auto_sync", "on");
   state.syncOk = false;
-  await expect(switchWorkspace("cloud")).rejects.toThrow("Couldn't finish saving to Filey Cloud");
+  state.syncStatus = { state: "error" };
+  await expect(switchWorkspace("cloud")).rejects.toThrow("Sync couldn't finish");
   expect(localStorage.getItem("filey_data_mode")).toBe("local");
   expect(localStorage.getItem("filey_auto_sync")).toBe("off");
   expect(state.migrating).toBe(false);

@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import DataModePanel from "../settings/DataModePanel";
 import { setImplicitDataMode } from "../../lib/dataMode";
+import { WorkspaceTransferError } from "../../lib/switchWorkspace";
 
 const cloud = vi.hoisted(() => ({
   session: "owner@example.test" as string | null,
@@ -33,18 +34,21 @@ vi.mock("../../lib/supabase", async (importOriginal) => ({
   },
 }));
 
-vi.mock("../../lib/switchWorkspace", () => ({ switchWorkspace: cloud.switchWorkspace }));
+vi.mock("../../lib/switchWorkspace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/switchWorkspace")>()),
+  switchWorkspace: cloud.switchWorkspace,
+}));
 vi.mock("../../lib/migrate", () => ({
   migrateLocalToCloud: cloud.migrateLocalToCloud,
   migrateCloudToLocal: vi.fn(async () => []),
   normalizeLocalEmirates: vi.fn(async () => 0),
 }));
 vi.mock("../../lib/license", () => ({ hasLocalData: cloud.hasLocalData }));
-vi.mock("../../lib/sync", () => ({
+vi.mock("../../lib/sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/sync")>()),
   autoSyncEnabled: () => false,
   setAutoSyncEnabled: vi.fn(),
   getSyncStatus: () => ({ state: "idle" as const, at: null }),
-  syncStatusMessage: () => "",
   syncNow: vi.fn(async () => true),
   syncCycle: vi.fn(async () => true),
   markAllForSync: vi.fn(async () => {}),
@@ -137,6 +141,17 @@ it("stays put and explains when the upload only partly succeeded", async () => {
   await flip();
 
   expect(await screen.findByRole("alert")).toHaveTextContent(/your saved data is safe/i);
+  expect(cloud.reload).toBe(false);
+});
+
+it.each(["permission", "schema"] as const)("shows safe %s guidance without exposing the failed row or SQL", async kind => {
+  cloud.switchWorkspace.mockRejectedValue(new WorkspaceTransferError({ state: "error", error: "private SQL details", failures: [
+    { table: "invoice_docs", recordId: 47, kind, message: "private SQL details" },
+  ] }));
+  render(<DataModePanel />);
+  await flip();
+  expect(await screen.findByRole("alert")).toHaveTextContent(kind === "schema" ? "needs a sync update" : "aren't accessible");
+  expect(screen.queryByText(/invoice_docs|private SQL/i)).toBeNull();
   expect(cloud.reload).toBe(false);
 });
 

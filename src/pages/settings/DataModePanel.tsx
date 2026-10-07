@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Cloud, Check, Download, FolderOpen, ShieldCheck } from "lucide-react";
 import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
-import { switchWorkspace } from "../../lib/switchWorkspace";
+import { switchWorkspace, WorkspaceTransferError } from "../../lib/switchWorkspace";
 import { useAuth } from "../../lib/auth";
 import {
   cloudSignIn,
@@ -327,7 +327,7 @@ export default function DataModePanel() {
   const { user } = useAuth();
   const transferFailed = (error: unknown) => {
     log.warn("sync", "Workspace transfer failed", error);
-    setErr(RETRY_MESSAGE);
+    setErr(error instanceof WorkspaceTransferError ? error.message : RETRY_MESSAGE);
   };
   /** The helper owns transfer ordering and locks; the switch owns only its UI. */
   const toggleStorage = async (next: boolean) => {
