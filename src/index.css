@@ -41,7 +41,9 @@
 .filey-document-dialog .fp-box { flex: 1; min-height: 0; max-height: none; border-radius: 0; padding: 16px; scrollbar-gutter: auto; background: hsl(var(--muted)); }
 @media screen and (max-width: 1023px) {
   #root { height: var(--filey-viewport-height, 100dvh); }
-  .filey-workspace { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  /* iOS pans the visual viewport as well as shrinking it for the keyboard.
+     Keep the shell in that viewport; <main> remains the page scroller. */
+  .filey-workspace { position: fixed; top: var(--filey-viewport-top, 0px); height: var(--filey-viewport-height, 100dvh); padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
   .workspace-header { height: calc(4rem + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
   .workspace-header > button, .workspace-header > div { flex-shrink: 0; }
   .workspace-content { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }

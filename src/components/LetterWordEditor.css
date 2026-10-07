@@ -135,6 +135,7 @@
   margin-left: auto;
 }
 .letter-word-stage {
+  container-type: inline-size;
   background: hsl(var(--muted) / 0.55);
   padding: 28px 24px;
 }
@@ -154,7 +155,7 @@
   font-size: var(--letter-size);
 }
 .letter-word-paper-letterhead {
-  padding-top: 150px;
+  padding-top: min(18.9cqw, 150px);
   padding-bottom: 140px;
 }
 .letter-word-letterhead {
@@ -162,7 +163,8 @@
   z-index: -1;
   inset: 0;
   width: 100%;
-  height: 1123px;
+  height: auto;
+  aspect-ratio: 794 / 1123;
   object-fit: fill;
   pointer-events: none;
 }
@@ -287,27 +289,31 @@
   color: hsl(var(--muted-foreground));
   font-size: 11px;
 }
-@media (max-width: 640px) {
+@media (max-width: 1023px) {
   .letter-word-ribbon {
+    /* A sticky expanded ribbon can cover the entire keyboard-sized viewport. */
+    position: static;
     padding: 6px;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 4px;
-    max-height: 240px;
-    overflow-y: auto;
   }
   .letter-word-ribbon-row,
   .letter-word-ribbon-row + .letter-word-ribbon-row {
     display: contents;
   }
   .letter-word-history,
+  .letter-word-font,
+  .letter-word-alignment,
   .letter-word-lists,
   .letter-word-spacing,
   .letter-word-insert {
     display: none;
   }
   .letter-word-ribbon-expanded .letter-word-history,
+  .letter-word-ribbon-expanded .letter-word-font,
+  .letter-word-ribbon-expanded .letter-word-alignment,
   .letter-word-ribbon-expanded .letter-word-lists,
   .letter-word-ribbon-expanded .letter-word-spacing {
     display: flex;
@@ -318,10 +324,9 @@
   .letter-word-more {
     display: block;
     order: 10;
-    min-height: 36px;
-    width: 100%;
-    border-top: 1px solid hsl(var(--border));
-    margin-top: 2px;
+    min-height: 44px;
+    padding-inline: 12px;
+    margin-left: auto;
     color: hsl(var(--muted-foreground));
     font-size: 12px;
   }
@@ -373,10 +378,12 @@
     border-right: 0;
   }
   .letter-word-font > :nth-child(1) {
-    width: 88px;
+    width: 80px;
   }
   .letter-word-font > :nth-child(2) {
-    width: 108px;
+    flex: 1;
+    min-width: 0;
+    width: auto;
   }
   .letter-word-group {
     padding-right: 4px;
@@ -401,11 +408,16 @@
     min-height: 650px;
   }
   .letter-word-paper-letterhead {
-    padding-top: 95px;
+    padding-top: min(18.9cqw, 150px);
     padding-bottom: 75px;
   }
+  /* Phone text reflows beyond A4. Show the unstretched header while editing,
+     so the letterhead footer cannot sit behind the prose. Preview keeps A4. */
   .letter-word-letterhead {
-    height: 100%;
+    height: min(18.9cqw, 150px);
+    aspect-ratio: auto;
+    object-fit: cover;
+    object-position: top;
   }
   .letter-word-paper .tiptap {
     min-height: 430px;
