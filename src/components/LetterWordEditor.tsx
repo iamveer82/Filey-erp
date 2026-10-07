@@ -738,6 +738,21 @@ function WordCanvas({
     content: initial.current as JSONContent,
     editable: !disabled,
     editorProps: {
+      handleScrollToSelection(view) {
+        const viewport = window.visualViewport;
+        const main = view.dom.closest("main");
+        if (!viewport || window.innerWidth > 1023 || !main) return false;
+        // ProseMirror's default window bounds start at zero, even when iOS
+        // has panned the visual viewport. Scroll our page, not the browser.
+        if (viewport.scale !== 1) return true;
+        const caret = view.coordsAtPos(view.state.selection.head);
+        const bounds = main.getBoundingClientRect();
+        const top = Math.max(bounds.top, viewport.offsetTop) + 16;
+        const bottom = Math.min(bounds.bottom, viewport.offsetTop + viewport.height) - 16;
+        if (caret.top < top) main.scrollTop += caret.top - top;
+        else if (caret.bottom > bottom) main.scrollTop += caret.bottom - bottom;
+        return true;
+      },
       attributes: {
         role: "textbox",
         "aria-label": "Letter canvas",
@@ -754,9 +769,34 @@ function WordCanvas({
     },
   });
   useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!editor || !viewport) return;
+    let frame = 0;
+    const keepCaretVisible = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (
+          !editor.isDestroyed &&
+          editor.isFocused &&
+          window.innerWidth <= 1023 &&
+          viewport.scale === 1
+        )
+          editor.commands.scrollIntoView();
+      });
+    };
+    editor.on("focus", keepCaretVisible);
+    viewport.addEventListener("resize", keepCaretVisible);
+    return () => {
+      cancelAnimationFrame(frame);
+      editor.off("focus", keepCaretVisible);
+      viewport.removeEventListener("resize", keepCaretVisible);
+    };
+  }, [editor]);
+  useEffect(() => {
     editor?.setEditable(!disabled, false);
     editor?.setOptions({
       editorProps: {
+        ...editor.options.editorProps,
         attributes: {
           role: "textbox",
           "aria-label": "Letter canvas",
@@ -791,6 +831,11 @@ function WordCanvas({
   const hasHeader =
     form.show_company_header ?? !(form.use_letterhead && form.letterhead?.background);
   const hasLetterhead = form.use_letterhead && !!form.letterhead?.background;
+  // Match the PDF: old letterhead-only documents must not gain a second logo.
+  const hasLogo =
+    form.show_logo &&
+    form.company_logo &&
+    (form.show_company_header !== undefined || !hasLetterhead);
   const paperStyle = {
     "--letter-font":
       form.text_style?.font === "classic"
@@ -827,10 +872,9 @@ function WordCanvas({
                 className="letter-word-letterhead"
               />
             )}
-            {((hasHeader && (form.company_name || form.company_address)) ||
-              (form.show_logo && form.company_logo)) && (
+            {((hasHeader && (form.company_name || form.company_address)) || hasLogo) && (
               <header className="letter-word-company" contentEditable={false}>
-                {form.show_logo && form.company_logo && (
+                {hasLogo && (
                   <CompanyAssetImage
                     src={form.company_logo}
                     alt="Company logo"
@@ -876,7 +920,7 @@ function WordCanvas({
           <span>
             {count} {count === 1 ? "word" : "words"}
           </span>
-          <span>{disabled ? "Read only" : "A4 · PDF preview shows page breaks"}</span>
+          <span>{disabled ? "Read only" : "A4 · Preview shows the full page"}</span>
         </div>
       </div>
     </FormContext.Provider>

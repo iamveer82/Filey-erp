@@ -57,7 +57,11 @@ beforeEach(() => {
   });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 const doc = (text: string): LetterRichDocument => ({
   type: "doc",
   content: [{ type: "paragraph", content: [{ type: "text", text }] }],
@@ -73,7 +77,8 @@ async function mount(
 ) {
   const changed = vi.fn();
   const view = render(
-    <LetterWordEditor form={form} disabled={disabled} onChange={changed} />
+    <LetterWordEditor form={form} disabled={disabled} onChange={changed} />,
+    { wrapper: ({ children }) => <main>{children}</main> }
   );
   const canvas = await screen.findByRole("textbox", { name: "Letter canvas" });
   await waitFor(() =>
@@ -103,6 +108,82 @@ it("opens a legacy letter as continuous prose without dirtying it on mount or re
   view.rerender(<LetterWordEditor form={legacy} disabled onChange={changed} />);
   expect(changed).not.toHaveBeenCalled();
   expect(canvas).toHaveAttribute("contenteditable", "false");
+});
+
+it("keeps the caret in the panned keyboard viewport without scrolling the window or changing text", async () => {
+  const viewport = Object.assign(new EventTarget(), {
+    height: 420,
+    offsetTop: 180,
+    scale: 1,
+  });
+  vi.stubGlobal("visualViewport", viewport);
+  vi.stubGlobal("innerWidth", 390);
+  const { editor, canvas, changed } = await mount();
+  act(() => {
+    canvas.focus();
+  });
+  await new Promise(requestAnimationFrame);
+  const main = canvas.closest("main")!;
+  vi.spyOn(main, "getBoundingClientRect").mockReturnValue({
+    top: 244,
+    bottom: 600,
+  } as DOMRect);
+  const caret = vi
+    .spyOn(editor.view, "coordsAtPos")
+    .mockReturnValue({ top: 650, bottom: 670, left: 30, right: 30 });
+  const windowScroll = vi.spyOn(window, "scrollBy");
+  main.scrollTop = 0;
+  act(() => {
+    editor.commands.scrollIntoView();
+  });
+  expect(main.scrollTop).toBe(86);
+  caret.mockReturnValue({ top: 230, bottom: 250, left: 30, right: 30 });
+  act(() => {
+    editor.commands.scrollIntoView();
+  });
+  expect(main.scrollTop).toBe(56);
+  expect(windowScroll).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
+
+  caret.mockReturnValue({ top: 300, bottom: 320, left: 30, right: 30 });
+  act(() => {
+    canvas.focus();
+  });
+  await waitFor(() => expect(editor.isFocused).toBe(true));
+  await new Promise(requestAnimationFrame);
+  caret.mockClear();
+  viewport.dispatchEvent(new Event("resize"));
+  await waitFor(() => expect(caret).toHaveBeenCalled());
+  caret.mockClear();
+  viewport.scale = 2;
+  viewport.dispatchEvent(new Event("resize"));
+  await new Promise(requestAnimationFrame);
+  expect(caret).not.toHaveBeenCalled();
+  viewport.scale = 1;
+  act(() => {
+    canvas.blur();
+  });
+  viewport.dispatchEvent(new Event("resize"));
+  await new Promise(requestAnimationFrame);
+  expect(caret).not.toHaveBeenCalled();
+});
+
+it("matches PDF branding for legacy letterhead-only letters while respecting explicit logo choices", async () => {
+  const form = {
+    ...blankLetterForm("LTR-1"),
+    use_letterhead: true,
+    letterhead: { background: "data:image/png;base64,background" },
+    show_company_header: undefined,
+    show_logo: true,
+    company_logo: "data:image/png;base64,logo",
+  };
+  const view = render(<LetterWordEditor form={form} onChange={vi.fn()} />);
+  expect(await screen.findByAltText("Company letterhead")).toBeInTheDocument();
+  expect(screen.queryByAltText("Company logo")).not.toBeInTheDocument();
+  view.rerender(
+    <LetterWordEditor form={{ ...form, show_company_header: false }} onChange={vi.fn()} />
+  );
+  expect(screen.getByAltText("Company logo")).toBeInTheDocument();
 });
 
 it("formats selected words with manual decimal size and spacing without changing adjacent text", async () => {
