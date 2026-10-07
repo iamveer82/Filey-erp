@@ -127,7 +127,7 @@ export async function savePdfAnnotations(
         Math.abs(b.y - a.y)
       );
     }
-    page.setRotation(degrees((angle + (changes[index]?.rotation || 0)) % 360));
+    page.setRotation(degrees((((angle + (changes[index]?.rotation || 0)) % 360) + 360) % 360));
   }
   for (let i = pages.length - 1; i >= 0; i--) if (changes[i]?.deleted) doc.removePage(i);
   return new File(

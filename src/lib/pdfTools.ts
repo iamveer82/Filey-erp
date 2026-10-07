@@ -164,7 +164,8 @@ export async function rotatePdf(
   doc.getPages().forEach((p, i) => {
     if (!target || target.has(i)) {
       const cur = p.getRotation().angle;
-      p.setRotation(degrees((cur + deg) % 360));
+      // Source PDFs may carry a negative /Rotate; keep the result in 0..359.
+      p.setRotation(degrees((((cur + deg) % 360) + 360) % 360));
     }
   });
   return { name: `${base(file.name)}-rotated.pdf`, bytes: await doc.save() };
