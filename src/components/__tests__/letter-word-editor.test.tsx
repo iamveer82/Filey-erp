@@ -244,7 +244,7 @@ it("renders Inter with the loaded face and preserves its stored label through ed
     editor.commands.setTextSelection({ from: 1, to: 11 });
     editor.commands.setMark("textStyle", { fontSize: "13pt" });
   });
-  const saved = changed.mock.calls.at(-1)![0] as LetterRichDocument;
+  const saved = changed.mock.calls[changed.mock.calls.length - 1][0] as LetterRichDocument;
   expect(saved.content[0].content![0].marks).toContainEqual({ type: "textStyle", attrs: { fontFamily: "Inter", fontSize: "13pt", color: null } });
   expect(() => validateLetterRichDocument(saved)).not.toThrow();
 });

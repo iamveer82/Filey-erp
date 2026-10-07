@@ -30,7 +30,8 @@ that every possible workflow is free of defects.
 - Mobile letter: typed content, manually changed font size/line spacing, saved, reopened after reload, viewed the paginated preview and exported a one-page A4 PDF. Rechecked the corrected Inter font in the actual editor DOM.
 - Invoice: selected a synthetic customer, calculated 6 × 40 plus 5% tax as AED 252, saved a draft and checked its dashboard row. The E-invoice checker identified missing required details and prevented XML export.
 - Inventory: navigated from a product's stock entry to Stocktake, adjusted a synthetic count from 40 to 42 and verified the result.
-- Receipt: created a synthetic AED 252 draft, verified the editor's busy lock and its saved dashboard record. This exercise exposed the draft-total bug above.
+- Receipt: created a synthetic AED 252 draft, verified the editor's busy lock and its saved dashboard record. After the fix, received totals stayed at zero for the draft, then changed to AED 252 once it was marked paid.
+- Packing list: saved a standalone synthetic shipment without an invoice reference; 6 units at 20 kg correctly produced 120 kg gross weight in the editor and preview.
 - AI: checked the phone-sized dark interface, effort slider, reasoning on/off controls, missing-key setup link and the chat-to-Connections path. No paid model requests were made.
 - Real browser tool regressions cover eight conversion, password-removal, recovery, HEIC/WASM and Arabic-output checks.
 
@@ -38,6 +39,15 @@ Only fictional records were written. The local fixture blocks external requests
 and does not copy production records, login tokens or credentials. Browser
 screenshots and detailed route evidence are retained in ignored
 `output/enterprise-audit/` on the audit machine.
+
+## Automated validation
+
+- Full unit/regression suite: 387 files, 3,447 tests passed. The final receipt regression file also passed all 31 checks; the font compatibility repair passed all 12 editor checks.
+- TypeScript typecheck passed. ESLint reported zero errors and 615 warnings; the existing warning backlog was not rewritten in this patch.
+- Main production and development dependency audits, plus the WhatsApp bridge, worker and MCP production dependency audits, reported zero known vulnerabilities at audit time.
+- Disposable PostgreSQL RLS checks passed 63 assertion groups. Static schema/privacy checks passed 33 checks; schema bootstrap verification included 101 historical and 14 current upgrades.
+- Worker isolation/cancellation checks passed 12 tests. WhatsApp media validation passed without pairing or sending messages.
+- Production build and CI results must be checked on the final pull-request head before publishing; the PR records those release gates.
 
 ## Limits and follow-up
 
