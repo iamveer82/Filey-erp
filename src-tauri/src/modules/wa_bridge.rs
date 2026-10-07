@@ -91,6 +91,12 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     };
     let tripled = if cfg!(windows) {
         "filey-wa-bridge-x86_64-pc-windows-msvc.exe"
+    } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            "filey-wa-bridge-aarch64-unknown-linux-gnu"
+        } else {
+            "filey-wa-bridge-x86_64-unknown-linux-gnu"
+        }
     } else if cfg!(target_arch = "aarch64") {
         "filey-wa-bridge-aarch64-apple-darwin"
     } else {
@@ -120,6 +126,22 @@ fn sidecar_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .into_iter()
         .find(|p| p.exists())
         .ok_or_else(|| "WhatsApp bridge binary is not installed with this build".to_string())
+}
+
+/// Native media stays in Tauri resources, which is separate from the sidecar
+/// executable on macOS and Linux. Dev builds keep it beside the compiled bridge.
+fn media_directory(bin: &std::path::Path, resources: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Some(resources) = resources {
+        candidates.push(resources.join("wa-media"));
+    }
+    if let Some(dir) = bin.parent() {
+        candidates.push(dir.join("wa-media"));
+    }
+    // Preserve the already-absolute resource path. Windows canonicalize adds
+    // a verbatim prefix that Bun's native-module loader cannot resolve.
+    candidates.into_iter().find(|dir| dir.is_absolute() && dir.is_dir())
+        .ok_or_else(|| "WhatsApp media files are not installed with this build".to_string())
 }
 
 fn lock_session(dir: &std::path::Path) -> Result<std::fs::File, String> {
@@ -156,6 +178,8 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
     wa_bridge_stop_blocking();
 
     let bin = sidecar_path(&app)?;
+    let resources = app.path().resource_dir().ok();
+    let media_dir = media_directory(&bin, resources.as_deref())?;
     // Session state must outlive updates, so it goes in the per-user app data
     // dir — never beside the binary, which reinstalls replace.
     let app_dir = app
@@ -174,6 +198,7 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
     // Pass non-secret connection settings explicitly; never fall back to the
     // launcher's working directory for pairing files.
     cmd.arg("--state-dir").arg(&state_dir)
+        .arg("--media-dir").arg(&media_dir)
         .arg("--owner-number").arg(owner_number.unwrap_or_default())
         .current_dir(&state_dir)
         .stdin(Stdio::piped())
@@ -523,6 +548,39 @@ mod tests {
             assert_eq!(self.0.parent(), Some(std::env::temp_dir().as_path()));
             std::fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    #[test]
+    fn native_media_uses_installed_resources_on_every_desktop_layout() {
+        let fixture = OutputFixture::new();
+        for (bin, resources, platform) in [
+            ("Windows install/filey-wa-bridge.exe", "Windows install", "win32-x64"),
+            ("Filey.app/Contents/MacOS/filey-wa-bridge", "Filey.app/Contents/Resources", "darwin-arm64"),
+            ("usr/bin/filey-wa-bridge", "usr/lib/filey-erp", "linux-x64"),
+        ] {
+            let bin = fixture.file(bin);
+            let resources = fixture.0.join(resources);
+            fixture.file(resources.join("wa-media").join(platform)
+                .join("@img").join(format!("sharp-{platform}"))
+                .join("lib").join(format!("sharp-{platform}.node")));
+            let resolved = super::media_directory(&bin, Some(&resources)).unwrap();
+            assert!(resolved.is_absolute());
+            assert_eq!(resolved, resources.join("wa-media"));
+        }
+    }
+
+    #[test]
+    fn native_media_supports_dev_output_and_rejects_missing_resources() {
+        let fixture = OutputFixture::new();
+        let bin = fixture.file("binaries/filey-wa-bridge");
+        assert_eq!(super::media_directory(&bin, None).unwrap_err(),
+            "WhatsApp media files are not installed with this build");
+        let media = fixture.0.join("binaries/wa-media");
+        std::fs::create_dir(&media).unwrap();
+        assert_eq!(super::media_directory(&bin, Some(&fixture.0.join("missing resources"))).unwrap(),
+            media);
+        assert!(super::media_directory(std::path::Path::new("relative/filey-wa-bridge"),
+            Some(std::path::Path::new("relative resources"))).is_err());
     }
 
     #[test]
