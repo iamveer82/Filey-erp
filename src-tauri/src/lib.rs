@@ -46,6 +46,7 @@ pub fn run() {
                 modules::sync::cache_get,
                 modules::sync::cache_set,
                 modules::sync::cache_set_many,
+                modules::sync::cache_compare_set_many,
                 modules::credentials::credential_read,
                 modules::credentials::credential_write,
                 modules::credentials::credential_quarantine,

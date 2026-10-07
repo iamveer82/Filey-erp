@@ -55,6 +55,62 @@ fn write_cache_batch(conn: &mut Connection, entries: &[(String, String)]) -> App
     Ok(())
 }
 
+/// Compare-and-set over the whole read set of a local transaction. Every key in
+/// `expected` must still hold the value the caller read (`None` = absent) before
+/// any of `entries` is written (`None` = delete). Returns `false`, writing
+/// nothing, when another window or process committed first.
+#[tauri::command]
+pub async fn cache_compare_set_many(
+    db: State<'_, Db>,
+    entries: Vec<(String, Option<String>)>,
+    expected: Vec<(String, Option<String>)>,
+) -> AppResult<bool> {
+    let mut conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
+    compare_cache_batch(&mut conn, &entries, &expected)
+}
+
+fn valid_cache_key(key: &str) -> bool {
+    key.starts_with("localdb:") || key == "syncjournal"
+}
+
+fn compare_cache_batch(
+    conn: &mut Connection,
+    entries: &[(String, Option<String>)],
+    expected: &[(String, Option<String>)],
+) -> AppResult<bool> {
+    if entries.len() > 256
+        || expected.len() > 512
+        || entries.iter().any(|(key, _)| !valid_cache_key(key))
+        || expected.iter().any(|(key, _)| !valid_cache_key(key))
+    {
+        return Err(AppError::Io("Invalid local transaction comparisons".into()));
+    }
+    // IMMEDIATE takes the write lock before the reads, so no other connection
+    // can slip a commit in between our comparison and our writes.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    for (key, value) in expected {
+        if read_cache_value(&tx, key)? != *value {
+            tx.rollback()?;
+            return Ok(false);
+        }
+    }
+    for (key, value) in entries {
+        match value {
+            Some(value) => {
+                tx.execute(
+                    "INSERT INTO kv_cache(key,value,updated_at) VALUES(?1,?2,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+                    rusqlite::params![key, value],
+                )?;
+            }
+            None => {
+                tx.execute("DELETE FROM kv_cache WHERE key = ?1", [key])?;
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn outbox_add(db: State<'_, Db>, op: String) -> AppResult<i64> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
@@ -106,6 +162,30 @@ mod tests {
         assert_eq!(read_cache_value(&conn,"syncjournal").unwrap(),None);
         write_cache_batch(&mut conn,&[("localdb:invoice_docs".into(),"committed".into()),("syncjournal".into(),"pending".into())]).unwrap();
         assert_eq!(read_cache_value(&conn,"syncjournal").unwrap().as_deref(),Some("pending"));
+    }
+
+    #[test]
+    fn compare_set_writes_only_when_every_expected_value_still_holds() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE kv_cache(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT); INSERT INTO kv_cache(key,value) VALUES('localdb:orders','v1');").unwrap();
+        let stale = vec![("localdb:orders".to_string(), Some("v0".to_string())), ("syncjournal".to_string(), None)];
+        let writes = vec![("localdb:orders".to_string(), Some("v2".to_string())), ("syncjournal".to_string(), Some("dirty".to_string()))];
+        assert!(!compare_cache_batch(&mut conn, &writes, &stale).unwrap());
+        assert_eq!(read_cache_value(&conn, "localdb:orders").unwrap().as_deref(), Some("v1"));
+        assert_eq!(read_cache_value(&conn, "syncjournal").unwrap(), None);
+
+        let fresh = vec![("localdb:orders".to_string(), Some("v1".to_string())), ("syncjournal".to_string(), None)];
+        assert!(compare_cache_batch(&mut conn, &writes, &fresh).unwrap());
+        assert_eq!(read_cache_value(&conn, "localdb:orders").unwrap().as_deref(), Some("v2"));
+        assert_eq!(read_cache_value(&conn, "syncjournal").unwrap().as_deref(), Some("dirty"));
+
+        let delete = vec![("syncjournal".to_string(), None)];
+        let current = vec![("syncjournal".to_string(), Some("dirty".to_string()))];
+        assert!(compare_cache_batch(&mut conn, &delete, &current).unwrap());
+        assert_eq!(read_cache_value(&conn, "syncjournal").unwrap(), None);
+
+        let foreign = vec![("outbox".to_string(), Some("x".to_string()))];
+        assert!(compare_cache_batch(&mut conn, &foreign, &[]).is_err());
     }
 
     #[test]
