@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { prepareCreditRequest } from "../../../supabase/functions/_shared/ai-credits";
 import {
   compressForModel,
   headroomRetrieve,
@@ -49,8 +50,14 @@ describe("compressForModel", () => {
     expect(r.text.length).toBeLessThan(raw.length);
     expect(r.text).toMatch(/\[headroom\] json compressed \d+ → \d+ chars/);
 
-    const back = headroomRetrieve(r.ccrId!) as { content: string };
-    expect(JSON.parse(back.content)).toEqual(bigRows);
+    let offset: number | null = 0, restored = "";
+    while (offset !== null) {
+      const page = headroomRetrieve(r.ccrId!, offset) as { content: string; next_offset: number | null };
+      expect(page.content.length).toBeLessThanOrEqual(6000);
+      restored += page.content;
+      offset = page.next_offset;
+    }
+    expect(JSON.parse(restored)).toEqual(bigRows);
   });
 
   it("clips very wide tables to the wire limit while keeping the retrieval pointer", () => {
@@ -96,4 +103,31 @@ describe("compressForModel", () => {
     expect(s.compressed).toBe(1);
     expect(s.wireChars).toBeLessThan(s.rawChars);
   });
+});
+
+it("bounds a large catalogue retrieval and keeps every character reachable", () => {
+  const original = 'Catalogue row: "quoted" \n 中文 😀 '.repeat(2500);
+  const stored = retainToolOutput(original);
+  let offset: number | null = 0, restored = "";
+  while (offset !== null) {
+    const page = headroomRetrieve(stored.ccrId!, offset) as { content: string; next_offset: number | null };
+    expect(page.content.length).toBeLessThanOrEqual(6000);
+    expect(JSON.stringify(page).length).toBeLessThan(15000);
+    restored += page.content;
+    offset = page.next_offset;
+  }
+  expect(restored).toBe(original);
+  // The failed production request restored a 70 KB catalogue after its image
+  // was removed. Exercise the same server-side size guard, not a guessed limit.
+  const model = { id: "filey-ai", name: "Filey AI", input: 0.0000005, output: 0.000002,
+    context: 131072, maxOutput: 8192, vision: true };
+  const request = (content: string) => ({ max_tokens: 2048, messages: [
+    { role: "user", content: "Read the relevant catalogue entry." },
+    { role: "tool", tool_call_id: "catalogue", content },
+  ] });
+  expect(() => prepareCreditRequest(request(original), model)).toThrow("conversation is too large");
+  expect(() => prepareCreditRequest(request(JSON.stringify(headroomRetrieve(stored.ccrId!))), model)).not.toThrow();
+  expect(headroomRetrieve(stored.ccrId!, 0, 200000)).toHaveProperty("error");
+  expect(headroomRetrieve(stored.ccrId!, -1)).toHaveProperty("error");
+  expect(headroomRetrieve(stored.ccrId!, original.length + 1)).toHaveProperty("error");
 });

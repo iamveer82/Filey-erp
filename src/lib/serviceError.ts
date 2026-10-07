@@ -45,6 +45,19 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
   const status = value?.context?.status;
   const walletMessage = walletMessages.get(detail);
   if (walletMessage) return new Error(walletMessage);
+  if (detail === "This conversation is too large for the selected model. Start a new chat or choose a larger-context model.")
+    return new Error("This task has too much information for one request. Start a new chat with just the relevant details and attachments.");
+  if ([
+    "This task has too much information for one request. Start a new chat with just the relevant details and attachments.",
+    "This attachment is too large. Choose a smaller image.",
+    "Filey AI could not finish this request. No Coins were charged.",
+    "Filey AI could not complete this request. No Coins were charged.",
+    "Filey AI is busy. No Coins were charged; try again shortly.",
+    "Filey AI did not return verifiable usage. No Coins were charged.",
+    "Your AI wallet is temporarily unavailable. Please try again shortly.",
+    "This reply has expired. Start a new task.",
+    "Filey AI is still reconnecting. Your request was not repeated. Check your connection before continuing.",
+  ].includes(detail)) return new Error(detail);
   if (detail === "Connection lost")
     return new Error(
       "Connection lost. Refresh to check whether your request completed before trying again."

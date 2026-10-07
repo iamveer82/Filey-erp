@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import AgentChat from "../AgentChat";
 import * as ai from "../../lib/ai";
 import * as localPaths from "../../lib/localPaths";
+import * as docScan from "../../lib/docScan";
 import { loadChats, saveChats, setActiveId, type Chat } from "../../lib/aiChats";
 import { setCacheOrg } from "../../lib/api";
 import { setDataMode } from "../../lib/dataMode";
@@ -65,6 +66,47 @@ it("the file starter opens the existing picker without starting a request", () =
   fireEvent.click(screen.getByRole("button", { name: "Work with a file" }));
   expect(click).toHaveBeenCalledOnce(); expect(stream).not.toHaveBeenCalled();
   expect(input()).toHaveValue("");
+});
+
+it("sends every attached image in order and retains the other files for tools", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:attachment");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const images = [{ mediaType: "image/png", dataBase64: "QUJD" }, { mediaType: "image/jpeg", dataBase64: "REVG" }];
+  const read = vi.spyOn(docScan, "fileToImage").mockResolvedValueOnce(images[0]).mockResolvedValueOnce(images[1]);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () { yield* []; return "Images reviewed."; });
+  const files = [new File(["first"], "first.png", { type: "image/png" }),
+    new File(["pdf"], "reference.pdf", { type: "application/pdf" }),
+    new File(["second"], "second.jpg", { type: "image/jpeg" })];
+  const { container } = showChat();
+  fireEvent.change(input(), { target: { value: "Invoice these two images" } });
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Images reviewed.");
+  expect(read.mock.calls.map(([file]) => file)).toEqual([files[0], files[2]]);
+  const messages = stream.mock.calls[0][0], user = messages[messages.length - 1];
+  expect(user.images).toEqual(images);
+  expect(user.text).toContain('"reference.pdf"');
+});
+
+it("restores image attachments and stops before inference when any image cannot be read", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:attachment");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  vi.spyOn(docScan, "fileToImage").mockResolvedValueOnce({ mediaType: "image/png", dataBase64: "QUJD" })
+    .mockRejectedValueOnce(new Error("Private decoder details"));
+  const stream = vi.spyOn(ai, "aiAgentStream");
+  const { container } = showChat();
+  const files = [new File(["first"], "first.png", { type: "image/png" }), new File(["bad"], "second.png", { type: "image/png" })];
+  fireEvent.change(input(), { target: { value: "Invoice both images" } });
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Could not read the attached images. Attach them again before sending.");
+  expect(stream).not.toHaveBeenCalled();
+  expect(input()).toHaveValue("Invoice both images");
+  for (const file of files) expect(screen.getByRole("button", { name: `Remove ${file.name}` })).toBeInTheDocument();
+  expect(screen.queryByText("Private decoder details")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
 });
 
 it("the letter starter prepares an editable draft prompt without a paid request", () => {

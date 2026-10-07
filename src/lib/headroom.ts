@@ -59,7 +59,9 @@ export function retainToolOutput(text: string): WireText {
   return { ccrId, text: `${text.slice(0, 300)}\n[Earlier observation; full output: headroom_retrieve("${ccrId}").]` };
 }
 
-export function headroomRetrieve(id: string): unknown {
+export function headroomRetrieve(id: string, offset = 0, limit = MAX_WIRE): unknown {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_WIRE)
+    return { error: `Use a non-negative integer offset and a limit from 1 to ${MAX_WIRE}.` };
   const hit = ccr.get(id);
   if (!hit)
     return {
@@ -69,7 +71,10 @@ export function headroomRetrieve(id: string): unknown {
     ccr.delete(id);
     return { error: `Stored output "${id}" expired. Re-run the tool.` };
   }
-  return { id, chars: hit.text.length, content: hit.text };
+  if (offset > hit.text.length) return { error: "Offset is beyond the stored output." };
+  const end = Math.min(offset + limit, hit.text.length);
+  return { id, chars: hit.text.length, offset, content: hit.text.slice(offset, end),
+    next_offset: end < hit.text.length ? end : null };
 }
 
 /** Test seam only. */
