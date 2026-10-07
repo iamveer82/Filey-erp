@@ -25,6 +25,49 @@ const prerequisite=sql('scripts/fixtures/supabase-prerequisites.sql');
 const prerequisiteAgain=prerequisite.replace(/^create role[^\n]+\r?\n/gm,'');
 const recurrenceOnly=process.argv.includes('--recurrence');
 const genericDocumentOnly=process.argv.includes('--generic-document');
+const removedMemberOnly=process.argv.includes('--removed-member');
+async function testRemovedMembership() {
+  const upgrade=sql('supabase/2026-10-07-removed-member-workspace-recovery.sql').replace(/^(?:begin;|commit;)\s*$/gmi,'');
+  const authority=sql('supabase/2026-10-07-profile-workspace-authority.sql').replace(/^(?:begin;|commit;)\s*$/gmi,'');
+  console.log(run('psql',args('postgres'),sql('scripts/fixtures/removed-member-workspace.sql')
+    .replace('-- APPLY RECOVERY UPGRADE',()=>upgrade+'\n'+upgrade+'\n'+authority+'\n'+authority)).trim());
+  run('psql',args('postgres'),`insert into auth.users(id,email,email_confirmed_at) values
+    ('b7100000-0000-4000-8000-000000000001','race-owner@membership.invalid',now()),
+    ('b7100000-0000-4000-8000-000000000002','race-member@membership.invalid',now());
+    insert into org_members(org_id,user_id,role) select org_id,'b7100000-0000-4000-8000-000000000002','staff'
+      from profiles where id='b7100000-0000-4000-8000-000000000001';`);
+  const teamOrg=query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000001';");
+  const ownOrg=query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000002';");
+  const identity=id=>`set role authenticated;set request.jwt.claim.sub='${id}';set request.jwt.claims='{"role":"authenticated","aal":"aal1"}';`;
+  const switchSql=identity('b7100000-0000-4000-8000-000000000002')+`select public.filey_switch_workspace('${teamOrg}');`;
+  const removeSql=identity('b7100000-0000-4000-8000-000000000001')+"delete from org_members where user_id='b7100000-0000-4000-8000-000000000002' and org_id=public.current_org();";
+  const command=text=>runAsync(exe('psql'),[...args('postgres'),'-tA','-c',text],{encoding:'utf8',windowsHide:true,maxBuffer:1024*1024});
+  const waitForLock=async name=>{
+    const until=Date.now()+5000;
+    while(Date.now()<until) {
+      if(query('postgres',`select exists(select 1 from pg_stat_activity where application_name='${name}' and wait_event='PgSleep');`)==='t') return;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    throw new Error('Concurrent membership fixture did not acquire its lock: '+name);
+  };
+  // Both real lock orders: switch wins first; removal wins first. The bounded
+  // database pause is only a synchronization barrier in the disposable fixture.
+  const switching=command(`set application_name='filey-membership-switch';begin;${switchSql}select pg_sleep(2);commit;`);
+  await waitForLock('filey-membership-switch');
+  await Promise.all([switching,command(removeSql)]);
+  assert.equal(query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000002';"),ownOrg,
+    'Switch overwrote personal recovery after removal');
+  run('psql',args('postgres'),`insert into org_members(org_id,user_id,role) values('${teamOrg}','b7100000-0000-4000-8000-000000000002','staff');
+    update profiles set org_id='${teamOrg}' where id='b7100000-0000-4000-8000-000000000002';`);
+  const removing=command(`set application_name='filey-membership-remove';begin;${removeSql}select pg_sleep(2);commit;`);
+  await waitForLock('filey-membership-remove');
+  const denied=assert.rejects(command(switchSql),error=>/You are not a member of this workspace/.test(error.stderr?.toString()||''));
+  await Promise.all([removing,denied]);
+  assert.equal(query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000002';"),ownOrg,
+    'Delayed switch restored the removed team workspace');
+  run('psql',args('postgres'),"delete from auth.users where id::text like 'b7100000-%';");
+  console.log('PASS: concurrent switch/removal in both lock orders leaves personal workspace active and former team revoked.');
+}
 async function testRecurrence() {
   run('psql',args('postgres'),sql('scripts/fixtures/recurrence-setup.sql'));
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/recurrence-assertions.sql')).trim());
@@ -61,11 +104,14 @@ try {
   writeFileSync(catalogPath,JSON.stringify({rows:[{catalog}]},null,2)+'\n');
   console.log('PASS: actual full installer runs from empty public schema.');
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/bootstrap-workflows.sql')).trim());
-  if(recurrenceOnly) {
+  if(removedMemberOnly) {
+    await testRemovedMembership();
+  } else if(recurrenceOnly) {
     await testRecurrence();
   } else if(genericDocumentOnly) {
     console.log(run('psql',args('postgres'),sql('scripts/fixtures/generic-document-authority.sql')).trim());
   } else {
+  await testRemovedMembership();
   const before=query('postgres',snapshotSql);
   run('psql',args('postgres'),installer);
   assert.equal(query('postgres',snapshotSql),before,'Repeated installer modified saved rows, ownership, workspace identity or balances');
@@ -76,7 +122,7 @@ try {
   run('psql',args('postgres'),`update public.filey_bootstrap_migrations set source_sha256='${installedHash}' where name='stripe-billing.sql';`);
   assert.equal(query('postgres',snapshotSql),before,'A changed migration receipt allowed partial canonical changes');
   console.log('PASS: installed source hash mismatch refuses silently changed historical migrations and leaves saved data intact.');
-  const currentUpgradePaths=['2026-10-04-document-child-authority.sql','2026-10-04-tool-job-authority.sql','2026-10-04-atomic-document-save.sql','2026-10-04-workspace-device-authority.sql','2026-10-04-public-document-privacy.sql','2026-10-04-atomic-payroll.sql','2026-10-04-subscription-claim-serialization.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-04-cloud-storage-privacy.sql','2026-10-04-scheduled-agent-privacy.sql','2026-10-04-ai-credit-test-promotion.sql','2026-10-04-ai-credit-checkout-resume.sql'];
+  const currentUpgradePaths=['2026-10-04-document-child-authority.sql','2026-10-04-tool-job-authority.sql','2026-10-04-atomic-document-save.sql','2026-10-04-workspace-device-authority.sql','2026-10-04-public-document-privacy.sql','2026-10-04-atomic-payroll.sql','2026-10-04-subscription-claim-serialization.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-04-cloud-storage-privacy.sql','2026-10-04-scheduled-agent-privacy.sql','2026-10-04-ai-credit-test-promotion.sql','2026-10-04-ai-credit-checkout-resume.sql','2026-10-07-removed-member-workspace-recovery.sql','2026-10-07-profile-workspace-authority.sql'];
   for(const file of currentUpgradePaths) run('psql',args('postgres'),sql('supabase/'+file)+'\n'+sql('supabase/'+file));
   assert.equal(query('postgres',snapshotSql),before,'Repeated current upgrade changed seeded customer records');
   console.log('PASS: current explicit upgrades apply repeatably to the populated installed database without rewriting saved records.');

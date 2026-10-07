@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { assertWorkspaceCurrent, isLocalMode } from "./dataMode";
-import { getCacheScope } from "./api";
+import { getCacheOrg, getCacheScope } from "./api";
 import { setOf } from "./toolsets";
 import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 
@@ -24,6 +24,17 @@ export async function loadModuleAccess(): Promise<ModuleAccess> {
     if (error || !data || data.allowed !== true || typeof data.admin !== "boolean" ||
       (data.modules !== null && (!Array.isArray(data.modules) || data.modules.some((id: unknown) => typeof id !== "string"))))
       throw new Error("Workspace permissions could not be verified. Retry or contact your administrator.");
+    // New servers bind permissions to the selected organization. Older servers
+    // omit this field; after a revoked membership is repaired, personal admin
+    // access must never authorize the previous team's cached records.
+    if ("org_id" in data) {
+      if (typeof data.org_id !== "string" || !data.org_id)
+        throw new Error("Workspace permissions could not be verified. Retry or contact your administrator.");
+      if (data.org_id !== getCacheOrg()) {
+        if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:cloud-change"));
+        throw new Error("Your workspace changed. Filey is refreshing your account access.");
+      }
+    }
     return {admin:data.admin,modules:data.modules} as ModuleAccess;
   })();
   pending = {scope,promise};
