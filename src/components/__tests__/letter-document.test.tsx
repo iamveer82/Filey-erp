@@ -56,6 +56,21 @@ function documentFor(
 }
 
 describe("LetterDocument", () => {
+  it("uses the loaded Inter face with safe fallbacks for legacy text and rich PDF runs", () => {
+    const form = example();
+    form.font = "Inter";
+    form.rich_document = { type: "doc", content: [{ type: "paragraph", content: [{
+      type: "text", text: "Modern wording",
+      marks: [{ type: "textStyle", attrs: { fontFamily: "Inter" } }],
+    }] }] };
+    const part = paginateLetter(form).flatMap((page) => page.parts).find((value) => value.runs)!;
+    expect(part.runs![0].font).toBe("'Inter Variable', Inter, Arial, sans-serif");
+    const host = documentFor(form);
+    expect((host.querySelector(".letter-rich-line span") as HTMLElement).style.fontFamily).toContain("Inter Variable");
+    expect((host.firstElementChild as HTMLElement).style.fontFamily).toContain("Inter Variable");
+    expect(form.rich_document.content[0].content![0].marks![0]).toEqual({ type: "textStyle", attrs: { fontFamily: "Inter" } });
+  });
+
   it("prints the continuous rich canvas once in each template, preserving the surrounding company frame", () => {
     const form = example();
     form.rich_document = letterRichDocument(form);
@@ -703,7 +718,7 @@ describe("LetterDocument", () => {
       "letter-standard"
     );
     expect((host.firstElementChild as HTMLElement).style.fontFamily).toBe(
-      "Inter, Arial, sans-serif"
+      '"Inter Variable", Inter, Arial, sans-serif'
     );
     expect(host.children).toHaveLength(1);
   });
@@ -915,7 +930,7 @@ describe("LetterDocument", () => {
     expect(title.lineHeight).toBeCloseTo(title.size * 1.2);
     expect(title.weight).toBe(700);
     expect(title.align).toBe("center");
-    expect(title.font).toBe("Inter, Arial, sans-serif");
+    expect(title.font).toBe("'Inter Variable', Inter, Arial, sans-serif");
     expect(parts.find((part) => part.sourceId === "field-label")).toEqual(
       expect.objectContaining({ size: 10, lineHeight: 16, gap: 8 })
     );

@@ -48,6 +48,18 @@ export default function ESignStudio({
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
   const loadRevision = useRef(0);
+  const signatureReader = useRef<FileReader | null>(null);
+
+  const cancelSignatureRead = useCallback(() => {
+    const reader = signatureReader.current;
+    signatureReader.current = null;
+    reader?.abort();
+  }, []);
+
+  useEffect(() => () => {
+    loadRevision.current++;
+    cancelSignatureRead();
+  }, [cancelSignatureRead]);
 
   // Drawing state
   const [drawColor, setDrawColor] = useState("#000000");
@@ -198,9 +210,21 @@ export default function ESignStudio({
 
   const handleSignUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
+    e.target.value = "";
     if (!f) return;
+    cancelSignatureRead();
     const r = new FileReader();
-    r.onload = () => setSignImg(String(r.result));
+    signatureReader.current = r;
+    r.onload = () => {
+      if (signatureReader.current !== r) return;
+      signatureReader.current = null;
+      setSignImg(String(r.result));
+    };
+    r.onerror = () => {
+      if (signatureReader.current !== r) return;
+      signatureReader.current = null;
+      toast.error("Could not read this signature image. Please select it again.");
+    };
     r.readAsDataURL(f);
   };
 
@@ -343,6 +367,9 @@ export default function ESignStudio({
   };
 
   const reset = () => {
+    loadRevision.current++;
+    cancelSignatureRead();
+    setLoading(false);
     setDocPages([]);
     setDocFile(null);
     setSignImg("");
@@ -583,6 +610,7 @@ export default function ESignStudio({
                       <Upload size={14} /> Upload Signature Image
                       <input
                         type="file"
+                        aria-label="Upload signature image"
                         accept="image/png,image/jpeg,image/webp,image/bmp,image/gif,image/svg+xml"
                         className="hidden"
                         onChange={handleSignUpload}

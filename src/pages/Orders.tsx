@@ -637,11 +637,15 @@ function EditOrderModal({
       setErr("Customer name is required.");
       return;
     }
-    // Only line items mapped to a real product affect stock; keep all lines'
-    // money in the total but send product-linked rows for the items table.
-    const productLines = lines
-      .filter((l) => l.product_id != null && l.quantity > 0)
-      .map((l) => ({
+    if (lines.some((line) => line.product_id == null)) {
+      setErr("An item is no longer linked to a product. Remove it and select a replacement before saving.");
+      return;
+    }
+    if (lines.some((line) => !Number.isFinite(line.quantity) || line.quantity < 0 || !Number.isFinite(line.unit_price) || line.unit_price < 0)) {
+      setErr("Quantities and prices must be zero or greater.");
+      return;
+    }
+    const productLines = lines.map((l) => ({
         product_id: l.product_id as number,
         quantity: l.quantity,
         unit_price: l.unit_price,

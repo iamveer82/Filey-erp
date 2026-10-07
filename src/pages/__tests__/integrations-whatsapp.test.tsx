@@ -37,6 +37,21 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it("keeps free work utilities separate from built-in account connections", async () => {
+  show("free");
+  expect(screen.getByRole("region", { name: "Telegram agent connection" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Exchange rates" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Telegram contact links" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Free work tools" }));
+  expect(screen.getByRole("region", { name: "Free work tools" })).toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { name: "Exchange rates" })).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Telegram contact links" })).toBeInTheDocument();
+  expect(screen.queryByText(/require administrator setup/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Telegram agent connection" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("link", { name: "Telegram desktop connection" }));
+  expect(await screen.findByRole("region", { name: "Telegram agent connection" })).toBeInTheDocument();
+});
+
 it("explains self-chat when the configured owner is the paired phone itself", async () => {
   vi.mocked(bridge.getBridgeConfig).mockReturnValue({ autoStart: true, ownerNumber: "971500000001" });
   vi.mocked(bridge.bridgeState).mockResolvedValue({ state: "connected", me: "971500000001:2@s.whatsapp.net" });

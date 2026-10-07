@@ -219,8 +219,14 @@ export default function PaymentReceipt() {
   useLiveSync(reload);
 
   const refreshList = async () => {
-    const d = await receipts.list();
-    setDocs(d);
+    try {
+      const d = await receipts.list();
+      setDocs(d);
+      setLoadErr(null);
+    } catch (error) {
+      setLoadErr(errMsg(error));
+      toast.error(`Receipt list could not refresh: ${errMsg(error)}`);
+    }
   };
 
   const update = (patch: Partial<Form>) => {
@@ -294,10 +300,12 @@ export default function PaymentReceipt() {
         signature: form!.signature ?? null,
       } as ReceiptDoc;
       const id = await receipts.save(payload);
-      await refreshList();
-      toast.success(`Receipt ${form!.number} saved.`);
       if (request === editRequest.current) {
         if (!form!.id) setForm((f) => f && { ...f, id });
+      }
+      toast.success(`Receipt ${form!.number} saved.`);
+      await refreshList();
+      if (request === editRequest.current) {
         await archivePdf();
       }
       return id;
@@ -620,9 +628,11 @@ export default function PaymentReceipt() {
   for (const receipt of docs) {
     const currency = receipt.currency || company?.currency || "AED";
     const group = currencyTotals.get(currency) || { amount: 0, thisMonth: 0, count: 0 };
-    group.amount += Number(receipt.amount) || 0;
-    group.count += 1;
-    if ((receipt.payment_date || "").slice(0, 7) === today().slice(0, 7)) group.thisMonth += Number(receipt.amount) || 0;
+    if (receipt.status === "paid") {
+      group.amount += Number(receipt.amount) || 0;
+      group.count += 1;
+      if ((receipt.payment_date || "").slice(0, 7) === today().slice(0, 7)) group.thisMonth += Number(receipt.amount) || 0;
+    }
     currencyTotals.set(currency, group);
   }
   if (!currencyTotals.size) currencyTotals.set(company?.currency || "AED", { amount: 0, thisMonth: 0, count: 0 });
@@ -715,8 +725,8 @@ export default function PaymentReceipt() {
           )}
           <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
             {[...currencyTotals].flatMap(([currency, total]) => [
-              <MetricCard key={`${currency}-total`} label={`Total received (${currency})`} value={money(total.amount, currency)} change={`${num(total.count)} receipts`} changeTone="up" />,
-              <MetricCard key={`${currency}-month`} label={`This month (${currency})`} value={money(total.thisMonth, currency)} change="Current period" changeTone="up" />,
+              <MetricCard key={`${currency}-total`} label={`Total received (${currency})`} value={money(total.amount, currency)} change={`${num(total.count)} confirmed receipts`} changeTone="up" />,
+              <MetricCard key={`${currency}-month`} label={`This month (${currency})`} value={money(total.thisMonth, currency)} change="Confirmed this month" changeTone="up" />,
             ])}
             <MetricCard
               label="Sent"
@@ -877,7 +887,7 @@ export default function PaymentReceipt() {
               Loading editor…
             </div>
           ) : (
-            <>
+            <fieldset disabled={saving} aria-busy={saving} className="m-0 min-w-0 border-0 p-0">
               {/* Header bar — same layout as the invoice editor: back arrow,
                   title, then status + actions right-aligned. */}
               <PageHeader
@@ -1209,7 +1219,7 @@ export default function PaymentReceipt() {
                   }}
                 />
               </Modal>
-            </>
+            </fieldset>
           )}
         </>
       )}

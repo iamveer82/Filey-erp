@@ -570,6 +570,8 @@ function DcEditor({
 }) {
   const { toast, confirm } = useUI();
   const dcRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef(form);
+  formRef.current = form;
   const [viewOpen, setViewOpen] = useState(false);
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -629,19 +631,23 @@ function DcEditor({
   // Seed the seller block from the saved company profile (challan has no company
   // fields of its own) so the header isn't blank / a leftover placeholder.
   useEffect(() => {
+    let active = true;
     billing
       .getCompany()
       .then((c) => {
+        if (!active) return;
         setCompany(c);
         if (!c) return;
+        const current = formRef.current;
         setForm({
-          ...form,
-          company_name: form.company_name || c.name || "",
-          company_address: form.company_address || c.address || "",
-          company_trn: form.company_trn || c.trn || "",
+          ...current,
+          company_name: current.company_name || c.name || "",
+          company_address: current.company_address || c.address || "",
+          company_trn: current.company_trn || c.trn || "",
         });
       })
       .catch(() => {});
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const { templates: customTemplates, error: templateError, reload: reloadTemplates } = useCustomTemplates();

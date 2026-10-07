@@ -39,7 +39,7 @@ import {
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { SelectMenu } from "../components/ui-menu";
-import { aed, fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd, getDisplayCurrency } from "../lib/format";
+import { fmtDate, money, num, numInput, CURRENCIES, errMsg, todayYmd, getDisplayCurrency } from "../lib/format";
 import { defaultTaxRate, taxRegimeFor } from "../lib/taxRegimes";
 import {
   docLineAmount,
@@ -238,7 +238,7 @@ export default function PurchaseOrders() {
   const loadRows = () =>
     pos
       .list()
-      .then(setRows)
+      .then((rows) => { setRows(rows); setError(""); })
       .catch((e) => {
         setError(`Could not load purchase orders: ${errMsg(e)}`);
         toast.error("Failed to load purchase orders");
@@ -326,7 +326,12 @@ export default function PurchaseOrders() {
   }
 
   const statCcy = company?.currency || "AED";
-  const totalValue = rows.reduce((s, r) => s + r.total, 0);
+  const currencyTotals = new Map<string, number>();
+  for (const row of rows) {
+    const currency = row.currency || statCcy;
+    currencyTotals.set(currency, (currencyTotals.get(currency) || 0) + row.total);
+  }
+  if (!currencyTotals.size) currencyTotals.set(statCcy, 0);
   const draftCount = rows.filter((r) => (r.status || "draft") === "draft").length;
   const sentCount = rows.filter((r) => r.status === "sent").length;
   const receivedCount = rows.filter((r) => r.status === "received").length;
@@ -463,12 +468,13 @@ export default function PurchaseOrders() {
           }
           changeTone={draftCount > 0 ? "warn" : "up"}
         />
-        <MetricCard
-          label="Total Value"
-          value={aed(totalValue)}
+        {[...currencyTotals].map(([currency, total]) => <MetricCard
+          key={currency}
+          label={`Total value (${currency})`}
+          value={money(total, currency)}
           change="Ordered across all suppliers"
           changeTone="up"
-        />
+        />)}
         <MetricCard
           label="Sent"
           value={num(sentCount)}
@@ -1084,12 +1090,17 @@ function Editor({
   };
 
   const handleSave = async () => {
+    if (saving) return;
     if (!form.supplier_name?.trim()) {
       toast.error("Supplier name is required");
       return;
     }
     if (!form.items.length || form.items.every((i) => !i.description.trim())) {
       toast.error("Add at least one line item");
+      return;
+    }
+    if (form.items.some((item) => !item.description.trim() && docLineAmount(toDocItem(item), form.unit_price_formula) !== 0)) {
+      toast.error("Add a description to every priced item before saving.");
       return;
     }
     setSaving(true);
@@ -1143,6 +1154,7 @@ function Editor({
   };
 
   const setStatus = async (status: string) => {
+    if (saving) return;
     if (!form.id) {
       toast.error("Save the PO first");
       return;
@@ -1161,6 +1173,7 @@ function Editor({
   };
 
   const handleReceive = async () => {
+    if (saving) return;
     if (!form.id) {
       toast.error("Save the PO before receiving stock");
       return;
@@ -1318,7 +1331,7 @@ function Editor({
   };
 
   return (
-    <div>
+    <fieldset disabled={saving} aria-busy={saving} className="m-0 min-w-0 border-0 p-0">
       {/* Header bar */}
       <PageHeader
         title={form.id ? "Edit Purchase Order" : "New Purchase Order"}
@@ -2240,7 +2253,7 @@ function Editor({
                   </div>
             </FitPreview>
           </Modal>}
-    </div>
+    </fieldset>
   );
 }
 

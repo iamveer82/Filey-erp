@@ -27,11 +27,37 @@ let cached: { at: number; key: string; text: string } | null = null;
 const CACHE_MS = 60_000;
 const accessKey = (access: ModuleAccess) => JSON.stringify([access.admin, access.modules?.slice().sort() ?? null]);
 
-export async function buildAiContext(companyName?: string): Promise<string> {
+/** An optional business snapshot must not wedge chat or ignore its Stop button. */
+export async function buildAiContext(companyName?: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort(new DOMException("Stopped", "AbortError"));
+  signal?.addEventListener("abort", abort, { once: true });
+  let rejectAborted!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAborted = () => reject(controller.signal.reason);
+    controller.signal.addEventListener("abort", rejectAborted, { once: true });
+  });
+  const timer = setTimeout(() => controller.abort(new DOMException("Business snapshot timed out", "TimeoutError")), 12_000);
+  try {
+    return await Promise.race([prepareAiContext(companyName, controller.signal), aborted]);
+  } catch (error) {
+    if (controller.signal.aborted && controller.signal.reason?.name === "TimeoutError")
+      return "CURRENT BUSINESS DATA: unavailable because the snapshot timed out. Use tools to look up the records needed for this task; missing data is unknown, not empty.";
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+    controller.signal.removeEventListener("abort", rejectAborted);
+  }
+}
+
+async function prepareAiContext(companyName: string | undefined, signal: AbortSignal): Promise<string> {
   const scope = agentStorageScope();
   if (!scope) return "CURRENT BUSINESS DATA: unavailable until the user signs in to their workspace.";
   const currency = getDisplayCurrency();
   const current = () => {
+    signal.throwIfAborted();
     if (scope !== agentStorageScope() || currency !== getDisplayCurrency())
       throw new DOMException("Workspace changed before preparing the business brief.", "AbortError");
   };

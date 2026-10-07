@@ -2384,6 +2384,7 @@ function Editor({
 
   return (
     <div ref={editorRootRef}>
+      <fieldset disabled={saving} aria-busy={saving} className="m-0 min-w-0 border-0 p-0">
       <EInvoiceReview open={eInvoiceOpen} doc={form} busy={saving || exportingXml}
         onClose={() => setEInvoiceOpen(false)} onChange={einvoice => set("einvoice", einvoice)}
         onCloseAutoFocus={focusEInvoiceField}
@@ -3862,6 +3863,7 @@ function Editor({
                   </div>
             </FitPreview>
       </Modal>
+      </fieldset>
     </div>
   );
 }

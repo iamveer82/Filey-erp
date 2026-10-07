@@ -116,11 +116,9 @@ export async function runRemoteAgentTurn(turn: RemoteAgentTurn): Promise<{
     const work = async () => {
       const { buildAiContext } = await import("./aiContext");
       let brief = "";
-      let briefTimer: ReturnType<typeof setTimeout> | undefined;
       try {
-        brief = await Promise.race([buildAiContext(), new Promise<string>(resolve => { briefTimer = setTimeout(() => resolve(""), 12_000); }), aborted]);
+        brief = await buildAiContext(undefined, controller.signal);
       } catch (error) { if (controller.signal.aborted) throw error; }
-      finally { if (briefTimer) clearTimeout(briefTimer); }
       assertCurrent();
       if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       const system = buildSystemPrompt([

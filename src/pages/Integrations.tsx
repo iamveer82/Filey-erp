@@ -508,13 +508,12 @@ export default function Integrations() {
           </button>
         ))}
       </nav>
-      {tab === "services" && <WorkServices />}
+      {tab === "services" && <div className="space-y-6"><WorkServices /><FreeConnections /></div>}
       {tab === "free" && (
         <>
           <WhatsAppBridgeProvider key={agentStorageScope() ?? "signed-out"} />
           <TelegramAgentConnection key={`telegram:${agentStorageScope() ?? "signed-out"}`} />
           <EmailConnection />
-          <FreeConnections />
         </>
       )}
       {tab === "providers" && (

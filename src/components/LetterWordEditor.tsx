@@ -42,6 +42,7 @@ import {
 import {
   letterRichDocument,
   LETTER_RICH_FONTS,
+  LETTER_RICH_FONT_STACKS,
   validateLetterRichDocument,
   type LetterRichDocument,
 } from "../lib/letterRichText";
@@ -64,11 +65,12 @@ const fontSize = (raw: string) => {
   const value = Number(match[1]) * (match[2].toLowerCase() === "px" ? 0.75 : 1);
   return value >= 8 && value <= 36 ? `${Math.round(value * 100) / 100}pt` : null;
 };
-const fontFamily = (raw: string) =>
-  LETTER_RICH_FONTS.find(
-    (font) =>
-      raw.split(",")[0].trim().replace(/["']/g, "").toLowerCase() === font.toLowerCase()
+const fontFamily = (raw: string) => {
+  const family = raw.split(",")[0].trim().replace(/["']/g, "").toLowerCase();
+  return LETTER_RICH_FONTS.find(
+    (font) => family === font.toLowerCase() || (font === "Inter" && family === "inter variable")
   ) ?? null;
+};
 const textColor = (raw: string) => {
   if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
   const match = /^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/.exec(raw);
@@ -92,8 +94,10 @@ const LetterTypography = Extension.create({
           fontFamily: {
             default: null,
             parseHTML: (element) => fontFamily(element.style.fontFamily),
-            renderHTML: (attrs) =>
-              attrs.fontFamily ? { style: `font-family: ${attrs.fontFamily}` } : {},
+            renderHTML: (attrs) => {
+              const font = fontFamily(String(attrs.fontFamily || ""));
+              return font ? { style: `font-family: ${LETTER_RICH_FONT_STACKS[font]}` } : {};
+            },
           },
           fontSize: {
             default: null,
@@ -839,10 +843,10 @@ function WordCanvas({
   const paperStyle = {
     "--letter-font":
       form.text_style?.font === "classic"
-        ? "Lora, Georgia, serif"
+        ? LETTER_RICH_FONT_STACKS.Lora
         : form.text_style?.font === "mono"
-          ? "'IBM Plex Mono', monospace"
-          : "Inter, Arial, sans-serif",
+          ? LETTER_RICH_FONT_STACKS["IBM Plex Mono"]
+          : LETTER_RICH_FONT_STACKS.Inter,
     "--letter-size": `${form.text_style?.fontSize || 11}pt`,
     "--letter-line": form.text_style?.lineSpacing || 1.5,
     "--letter-after": `${form.text_style?.paragraphSpacing ?? 16}px`,

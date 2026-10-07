@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { notifyDataChanged } from "../../lib/realtime";
 import { AuthProvider } from "../../lib/auth";
-import { billing, erp, hr, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type Payroll, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary } from "../../lib/api";
+import { billing, erp, hr, pos, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type Payroll, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary, type PoSummary } from "../../lib/api";
 import * as filesApi from "../../lib/files";
 import * as pdfTools from "../../lib/pdfTools";
 import * as emailApi from "../../lib/email";
@@ -20,6 +20,9 @@ import PayslipPage from "../PayslipPage";
 import Quoting from "../Quoting";
 import DeliveryChallan from "../DeliveryChallan";
 import Invoicing from "../Invoicing";
+import PurchaseOrders from "../PurchaseOrders";
+import * as documentNumbers from "../../lib/documentNumbers";
+import { money, todayYmd } from "../../lib/format";
 
 // Action tests exercise the live editor/document, not four extra miniature
 // documents. Real thumbnail rendering is covered by doc-template-gallery.test.
@@ -125,6 +128,23 @@ describe("invoice editor actions", () => {
     vi.spyOn(recurrences, "list").mockResolvedValue([]);
     vi.spyOn(recurrences, "generateDue").mockResolvedValue(0);
     vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1 });
+  });
+
+  it("locks invoice editing while a save is pending and restores it after acknowledgement", async () => {
+    let finish!: (id: number) => void;
+    vi.spyOn(billing, "saveDoc").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    const number = await view.findByLabelText("Invoice Number");
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(billing.saveDoc).toHaveBeenCalledOnce());
+    expect(number).toBeDisabled();
+    expect(view.getByRole("button", { name: "Back" })).toBeDisabled();
+    await act(async () => { finish(10); });
+    expect(number).toBeEnabled();
   });
 
   it("makes e-invoice checking and messaging directly accessible beside save and PDF", async () => {
@@ -332,6 +352,34 @@ describe("invoice editor actions", () => {
 });
 
 describe("receipt actions", () => {
+  it("keeps the saved receipt id and can finalize when the list refresh fails", async () => {
+    const list = vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
+    vi.spyOn(receipts, "get").mockResolvedValue(receipt);
+    vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("RCPT-COPY");
+    let finish!: (id: number) => void;
+    const save = vi.spyOn(receipts, "save").mockResolvedValue(9).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const status = vi.spyOn(receipts, "setStatus").mockResolvedValue(undefined);
+    const view = wrap(<PaymentReceipt />);
+    fireEvent.click(await view.findByText("RCPT-AUDIT"));
+    await view.findByDisplayValue("120");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "Duplicate" }));
+    await view.findByDisplayValue("RCPT-COPY");
+    list.mockRejectedValue(new Error("Connection interrupted"));
+    fireEvent.click(view.getByRole("button", { name: "Mark paid" }));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(view.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+    expect(view.getByDisplayValue("120")).toBeDisabled();
+    await act(async () => { finish(9); });
+    await waitFor(() => expect(status).toHaveBeenCalledWith(9, "paid"));
+    await waitFor(() => expect(view.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(view.queryByText(/^Save failed:/)).toBeNull();
+    expect(view.getByRole("heading", { name: "Edit Receipt" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0]).toMatchObject({ id: 9, number: "RCPT-COPY", status: "paid" });
+  });
+
   it("does not copy an app login link or claim sharing success after public sharing fails", async () => {
     vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
     vi.spyOn(documentMessage, "receiptPublicLink").mockRejectedValue(new Error("Public sharing is unavailable"));
@@ -404,6 +452,26 @@ describe("receipt actions", () => {
     ]), expect.any(Array));
   });
 
+  it("counts only confirmed receipts as received money while keeping draft currencies and history", async () => {
+    const date = todayYmd();
+    vi.spyOn(receipts, "list").mockResolvedValue([
+      { ...receiptRow, status: "paid", amount: 120, payment_date: date },
+      { ...receiptRow, id: 8, number: "RCPT-DRAFT", amount: 9000, payment_date: date },
+      { ...receiptRow, id: 9, number: "RCPT-CANCELLED", status: "cancelled", amount: 8000, payment_date: date },
+      { ...receiptRow, id: 10, number: "RCPT-AED-DRAFT", currency: "AED", amount: 252, payment_date: date },
+      { ...receiptRow, id: 11, number: "RCPT-OLDER", status: "paid", amount: 40, payment_date: "2020-01-01" },
+    ]);
+    const view = wrap(<PaymentReceipt />);
+    const total = await view.findByText("Total received (USD)");
+    expect(total.parentElement?.parentElement).toHaveTextContent(money(160, "USD").replace(/\s/g, " "));
+    expect(total.parentElement?.parentElement).toHaveTextContent("2 confirmed receipts");
+    expect(view.getByText("This month (USD)").parentElement?.parentElement).toHaveTextContent(money(120, "USD").replace(/\s/g, " "));
+    expect(view.getByText("Total received (AED)").parentElement?.parentElement).toHaveTextContent(money(0, "AED").replace(/\s/g, " "));
+    expect(view.getByText("This month (AED)").parentElement?.parentElement).toHaveTextContent(money(0, "AED").replace(/\s/g, " "));
+    expect(view.getByText("RCPT-DRAFT")).toBeTruthy();
+    expect(view.getByText("RCPT-CANCELLED")).toBeTruthy();
+  });
+
   it("reports a native CSV failure instead of leaving an unhandled rejection", async () => {
     vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
     vi.spyOn(csvApi, "downloadCsv").mockRejectedValue(new Error("Folder is read-only"));
@@ -412,6 +480,57 @@ describe("receipt actions", () => {
     fireEvent.click(view.getByRole("button", { name: /export/i }));
     expect(await view.findByText("Folder is read-only")).toBeTruthy();
   });
+});
+
+it("keeps purchase-order dashboard amounts in their own currencies", async () => {
+  vi.spyOn(pos, "list").mockResolvedValue([
+    { id: 1, po_number: "PO-USD", supplier_name: "Supplier", status: "draft", total: 120, currency: "USD" },
+    { id: 2, po_number: "PO-AED", supplier_name: "Supplier", status: "draft", total: 50, currency: "AED" },
+  ] as PoSummary[]);
+  const view = wrap(<PurchaseOrders />);
+  const usd = await view.findByText("Total value (USD)");
+  const aed = view.getByText("Total value (AED)");
+  expect(usd.parentElement?.parentElement).toHaveTextContent(/120/);
+  expect(aed.parentElement?.parentElement).toHaveTextContent(/50/);
+  expect(view.queryByText("Total Value")).toBeNull();
+});
+
+it("locks purchase-order editing while its saved snapshot is pending", async () => {
+  const purchaseOrder = { id: 1, po_number: "PO-SAVE", supplier_name: "Supplier", status: "draft", total: 120, currency: "USD", items: [{ description: "Stock", quantity: 1, unit_cost: 120 }] } as Awaited<ReturnType<typeof pos.get>>;
+  vi.spyOn(pos, "list").mockResolvedValue([{ ...purchaseOrder, supplier_name: "Supplier", items_count: 1 }]);
+  vi.spyOn(pos, "get").mockResolvedValue(purchaseOrder);
+  let finish!: (id: number) => void;
+  vi.spyOn(pos, "save").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = wrap(<PurchaseOrders />);
+  await view.findByText("PO-SAVE");
+  fireEvent.click(view.getByRole("button", { name: "More actions" }));
+  fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+  const supplier = await view.findByLabelText("Supplier Name");
+  fireEvent.click(view.getAllByRole("button", { name: "Save" })[0]);
+  await waitFor(() => expect(pos.save).toHaveBeenCalledOnce());
+  expect(supplier).toBeDisabled();
+  expect(view.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+  await act(async () => { finish(1); });
+  expect(supplier).toBeEnabled();
+});
+
+it("does not silently drop a priced purchase-order line with an empty description", async () => {
+  const purchaseOrder = { id: 1, po_number: "PO-LINES", supplier_name: "Supplier", status: "draft", total: 125, currency: "USD", items: [{ description: "Stock", quantity: 1, unit_cost: 120 }, { description: "", quantity: 1, unit_cost: 5 }] } as Awaited<ReturnType<typeof pos.get>>;
+  vi.spyOn(pos, "list").mockResolvedValue([{ ...purchaseOrder, supplier_name: "Supplier", items_count: 2 }]);
+  vi.spyOn(pos, "get").mockResolvedValue(purchaseOrder);
+  vi.spyOn(pos, "save").mockResolvedValue(1);
+  const view = wrap(<PurchaseOrders />);
+  await view.findByText("PO-LINES");
+  fireEvent.click(view.getByRole("button", { name: "More actions" }));
+  fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+  await view.findByLabelText("Supplier Name");
+  fireEvent.click(view.getAllByRole("button", { name: "Save" })[0]);
+  expect(await view.findByText("Add a description to every priced item before saving.")).toBeTruthy();
+  expect(pos.save).not.toHaveBeenCalled();
+  const descriptions = view.getAllByPlaceholderText("Item description");
+  fireEvent.change(descriptions[1], { target: { value: "Freight charge" } });
+  fireEvent.click(view.getAllByRole("button", { name: "Save" })[0]);
+  await waitFor(() => expect(pos.save).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ description: "Stock", unit_cost: 120 }), expect.objectContaining({ description: "Freight charge", unit_cost: 5 })] })));
 });
 
 it("searches the product category promised by the inventory search field", async () => {
@@ -561,5 +680,20 @@ it("keeps a failed challan save open without a success toast or PDF archive", as
   expect(view.getByRole("button", { name: "Save" })).not.toBeDisabled();
   expect(view.queryByText("Challan saved.")).toBeNull();
   expect(filesApi.autoSaveDocument).not.toHaveBeenCalled();
+});
+
+it("preserves delivery edits when the company profile loads slowly", async () => {
+  vi.spyOn(tools, "settings").mockResolvedValue([]);
+  let finish!: (profile: CompanyProfile) => void;
+  vi.mocked(billing.getCompany).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = wrap(<DeliveryChallan />);
+  const create = await view.findByRole("button", { name: "Assign driver" });
+  await waitFor(() => expect(create).toBeEnabled());
+  setCacheOrg("document-test-org", "document-test-user");
+  fireEvent.click(create);
+  const party = await view.findByLabelText("Party Name");
+  fireEvent.change(party, { target: { value: "Unsaved recipient" } });
+  await act(async () => { finish(company); });
+  expect(party).toHaveValue("Unsaved recipient");
 });
 
