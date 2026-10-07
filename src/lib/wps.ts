@@ -119,7 +119,11 @@ export function validateWps(input: WpsInput): string[] {
       problems.push(`${who}: variable amount cannot be negative.`);
     if (!Number.isInteger(e.daysInPeriod) || e.daysInPeriod < 1 || e.daysInPeriod > 31)
       problems.push(`${who}: days in period must be between 1 and 31.`);
-    if (e.leaveDays != null && (e.leaveDays < 0 || e.leaveDays > e.daysInPeriod))
+    // The SIF leave field is a whole number of days; NaN or 2.5 would pass the
+    // range check below and write an invalid field into the file.
+    if (e.leaveDays != null && !Number.isInteger(e.leaveDays))
+      problems.push(`${who}: leave days must be a whole number.`);
+    else if (e.leaveDays != null && (e.leaveDays < 0 || e.leaveDays > e.daysInPeriod))
       problems.push(`${who}: leave days cannot exceed the days in the period.`);
     if (e.fixedAmount + (e.variableAmount ?? 0) <= 0)
       problems.push(`${who}: total pay is zero — remove them from this run instead.`);
