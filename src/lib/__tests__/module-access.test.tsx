@@ -53,6 +53,19 @@ it("rejects a membership response from a previous workspace",async()=>{
   rpc.mockImplementationOnce(async()=>{setCacheOrg("other","staff");return {data:{allowed:true,admin:true,modules:null}};});
   await expect(loadModuleAccess()).rejects.toThrow("workspace changed");
 });
+it("rejects old permissions and starts a fresh read after returning to the same workspace", async () => {
+  let finishEarlier!: (value: unknown) => void;
+  rpc.mockImplementationOnce(() => new Promise(resolve => { finishEarlier = resolve; }));
+  const earlier = expect(loadModuleAccess()).rejects.toThrow("workspace changed");
+  setCacheOrg("other", "staff");
+  setCacheOrg("org", "staff");
+  rpc.mockResolvedValueOnce({ data: { allowed: true, admin: false, modules: ["inventory"], org_id: "org" }, error: null });
+  const current = loadModuleAccess();
+  finishEarlier({ data: { allowed: true, admin: true, modules: null, org_id: "org" }, error: null });
+  await earlier;
+  await expect(current).resolves.toEqual({ admin: false, modules: ["inventory"] });
+  expect(rpc).toHaveBeenCalledTimes(2);
+});
 it("does not apply restored personal administrator permissions to a removed team's cache", async () => {
   const refresh = vi.fn();
   window.addEventListener("filey:cloud-change", refresh);
