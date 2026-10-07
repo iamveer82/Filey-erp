@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Minus, Plus, ShoppingCart, X, CreditCard, Search } from "lucide-react";
 import NumberFlow from "@number-flow/react";
 import type { Product } from "../lib/api";
-import { aed, getDisplayCurrency } from "../lib/format";
+import { aed, displayAmount, getDisplayCurrency } from "../lib/format";
 import { cn } from "../lib/format";
 
 export type CartLine = Product & { quantity: number };
@@ -194,7 +194,7 @@ export default function ProductPicker({
             <span className="text-sm font-medium text-ink">Total</span>
             <span className="text-base font-medium text-ink tabular-nums">
               <NumberFlow
-                value={totalPrice}
+                value={displayAmount(totalPrice)}
                 format={{
                   style: "currency",
                   currency: getDisplayCurrency(),

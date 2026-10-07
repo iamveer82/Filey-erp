@@ -66,6 +66,12 @@ export function aed(value: number): string {
   return money((value || 0) / displayRate, displayCurrency);
 }
 
+/** An AED-denominated value as a plain number in the display currency, for
+ *  components that format numbers themselves (animated counters, chart data). */
+export function displayAmount(value: number): number {
+  return (value || 0) / displayRate;
+}
+
 /** Compact axis values in the display currency; chart headings give the unit. */
 export function chartAmount(value: number): string {
   return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
