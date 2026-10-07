@@ -41,7 +41,7 @@ import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd, errMsg } from "../lib/format";
+import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd, localYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -61,9 +61,13 @@ import { DateField } from "../components/DatePicker";
 /** Expiring = still in stock and expiry date within 30 days (or already past). */
 function isExpiring(p: Product): boolean {
   if (!p.expiry_date || p.quantity <= 0) return false;
-  const d = new Date(p.expiry_date).getTime();
-  if (Number.isNaN(d)) return false;
-  return d - Date.now() <= 30 * 24 * 60 * 60 * 1000;
+  // Expiry is a calendar date. `new Date("YYYY-MM-DD")` is UTC midnight, which
+  // west of UTC is still the previous local day, so compare day strings instead.
+  const expiry = p.expiry_date.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return false;
+  const horizon = new Date();
+  horizon.setDate(horizon.getDate() + 30);
+  return expiry <= localYmd(horizon);
 }
 
 export default function Inventory() {
@@ -627,7 +631,7 @@ export default function Inventory() {
                       <span className="text-[10px] text-brand-500 flex items-center gap-1">
                         <Calendar size={9} />
                         {fmtDate(exp)}
-                        {new Date(exp) < new Date() && (
+                        {exp.slice(0, 10) < todayYmd() && (
                           <Badge tone="danger">Expired</Badge>
                         )}
                       </span>
