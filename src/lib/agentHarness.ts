@@ -143,10 +143,10 @@ const SPAWN_TOOL: AgentToolDef = {
 const headroomTool: AgentToolDef = {
   name: HEADROOM_RETRIEVE,
   description:
-    "Fetch the FULL original of an earlier tool output that came back with a [headroom] compressed marker. Pass the exact id from that marker. Use it when the digest is not enough — for example you need one row the table clipped.",
+    "Read an exact page of an earlier compressed tool output. Pass its id; use next_offset to read another page only when needed. Content is a text slice and may not be complete JSON. Prefer a focused tool query over reading a whole catalogue.",
   parameters: {
     type: "object",
-    properties: { id: { type: "string" } },
+    properties: { id: { type: "string" }, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 6000 } },
     required: ["id"],
   },
 };
@@ -604,15 +604,15 @@ export function adapterFor(provider: AiConfig["provider"]): Adapter {
 
 /** Context hygiene between rounds.
  *
- *  Images only need to be SEEN once: after the first round every earlier
- *  turn's base64 payload goes, otherwise a single screenshot is re-uploaded —
- *  and re-billed — on every remaining call. Observed tool outputs shrink to
+ *  The current user's attachments remain available throughout the task.
+ *  Older attachments and observed tool screenshots are removed, so stale
+ *  screenshots are not re-uploaded on every call. Observed tool outputs shrink to
  *  retrievable markers; fresh batch results remain intact until the model
  *  receives them. Both wire shapes carry content either as a string or as a
  *  block array, so the walk handles both. */
 const OLD_TOOL_CLIP = 400;
 
-function trimWire(wire: Wire, observedThrough: number, retain: (text: string) => string): void {
+function trimWire(wire: Wire, observedThrough: number, retain: (text: string) => string, currentUser: unknown): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const convo = wire.convo as any[];
   for (let i = 0; i < observedThrough; i++) {
@@ -621,7 +621,7 @@ function trimWire(wire: Wire, observedThrough: number, retain: (text: string) =>
     const isLast = i === convo.length - 1;
     if (Array.isArray(m.content)) {
       let blocks = m.content;
-      if (!isLast) {
+      if (!isLast && m !== currentUser) {
         blocks = blocks.filter(
           (b: { type?: string }) => b?.type !== "image" && b?.type !== "image_url"
         );
@@ -696,6 +696,9 @@ export async function* runAgentStream(
       : message),
     ...browserContext,
   ]);
+  // A lookup/tool-discovery response does not preserve the visual details of
+  // the user's attachments. Keep those available until this task finishes.
+  const currentUser = [...wire.convo].reverse().find(message => message.role === "user");
   const maxRounds = Number.isFinite(opts.maxRounds)
     ? Math.min(64, Math.max(1, Math.floor(opts.maxRounds!)))
     : MAX_TOOL_ROUNDS;
@@ -737,7 +740,7 @@ export async function* runAgentStream(
       compressedThisRun = true;
       compressedIds.add(kept.ccrId!);
       return kept.text;
-    });
+    }, currentUser);
     const offered = offeredTools(opts, opened, opts.subdepth ?? 0, discovered);
     const tools = compressedThisRun ? [...offered, headroomTool] : offered;
     const { url, init } = adapter.buildRequest(wire, tools, opts, deps.cfg);
@@ -778,7 +781,7 @@ export async function* runAgentStream(
       // Never forward provider strings merely because they share its prefix.
       const walletHint = deps.cfg.billing === "credits" && detail === "Insufficient credit. Add Coin to continue."
         ? detail : undefined;
-      const failure = walletHint ? new Error(walletHint) : providerHint ? new Error(providerHint) : await serviceError({ context: { status } }, "Filey AI couldn't continue. Please try again.");
+      const failure = walletHint ? new Error(walletHint) : providerHint ? new Error(providerHint) : await serviceError({ message: deps.cfg.billing === "credits" ? detail : undefined, context: { status } }, "Filey AI couldn't continue. Please try again.");
       const text = `${failure.message} Nothing was executed from that response.${guard.steps().length ? " Check any earlier changes or files before asking me to continue." : ""}`;
       assertActive();
       yield { type: "done", text, reason: "error" };
@@ -913,7 +916,7 @@ export async function* runAgentStream(
       if (call.name === HEADROOM_RETRIEVE) {
         const id = String(call.args.id ?? "");
         const result = compressedIds.has(id)
-          ? headroomRetrieve(id)
+          ? headroomRetrieve(id, call.args.offset as number | undefined, call.args.limit as number | undefined)
           : {
               error:
                 "That output does not belong to this run. Use an id from a compressed result in this task.",

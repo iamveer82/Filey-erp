@@ -92,3 +92,12 @@ it("preserves sign-in and request-rate guidance for unrecognized service errors"
   expect((await serviceError({ context: { status: 429 } }, "Unavailable.")).message)
     .toBe("Too many attempts. Please wait a few minutes and try again.");
 });
+
+it("keeps task-size guidance through both service and harness translation without leaking suffixes", async () => {
+  const detail = "This conversation is too large for the selected model. Start a new chat or choose a larger-context model.";
+  const safe = await serviceError({ context: { status: 400, json: async () => ({ error: detail }) } }, "Unavailable.");
+  expect(safe.message).toContain("just the relevant details and attachments");
+  expect((await serviceError(safe, "Unavailable.")).message).toBe(safe.message);
+  expect((await serviceError(new Error(`${detail} Private provider details`), "Unavailable.")).message).toBe("Unavailable.");
+  expect((await serviceError(new Error(`${safe.message} Private provider details`), "Unavailable.")).message).toBe("Unavailable.");
+});

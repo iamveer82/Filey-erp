@@ -54,6 +54,36 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, use
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it("keeps invoice image details through a managed customer lookup and draft creation without OCR discovery", async () => {
+    const item = { description: "RC drum", qty: 1200, unit: "L", unit_price: 0.2 };
+    vi.mocked(runTool).mockResolvedValueOnce([{ id: "customer-1", name: "Fixture customer" }])
+      .mockResolvedValueOnce({ ok: true, id: "invoice-1", items: [item] });
+    const replies = [
+      turn([call("find_customers", { query: "Fixture customer" })]),
+      turn([call("create_invoice_draft", { customer_id: "customer-1", items: [item] })]),
+      turn([], "Draft invoice created."),
+    ];
+    const requests: string[] = [], events: AgentEvent[] = [];
+    const stream = runAgentStream([{ role: "user", text: "Invoice the attached items for Fixture customer", images: [
+      { mediaType: "image/png", dataBase64: "QUJD" }, { mediaType: "image/jpeg", dataBase64: "REVG" },
+    ] }], { isOwner: true, reasoningEnabled: false }, {
+      cfg: { ...config, billing: "credits", model: "filey-ai", apiKey: "" },
+      fetchFn: async (_url, init) => { requests.push(String(init.body)); return new Response(JSON.stringify(replies.shift())); },
+    });
+    for (;;) {
+      const step = await stream.next();
+      if (step.done) { expect(step.value).toBe("Draft invoice created."); break; }
+      events.push(step.value);
+    }
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      expect(request).toContain("QUJD"); expect(request).toContain("REVG");
+    }
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["find_customers", "create_invoice_draft"]);
+    expect(vi.mocked(runTool).mock.calls[1][1]).toEqual({ customer_id: "customer-1", items: [item] });
+    expect(events[events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
+  });
+
   it("does not dispatch quotation or purchase/order probes after a failed requested invoice", async () => {
     vi.mocked(runTool).mockResolvedValueOnce({ error: "The quota has been exceeded." });
     const fallbacks = ["create_quote", "create_order", "create_purchase_order", "create_purchase_invoice_draft"];

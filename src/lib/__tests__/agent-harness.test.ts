@@ -201,6 +201,17 @@ it("keeps canonical insufficient-Coin guidance in a managed agent failure withou
   expect(fetchFn).toHaveBeenCalledOnce();
 });
 
+it("preserves managed task-size guidance without repeating inference", async () => {
+  const message = "This task has too much information for one request. Start a new chat with just the relevant details and attachments.";
+  const fetchFn = vi.fn(async () => { throw new Error(message); });
+  const result = await collect(runAgentStream([{ role: "user", text: "Read attached items" }], {}, {
+    cfg: { provider: "openai", baseUrl: "https://filey-credits.invalid/v1", model: "filey-ai", apiKey: "", billing: "credits" }, fetchFn,
+  }));
+  expect(result.final).toContain(message);
+  expect(result.events).toEqual([expect.objectContaining({ type: "done", reason: "error" })]);
+  expect(fetchFn).toHaveBeenCalledOnce();
+});
+
 it.each([
   ["credits", "Insufficient credit. Add Coin to continue. SQL SELECT private_customer_rows"],
   ["credits", "Private provider failure: secret-key-fixture"],
@@ -476,7 +487,31 @@ describe("agent harness", () => {
     expect(http.final).not.toContain("private-provider-body");
   });
 
-  it("omits unsupported temperature for current Claude and stops re-sending old images", async () => {
+  it.each(["openai", "anthropic"] as const)("keeps all current attachments for %s after lookups while dropping earlier images", async provider => {
+    const requests: string[] = [];
+    const replies = provider === "openai"
+      ? [oa("", [{ id: "lookup", type: "function", function: { name: "recall", arguments: "{}" } }]), oa("Ready to draft.")]
+      : [an("", { id: "lookup", name: "recall", input: {} }), an("Ready to draft.")];
+    const result = await collect(runAgentStream([
+      { role: "user", text: "Earlier attachment", images: [{ mediaType: "image/png", dataBase64: "OLDIMAGE" }] },
+      { role: "assistant", text: "Earlier task finished." },
+      { role: "user", text: "Invoice both attached items", images: [
+        { mediaType: "image/png", dataBase64: "FIRSTIMAGE" }, { mediaType: "image/jpeg", dataBase64: "SECONDIMAGE" },
+      ] },
+    ], { isOwner: true }, {
+      cfg: { provider, baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" },
+      fetchFn: async (_url, init) => { requests.push(String(init.body)); return new Response(JSON.stringify(replies.shift())); },
+    }));
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toContain("OLDIMAGE");
+    expect(requests[1]).not.toContain("OLDIMAGE");
+    for (const request of requests) {
+      expect(request).toContain("FIRSTIMAGE"); expect(request).toContain("SECONDIMAGE");
+    }
+    expect(result.final).toBe("Ready to draft.");
+  });
+
+  it("omits unsupported temperature for current Claude and keeps current image details through lookups", async () => {
     setAiConfig({
       provider: "anthropic",
       baseUrl: "https://api.anthropic.com/v1",
@@ -513,9 +548,10 @@ describe("agent harness", () => {
     const first = JSON.parse(String(calls[0].body));
     expect(first).not.toHaveProperty("temperature");
     expect(JSON.stringify(first.messages)).toContain("AAAA");
-    // Round two must not carry the base64 payload again — the text survives.
+    // The lookup did not transcribe the attachment. Its details must remain
+    // visible when the next round prepares the actual document.
     const second = JSON.parse(String(calls[1].body));
-    expect(JSON.stringify(second.messages)).not.toContain("AAAA");
+    expect(JSON.stringify(second.messages)).toContain("AAAA");
     expect(JSON.stringify(second.messages)).toContain("what is this?");
   });
 

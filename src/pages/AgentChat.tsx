@@ -613,7 +613,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     const goalText = attached.length
       ? `${q || "Process the attached file."}\n\n[${
           attached.length === 1 ? "A file" : `${attached.length} files`
-        } ${attached.length === 1 ? "is" : "are"} attached: ${fileList}. Use run_file_tool to edit/convert/merge them (multiple attachments arrive in order), or read_attached_document to act on their contents. Deliver the result here — do not send the user to the Tools page.]`
+        } ${attached.length === 1 ? "is" : "are"} attached: ${fileList}. Read images directly from the attached image input. Use read_attached_document for PDF text, or run_file_tool to edit/convert/merge files (multiple attachments arrive in order). Deliver the result here — do not send the user to the Tools page.]`
       : q;
     // This turn's slot in the file toolbox: the attachment in, produced files
     // out. Scoped per turn so a popover run mid-flight can't swap this one's
@@ -634,17 +634,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     const ctl = new AbortController();
     abortRef.current = ctl;
 
-    // Make the files available to run_file_tool; convert images for vision.
+    // Read vision attachments inside the cleanup/error boundary below, before
+    // starting a model request.
     setTurnFiles(turnId, attached);
-    const firstImage = attached.find((f) => f.type.startsWith("image/"));
-    let images: AiImage[] | undefined;
-    if (firstImage) {
-      try {
-        images = [await fileToImage(firstImage)];
-      } catch {
-        /* non-fatal — the agent can still run file tools on it */
-      }
-    }
 
     /** Files this turn produced, drained exactly once in finally — success,
      *  stop or error — so they always land with THIS message and never leak
@@ -665,6 +657,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     };
     const trace: NonNullable<ChatTurn["run"]> = { plan: [], actions: [] };
     try {
+      let images: AiImage[];
+      try {
+        images = await Promise.all(attached.filter(file => file.type.startsWith("image/")).map(fileToImage));
+      } catch {
+        throw new Error("Could not read the attached images. Attach them again before sending.");
+      }
+      ctl.signal.throwIfAborted();
       let reply = "";
       const brief = await buildAiContext(undefined, ctl.signal).catch(() => "");
       ctl.signal.throwIfAborted();
