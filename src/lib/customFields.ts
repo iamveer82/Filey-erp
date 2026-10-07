@@ -132,12 +132,17 @@ export async function syncCustomFields(
   const settings = await tools.settings();
   requireAgentStorageScope(scope);
   const row = settings.find((s) => s.key === settingsKey(module));
-  const remote: CustomFieldDef[] = row?.value ? JSON.parse(row.value) : [];
+  let remote: unknown = [];
+  try {
+    remote = row?.value ? JSON.parse(row.value) : [];
+  } catch {
+    remote = null;
+  }
   if (
     !Array.isArray(remote) ||
     remote.length > 100 ||
     remote.some((d) => !validDefinition(d, module)) ||
-    new Set(remote.map((d) => d.key)).size !== remote.length
+    new Set(remote.map((d: CustomFieldDef) => d.key)).size !== remote.length
   )
     throw new Error(
       "Custom field definitions could not be read. Existing data was preserved."

@@ -33,6 +33,12 @@ it("loads canonical definitions and clears an obsolete scoped cache when the set
   expect(await syncCustomFields("customers")).toEqual([]);
   expect(listCustomFields("customers")).toEqual([]);
 });
+it("reports an unreadable remote definition set and keeps the cached definitions", async () => {
+  await saveCustomFields("customers", [field]);
+  state.settings.mockResolvedValue([{ key: "custom_fields_customers", value: "{not json" }]);
+  await expect(syncCustomFields("customers")).rejects.toThrow(/could not be read/);
+  expect(listCustomFields("customers")).toEqual([field]);
+});
 it("rejects unsafe field keys, non-finite numbers, missing consent checkboxes and unsafe URLs", async () => {
   await expect(saveCustomFields("customers", [{ ...field, key: "constructor" }])).rejects.toThrow("valid unique key");
   expect(state.save).not.toHaveBeenCalled();
