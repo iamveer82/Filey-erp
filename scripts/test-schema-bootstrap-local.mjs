@@ -65,8 +65,18 @@ async function testRemovedMembership() {
   await Promise.all([removing,denied]);
   assert.equal(query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000002';"),ownOrg,
     'Delayed switch restored the removed team workspace');
+  const alternate='b7300000-0000-4000-8000-000000000001';
+  run('psql',args('postgres'),`insert into organizations(id,name,owner_id,created_at) values('${alternate}','Concurrent alternate workspace','b7100000-0000-4000-8000-000000000002',now()+interval '1 day');
+    insert into org_members(org_id,user_id,role) values('${alternate}','b7100000-0000-4000-8000-000000000002','owner');
+    update profiles set org_id='${teamOrg}' where id='b7100000-0000-4000-8000-000000000002';`);
+  const alternateSwitch=command(`set application_name='filey-membership-alternate';begin;${identity('b7100000-0000-4000-8000-000000000002')}
+    select public.filey_switch_workspace('${alternate}');select pg_sleep(2);commit;`);
+  await waitForLock('filey-membership-alternate');
+  await Promise.all([alternateSwitch,command(sql('supabase/2026-10-07-removed-member-workspace-recovery.sql'))]);
+  assert.equal(query('postgres',"select org_id from profiles where id='b7100000-0000-4000-8000-000000000002';"),alternate,
+    'Historic profile backfill overwrote a concurrently selected valid workspace');
   run('psql',args('postgres'),"delete from auth.users where id::text like 'b7100000-%';");
-  console.log('PASS: concurrent switch/removal in both lock orders leaves personal workspace active and former team revoked.');
+  console.log('PASS: concurrent switch/removal in both lock orders keeps personal access; historic backfill preserves a concurrently selected valid workspace.');
 }
 async function testRecurrence() {
   run('psql',args('postgres'),sql('scripts/fixtures/recurrence-setup.sql'));
