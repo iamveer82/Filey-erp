@@ -711,8 +711,10 @@ class LocalBuilder implements PromiseLike<Result> {
           let row: Row = { ...p };
           if (this.op === "upsert") {
             const key = this.conflictKey || "id";
+            // Same text↔number tolerance as the filters: an upsert of id "5"
+            // must update the stored int 5, not sit beside it as a twin.
             const idx = rows.findIndex(
-              (r) => row[key] != null && r[key] === row[key]
+              (r) => row[key] != null && this.looseEq(r[key], row[key])
             );
             if (idx >= 0) {
               row = { ...rows[idx], ...row };
@@ -722,7 +724,7 @@ class LocalBuilder implements PromiseLike<Result> {
             }
           }
           if (row.id == null) row.id = nextLocalId(rows);
-          if (rows.some((existing) => existing.id === row.id))
+          if (rows.some((existing) => this.looseEq(existing.id, row.id)))
             throw new Error("A record with this ID already exists.");
           if (row.created_at == null) row.created_at = new Date().toISOString();
           rows.push(row);
