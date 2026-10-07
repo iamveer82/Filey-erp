@@ -23,6 +23,8 @@ import {
   computeCashSummary,
   links,
   getCacheIdentity,
+  invoiceSaveOutcome,
+  invoiceSaveIntentMatches,
   type InvoiceDocInput,
 } from "./api";
 import { ENTITY_TYPES, isEntityType } from "./links";
@@ -185,6 +187,59 @@ function confirmedDocumentId(id: number): number {
   if (!Number.isSafeInteger(id) || id <= 0)
     throw new Error("The document save could not be confirmed. Check the existing document before trying again.");
   return id;
+}
+
+/** A timeout can follow a committed write. Keep its identity for verification,
+ * without turning a missing acknowledgement into a new invoice attempt. */
+async function saveAgentInvoice(input: InvoiceDocInput, assertCurrent: () => void, retryRequestId?: string) {
+  assertCurrent();
+  try {
+    const id = confirmedDocumentId(await (retryRequestId ? billing.retryInvoiceSave(retryRequestId) : billing.saveDoc(input)));
+    if (input.id && id !== input.id)
+      throw new Error("The invoice save returned a different record. Check the existing invoice before trying again.");
+    return { id };
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") throw error;
+    if (invoiceSaveOutcome(error) === "rejected") return {
+      error: errMsg(error), save_outcome: "rejected" as const, retry_safe: false,
+      invoice_number: input.number,
+      hint: "This save was rejected before committing. Explain the reported cause; do not change the user's prices or calculation fields to bypass it.",
+    };
+    const pending = (await billing.pendingInvoiceSaves().catch(() => [])).find(save =>
+      save.input.number === input.number && (save.input.id ?? null) === (input.id ?? null));
+    assertCurrent();
+    return {
+      error: errMsg(error), save_outcome: "unconfirmed" as const, retry_safe: false,
+      invoice_number: input.number, ...(input.id ? { invoice_id: input.id } : {}),
+      ...(pending || retryRequestId ? { save_request_id: pending?.requestId ?? retryRequestId } : {}),
+      hint: "The invoice may already be saved. Read this exact invoice before any further write. Do not claim nothing was saved or that retrying cannot duplicate it. Keep the user's quantities, prices and custom calculation fields unchanged.",
+    };
+  }
+}
+
+/** Check durable receipts before allocating a new number, including after the
+ * previous chat turn or renderer ended. Never replay a different payload. */
+async function pendingAgentInvoice(input: Partial<InvoiceDocInput>, assertCurrent: () => void) {
+  const pending = await billing.pendingInvoiceSaves();
+  assertCurrent();
+  const match = pending.find(save => (input.id ?? null) === (save.input.id ?? null) &&
+    (save.input.doc_type === "purchase") === (input.doc_type === "purchase") && invoiceSaveIntentMatches(input, save.input));
+  const unresolved = match ?? pending.find(save => input.id
+    ? save.input.id === input.id
+    : !save.input.id && (save.input.doc_type === "purchase") === (input.doc_type === "purchase") &&
+      save.input.customer_name.trim().toLowerCase() === input.customer_name?.trim().toLowerCase());
+  if (!unresolved) return undefined;
+  if (match && !match.active) {
+    const recovered = await billing.readPendingInvoiceSave(match.requestId);
+    assertCurrent();
+    if (recovered) return { ok: true, id: confirmedDocumentId(recovered.id), number: recovered.number,
+      verified_save_requests: [match.requestId], message: "The original invoice save was verified. No second invoice was created." };
+  }
+  return { error: `Invoice ${unresolved.input.number} has an unconfirmed save. Verify it before creating or changing another invoice for this customer.`,
+    save_outcome: "unconfirmed" as const, retry_safe: false, save_request_id: unresolved.requestId,
+    invoice_number: unresolved.input.number, ...(unresolved.input.id ? { invoice_id: unresolved.input.id } : {}),
+    hint: "Use get_invoice to verify the exact invoice. If the user explicitly asks to retry or continue the earlier save, load the sales toolset if retry_invoice_save is not offered, then use it with this save_request_id. It reuses the original number and exact stored contents. Do not allocate a new number or alter the supplied rate, quantity or calculation fields.",
+  };
 }
 
 /** Validate the active operands before shared display math can normalize bad
@@ -431,10 +486,10 @@ async function partyCheck(
   };
 }
 
-async function findInvoice(numberOrId: unknown) {
+async function findInvoice(numberOrId: unknown, fresh = false, docType: "sales" | "purchase" = "sales") {
   if (!str(numberOrId).trim()) return undefined;
   return findNumberedDocument(
-    (await billing.listDocs()) as unknown as Record<string, unknown>[],
+    (await billing.listDocs(docType, fresh)) as unknown as Record<string, unknown>[],
     numberOrId,
     "number",
     "invoice"
@@ -1271,14 +1326,16 @@ export const TOOLS: ToolDef[] = [
     description: "Read saved invoice lines, pricing, dates, buyer, tax and current totals. Use an exact number or id:<id> for duplicates. Read back after edits. Image presence flags replace raw images.",
     parameters: {
       type: "object",
-      properties: { invoice_number: { type: "string", minLength: 1, maxLength: 200 } },
+      properties: { invoice_number: { type: "string", minLength: 1, maxLength: 200 }, doc_type: { type: "string", enum: ["sales", "purchase"] } },
       required: ["invoice_number"],
       additionalProperties: false,
     },
-    run: async ({ invoice_number }) => {
-      const summary = await findInvoice(invoice_number);
+    run: async ({ invoice_number, doc_type }) => {
+      const summary = await findInvoice(invoice_number, true, doc_type === "purchase" ? "purchase" : "sales");
       if (!summary) return { error: `No invoice matching "${str(invoice_number)}". Find its exact number or id with list_invoices.` };
-      const { logo, stamp, signature, ...doc } = await billing.getDoc(Number(summary.id));
+      const saved = await billing.getDoc(Number(summary.id), true);
+      const verified = await billing.verifyPendingInvoiceSaves(saved);
+      const { logo, stamp, signature, ...doc } = saved;
       return {
         ...doc,
         total: summary.total,
@@ -1287,6 +1344,7 @@ export const TOOLS: ToolDef[] = [
         has_logo: !!logo,
         has_stamp: !!stamp?.data,
         has_signature: !!signature?.data,
+        verified_save_requests: verified,
       };
     },
   },
@@ -1448,6 +1506,24 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "retry_invoice_save",
+    description: "Only after the user explicitly asks to retry/continue an unconfirmed invoice save: recover that exact saved request ID. Reuses its original number, lines, prices and request receipt; accepts no replacement fields. Read get_invoice afterwards. Never use this to create another invoice.",
+    sensitive: true,
+    parameters: { type: "object", properties: { request_id: { type: "string", pattern: "^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$" } }, required: ["request_id"], additionalProperties: false },
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      const pending = (await billing.pendingInvoiceSaves()).find(save => save.requestId === args.request_id);
+      if (!pending) return { error: "This pending invoice request is unavailable. Read the existing invoice before attempting a new save.", retry_safe: false };
+      const originalTool = pending.input.doc_type === "purchase" ? "create_purchase_invoice_draft" : "create_invoice_draft";
+      await requireToolModuleAccess(originalTool, {});
+      if (!isToolAllowed(originalTool)) return { error: "The invoice capability is turned off. No retry was run.", retry_safe: false };
+      const saved = await saveAgentInvoice(pending.input, assertCurrent, pending.requestId);
+      if ("error" in saved) return saved;
+      return { ok: true, id: saved.id, number: pending.input.number, confirmed_save_request: pending.requestId,
+        message: "The original invoice save is confirmed. No new document number was allocated. Read back this saved invoice before reporting its details." };
+    },
+  },
+  {
     name: "create_invoice_draft",
     description:
       "Create a numbered draft. Never guess customer, item, qty or rate. Preserve item codes; rate is per unit. For per litre/kg/hour: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. To repeat, get_invoice and retain lines/pricing/wording. Defaults: today's date, company VAT, zero discount. Correct with revise_invoice. Verify saved id with get_invoice(id:<id>).",
@@ -1547,15 +1623,8 @@ export const TOOLS: ToolDef[] = [
             .filter((c) => c.key)
         : [];
       const priceBy = str(args.price_by).trim();
-      // The user's invoice sequence (Settings → Document Numbering), not a
-      // timestamp — an agent-made draft sits in the same series as the rest.
-      const number = await allocateDocumentNumber(
-        "invoice",
-        ((await billing.listDocs("sales")) as { number: string }[]).map((d) => d.number),
-        await loadDocFormats()
-      );
       const input: InvoiceDocInput = {
-        number,
+        number: "",
         status: "draft",
         template:
           (str(args.template) ? resolveTemplate(str(args.template)) : undefined) ||
@@ -1610,7 +1679,14 @@ export const TOOLS: ToolDef[] = [
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       };
       const pricing = documentPricing(input.items, cols, priceBy, input.discount, input.tax_rate, input.round_off);
-      const id = await (assertCurrent(), billing.saveDoc(input));
+      const pending = await pendingAgentInvoice(input, assertCurrent);
+      if (pending) return pending;
+      // Allocate only after pending receipts and supplied calculations are checked.
+      input.number = await allocateDocumentNumber("invoice",
+        ((await billing.listDocs("sales")) as { number: string }[]).map(d => d.number), await loadDocFormats());
+      const saved = await saveAgentInvoice(input, assertCurrent);
+      if ("error" in saved) return saved;
+      const id = saved.id;
       const unknownParty = await partyCheck("customer", args.customer_name);
       // Hand back what each line actually came to. The agent then states the
       // real figure instead of re-deriving it and reporting a total the
@@ -1761,9 +1837,13 @@ export const TOOLS: ToolDef[] = [
         unit_price_formula: priceBy ? { a: priceBy, b: "unit_price" } : null,
       };
       const pricing = documentPricing(items, cols, priceBy, next.discount, next.tax_rate, next.round_off);
-      await (assertCurrent(), billing.saveDoc(next));
+      const pending = await pendingAgentInvoice(next, assertCurrent);
+      if (pending) return pending;
+      const saved = await saveAgentInvoice(next, assertCurrent);
+      if ("error" in saved) return saved;
       return {
         ok: true,
+        id: saved.id,
         number: doc.number,
         ...pricing,
         priced_by: priceBy || "qty × unit price",
@@ -3216,16 +3296,8 @@ export const TOOLS: ToolDef[] = [
       const co = await billing.getCompany();
       const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
       if (!items.length) return { error: "A bill needs at least one line." };
-      // The user's purchase-invoice sequence (Settings → Document Numbering).
-      const number = await allocateDocumentNumber(
-        "purchase_invoice",
-        ((await billing.listDocs("purchase")) as { number: string }[]).map(
-          (d) => d.number
-        ),
-        await loadDocFormats()
-      );
       const input = {
-        number,
+        number: "",
         status: "draft",
         // doc_type is what separates a supplier bill from a sales invoice —
         // without it the bill lands in Invoicing as money owed TO the company.
@@ -3248,10 +3320,16 @@ export const TOOLS: ToolDef[] = [
           unit_price: numOf(it.unit_price),
         })),
       } as unknown as InvoiceDocInput;
-      await (assertCurrent(), billing.saveDoc(input));
+      const pending = await pendingAgentInvoice(input, assertCurrent);
+      if (pending) return pending;
+      input.number = await allocateDocumentNumber("purchase_invoice",
+        ((await billing.listDocs("purchase")) as { number: string }[]).map(d => d.number), await loadDocFormats());
+      const saved = await saveAgentInvoice(input, assertCurrent);
+      if ("error" in saved) return saved;
       const unknownParty = await partyCheck("supplier", a.supplier_name);
       return {
         ok: true,
+        id: saved.id,
         number: input.number,
         ...(unknownParty ?? {}),
         message: "Draft bill recorded — open Purchase Invoices to review it.",
@@ -5683,6 +5761,6 @@ export async function runTool(
     log.error("agent", `${name} threw`, e);
     // A failed acknowledgement can follow a committed document or outbound
     // action. Never coach another write without verifying the original result.
-    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" || ["create_quote", "create_purchase_order", "create_letter_draft", "revise_letter_draft"].includes(name) ? { retry_safe: false } : {}) };
+    return { error: errMsg(e), ...(tool.sensitive || name === "agent_computer" || ["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft", "create_quote", "create_purchase_order", "create_letter_draft", "revise_letter_draft"].includes(name) ? { retry_safe: false } : {}) };
   }
 }

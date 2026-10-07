@@ -66,8 +66,9 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   sales: {
     about:
-      "Invoice appearance, logos, saved stamps/signatures, templates, sending, payments, recurring billing, orders and receipts",
+      "Pending invoice recovery, appearance, logos, saved stamps/signatures, templates, sending, payments, recurring billing, orders and receipts",
     tools: [
+      "retry_invoice_save",
       "send_invoice",
       "export_invoice_pdf",
       "email_invoice",

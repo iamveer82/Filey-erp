@@ -54,6 +54,55 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, use
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it.each([false, true])("does not publish rollback claims or retry altered invoice data after a timeout (autonomous=%s)", async autonomous => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "Statement timeout", save_outcome: "unconfirmed", retry_safe: false, invoice_number: "INV-1" });
+    const misleading = "Nothing was saved, so there is no duplicate risk. I removed T.Liters and increased the rate.";
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_name: "Acme", items: [{ qty: 6, unit_price: 0.2, custom: { liters: "1200" } }] }, "first")]),
+      turn([call("create_invoice_draft", { customer_name: "Acme", items: [{ qty: 6, unit_price: 200 }] }, "changed")], misleading),
+      autonomous ? turn([call("task_complete", { status: "blocked", summary: misleading })]) : turn([], misleading),
+    ], autonomous ? { finishToolName: "task_complete", extraTools: [finish] } : {}, config, "Create an invoice for Acme: 6 drums, T.Liters 1200, rate 0.20 per litre.");
+    expect(runTool).toHaveBeenCalledOnce();
+    expect(result.text).toContain("save could not be confirmed");
+    expect(result.text).toContain("may already exist");
+    expect(result.text).toContain("prices, quantities and calculation fields unchanged");
+    expect(result.text).not.toContain(misleading);
+    expect(result.events.filter(event => event.type === "text")).toEqual([]);
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it("continues another requested invoice after the exact pending save is verified", async () => {
+    vi.mocked(runTool)
+      .mockResolvedValueOnce({ error: "Timeout", save_outcome: "unconfirmed", retry_safe: false, save_request_id: "request-1", invoice_number: "INV-1" })
+      .mockResolvedValueOnce({ id: 1, number: "INV-1", verified_save_requests: ["request-1"] })
+      .mockResolvedValueOnce({ ok: true, id: 2, number: "INV-2" });
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_name: "Acme", items: [{ qty: 6, unit_price: 0.2 }] }, "first")]),
+      turn([call("get_invoice", { invoice_number: "INV-1" })]),
+      turn([call("create_invoice_draft", { customer_name: "Other customer", items: [{ qty: 1, unit_price: 40 }] }, "second")]),
+      turn([], "The first invoice is verified and the second invoice was created."),
+    ], {}, config, "Create one invoice for Acme and another invoice for Other customer.");
+    expect(runTool).toHaveBeenCalledTimes(3);
+    expect(result.text).toBe("The first invoice is verified and the second invoice was created.");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
+  });
+
+  it("allows an explicitly requested exact retry after discovering a prior turn's pending save", async () => {
+    vi.mocked(runTool)
+      .mockResolvedValueOnce({ error: "Earlier save is unconfirmed", save_outcome: "unconfirmed", retry_safe: false, save_request_id: "request-1", invoice_number: "INV-1" })
+      .mockResolvedValueOnce({ ok: true, id: 1, number: "INV-1", confirmed_save_request: "request-1" })
+      .mockResolvedValueOnce({ id: 1, number: "INV-1", items: [{ qty: 6, unit_price: 0.2 }] });
+    const result = await run([
+      turn([call("create_invoice_draft", { customer_name: "Acme", items: [{ qty: 6, unit_price: 0.2 }] })]),
+      turn([call("retry_invoice_save", { request_id: "request-1" })]),
+      turn([call("get_invoice", { invoice_number: "INV-1" })]),
+      turn([], "The original invoice is now saved and verified."),
+    ], {}, config, "Please retry the earlier invoice save with the same details.");
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["create_invoice_draft", "retry_invoice_save", "get_invoice"]);
+    expect(result.text).toBe("The original invoice is now saved and verified.");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
+  });
+
   it("keeps invoice image details through a managed customer lookup and draft creation without OCR discovery", async () => {
     const item = { description: "RC drum", qty: 1200, unit: "L", unit_price: 0.2 };
     vi.mocked(runTool).mockResolvedValueOnce([{ id: "customer-1", name: "Fixture customer" }])

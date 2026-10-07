@@ -169,6 +169,19 @@ rejected. They have since been applied. This is the deployed state of project
 | `2026-09-06-international-business.sql` | 10 Sep 2026 | the six country/fx columns return 42501, not 42703 |
 | `2026-09-06-work-items.sql` | 10 Sep 2026 | `to_regclass('public.work_items')` is non-null, `relrowsecurity` true |
 | `2026-09-12-crm-sales-workflow.sql` | 12 Sep 2026 | isolated PostgreSQL rollback/access/concurrency checks; hosted function resolves, invoker security, authenticated grant, anonymous denial |
+| `2026-10-07-document-save-performance.sql` | 7 Oct 2026 | production timeout reproduced inside rollback; same invoice save completed in 1.54 s after upgrade, with three custom-pricing lines and total 336; owner, grants and invoker security unchanged |
+
+The October 7 upgrade parses each document payload once instead of once per
+column. It changes the shared invoice/quotation/purchase-order save function,
+without rewriting business records. The complete runtime catalog is checked
+against `scripts/check-cloud-schema.mjs`; fresh installations receive the same
+upgrade through the generated `supabase/schema.sql`. Existing installations
+must apply the incremental migration, not replay the fresh installer.
+
+Local documents use the existing SQLite-backed JSON collections and need no new
+SQL columns for this fix. The local upgrade regression verifies existing records,
+large company artwork, T.Liters calculations and recovery of a committed save
+whose acknowledgement was lost. Never replace a user's database to update it.
 
 The September 12 migration changes only the conversion function and its grants;
 it does not rewrite business records. The international columns and work-items

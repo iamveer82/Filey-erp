@@ -36,6 +36,7 @@ export interface Step {
   args: Record<string, unknown>;
   ok: boolean;
   invalidArguments?: boolean;
+  unconfirmedSave?: boolean;
   /** Short human line for the run summary. */
   note: string;
 }
@@ -139,6 +140,8 @@ const DOCUMENT_CREATORS: Record<string, "quote" | "order" | "purchase_order" | "
   create_letter_draft: "letter",
 };
 
+const INVOICE_WRITES = new Set(["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft", "retry_invoice_save"]);
+
 function requestedDocument(kind: typeof DOCUMENT_CREATORS[string], request: string): boolean {
   const noun = {
     quote: "(?:quotes?|quotations?)",
@@ -170,6 +173,20 @@ export function createGuard(userRequest = ""): AgentGuard {
 
   return {
     before(name, args) {
+      if (name === "retry_invoice_save" && (!/\b(?:retry|continue|try\s+(?:it\s+)?again)\b/i.test(userRequest) ||
+          /\b(?:do not|don't|never|stop)\b[^.!?\n]*\b(?:retry|continue|try)\b/i.test(userRequest))) return {
+        short: { error: "The user has not asked to retry the earlier invoice save. Verify it with get_invoice first.", retry_safe: false },
+      };
+      const unconfirmed = unresolvedFailures().filter(step => step.unconfirmedSave);
+      const exactRetry = name === "retry_invoice_save" && unconfirmed.some(step =>
+        (seen.get(keyOf(step.name, step.args)) as { save_request_id?: string } | undefined)?.save_request_id === args.request_id);
+      if (INVOICE_WRITES.has(name) && unconfirmed.length && !exactRetry) return {
+        short: {
+          error: "An earlier invoice save is unconfirmed — not repeating or changing it in this task.",
+          save_outcome: "unconfirmed", retry_safe: false,
+          hint: "Read the exact invoice to verify its outcome. A failed lookup does not prove it is absent. Keep the user's prices, quantities and custom fields unchanged; do not create another invoice or allocate a new number to bypass this check.",
+        },
+      };
       const documentKind = DOCUMENT_CREATORS[name];
       if (documentKind && unresolvedFailures().some(step => ["create_invoice_draft", "revise_invoice"].includes(step.name)) &&
           !requestedDocument(documentKind, userRequest)) return {
@@ -210,6 +227,27 @@ export function createGuard(userRequest = ""): AgentGuard {
     after(name, args, result, validationRejected = false) {
       const k = keyOf(name, args);
       const failed = !!toolFailure(result);
+      // Only the API's exact pending-payload comparison can confirm a lost
+      // acknowledgement. An invoice existing under the same number is not
+      // enough: it could have different lines or be an older revision.
+      if ((name === "get_invoice" || name === "retry_invoice_save") && !failed && result && typeof result === "object") {
+        const read = result as { id?: number; number?: string; ok?: boolean; verified_save_requests?: string[]; confirmed_save_request?: string };
+        const confirmed = name === "retry_invoice_save" && read.ok === true && read.confirmed_save_request === args.request_id
+          ? [read.confirmed_save_request] : name === "get_invoice" ? read.verified_save_requests : undefined;
+        if (Number.isSafeInteger(read.id) && Number(read.id) > 0 && Array.isArray(confirmed)) {
+          for (const step of log.filter(previous => previous.unconfirmedSave)) {
+            const writeKey = keyOf(step.name, step.args);
+            const pending = seen.get(writeKey) as { save_request_id?: string; invoice_number?: string; invoice_id?: number } | undefined;
+            if (!pending?.save_request_id || !confirmed.includes(pending.save_request_id) ||
+                !pending.invoice_number || read.number !== pending.invoice_number ||
+                (pending.invoice_id !== undefined && read.id !== pending.invoice_id)) continue;
+            step.ok = true;
+            step.unconfirmedSave = false;
+            step.note = `${step.name}: saved invoice verified`;
+            seen.set(writeKey, { ok: true, id: read.id, number: read.number, message: "The saved invoice was verified." });
+          }
+        }
+      }
       if (!validationRejected && !isReadOnly(name)) {
         // A failed acknowledgement can follow a committed mutation. Verify
         // current records even after errors; only trusted preflight proves no
@@ -218,7 +256,10 @@ export function createGuard(userRequest = ""): AgentGuard {
           if (isReadOnly(key.split(":")[0])) seen.delete(key);
       }
       seen.set(k, result);
-      log.push({ name, args, ok: !failed, ...(validationRejected ? { invalidArguments: true } : {}), note: shortNote(name, result) });
+      const unconfirmedSave = failed && !validationRejected && INVOICE_WRITES.has(name) &&
+        (result as { save_outcome?: string } | null)?.save_outcome === "unconfirmed";
+      log.push({ name, args, ok: !failed, ...(validationRejected ? { invalidArguments: true } : {}),
+        ...(unconfirmedSave ? { unconfirmedSave: true } : {}), note: shortNote(name, result) });
     },
     steps() {
       return [...log];

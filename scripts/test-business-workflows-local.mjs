@@ -27,6 +27,11 @@ try {
   const socket=process.platform==='win32'?'':` -k "${temp}"`;
   run('pg_ctl',['-D',temp,'-l',join(temp,'server.log'),'-o',`-h 127.0.0.1 -p ${port} -c wal_level=logical${socket}`,'-w','start']); started=true;
   run('psql',args,sql('scripts/fixtures/supabase-prerequisites.sql')+'\n'+sql('supabase/schema.sql'));
+  const saveAuthority="select jsonb_build_object('owner',proowner,'acl',proacl,'definer',prosecdef,'config',proconfig) from pg_proc where oid='public.filey_save_document(text,jsonb,jsonb,bigint)'::regprocedure;";
+  const beforeSaveAuthority=query(saveAuthority);
+  const saveUpgrade=sql('supabase/2026-10-07-document-save-performance.sql');
+  run('psql',args,saveUpgrade+'\n'+saveUpgrade);
+  assert.equal(query(saveAuthority),beforeSaveAuthority,'Document save upgrade changed its owner, ACL, invoker authority or search path');
   const migration=sql('supabase/2026-10-04-atomic-business-workflows.sql');
   run('psql',args,migration+'\n'+migration);
   // A colliding privileged role is a migration failure, never an RLS bypass.
@@ -46,6 +51,7 @@ try {
   assert.equal(query("select has_schema_privilege('filey_workflow_executor','public','CREATE');"),'f');
   console.log('PASS: a nonsuperuser table-owning installer can assign the executor functions, and executor schema CREATE is revoked before commit.');
   console.log(run('psql',args,sql('scripts/fixtures/business-workflow-assertions.sql')).trim());
+  console.log(run('psql',args,sql('scripts/fixtures/document-save-performance.sql')).trim());
   console.log(run('psql',args,sql('scripts/fixtures/business-advance-ownership.sql')).trim());
   // Reproduce the actual pre-fix gap only inside a rolled-back synthetic DB
   // transaction: all current authority gates remain, except the new net-pool

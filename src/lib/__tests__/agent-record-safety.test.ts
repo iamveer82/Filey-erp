@@ -349,7 +349,9 @@ it.each(["workspace", "workspace_return", "cancel"] as const)("prevents multi-st
     await expect(runTool(item.name, item.args, () => true, true, undefined, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
     expect(item.write, item.name).not.toHaveBeenCalled();
   }
-  expect(invoices).toHaveBeenCalled();
+  // A workspace change during company lookup now stops before allocating or
+  // looking up a fresh invoice number, as well as before the write.
+  expect(invoices).not.toHaveBeenCalled();
 });
 
 it.each(["organization", "account"] as const)("does not revive an approved action after switching %s away and back", async kind => {
