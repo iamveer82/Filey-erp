@@ -37,18 +37,18 @@ describe("compressForModel", () => {
     expect(r.ccrId).toBeUndefined();
   });
 
-  it("crushes an array of objects into a columnar digest and keeps the original retrievable", () => {
+  it("pages large arrays without dropping columns and keeps the original retrievable", () => {
     const raw = JSON.stringify(bigRows);
     const r = compressForModel("list_invoices", raw);
     expect(r.ccrId).toBeDefined();
-    // Keys written once, values still readable, syntax overhead gone.
-    expect(r.text).toContain("[60 rows × 6 cols]");
-    expect(r.text).toContain("INV-1050");
-    expect(r.text.includes('"number"')).toBe(false);
-    // Meaningful shrink even after the wire backstop.
+    const first = JSON.parse(r.text);
+    expect(first.content).toBe(raw.slice(0, first.next_offset));
+    expect(first.offset).toBe(0);
+    expect(first.id).toBe(r.ccrId);
+    expect(first.note).toContain(`headroom_retrieve("${r.ccrId}", next_offset)`);
+    expect(first.note).toContain("Do not infer missing values");
     expect(r.text.length).toBeLessThanOrEqual(6000);
     expect(r.text.length).toBeLessThan(raw.length);
-    expect(r.text).toMatch(/\[headroom\] json compressed \d+ → \d+ chars/);
 
     let offset: number | null = 0, restored = "";
     while (offset !== null) {
@@ -67,6 +67,54 @@ describe("compressForModel", () => {
     const r = compressForModel("tool", huge);
     expect(r.text.length).toBeLessThanOrEqual(6000);
     expect(r.ccrId).toBeDefined();
+    expect(JSON.parse(r.text).note).toContain(`headroom_retrieve("${r.ccrId}"`);
+  });
+
+  it("preserves a wide invoice including tail totals, formulas and nested amounts losslessly", () => {
+    const invoice = {
+      id: 28, number: "INV-DLS-028-26", issue_date: "2026-09-01", currency: "AED",
+      ...Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`saved_field_${i}`, "Saved optional header setting ".repeat(2)])),
+      items: [{ description: "Test goods", qty: 2, unit_price: 100, tax_rate: 5,
+        custom: { "T.Liters": 200.123456789 }, formula: "qty * unit_price" }],
+      total: 210, balance: 210, paid: 0,
+    };
+    const raw = JSON.stringify(invoice);
+    expect(raw.length).toBeGreaterThan(3500);
+    expect(raw.length).toBeLessThan(6000);
+    const r = compressForModel("get_invoice", raw);
+    expect(r.text).toBe(raw);
+    expect(r.ccrId).toBeUndefined();
+    expect(JSON.parse(r.text)).toEqual(invoice);
+  });
+
+  it("preserves escape-heavy output through bounded pages with a visible continuation marker", () => {
+    const original = JSON.stringify({ notes: '\\"\n'.repeat(1500), total: 210.123456789,
+      lines: [{ custom: { "T.Liters": 1200 }, qty: 6, unit_price: 0.20 }] });
+    const r = compressForModel("get_invoice", original);
+    expect(r.text.length).toBeLessThanOrEqual(6000);
+    const first = JSON.parse(r.text);
+    expect(first.note).toContain("[headroom]");
+    expect(first.content).toBe(original.slice(0, first.next_offset));
+    let restored = first.content;
+    let offset: number | null = first.next_offset;
+    while (offset !== null) {
+      const page = headroomRetrieve(r.ccrId!, offset) as { content: string; next_offset: number | null };
+      restored += page.content;
+      offset = page.next_offset;
+    }
+    expect(restored).toBe(original);
+    expect(JSON.parse(restored).total).toBe(210.123456789);
+  });
+
+  it("marks oversized prose and errors as partial instead of silently truncating them", () => {
+    for (const raw of ["A long observation. ".repeat(500), JSON.stringify({ error: "Exact failure. ".repeat(600) })]) {
+      const r = compressForModel("read_record", raw);
+      const page = JSON.parse(r.text);
+      expect(r.text.length).toBeLessThanOrEqual(6000);
+      expect(page.content).toBe(raw.slice(0, page.next_offset));
+      expect(page.note).toContain("headroom_retrieve");
+      expect(r.ccrId).toBeDefined();
+    }
   });
 
   it("never rewrites error payloads", () => {

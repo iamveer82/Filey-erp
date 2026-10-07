@@ -1,4 +1,4 @@
-import { setCacheOrg } from "../api";
+import { billing, setCacheOrg } from "../api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiAgent, aiAgentStream, setAiConfig } from "../ai";
 import { runAgentStream, type AgentEvent } from "../agentHarness";
@@ -23,12 +23,12 @@ import { listRuns } from "../agentJournal";
 beforeEach(() => { localStorage.clear(); setDataMode("local"); setCacheOrg(null); setCacheOrg("test-org", "test-user"); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-/** A big enough result that headroom engages (>1500 chars on the wire). */
+/** A big enough result that headroom pages it (>6000 chars on the wire). */
 async function seedManyCustomers() {
   setDataMode("local");
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 20; i++) {
     await runTool("create_customer", {
-      name: `Customer Number ${i} Trading LLC`,
+      name: `Customer Number ${i} Trading LLC ${"Regional wholesale distribution ".repeat(10)}`,
       email: `c${i}@example.com`,
     });
   }
@@ -605,11 +605,47 @@ describe("agent harness", () => {
     expect(bodies[1].length).toBeLessThan(bodies[0].length + 8000);
     // After compression, the retrieve tool is offered…
     expect(bodies[2]).toContain('"headroom_retrieve"');
-    // …the model called it, and got the FULL original back on the wire.
+    // …the model called it and received a page of the exact original.
     const retrieveCall = events.find(
       (e) => e.type === "tool_call" && e.name === "headroom_retrieve"
     );
     expect(retrieveCall).toBeDefined();
     expect(final).toBe("All retrieved.");
+  });
+
+  it.each(["openai", "anthropic"] as const)("keeps the saved invoice total and nested lines on the %s wire beside a workspace aggregate", async provider => {
+    vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 28, number: "INV-DLS-028-26", total: 50934.96, balance: 50934.96, paid: 0 }] as never);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({
+      id: 28, number: "INV-DLS-028-26", issue_date: "2026-09-01", currency: "AED",
+      tax_rate: 5, discount: 0, status: "draft", doc_type: "sales",
+      ...Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`saved_field_${i}`, "Saved optional header setting ".repeat(2)])),
+      items: [{ description: "Test goods", qty: 2, unit_price: 100, custom: { "T.Liters": "200" } }],
+    } as never);
+    vi.spyOn(billing, "verifyPendingInvoiceSaves").mockResolvedValue([]);
+    const bodies: { messages: { role: string; content: unknown }[] }[] = [];
+    const result = await collect(runAgentStream([
+      { role: "system", text: "Workspace-wide outstanding: AED 50,934.96 across all invoices. This is not an individual invoice total." },
+      { role: "user", text: "Read invoice INV-DLS-028-26 and tell me its saved number, date and total. Do not create or edit anything." },
+    ], { isOwner: true }, {
+      cfg: { provider, baseUrl: "https://example.test/v1", model: "fixture", apiKey: "test" },
+      fetchFn: async (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)));
+        const first = bodies.length === 1;
+        return new Response(JSON.stringify(provider === "openai"
+          ? first ? oa("", [{ id: "invoice-read", type: "function", function: { name: "get_invoice", arguments: '{"invoice_number":"INV-DLS-028-26"}' } }]) : oa("INV-DLS-028-26 · 2026-09-01 · AED 210.00")
+          : first ? an("", { id: "invoice-read", name: "get_invoice", input: { invoice_number: "INV-DLS-028-26" } }) : an("INV-DLS-028-26 · 2026-09-01 · AED 210.00")));
+      },
+    }));
+    const messages = bodies[1].messages;
+    const wireResult = provider === "openai"
+      ? messages.find(message => message.role === "tool")?.content
+      : messages.flatMap(message => Array.isArray(message.content) ? message.content : []).find((block: { type?: string }) => block.type === "tool_result")?.content;
+    const saved = JSON.parse(String(wireResult));
+    expect(saved).toMatchObject({ number: "INV-DLS-028-26", issue_date: "2026-09-01", total: 210,
+      items: [{ qty: 2, unit_price: 100, custom: { "T.Liters": "200" } }] });
+    expect(String(wireResult)).not.toContain("50934.96");
+    expect(saved.saved_field_44).toBe("Saved optional header setting ".repeat(2));
+    expect(result.events.filter(event => event.type === "tool_call").map(event => event.name)).toEqual(["get_invoice"]);
+    expect(result.final).toBe("INV-DLS-028-26 · 2026-09-01 · AED 210.00");
   });
 });

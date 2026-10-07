@@ -37,6 +37,7 @@ it("reads persisted lines and pricing after edits without sending branding image
   vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 7, number: "INV-7", total: 420, balance: 400, paid: 20 }] as never);
   const doc = vi.spyOn(billing, "getDoc").mockResolvedValue({
     id: 7, number: "INV-7", customer_name: "Mary Studio", customer_trn: "100000000000003",
+    currency: "AED", tax_rate: 5, discount: 0,
     items: [{ description: "Oil", qty: 2, unit_price: 1, custom: { liters: "400" } }],
     unit_price_formula: { a: "liters", b: "unit_price" },
     einvoice: { payment_account: "fixture-bank-account" },
@@ -60,7 +61,7 @@ it("refuses ambiguous or missing numbers and uses explicit IDs for duplicates", 
   vi.spyOn(billing, "listDocs").mockResolvedValue([
     { id: 7, number: "INV-7" }, { id: 8, number: "INV-7" },
   ] as never);
-  const doc = vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 8, number: "INV-7", items: [] } as never);
+  const doc = vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 8, number: "INV-7", currency: "AED", tax_rate: 5, discount: 0, items: [] } as never);
   expect(await runTool("get_invoice", { invoice_number: "INV-7" })).toMatchObject({ error: expect.stringContaining("More than one invoice") });
   expect(await runTool("get_invoice", { invoice_number: "missing" })).toHaveProperty("error");
   expect(await runTool("get_invoice", { invoice_number: " " })).toHaveProperty("error");

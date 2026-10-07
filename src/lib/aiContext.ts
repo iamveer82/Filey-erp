@@ -120,7 +120,7 @@ async function composeContext(companyName: string | undefined, ccy: string, curr
   const lines: string[] = [];
 
   lines.push(
-    `CURRENT BUSINESS DATA (live snapshot — the user owns all of this; use it to answer and to draft):`
+    `CURRENT BUSINESS DATA (workspace overview; may be cached, not a verified individual document):`
   );
   const name = companyName || s(company?.name);
   if (name || company) {
@@ -162,7 +162,7 @@ async function composeContext(companyName: string | undefined, ccy: string, curr
     }
     const outstanding = [...owed].map(([currency, balance]) => money(balance, currency)).join(" + ") || money(0, "AED");
     lines.push(
-      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue · ${outstanding} outstanding${owed.size > 1 ? " (separate currencies; not a converted total)" : ""}.`
+      `- Invoices: ${inv.length} total · ${unpaid.length} unpaid · ${overdue.length} overdue · ${outstanding} outstanding${owed.size > 1 ? " (separate currencies; not a converted total)" : ""} across the workspace, NOT the total of any one invoice.`
     );
     if (overdue.length) {
       const list = overdue
@@ -210,9 +210,9 @@ async function composeContext(companyName: string | undefined, ccy: string, curr
   if (orders.length) lines.push(`- Orders: ${orders.length}`);
 
   lines.push(
-    `This is a summary, not the whole book: counts are exact, the examples are a sample. ` +
+    `This is a workspace summary: counts reflect the loaded snapshot and the examples are a sample. Never use its outstanding balance as an individual invoice total. ` +
       `For anything beyond it — a specific invoice, a customer's history, a product's stock — ` +
-      `use the find/list tools rather than answering from what is listed here.`
+      `use the find/list tools rather than answering from what is listed here. Read get_invoice for a requested invoice's own dates, lines and total; if that result is missing or incomplete, retrieve it rather than substituting an overview figure.`
   );
 
   return lines.join("\n");

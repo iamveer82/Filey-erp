@@ -51,7 +51,7 @@ import {
 } from "./documentMessage";
 import { log } from "./log";
 import { DOC_TEMPLATES, resolveTemplate } from "./docTemplates";
-import { applyRoundOff, r2 } from "./money";
+import { applyRoundOff, isCreditNote, r2 } from "./money";
 import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
 import { loadDocFormats } from "./numberFormat";
 import { allocateDocumentNumber } from "./documentNumbers";
@@ -1336,16 +1336,21 @@ export const TOOLS: ToolDef[] = [
       const saved = await billing.getDoc(Number(summary.id), true);
       const verified = await billing.verifyPendingInvoiceSaves(saved);
       const { logo, stamp, signature, ...doc } = saved;
-      return {
-        ...doc,
-        total: summary.total,
-        balance: summary.balance,
-        paid: summary.paid,
+      const computed = applyRoundOff(docTotals(saved.items.map(item => ({ ...item, ...splitItemMeta(item.custom) })),
+        saved.discount, saved.tax_rate, saved.unit_price_formula), !!saved.round_off);
+      const sign = isCreditNote(saved.invoice_type_code) ? -1 : 1;
+      const total = sign * computed.total, tax = sign * computed.tax, paid = Number(summary.paid ?? 0);
+      // Essential amounts precede optional header fields in the model payload.
+      // Compute them from these returned lines, not a separately read list row.
+      const financials = { total, net_total: r2(total - tax), tax_total: tax, balance: Math.max(0, r2(total - paid)), paid,
+        items: saved.items.map(item => ({ ...item, amount: storedLineAmount(item, saved.unit_price_formula) })) };
+      return Object.assign({ id: doc.id, number: doc.number, issue_date: doc.issue_date, due_date: doc.due_date,
+        currency: doc.currency, status: doc.status, customer_name: doc.customer_name, ...financials }, doc, financials, {
         has_logo: !!logo,
         has_stamp: !!stamp?.data,
         has_signature: !!signature?.data,
         verified_save_requests: verified,
-      };
+      });
     },
   },
 

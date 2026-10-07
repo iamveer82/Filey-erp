@@ -1,18 +1,16 @@
 /* Built-in context compression — a TypeScript take on the ideas behind
  * headroom-ai (Apache-2.0), sized for Filey's BYOK, client-side agent.
  *
- * Tool outputs are the bulk of an agent's token bill, and most of that bulk is
- * syntax and repetition: quoted keys repeated per row of a 40-row JSON array,
- * the same log line printed two hundred times. Compressing those before they
- * reach the model cuts cost without touching meaning — and because guessing
- * is how compression breaks agents, every crushed output stays REVERSIBLE:
+ * Tool outputs are the bulk of an agent's token bill. Structured results stay
+ * lossless while they fit; larger results use explicit, reversible pages.
+ * Dropping fields or replacing nested lines with counts can remove financial
+ * facts, so JSON is never reduced to a lossy object or table summary.
+ * Repeated log lines may still be compressed. Every shortened output stays REVERSIBLE:
  * the original is kept in a local store (CCR) and the model can call
  * headroom_retrieve(id) to see it verbatim.
  *
- * Deliberate limits: prose is never rewritten (a model-free rewriter mangles
- * exactly the nuance answers depend on), error payloads pass through whole
- * (models need exact error text), and money-relevant numbers are rendered
- * with String() so no float formatting ever rounds them.
+ * Deliberate limits: prose, errors and financial values are never rewritten.
+ * When output exceeds a page, the model sees an explicit continuation marker.
  */
 
 import { log } from "./log";
@@ -83,73 +81,7 @@ export function headroomReset(): void {
   seq = 0;
 }
 
-/* ── Crushers ──────────────────────────────────────────────────────────────── */
-
-const CELL_CAP = 48;
-
-function cell(v: unknown): string {
-  let s: string;
-  if (typeof v === "string") s = v;
-  else if (v == null) s = "";
-  else if (Array.isArray(v)) s = `[${v.length} items]`;
-  else if (typeof v === "object") s = `{…}`;
-  else s = String(v); // numbers keep their exact value
-  return s.length > CELL_CAP ? `${s.slice(0, CELL_CAP)}…` : s.replace(/\s+/g, " ");
-}
-
-/** Array of similar objects → columnar digest: one header line, one row per
- *  record, keys written once instead of N times. This is where most of the
- *  savings on ERP data comes from. */
-function crushRows(rows: Record<string, unknown>[]): string {
-  const cols: string[] = [];
-  for (const r of rows.slice(0, 20))
-    for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
-  const shown = cols.slice(0, 12);
-
-  const KEEP_HEAD = 60;
-  const KEEP_TAIL = 20;
-  const lines: string[] = [
-    `[${rows.length} rows × ${shown.length} cols] ${shown.join(" | ")}`,
-  ];
-  const emit = (r: Record<string, unknown>) =>
-    lines.push(shown.map((k) => cell(r[k])).join(" | "));
-  if (rows.length > KEEP_HEAD + KEEP_TAIL) {
-    for (const r of rows.slice(0, KEEP_HEAD)) emit(r);
-    lines.push(`[…${rows.length - KEEP_HEAD - KEEP_TAIL} more rows]`);
-    for (const r of rows.slice(-KEEP_TAIL)) emit(r);
-  } else {
-    for (const r of rows) emit(r);
-  }
-  return lines.join("\n");
-}
-
-/** Nested object → key-path summary with type/size/preview per leaf. */
-function crushObject(obj: Record<string, unknown>): string {
-  const lines: string[] = [];
-  for (const [k, v] of Object.entries(obj).slice(0, 40)) {
-    if (v == null || typeof v !== "object") lines.push(`${k}: ${cell(v)}`);
-    else if (Array.isArray(v))
-      lines.push(`${k}: [${v.length} items] e.g. ${cell(v[0])}`);
-    else
-      lines.push(
-        `${k}: {${Object.keys(v).length} keys} e.g. ${Object.keys(v).slice(0, 4).join(", ")}`
-      );
-  }
-  return lines.join("\n");
-}
-
-function crushJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    const objs = value.filter(
-      (x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)
-    );
-    if (objs.length === value.length && objs.length > 0) return crushRows(objs);
-    const scalars = value.map((v) => cell(v)).join(", ");
-    return `[${value.length} items] ${scalars}`;
-  }
-  if (value && typeof value === "object") return crushObject(value as Record<string, unknown>);
-  return String(value);
-}
+/* ── Repeated log lines ────────────────────────────────────────────────────── */
 
 /** Log-ish text: collapse consecutive duplicate lines, then keep head+tail. */
 function crushLog(text: string): string {
@@ -232,46 +164,44 @@ export function headroomStats(): HeadroomStats {
  *  on the wire (already ≤ MAX_WIRE), plus the CCR id when an original was
  *  stored. Never throws — a compressor bug must not fail the tool call. */
 export function compressForModel(name: string, raw: string): WireText {
-  const passthrough = (): WireText => ({ text: raw.slice(0, MAX_WIRE) });
   try {
-    if (raw.length < MIN_CHARS) {
-      bump(raw.length, Math.min(raw.length, MAX_WIRE), false);
-      return passthrough();
-    }
-
-    // Errors go whole: the model needs the exact message to recover, and they
-    // are rarely large enough to hurt.
-    let parsed: unknown;
+    // A JSON record's field order is not a relevance ranking. In particular,
+    // invoice totals often follow dozens of optional header fields and lines.
     let isJson = false;
     const trimmed = raw.trim();
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        parsed = JSON.parse(trimmed);
-        isJson =
-          parsed != null &&
-          typeof parsed === "object" &&
-          !("error" in (parsed as Record<string, unknown>));
-      } catch {
-        isJson = false;
-      }
+      try { JSON.parse(trimmed); isJson = true; } catch { /* plain text */ }
     }
-
-    const kind = isJson ? "json" : looksLikeLog(raw) ? "log" : "text";
-    const body = kind === "json" ? crushJson(parsed) : kind === "log" ? crushLog(raw) : raw;
-
-    const candidate = body.length < raw.length * 0.8 ? body : "";
-    if (!candidate) {
-      bump(raw.length, Math.min(raw.length, MAX_WIRE), false);
-      return passthrough();
+    const isLog = !isJson && raw.length >= MIN_CHARS && looksLikeLog(raw);
+    const crushed = isLog ? crushLog(raw) : raw;
+    const body = crushed.length < raw.length * 0.8 ? crushed : raw;
+    if (body === raw && raw.length <= MAX_WIRE) {
+      bump(raw.length, raw.length, false);
+      return { text: raw };
     }
 
     const id = rememberOriginal(raw);
-    const footer = `\n\n[headroom] ${kind} compressed ${raw.length} → ${candidate.length} chars (~${Math.round((1 - candidate.length / raw.length) * 100)}% smaller). Full original: call headroom_retrieve("${id}").`;
-    const text = `${candidate}${footer}`.slice(0, MAX_WIRE);
-    log.info("headroom", name, { kind, from: raw.length, to: text.length });
+    const footer = `[headroom] Output shortened. Do not infer missing values. Continue with headroom_retrieve("${id}", next_offset).${raw.length > MAX_STORED ? ` Stored output is capped at ${MAX_STORED} characters; use a narrower source query for later content.` : ""}`;
+    let text: string;
+    if (body !== raw && body.length + footer.length + 2 <= MAX_WIRE) {
+      text = `${body}\n\n${footer.replace("next_offset", "0")}`;
+    } else {
+      // Keep valid JSON around the partial content, including its continuation
+      // pointer. Account for escaping instead of slicing away the footer.
+      let limit = MAX_WIRE;
+      const page = () => JSON.stringify({ ...(headroomRetrieve(id, 0, limit) as object), note: footer });
+      text = page();
+      while (text.length > MAX_WIRE) {
+        limit = Math.max(1, limit - (text.length - MAX_WIRE));
+        text = page();
+      }
+    }
+    log.info("headroom", name, { kind: isLog ? "log" : "page", from: raw.length, to: text.length });
     bump(raw.length, text.length, true);
     return { text, ccrId: id };
   } catch {
-    return passthrough();
+    // Even unexpected formatting failures must not masquerade as a complete
+    // record with its tail silently missing.
+    return { text: raw.length <= MAX_WIRE ? raw : "The tool output could not be displayed completely. Re-run a narrower read before quoting its values." };
   }
 }

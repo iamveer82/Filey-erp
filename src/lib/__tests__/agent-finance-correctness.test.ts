@@ -227,6 +227,24 @@ describe("invoice save acknowledgement", () => {
     expect(result).not.toHaveProperty("logo");
   });
 
+  it.each([undefined, "381"])("puts totals from the returned invoice lines before optional header fields (type %s)", invoice_type_code => {
+    mockInvoiceContext();
+    vi.mocked(billing.listDocs).mockResolvedValue([{ id: 81, number: "INV-028", total: 50934.96, balance: 50934.96, paid: 0 }] as never);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({
+      ...Object.fromEntries(Array.from({ length: 55 }, (_, i) => [`optional_field_${i}`, "Header detail"])),
+      id: 81, number: "INV-028", issue_date: "2026-09-01", currency: "AED", invoice_type_code,
+      tax_rate: 5, discount: 0, unit_price_formula: { a: "liters", b: "unit_price" },
+      items: [{ description: "Oil", qty: 50, unit_price: 0.2, custom: { liters: "1000" } }],
+    } as never);
+    vi.spyOn(billing, "verifyPendingInvoiceSaves").mockResolvedValue([]);
+    return runTool("get_invoice", { invoice_number: "INV-028" }).then(result => {
+      const sign = invoice_type_code ? -1 : 1;
+      expect(result).toMatchObject({ number: "INV-028", issue_date: "2026-09-01", total: 210 * sign,
+        net_total: 200 * sign, tax_total: 10 * sign, items: [expect.objectContaining({ amount: 200 })] });
+      expect(Object.keys(result as object).slice(0, 20)).toEqual(expect.arrayContaining(["number", "issue_date", "total", "net_total", "tax_total", "balance", "items"]));
+    });
+  });
+
   it.each(["local", "cloud"] as const)("retains supplied per-litre pricing when a %s save times out", async mode => {
     const save = mockInvoiceContext().mockRejectedValue({ code: "57014", message: "canceling statement due to statement timeout" });
     vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
