@@ -405,6 +405,9 @@ export interface InvoiceDocSummary {
   tax_total?: number;
   currency?: string;
   paid?: number;
+  /** Customer advance credit allocated to this invoice (document currency). */
+  advance_applied?: number;
+  /** Outstanding after cash payments and allocated advance credit. */
   balance?: number;
   issue_date?: string;
   due_date?: string;
@@ -4152,7 +4155,7 @@ export const billing = {
         // costs nothing there; this is purely for the cloud round trip.)
         const DOC_COLS =
           "id,user_id,number,customer_id,quotation_id,customer_name,status,template,currency,fx_rate,issue_date,due_date," +
-          "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type,invoice_type_code";
+          "shared,shared_with,updated_at,tax_rate,discount,round_off,unit_price_formula,doc_type,invoice_type_code,advance_applied";
         const [allDocs, items, payments] = await Promise.all([
           // A purchase list can be filtered server-side. A sales list can't:
           // doc_type is null on legacy rows and those count as sales, which
@@ -4205,6 +4208,11 @@ export const billing = {
           const sign = isCreditNote(d.invoice_type_code) ? -1 : 1;
           const total = sign * computed.total || 0;
           const paid = paidByDoc.get(d.id) ?? 0;
+          // Customer credit allocated to the invoice settles part of it just as a
+          // payment does (posting treats it that way when it marks the invoice
+          // paid), so the outstanding balance must net it off too — otherwise
+          // lists, aging and the payments dialog ask for money already covered.
+          const advanceApplied = d.doc_type === "purchase" ? 0 : Number(d.advance_applied) || 0;
           return {
             id: d.id,
             number: d.number,
@@ -4223,7 +4231,8 @@ export const billing = {
             // figures move every time the market does.
             fx_rate: d.fx_rate ?? undefined,
             paid,
-            balance: Math.max(0, total - paid),
+            advance_applied: advanceApplied,
+            balance: Math.max(0, total - paid - advanceApplied),
             issue_date: d.issue_date ?? undefined,
             due_date: d.due_date ?? undefined,
             shared: d.shared ?? undefined,
