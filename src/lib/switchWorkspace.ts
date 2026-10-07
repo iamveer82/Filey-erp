@@ -8,12 +8,20 @@ import {
   rememberLocalIdentity,
   setLocalSignedIn,
 } from "./localAuth";
-import { getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, setMigrating, syncCycle } from "./sync";
+import { getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, setMigrating, syncCycle, syncStatusMessage, type SyncStatus } from "./sync";
 import { migrateCloudToLocal } from "./migrate";
 import { journalSnapshot } from "./localdb";
 import { withCloudTransfer } from "./cloudTransfer";
 
 let switching = false;
+
+/** Only curated sync guidance may be shown instead of the generic transfer error. */
+export class WorkspaceTransferError extends Error {
+  constructor(status: SyncStatus) {
+    super(syncStatusMessage(status));
+    this.name = "WorkspaceTransferError";
+  }
+}
 
 /** Change storage only after the destination is usable. Never ends an auth session. */
 export async function switchWorkspace(
@@ -51,11 +59,15 @@ export async function switchWorkspace(
         const failures = getSyncStatus().failures;
         // Enabling cloud chooses this device's edited versions. Unchanged
         // records and cloud-only records keep their cloud versions.
-        if (!synced && failures?.length && failures.every(f => f.kind === "conflict" || f.kind === "record"))
+        // A local ownership mismatch can accompany ordinary settings conflicts.
+        // The resolver verifies retired-workspace ownership on the server before
+        // changing anything; other permission failures must never enter recovery.
+        if (!synced && failures?.length && failures.every(f => f.kind === "conflict" || f.kind === "record"
+          || (f.kind === "permission" && f.message === "This record belongs to a different company. Switch to its original workspace before uploading.")))
           synced = await resolveSyncConflicts(true, supabase, { pendingOnly: true, transfer });
         return synced;
       });
-      if (!synced) throw new Error("Couldn't finish saving to Filey Cloud. Your device data is safe. Check your connection and try again.");
+      if (!synced) throw new WorkspaceTransferError(getSyncStatus());
       setMigrating(true);
       locked = true;
     } else {
