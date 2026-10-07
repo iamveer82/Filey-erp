@@ -192,6 +192,10 @@ try {
   run('psql', teamArgs, avatarChoicesMigration);
   assert.equal(run('psql', [...teamArgs, '-tAc', "select jsonb_agg(jsonb_build_array(id,avatar) order by id) from org_members"]).trim(), avatarBefore);
   console.log('PASS: avatar-choice migration is repeatable and does not rewrite saved presets.');
+  const mascotMigration = sql('supabase/2026-10-07-mascot-avatars.sql');
+  run('psql', teamArgs, mascotMigration + '\n' + mascotMigration);
+  assert.equal(run('psql', [...teamArgs, '-tAc', "select jsonb_agg(jsonb_build_array(id,avatar) order by id) from org_members"]).trim(), avatarBefore);
+  console.log(run('psql', teamArgs, sql('scripts/fixtures/mascot-avatar-assertions.sql') + '\n' + sql('scripts/fixtures/avatar-choice-assertions.sql')).trim());
   console.log(run('psql',teamArgs,sql('supabase/2026-09-20-profile-insert-scope.sql')+'\n'
     +sql('scripts/fixtures/profile-scope-assertions.sql')).trim());
   const rateMigration = sql('supabase/2026-09-20-edge-rate-limits.sql');

@@ -10,6 +10,7 @@ import { SelectMenu } from "../../components/ui-menu";
 import { getLocalCredential, rememberLocalCredential } from "../../lib/localAuth";
 import { checkPassword, strengthLabel } from "../../lib/password";
 import AvatarPicker from "../../components/AvatarPicker";
+import { ProfileAvatarImage } from "../../components/ProfileAvatarImage";
 
 /* ---------------- Account & Profile ---------------- */
 
@@ -326,7 +327,7 @@ export default function AccountProfile() {
           <div className="relative shrink-0">
             <div className="w-20 h-20 rounded-full bg-foreground text-background grid place-items-center text-xl font-medium overflow-hidden">
               {p.avatar ? (
-                <img
+                <ProfileAvatarImage animate
                   src={p.avatar}
                   alt="Profile photo"
                   className="w-full h-full object-cover"

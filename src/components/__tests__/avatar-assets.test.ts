@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, it } from "vitest";
-import { AVATAR_SHAPES, AVATAR_COLOURS, avatarUrl } from "../../lib/profileAvatars";
+import {
+  AVATAR_SHAPES,
+  AVATAR_COLOURS,
+  MASCOT_AVATARS,
+  avatarUrl,
+} from "../../lib/profileAvatars";
+import sharp from "sharp";
 
 it("keeps saved avatar URLs available and gives every character a static reduced-motion mode", () => {
   const paths = AVATAR_SHAPES.flatMap((shape) => [
@@ -25,4 +31,23 @@ it("keeps saved avatar URLs available and gives every character a static reduced
     designs.add(svg);
   }
   expect(designs.size).toBe(paths.length);
+});
+
+it("ships every licensed mascot as a small portrait and aligned direction/reaction sheets accepted by the cloud", async () => {
+  const license = readFileSync("public/avatars/mascots/LICENSE.txt", "utf8");
+  expect(license).toContain("Copyright (c) 2026 Kamran Ahmed");
+  expect(license).toContain("Permission is hereby granted");
+  const sql = readFileSync("supabase/2026-10-07-mascot-avatars.sql", "utf8");
+  const allowed = sql.match(/avatars\/mascots\/\(([^)]+)\)/)![1].split("|");
+  expect(allowed.sort()).toEqual([...MASCOT_AVATARS].sort());
+  for (const id of MASCOT_AVATARS) {
+    for (const suffix of ["", "-directions", "-reactions"]) {
+      const bytes = readFileSync(`public/avatars/mascots/${id}${suffix}.webp`);
+      const metadata = await sharp(bytes).metadata();
+      expect(metadata.format).toBe("webp");
+      expect(metadata.width).toBe(suffix ? 480 : 160);
+      expect(metadata.height).toBe(suffix ? 480 : 160);
+      expect(bytes.length).toBeLessThan(100_000);
+    }
+  }
 });
