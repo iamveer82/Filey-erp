@@ -239,6 +239,48 @@ it.each(["success", "error", "stop"])("preserves a follow-up draft while a reply
   expect(stream).toHaveBeenCalledOnce();
 });
 
+it.each(["", "Now check the saved invoice"])("does not prepare a duplicate write after an unexpected error with follow-up %j", async followUp => {
+  let finish!: () => void;
+  const done = new Promise<void>(resolve => { finish = resolve; });
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield { type: "tool_call", name: "create_invoice_draft", args: {}, id: "saved" };
+    yield { type: "tool_result", name: "create_invoice_draft", result: { ok: true, id: 42, number: "INV-FIXTURE-42" }, id: "saved" };
+    yield { type: "text", text: "The invoice was saved." };
+    await done;
+    throw new Error("Progress could not be saved.");
+  });
+  const { container } = showChat();
+  fireEvent.change(input(), { target: { value: "Create an invoice from this file" } });
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["fixture"], "invoice-source.pdf", { type: "application/pdf" })] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("The invoice was saved.");
+  if (followUp) fireEvent.change(input(), { target: { value: followUp } });
+  await act(async () => { finish(); });
+  expect(await screen.findByText("Progress could not be saved.")).toBeVisible();
+  expect(input()).toHaveValue(followUp);
+  expect(screen.queryByRole("button", { name: "Remove invoice-source.pdf" })).not.toBeInTheDocument();
+  expect(stream).toHaveBeenCalledOnce();
+  await waitFor(() => expect(loadChats()[0].turns.slice(-1)[0]?.run).toMatchObject({ outcome: "error",
+    actions: [{ id: "saved", name: "create_invoice_draft", status: "completed" }] }));
+});
+
+it("restores an unexecuted request after a failure before any action", async () => {
+  vi.spyOn(ai, "aiReady").mockReturnValue(true);
+  const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
+    yield* [];
+    throw new Error("Could not open the AI connection.");
+  });
+  showChat();
+  fireEvent.change(input(), { target: { value: "Create the draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await screen.findByText("Could not open the AI connection.");
+  expect(input()).toHaveValue("Create the draft");
+  expect(stream).toHaveBeenCalledOnce();
+});
+
 it("offers explicit history recovery on initial corrupted data and retains the original", async () => {
   const scope = agentStorageScope()!;
   const key = `filey.ai.chats:${encodeURIComponent(scope)}`;

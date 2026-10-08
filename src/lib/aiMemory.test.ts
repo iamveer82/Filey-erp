@@ -1,7 +1,7 @@
 import { setCacheOrg } from "./api";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addMemory, clearMemories, searchMemories, listMemories, memoryDigest } from "./aiMemory";
-import { agentStorageKey } from "./agentStorage";
+import { addMemory, clearMemories, deleteMemory, searchMemories, listMemories, memoryDigest } from "./aiMemory";
+import { agentStorageKey, readAgentStorage } from "./agentStorage";
 
 describe("searchMemories", () => {
   beforeEach(() => {
@@ -103,5 +103,28 @@ describe("searchMemories", () => {
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("quota"); });
     try { expect(() => addMemory("a fact")).toThrow(/could not be saved/); }
     finally { spy.mockRestore(); }
+  });
+
+  it.each(["local", "cloud"])("preserves existing preferences when a %s storage read fails before a write", mode => {
+    localStorage.setItem("filey_data_mode", mode);
+    clearMemories();
+    const saved = addMemory("Use liters for invoice calculations", "preference");
+    const key = agentStorageKey("filey.ai.memory")!;
+    const before = localStorage.getItem(key);
+    const originalGet = Storage.prototype.getItem;
+    const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, name) {
+      if (name === key) throw new DOMException("Storage is temporarily unavailable", "SecurityError");
+      return originalGet.call(this, name);
+    });
+    const write = vi.spyOn(Storage.prototype, "setItem");
+    try {
+      expect(readAgentStorage("filey.ai.memory")).toBeNull();
+      expect(() => addMemory("Prefer concise replies", "preference")).toThrow(/left unchanged/);
+      expect(() => deleteMemory(saved.id)).toThrow(/left unchanged/);
+      expect(write).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); write.mockRestore(); }
+    expect(localStorage.getItem(key)).toBe(before);
+    addMemory("Prefer concise replies", "preference");
+    expect(listMemories().map(memory => memory.text)).toEqual(["Prefer concise replies", "Use liters for invoice calculations"]);
   });
 });

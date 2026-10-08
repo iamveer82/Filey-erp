@@ -244,7 +244,7 @@ async function pendingAgentInvoice(input: Partial<InvoiceDocInput>, assertCurren
   if (match && !match.active) {
     const recovered = await billing.readPendingInvoiceSave(match.requestId);
     assertCurrent();
-    if (recovered) return { ok: true, id: confirmedDocumentId(recovered.id), number: recovered.number,
+    if (recovered) return { ok: true, id: confirmedDocumentId(recovered.id), number: recovered.number, currency: recovered.currency,
       verified_save_requests: [match.requestId], message: "The original invoice save was verified. No second invoice was created." };
   }
   return { error: `Invoice ${unresolved.input.number} has an unconfirmed save. Verify it before creating or changing another invoice for this customer.`,
@@ -498,7 +498,7 @@ async function partyCheck(
   };
 }
 
-async function findInvoice(numberOrId: unknown, fresh = false, docType: "sales" | "purchase" = "sales") {
+async function findInvoice(numberOrId: unknown, fresh = true, docType: "sales" | "purchase" = "sales") {
   if (!str(numberOrId).trim()) return undefined;
   return findNumberedDocument(
     (await billing.listDocs(docType, fresh)) as unknown as Record<string, unknown>[],
@@ -1309,7 +1309,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "list_invoices",
-    description: "Find invoice summaries by number/customer and status. Default 30; use offset for more. Read get_invoice before editing or reporting details.",
+    description: "Find current invoices, newest invoice date first. Filter by number/customer/status; default 30, offset for more. Read get_invoice for details.",
     parameters: {
       type: "object",
       properties: {
@@ -1320,7 +1320,7 @@ export const TOOLS: ToolDef[] = [
       },
     },
     run: async ({ status, query, limit, offset }) => {
-      const docs = (await billing.listDocs()) as unknown as Record<string, unknown>[];
+      const docs = (await billing.listDocs("sales", true)) as unknown as Record<string, unknown>[];
       const t = today();
       let rows = docs;
       if (status === "overdue")
@@ -1343,6 +1343,7 @@ export const TOOLS: ToolDef[] = [
         balance: d.balance,
         currency: d.currency,
         status: d.status,
+        issue_date: d.issue_date,
         due: d.due_date,
       }));
     },
@@ -1686,7 +1687,7 @@ export const TOOLS: ToolDef[] = [
           co?.default_template ||
           "minimal",
         accent: co?.default_accent || "#FFD600",
-        currency: str(args.currency) || getDisplayCurrency(),
+        currency: str(args.currency) || co?.currency || getDisplayCurrency(),
         seller_name: co?.name || "",
         tax_country_code: co?.country_code,
         seller_address: co?.address,
@@ -1759,6 +1760,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         id,
         number: input.number,
+        currency: input.currency,
         ...(unknownParty ?? {}),
         ...pricing,
         priced_by: priceBy || "qty × unit price",
@@ -1911,6 +1913,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         id: saved.id,
         number: doc.number,
+        currency: next.currency,
         ...pricing,
         priced_by: priceBy || "qty × unit price",
         ...readiness,
@@ -2585,6 +2588,7 @@ export const TOOLS: ToolDef[] = [
       const assertCurrent = toolExecutionCheck(signal);
       args = await documentContext(args, "customer");
       const quoteApi = (await import("./api")).quotes;
+      const currency = str(args.currency) || (await billing.getCompany())?.currency || getDisplayCurrency();
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
         : [];
@@ -2626,7 +2630,7 @@ export const TOOLS: ToolDef[] = [
         status: "draft",
         template: "minimal",
         accent: "#FFD600",
-        currency: str(args.currency) || getDisplayCurrency(),
+        currency,
         customer_name: str(args.customer_name),
         customer_id: args.customer_id == null ? undefined : Number(args.customer_id),
         customer_email: str(args.customer_email),
@@ -2641,6 +2645,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         id,
         number: qtNo,
+        currency,
         ...pricing,
         priced_by: priceBy || "qty × rate",
         message: "Draft quotation created — open Quoting to review/send.",
@@ -2725,6 +2730,7 @@ export const TOOLS: ToolDef[] = [
     run: async (args, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
       args = await documentContext(args, "supplier");
+      const currency = str(args.currency) || (await billing.getCompany())?.currency || getDisplayCurrency();
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
         : [];
@@ -2764,7 +2770,7 @@ export const TOOLS: ToolDef[] = [
         status: "draft",
         template: "uae",
         accent: "#222222",
-        currency: str(args.currency) || getDisplayCurrency(),
+        currency,
         order_date: today(),
         supplier_id: args.supplier_id == null ? undefined : Number(args.supplier_id),
         supplier_email: str(args.supplier_email),
@@ -2786,6 +2792,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         id,
         number: poNumber,
+        currency,
         ...(unknownParty ?? {}),
         lines,
         total,
@@ -3282,7 +3289,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_purchase_invoices",
     description:
-      "Supplier bills (purchase invoices), newest first — optionally filtered by supplier name or status. Separate from sales invoices; use list_invoices for what you billed OUT.",
+      "Supplier bills, newest invoice date first, filtered by supplier name or status. Separate from sales invoices; use list_invoices for what you billed OUT.",
     parameters: {
       type: "object",
       properties: {
@@ -3292,7 +3299,7 @@ export const TOOLS: ToolDef[] = [
       },
     },
     run: async (a) => {
-      const docs = (await billing.listDocs("purchase")) as unknown as Record<
+      const docs = (await billing.listDocs("purchase", true)) as unknown as Record<
         string,
         unknown
       >[];
@@ -3371,7 +3378,7 @@ export const TOOLS: ToolDef[] = [
         doc_type: "purchase",
         template: co?.default_template || "minimal",
         accent: co?.default_accent || "#FFD600",
-        currency: str(a.currency) || getDisplayCurrency(),
+        currency: str(a.currency) || co?.currency || getDisplayCurrency(),
         seller_name: co?.name || "",
         tax_country_code: co?.country_code,
         seller_trn: co?.trn,
@@ -3410,6 +3417,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         id: saved.id,
         number: input.number,
+        currency: input.currency,
         ...(unknownParty ?? {}),
         message: "Draft bill recorded — open Purchase Invoices to review it.",
       };
@@ -3564,12 +3572,13 @@ export const TOOLS: ToolDef[] = [
         (await receipts.list()).map((r) => r.number),
         await loadDocFormats()
       );
+      const currency = co?.currency || getDisplayCurrency();
       await (assertCurrent(), receipts.save({
         number,
         status: "issued",
         template: co?.default_template || "minimal",
         accent: co?.default_accent || "#FFD600",
-        currency: getDisplayCurrency(),
+        currency,
         seller_name: co?.name || "",
         tax_country_code: co?.country_code,
         seller_trn: co?.trn,
@@ -3584,6 +3593,7 @@ export const TOOLS: ToolDef[] = [
         ok: true,
         number,
         amount,
+        currency,
         message: `Receipt ${number} issued — open Payment Receipts to print or send it.`,
       };
     },
@@ -5821,7 +5831,9 @@ export async function runTool(
         : name === "workspace_browser" && agentId && isToolAllowed("agent_computer")
           ? await desktopBrowserCommand(args, signal, agentId)
           : await tool.run(args, signal);
-    signal?.throwIfAborted();
+    // Stop prevents further work, but cannot undo an in-flight write. Return
+    // its actual acknowledgement so the harness can record it before stopping.
+    // A changed workspace still must not receive the previous task's result.
     if (agentStorageScope() !== scope || identity !== getCacheIdentity())
       throw new DOMException("Workspace changed during execution.", "AbortError");
     const failure = toolFailure(out);

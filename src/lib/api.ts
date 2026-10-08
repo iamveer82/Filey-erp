@@ -1250,7 +1250,7 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
 // ---- generic Supabase helpers ----
 async function sList<T>(
   table: string,
-  order?: { col: string; asc: boolean }[],
+  order?: { col: string; asc: boolean; nullsFirst?: boolean }[],
   select = "*",
   client: any = null,
   limit = Infinity
@@ -1266,7 +1266,7 @@ async function sList<T>(
       // keep id as the stable tie-breaker used by pagination.
       if (o.col === "id" && !o.asc && !(order ?? []).some(entry => entry.col === "created_at"))
         q = q.order("created_at", { ascending: false });
-      q = q.order(o.col, { ascending: o.asc });
+      q = q.order(o.col, { ascending: o.asc, ...(o.nullsFirst !== undefined ? { nullsFirst: o.nullsFirst } : {}) });
     }
     if (remote) {
       if (!(order ?? []).some(o => o.col === "id")) q = q.order("id", { ascending: true });
@@ -4281,7 +4281,7 @@ export const billing = {
             ? sList<any>(
                 "invoice_docs",
                 [
-                  { col: "issue_date", asc: false },
+                  { col: "issue_date", asc: false, nullsFirst: false },
                   { col: "id", asc: false },
                 ],
                 DOC_COLS
@@ -4289,7 +4289,7 @@ export const billing = {
             : sList<any>(
                 "invoice_docs",
                 [
-                  { col: "issue_date", asc: false },
+                  { col: "issue_date", asc: false, nullsFirst: false },
                   { col: "id", asc: false },
                 ],
                 DOC_COLS
