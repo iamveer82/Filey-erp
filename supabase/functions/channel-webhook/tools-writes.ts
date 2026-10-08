@@ -204,8 +204,7 @@ export function rankMemories<T extends { text: string; tag?: string | null }>(ro
 export async function proposePaymentReminder(client: any, org: string, ownerId: string, input: any, source?: ApprovalSource): Promise<unknown> {
   const number = String(input?.invoice_number ?? "").trim();
   if (!number) return { error: "invoice_number is required" };
-  // deno-lint-ignore no-control-regex
-  if (number.length > 160 || /[\u0000-\u001f\u007f]/.test(number)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
+  if (number.length > 160 || [...number].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
   const { data: inv, error } = await client
     .from("invoice_docs")
     .select("id,number,customer_name,customer_email,due_date,status,currency")

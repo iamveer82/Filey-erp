@@ -781,8 +781,7 @@ export async function runTool(
     case "get_invoice_detail": {
       const number = String(input?.invoice_number ?? "").trim();
       if (!number) return { error: "invoice_number is required" };
-      // deno-lint-ignore no-control-regex
-      if (number.length > 160 || /[\u0000-\u001f\u007f]/.test(number)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
+      if (number.length > 160 || [...number].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
       const { data: inv, error } = await client
         .from("invoice_docs")
         .select("id,number,status,currency,customer_name,customer_email,issue_date,due_date,tax_rate,discount,unit_price_formula,round_off,invoice_type_code")
