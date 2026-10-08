@@ -39,7 +39,7 @@ vi.mock("../supabase", async () => {
   return { isConfigured: true, supabase: null, sb: () => localClient };
 });
 
-import { billing, erp, setCacheOrg } from "../api";
+import { billing, erp, suppliers, setCacheOrg } from "../api";
 import { clearLocalCache, journalSnapshot, localClient } from "../localdb";
 import { blankLetterForm, letterDisplayForm, loadLetters, saveLetter, type LetterRecord } from "../letters";
 import { blankPackagingForm, loadPackagingLists, savePackagingList } from "../packagingLists";
@@ -56,6 +56,22 @@ beforeEach(() => {
   native.values.set("syncjournal", '{"v":2,"tables":{"invoice_docs":{"changed":[5],"deleted":[]}}}');
 });
 afterAll(() => { delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__; });
+
+it("adds optional supplier identity to an older desktop collection and preserves it across reopen", async () => {
+  const oldSupplier = { id: 10, name: "Original supplier", notes: "Original notes", bank_details: { iban: "Original bank" } };
+  native.values.set("localdb:suppliers", JSON.stringify([oldSupplier]));
+  const fields = { city: "Dubai", country_code: "AE", country_subdivision: "DU", einvoice_identity: JSON.stringify({ tin: "1234567890", legal_id: "LIC-1" }) };
+  await suppliers.update(10, { custom_fields: fields });
+  clearLocalCache();
+  expect((await suppliers.list())[0]).toMatchObject({ ...oldSupplier, custom_fields: fields });
+  const newId = await suppliers.create({ name: "Name only" });
+  expect(newId).toBeGreaterThan(0);
+  await suppliers.update(10, { custom_fields: {} });
+  clearLocalCache();
+  expect((await suppliers.list()).find(row => row.id === 10)).toMatchObject({ ...oldSupplier, custom_fields: {} });
+  expect(native.values.get("localdb:invoice_docs")).toBe(legacyInvoice);
+  expect((await journalSnapshot()).tables.suppliers.changed).toContain(10);
+});
 
 it("reads legacy issued letters without rewriting missing typography flags or their frozen snapshot", async () => {
   const form = { ...blankLetterForm("LTR-FIXTURE-OLD"), status: "issued" as const,

@@ -5211,15 +5211,23 @@ export const recurrences = {
       const today = new Date().toISOString().slice(0, 10);
       const due = ((data ?? []) as Recurrence[]).filter(r => r.next_run <= today);
       let made = 0;
-      for (const r of due) {
-        let next = addInterval(r.next_run, r.interval);
-        while (next <= today) next = addInterval(next, r.interval);
-        checkScope();
-        if (await generateRecurringInvoice(r.id, r.next_run, today, next)) made++;
-        checkScope();
+      let attempted = false;
+      try {
+        for (const r of due) {
+          let next = addInterval(r.next_run, r.interval);
+          while (next <= today) next = addInterval(next, r.interval);
+          checkScope();
+          if (!attempted) { markWrite(); attempted = true; }
+          if (await generateRecurringInvoice(r.id, r.next_run, today, next)) made++;
+          checkScope();
+        }
+      } finally {
+        // A false result can retire a schedule, and a failed response may follow
+        // a committed invoice. Refresh after either, but never for an empty scan.
+        if (attempted) { markWrite(); notifyDataChanged(); }
       }
       return made;
-    }),
+    }, false),
 };
 
 const quoteTotal = (items: QuotationItem[], doc: QuotationDoc) =>
@@ -5409,6 +5417,13 @@ export const quotes = {
     online(async () => {
       if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
       const client = sb(), local = isLocalMode(), scope = activeCacheOrg, checkScope = workspaceGuard();
+      // Reopening an already converted quote must not consume another number.
+      // Keep the check inside convert too: a second caller can finish while
+      // this caller is reserving its own number.
+      const linked = await client.from("invoice_docs").select("id").eq("quotation_id", quotationId).order("id", { ascending: true }).limit(1).maybeSingle();
+      checkScope();
+      if (linked.error) throw linked.error;
+      if (linked.data) return Number(linked.data.id);
       const company = await billing.getCompany();
       const { loadDocFormats } = await import("./numberFormat");
       const formats = await loadDocFormats();
@@ -5503,6 +5518,8 @@ export interface Supplier {
   address?: string;
   tax_id?: string;
   notes?: string;
+  /** Optional saved location and electronic identity, matching customer metadata. */
+  custom_fields?: Record<string, string>;
   /** Per-supplier bank details (BankInfo shape: bank_name, account_number, …). */
   bank_details?: Record<string, string>;
   shared?: boolean;

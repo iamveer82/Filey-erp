@@ -13,6 +13,51 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+it("copies saved electronic identities into AI drafts and reports missing details without failing the save", async () => {
+  vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Seller", currency: "AED", country_code: "AE", address: "Seller street", city: "Dubai",
+    country_subdivision: "DXB", trn: "100123456700003", legal_id: "SELLER-TL", legal_id_type: "TL",
+    einvoice: { tin: "1001234567", endpoint_id: "1001234567", legal_authority: "Dubai DET" }, default_tax_rate: 5 } as never);
+  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 9, name: "Buyer", city: "Sharjah", address: "Buyer street", country_code: "AE",
+    country_subdivision: "SHJ", trn: "100987654300003", custom_fields: { einvoice_identity: JSON.stringify({ tin: "1009876543", endpoint_id: "1009876543", legal_id: "BUYER-TL" }) } }] as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(billing, "listDocs").mockResolvedValue([]);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  const result = await runTool("create_invoice_draft", { invoice_number: "TEST-EINV-1", customer_name: "Buyer",
+    items: [{ description: "Service", qty: 1, unit_price: 100, unit: "HUR" }] });
+  expect(result).toMatchObject({ ok: true, total: 105, einvoice_review: { status: "needs_details", fields: expect.arrayContaining([
+    expect.objectContaining({ field: "payment_means_code" }), expect.objectContaining({ field: "due_date" }),
+  ]) } });
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save.mock.calls[0][0]).toMatchObject({ seller_city: "Dubai", seller_country_subdivision: "DXB", seller_legal_id: "SELLER-TL",
+    buyer_city: "Sharjah", buyer_country_subdivision: "SHJ", buyer_country_code: "AE",
+    einvoice: { seller: { tin: "1001234567", legal_authority: "Dubai DET" }, buyer: { tin: "1009876543", legal_id: "BUYER-TL" } } });
+});
+
+it("AI purchase drafts retain optional supplier identity and location presets", async () => {
+  vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Our company", country_code: "AE" } as never);
+  vi.spyOn(suppliers, "list").mockResolvedValue([{ id: 5, name: "Supplier", address: "Supplier street", tax_id: "100987654300003",
+    custom_fields: { city: "Dubai", country_subdivision: "DXB", country_code: "AE", einvoice_identity: JSON.stringify({ tin: "1009876543" }) } }] as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(billing, "listDocs").mockResolvedValue([]);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  expect(await runTool("create_purchase_invoice_draft", { supplier_name: "Supplier", items: [{ description: "Goods", qty: 2, unit_price: 50 }] })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0]).toMatchObject({ doc_type: "purchase", customer_address: "Supplier street", customer_trn: "100987654300003",
+    buyer_city: "Dubai", buyer_country_subdivision: "DXB", buyer_country_code: "AE", einvoice: { buyer: { tin: "1009876543" } } });
+});
+
+it("a buyer change uses the new saved e-invoice profile and preserves only the seller and document identity", async () => {
+  vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
+  vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_name: "Old Buyer", customer_id: 3,
+    currency: "AED", tax_rate: 5, items: [{ description: "Service", qty: 1, unit_price: 100 }],
+    einvoice: { uuid: "existing-uuid", seller: { tin: "1001234567" }, buyer: { tin: "1000000000" }, buyer_delivery_mode: "export-unregistered", delivery: { city: "Old" } } } as never);
+  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 9, name: "New Buyer", city: "Abu Dhabi", country_subdivision: "AUH", country_code: "AE",
+    custom_fields: { einvoice_identity: JSON.stringify({ tin: "1009876543" }) } }] as never);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  expect(await runTool("revise_invoice", { invoice_number: "INV-1", customer_name: "New Buyer" })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0]).toMatchObject({ buyer_city: "Abu Dhabi", buyer_country_subdivision: "AUH", buyer_country_code: "AE",
+    einvoice: { uuid: "existing-uuid", seller: { tin: "1001234567" }, buyer: { tin: "1009876543" }, buyer_delivery_mode: undefined, delivery: undefined } });
+});
+
 it("relinks a revised buyer and clears the previous buyer's routing snapshot", async () => {
   vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
   vi.spyOn(billing, "getDoc").mockResolvedValue({

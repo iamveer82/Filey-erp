@@ -1,8 +1,11 @@
 import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
 import CustomerOpeningBalanceFields from "../components/CustomerOpeningBalanceFields";
+import EInvoicePartyFields from "../components/EInvoicePartyFields";
+import { SelectMenu } from "../components/ui-menu";
+import { EMIRATES, normalizeEmirate, readEInvoiceParty } from "../lib/einvoice";
 import { customerOpeningBalanceInputs, readCustomerOpeningBalance } from "../lib/customerOpeningBalance";
-import { taxRegimeFor } from "../lib/taxRegimes";
-import { companyCountry, companyPhoneHint, customerPhoneE164 } from "../lib/companyCountry";
+import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
+import { companyCountry, companyPhoneHint, customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -1533,6 +1536,10 @@ function EditCustomerModal({
     email: "",
     phone: "",
     address: "",
+    city: "",
+    country_subdivision: "",
+    country_code: "",
+    custom_fields: {} as Record<string, string>,
     segment: "",
     credit_limit: "",
     opening_balance: customerOpeningBalanceInputs(),
@@ -1553,6 +1560,10 @@ function EditCustomerModal({
             email: customer.email ?? "",
             phone: customer.phone ?? "",
             address: customer.address ?? "",
+            city: customer.city ?? "",
+            country_subdivision: customer.country_code === "AE" ? normalizeEmirate(customer.country_subdivision) : customer.country_subdivision || "",
+            country_code: customer.country_code || "",
+            custom_fields: customer.custom_fields ?? {},
             segment: customer.segment ?? "",
             credit_limit:
               customer.credit_limit != null ? String(customer.credit_limit) : "",
@@ -1579,10 +1590,16 @@ function EditCustomerModal({
         email: f.email.trim() || undefined,
         phone: f.phone.trim() || undefined,
         address: f.address.trim() || undefined,
+        // Empty strings deliberately clear saved optional values. Undefined
+        // would be omitted by the API patch and leave the old preset behind.
+        city: f.city.trim(),
+        country_subdivision: f.country_subdivision.trim(),
+        country_code: f.country_code,
+        custom_fields: f.custom_fields,
         segment: f.segment.trim() || undefined,
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
         opening_balance: openingBalance.value,
-        phone_e164: customerPhoneE164(f.phone, country) ?? undefined,
+        phone_e164: customerPhoneE164(f.phone, f.country_code || (!customer.country_code ? country : "")) ?? "",
       });
       toast.success("Customer updated.");
       onSaved();
@@ -1627,11 +1644,11 @@ function EditCustomerModal({
             className="input"
             value={f.phone}
             type="tel"
-            placeholder={companyPhoneHint(country)}
+            placeholder={companyPhoneHint(f.country_code || country)}
             onChange={(e) => setF({ ...f, phone: e.target.value })}
           />
         </Field>
-        <Field label={taxIdLabel}>
+        <Field label={f.country_code ? taxRegimeFor(undefined, f.country_code).trnLabel : taxIdLabel}>
           <input
             className="input"
             value={f.trn}
@@ -1654,6 +1671,26 @@ function EditCustomerModal({
             />
           </Field>
         </div>
+        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3">
+          <Field label="City (optional)"><input className="input" value={f.city}
+            onChange={event => setF({ ...f, city: event.target.value })} /></Field>
+          <Field label={`${subdivisionLabel(f.country_code)} (optional)`}>
+            {f.country_code === "AE" ? <SelectMenu ariaLabel={subdivisionLabel(f.country_code)}
+              value={f.country_subdivision} onChange={country_subdivision => setF({ ...f, country_subdivision })}
+              options={[{ value: "", label: "Select…" }, ...EMIRATES.map(entry => ({ value: entry.code, label: entry.label }))]} />
+              : <input className="input" value={f.country_subdivision}
+                onChange={event => setF({ ...f, country_subdivision: event.target.value })} />}
+          </Field>
+          <Field label="Country (optional)"><SelectMenu ariaLabel="Country" value={f.country_code}
+            onChange={country_code => setF({ ...f, country_code, country_subdivision: "" })}
+            options={[{ value: "", label: "Select country" }, ...COUNTRY_OPTIONS]} /></Field>
+        </div>
+        <details className="border-t border-border pt-3 sm:col-span-2">
+          <summary className="mb-3 cursor-pointer font-medium">Electronic invoicing (optional)</summary>
+          <p className="mb-3 text-sm text-muted-foreground">Save these details once to reuse on invoices, or leave them blank and enter them on an individual invoice.</p>
+          <EInvoicePartyFields includeIdentifier value={readEInvoiceParty(f.custom_fields.einvoice_identity)}
+            onChange={identity => setF({ ...f, custom_fields: { ...f.custom_fields, einvoice_identity: JSON.stringify(identity) } })} />
+        </details>
         <Field label="Credit limit (AED)">
           <input
             className="input"

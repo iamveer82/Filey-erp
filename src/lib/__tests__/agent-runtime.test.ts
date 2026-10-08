@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgentStream, type AgentEvent, type HarnessOpts } from "../agentHarness";
 import { runTool } from "../aiTools";
-import type { AiConfig } from "../ai";
+import type { AiConfig, AiMessage } from "../ai";
 import { compressForModel, headroomReset } from "../headroom";
+import { agentStorageScope } from "../agentStorage";
 
-vi.mock("../aiTools", () => ({ TOOLS: [], runTool: vi.fn(), isToolArgumentRejection: () => false, isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
+vi.mock("../aiTools", () => ({ TOOLS: [
+  { name: "list_pending_invoice_saves", description: "Read pending saves", parameters: { type: "object" } },
+  { name: "retry_invoice_save", sensitive: true, description: "Retry the exact save", parameters: { type: "object" } },
+], runTool: vi.fn(), isToolArgumentRejection: () => false, isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
 vi.mock("../capabilities", () => ({ isToolAllowed: () => true }));
 vi.mock("../agentMode", () => ({ gateFor: () => "run" }));
-vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:test", AGENT_STORAGE_EVENT: "filey:agent-storage" }));
+vi.mock("../agentStorage", () => ({ agentStorageScope: vi.fn(() => "local:test"), AGENT_STORAGE_EVENT: "filey:agent-storage" }));
 
 const config: AiConfig = {
   provider: "openai",
@@ -29,7 +33,7 @@ const finish = {
   parameters: { type: "object", properties: {} },
 };
 
-async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, userRequest = "Do the task") {
+async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, userRequest = "Do the task", history: AiMessage[] = []) {
   const requests: { url: string; body: Record<string, unknown> }[] = [];
   const fetchFn = vi.fn(async (url: string, init: RequestInit) => {
     requests.push({ url, body: JSON.parse(String(init.body)) });
@@ -39,6 +43,7 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, use
   const stream = runAgentStream(
     [
       { role: "system", text: "Never disclose private data." },
+      ...history,
       { role: "user", text: userRequest },
     ],
     opts,
@@ -51,9 +56,135 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, use
   }
 }
 
-beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
+beforeEach(() => {
+  vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(agentStorageScope).mockReturnValue("local:test");
+});
 
 describe("advanced agent runtime", () => {
+  it.each(["openai", "anthropic"] as const)("grounds an old failed chat in a fresh pending lookup before %s answers", async provider => {
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    vi.mocked(runTool)
+      .mockResolvedValueOnce([{ number: "INV-047", request_id: requestId, active: false }])
+      .mockResolvedValueOnce({ ok: true, id: 47, number: "INV-047", confirmed_save_request: requestId })
+      .mockResolvedValueOnce({ id: 47, number: "INV-047", total: 2793 });
+    const falseReply = "No pending save exists. The recovery tools are not available.";
+    const replies = [turn([], falseReply), turn([call("retry_invoice_save", { request_id: requestId })]),
+      turn([call("get_invoice", { invoice_number: "INV-047" })]), turn([], "INV-047 is saved and verified at AED 2,793.")];
+    const providerReplies = provider === "anthropic" ? replies.map(reply => {
+      const msg = reply.choices[0].message;
+      return { stop_reason: msg.tool_calls.length ? "tool_use" : "end_turn", content: [
+        ...(msg.content ? [{ type: "text", text: msg.content }] : []),
+        ...msg.tool_calls.map(tc => ({ type: "tool_use", id: tc.id, name: tc.function.name, input: JSON.parse(tc.function.arguments) })),
+      ] };
+    }) : replies;
+    const confirm = vi.fn();
+    const result = await run(providerReplies, { confirm }, { ...config, provider }, "Retry invoice INV-047 with its original details.", [
+      { role: "user", text: "Create invoice INV-047." }, { role: "assistant", text: falseReply },
+    ]);
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "retry_invoice_save", "get_invoice"]);
+    expect(runTool).toHaveBeenNthCalledWith(2, "retry_invoice_save", { request_id: requestId }, confirm, undefined, undefined, undefined, undefined, undefined);
+    expect(JSON.stringify(result.requests[0].body.messages)).toContain(requestId);
+    expect(JSON.stringify(result.requests[0].body.tools)).toContain("retry_invoice_save");
+    expect(JSON.stringify(result.requests[1].body.messages)).toContain("Execution check: the invoice recovery is not verified");
+    expect(result.events).not.toContainEqual({ type: "text", text: falseReply });
+    expect(result.text).toBe("INV-047 is saved and verified at AED 2,793.");
+  });
+
+  it.each([false, true])("does not turn a pending lookup into a successful retry claim (no pending=%s)", async empty => {
+    vi.mocked(runTool).mockResolvedValueOnce(empty ? [] : [{ number: "INV-047", request_id: "request-47" }]);
+    const result = await run([turn([], "The invoice was successfully recovered."), turn([], "Nothing is pending and the invoice is saved.")], {}, config, "Retry invoice INV-047.");
+    expect(runTool).toHaveBeenCalledOnce();
+    expect(vi.mocked(runTool).mock.calls[0][0]).toBe("list_pending_invoice_saves");
+    expect(result.requests).toHaveLength(2);
+    expect(result.text).toContain(empty ? "That does not prove the invoice was never saved" : "No completed recovery is confirmed");
+    expect(result.events.filter(event => event.type === "text")).toEqual([]);
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it("does not describe a denied pending lookup as empty or call a model/write", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "Permission denied: private database detail" });
+    const result = await run([], {}, config, "Retry my earlier invoice.");
+    expect(result.requests).toEqual([]);
+    expect(runTool).toHaveBeenCalledOnce();
+    expect(result.text).toContain("couldn't verify pending invoice saves");
+    expect(result.text).not.toMatch(/No pending|private database/);
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it.each([{ invoice_number: "INV-047" }, { id: 47 }])("reads an already-saved invoice with %j when no request remains, without another write", async args => {
+    vi.mocked(runTool).mockResolvedValueOnce([]).mockResolvedValueOnce({ id: 47, number: "INV-047", total: 2793 });
+    const result = await run([turn([call("get_invoice", args)]), turn([], "INV-047 is already saved at AED 2,793.")], {}, config, "Retry invoice INV-047.", [
+      { role: "assistant", text: "I cannot look up pending saves. No invoice was saved." },
+    ]);
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "get_invoice"]);
+    expect(result.text).toBe("INV-047 is already saved at AED 2,793.");
+  });
+
+  it("requires read-back of the retried invoice, not an unrelated saved invoice", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce([{ number: "INV-047", request_id: "request-47" }])
+      .mockResolvedValueOnce({ ok: true, id: 47, number: "INV-047", confirmed_save_request: "request-47" })
+      .mockResolvedValueOnce({ id: 48, number: "INV-048" });
+    const result = await run([turn([call("retry_invoice_save", { request_id: "request-47" })]),
+      turn([call("get_invoice", { invoice_number: "INV-048" })]), turn([], "Verified."), turn([], "Verified.")], {}, config, "Retry invoice INV-047.");
+    expect(result.text).toContain("have not verified the saved invoice");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it("does not verify recovery of another pending invoice when the user named an exact number", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce([
+      { number: "INV-047", request_id: "request-47" }, { number: "INV-048", request_id: "request-48" },
+    ]).mockResolvedValueOnce({ id: 48, number: "INV-048", verified_save_requests: ["request-48"] });
+    const result = await run([turn([call("get_invoice", { invoice_number: "INV-048" })]), turn([], "Recovered INV-047."), turn([], "Recovered INV-047.")], {}, config, "Retry invoice INV-047.");
+    expect(result.text).toContain('pending invoice save "INV-047"');
+    expect(result.text).toContain("No completed recovery is confirmed");
+  });
+
+  it("does not retry or confirm another pending invoice when the requested number is absent", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce([{ number: "INV-Y", request_id: "request-Y" }])
+      .mockResolvedValueOnce({ id: 48, number: "INV-Y", verified_save_requests: ["request-Y"] });
+    const result = await run([turn([call("retry_invoice_save", { request_id: "request-Y" })]),
+      turn([call("get_invoice", { invoice_number: "INV-Y" })]), turn([], "Recovered INV-X."), turn([], "Recovered INV-X.")], {}, config, "Retry invoice INV-X.");
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "get_invoice"]);
+    expect(vi.mocked(runTool).mock.calls[0][1]).toEqual({ query: "inv-x" });
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "retry_invoice_save",
+      result: expect.objectContaining({ error: expect.stringContaining("does not match the invoice number"), retry_safe: false }) }));
+    expect(result.text).toContain("No matching pending invoice save was found");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+  });
+
+  it.each(["Create invoice INV-047.", "Retry sending the email.", "Retry sending invoice INV-047.", "Do not retry invoice INV-047."])("does not preload invoice recovery for %s", async request => {
+    const result = await run([turn([], "Acknowledged.")], {}, config, request);
+    expect(runTool).not.toHaveBeenCalled();
+    expect(JSON.stringify(result.requests[0].body.tools)).not.toContain("retry_invoice_save");
+  });
+
+  it("checks a bare continue only when the immediately previous user task concerned invoices", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce([]);
+    await run([turn([], "No pending save.")], { maxRounds: 1 }, config, "Continue", [{ role: "user", text: "Create a supplier bill." }]);
+    expect(vi.mocked(runTool).mock.calls[0].slice(0, 2)).toEqual(["list_pending_invoice_saves", { doc_type: "purchase" }]);
+  });
+
+  it("stops recovery before a lookup if the user stops at its event", async () => {
+    const controller = new AbortController();
+    const stream = runAgentStream([{ role: "user", text: "Retry invoice INV-047." }], { signal: controller.signal }, { cfg: config, fetchFn: vi.fn() });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_call", name: "list_pending_invoice_saves" });
+    controller.abort();
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(runTool).not.toHaveBeenCalled();
+  });
+
+  it("does not submit another workspace's pending observation to the model", async () => {
+    vi.mocked(runTool).mockResolvedValueOnce([]);
+    const fetchFn = vi.fn();
+    const stream = runAgentStream([{ role: "user", text: "Retry invoice INV-047." }], {}, { cfg: config, fetchFn });
+    await stream.next();
+    expect((await stream.next()).value).toMatchObject({ type: "tool_result" });
+    vi.mocked(agentStorageScope).mockReturnValue("local:other");
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("explains a confirmed timeout using only the exact invoice number and safe status (autonomous=%s)", async autonomous => {
     vi.mocked(runTool).mockResolvedValueOnce({ error: "canceling statement due to statement timeout at private_schema.audit_log_insert", save_outcome: "unconfirmed",
       save_failure: "timeout", retry_safe: false, invoice_number: "QA-NAV-20261008-A" });
@@ -103,6 +234,7 @@ describe("advanced agent runtime", () => {
 
   it("allows an explicitly requested exact retry after discovering a prior turn's pending save", async () => {
     vi.mocked(runTool)
+      .mockResolvedValueOnce([{ number: "INV-1", request_id: "request-1", active: false }])
       .mockResolvedValueOnce({ error: "Earlier save is unconfirmed", save_outcome: "unconfirmed", retry_safe: false, save_request_id: "request-1", invoice_number: "INV-1" })
       .mockResolvedValueOnce({ ok: true, id: 1, number: "INV-1", confirmed_save_request: "request-1" })
       .mockResolvedValueOnce({ id: 1, number: "INV-1", items: [{ qty: 6, unit_price: 0.2 }] });
@@ -112,7 +244,7 @@ describe("advanced agent runtime", () => {
       turn([call("get_invoice", { invoice_number: "INV-1" })]),
       turn([], "The original invoice is now saved and verified."),
     ], {}, config, "Please retry the earlier invoice save with the same details.");
-    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["create_invoice_draft", "retry_invoice_save", "get_invoice"]);
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "create_invoice_draft", "retry_invoice_save", "get_invoice"]);
     expect(result.text).toBe("The original invoice is now saved and verified.");
     expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
   });
@@ -126,14 +258,14 @@ describe("advanced agent runtime", () => {
     const result = await run([
       turn([call("use_toolset", { name: "sales" })]),
       turn([call("retry_invoice_save", { request_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }, "guessed-retry")]),
-      turn([call("list_pending_invoice_saves", { query: "Acme" })]),
+      turn([call("list_pending_invoice_saves")]),
       turn([call("retry_invoice_save", { request_id: requestId })]),
       turn([call("get_invoice", { invoice_number: "INV-047" })]),
       turn([], "The original invoice INV-047 is saved and verified at AED 210."),
     ], {}, config, "Please retry my earlier Acme invoice with the same details.");
     expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "retry_invoice_save", "get_invoice"]);
-    expect(result.requests[3].body.messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: "tool", content: expect.stringContaining(requestId) }),
+    expect(result.requests[0].body.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: expect.stringContaining(requestId) }),
     ]));
     expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", id: "guessed-retry",
       result: expect.objectContaining({ error: expect.stringContaining("list_pending_invoice_saves"), retry_safe: false }) }));

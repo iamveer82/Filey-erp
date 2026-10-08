@@ -55,6 +55,8 @@ import { applyRoundOff, isCreditNote, r2 } from "./money";
 import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
 import { loadDocFormats } from "./numberFormat";
 import { allocateDocumentNumber } from "./documentNumbers";
+import { readEInvoiceParty, type EInvoiceParty } from "./einvoice";
+import { isUaeRegime } from "./taxRegimes";
 import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
 import {
   githubRepo,
@@ -124,12 +126,16 @@ async function documentContext(
   const party = matches.length === 1 ? matches[0] : null;
   if (selectedId != null && (!party || ![party.name, "company" in party ? party.company : ""].some(value => str(value).trim().toLowerCase() === name)))
     throw documentInputError(`The saved ${kind} ID and name do not match. Look up the saved record before changing the document.`);
-  const context = { ...args, ...(party ? {
+  const context: Record<string, unknown> = { ...args, ...(party ? {
     [kind + "_id"]: party.id,
     [kind + "_email"]: party.email,
     [kind + "_phone"]: party.phone,
     [kind + "_address"]: "address" in party ? party.address : undefined,
     [kind + "_trn"]: "tax_id" in party ? party.tax_id : "trn" in party ? party.trn : undefined,
+    buyer_city: "city" in party ? party.city : "custom_fields" in party ? party.custom_fields?.city : undefined,
+    buyer_country_subdivision: "country_subdivision" in party ? party.country_subdivision : "custom_fields" in party ? party.custom_fields?.country_subdivision : undefined,
+    buyer_country_code: "country_code" in party ? party.country_code : "custom_fields" in party ? party.custom_fields?.country_code : undefined,
+    buyer_identity: "custom_fields" in party && party.custom_fields?.einvoice_identity ? readEInvoiceParty(party.custom_fields.einvoice_identity) : undefined,
   } : {}) };
   if (!validateItems) return context;
   const products = await erp.products();
@@ -608,6 +614,20 @@ async function findProduct(name: unknown) {
         .join(", ")}. Stock was not changed.`
     );
   return matches[0];
+}
+
+/** Report draft readiness without treating missing tax details as a failed save. */
+async function invoiceReadiness(doc: InvoiceDocInput) {
+  if (doc.doc_type === "purchase" || !isUaeRegime(doc.currency || "AED", doc.tax_country_code)) return {};
+  const { eInvoiceIssues } = await import("./einvoiceXml");
+  const issues = eInvoiceIssues({ ...doc, items: doc.items.map(item => ({ ...item, ...splitItemMeta(item.custom) })) });
+  return { einvoice_review: {
+    status: issues.length ? "needs_details" : "ready_for_xml",
+    missing_or_invalid_count: issues.length,
+    fields: issues.slice(0, 12),
+    message: issues.length ? "Draft saved. Complete the listed details in the invoice's E-invoice tab before XML export. Never invent tax identities or claim this draft is FTA-approved."
+      : "Filey checks passed for XML preparation. An accredited provider must validate and transmit the invoice.",
+  } };
 }
 
 /** Both payroll and attendance must resolve the same single person before writing. */
@@ -1327,7 +1347,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "get_invoice",
-    description: "Read saved invoice lines, pricing, dates, buyer, tax and current totals. Use an exact number or id:<id> for duplicates. Read back after edits. Image presence flags replace raw images.",
+    description: "Read saved invoice details and current totals by exact number or id:<id>. Read back after edits.",
     parameters: {
       type: "object",
       properties: { invoice_number: { type: "string", minLength: 1, maxLength: 200 }, doc_type: { type: "string", enum: ["sales", "purchase"] } },
@@ -1354,6 +1374,7 @@ export const TOOLS: ToolDef[] = [
         has_stamp: !!stamp?.data,
         has_signature: !!signature?.data,
         verified_save_requests: verified,
+        ...await invoiceReadiness(saved),
       });
     },
   },
@@ -1554,7 +1575,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_invoice_draft",
     description:
-      "Create a draft; never guess buyer, item, qty or rate. Preserve item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Edit with revise_invoice; verify with get_invoice(id:<id>).",
+      "Create draft; never guess buyer, item, qty or rate. Keep item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Reuses e-invoice identities; review gaps before XML. Edit with revise_invoice; verify with get_invoice(invoice_number:'id:<id>').",
     parameters: {
       type: "object",
       properties: {
@@ -1670,12 +1691,20 @@ export const TOOLS: ToolDef[] = [
         seller_trn: co?.trn,
         seller_email: co?.email,
         seller_phone: co?.phone,
+        seller_city: co?.city,
+        seller_country_subdivision: co?.country_subdivision,
+        seller_legal_id: co?.legal_id,
+        seller_legal_id_type: co?.legal_id_type,
+        einvoice: { seller: co?.einvoice, buyer: args.buyer_identity as EInvoiceParty | undefined },
         logo: co?.logo,
         customer_name: str(args.customer_name),
         customer_id: args.customer_id == null ? undefined : Number(args.customer_id),
         customer_email: str(args.customer_email),
         customer_address: str(args.customer_address),
         customer_trn: str(args.customer_trn),
+        buyer_city: str(args.buyer_city),
+        buyer_country_subdivision: str(args.buyer_country_subdivision),
+        buyer_country_code: str(args.buyer_country_code),
         issue_date: issueDate,
         ...(dueDate !== undefined ? { due_date: dueDate } : {}),
         ...(args.notes !== undefined ? { notes: str(args.notes) } : {}),
@@ -1716,6 +1745,7 @@ export const TOOLS: ToolDef[] = [
       // Allocate only after pending receipts and supplied calculations are checked.
       if (!input.number) input.number = await allocateDocumentNumber("invoice",
         ((await billing.listDocs("sales")) as { number: string }[]).map(d => d.number), await loadDocFormats());
+      const readiness = await invoiceReadiness(input);
       const saved = await saveAgentInvoice(input, assertCurrent);
       if ("error" in saved) return saved;
       const id = saved.id;
@@ -1730,6 +1760,7 @@ export const TOOLS: ToolDef[] = [
         ...(unknownParty ?? {}),
         ...pricing,
         priced_by: priceBy || "qty × unit price",
+        ...readiness,
         message: "Draft invoice created — open Invoicing to review/send.",
       };
     },
@@ -1859,10 +1890,10 @@ export const TOOLS: ToolDef[] = [
           customer_email: str(context!.customer_email),
           customer_address: str(context!.customer_address),
           customer_trn: str(context!.customer_trn),
-          buyer_city: "",
-          buyer_country_subdivision: "",
-          buyer_country_code: "",
-          einvoice: { ...doc.einvoice, buyer: undefined, buyer_delivery_mode: undefined, delivery: undefined },
+          buyer_city: str(context!.buyer_city),
+          buyer_country_subdivision: str(context!.buyer_country_subdivision),
+          buyer_country_code: str(context!.buyer_country_code),
+          einvoice: { ...doc.einvoice, buyer: context!.buyer_identity as EInvoiceParty | undefined, buyer_delivery_mode: undefined, delivery: undefined },
         } : {}),
         items,
         custom_columns: cols,
@@ -1871,6 +1902,7 @@ export const TOOLS: ToolDef[] = [
       const pricing = documentPricing(items, cols, priceBy, next.discount, next.tax_rate, next.round_off);
       const pending = await pendingAgentInvoice(next, assertCurrent);
       if (pending) return pending;
+      const readiness = await invoiceReadiness(next);
       const saved = await saveAgentInvoice(next, assertCurrent);
       if ("error" in saved) return saved;
       return {
@@ -1879,6 +1911,7 @@ export const TOOLS: ToolDef[] = [
         number: doc.number,
         ...pricing,
         priced_by: priceBy || "qty × unit price",
+        ...readiness,
         message: `${doc.number} updated.`,
       };
     },
@@ -3340,7 +3373,19 @@ export const TOOLS: ToolDef[] = [
         seller_name: co?.name || "",
         tax_country_code: co?.country_code,
         seller_trn: co?.trn,
+        seller_address: co?.address,
+        seller_city: co?.city,
+        seller_country_subdivision: co?.country_subdivision,
+        seller_legal_id: co?.legal_id,
+        seller_legal_id_type: co?.legal_id_type,
+        einvoice: { seller: co?.einvoice, buyer: a.buyer_identity as EInvoiceParty | undefined },
         customer_name: str(a.supplier_name),
+        customer_address: str(a.supplier_address),
+        customer_email: str(a.supplier_email),
+        customer_trn: str(a.supplier_trn),
+        buyer_city: str(a.buyer_city),
+        buyer_country_subdivision: str(a.buyer_country_subdivision),
+        buyer_country_code: str(a.buyer_country_code),
         issue_date: str(a.issue_date) || today(),
         due_date: str(a.due_date) || undefined,
         tax_rate: co?.default_tax_rate ?? 0,

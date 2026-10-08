@@ -68,6 +68,51 @@ describe("document number reservations", () => {
     state.rpc.mockImplementation(() => ({ setHeader: async () => ({ data: null, error: new Error("Permission denied") }) }));
     await expect(allocateDocumentNumber("invoice")).rejects.toThrow("Permission denied");
   });
+  it("recovers a lost cloud response with the same reservation and keeps new creations independent", async () => {
+    state.local = false;
+    const reserved = new Map<string, string>();
+    let lost = false;
+    state.rpc.mockImplementation((_name, args) => ({ setHeader: async () => {
+      if (!reserved.has(args.p_request)) reserved.set(args.p_request, `INV-${reserved.size + 1}`);
+      if (!lost) { lost = true; throw new TypeError("Failed to fetch"); }
+      return { data: reserved.get(args.p_request), error: null };
+    } }));
+    expect(await allocateDocumentNumber("invoice")).toBe("INV-1");
+    expect(reserved.size).toBe(1);
+    expect(state.rpc.mock.calls[0][1]).toEqual(state.rpc.mock.calls[1][1]);
+    expect(await allocateDocumentNumber("invoice")).toBe("INV-2");
+    expect(reserved.size).toBe(2);
+  });
+  it("bounds returned transport failures and never retries an authoritative denial", async () => {
+    state.local = false;
+    const gateway = { message: "Gateway unavailable" };
+    state.rpc.mockImplementation(() => ({ setHeader: async () => ({ data: null, error: gateway, status: 503 }) }));
+    await expect(allocateDocumentNumber("invoice", [], {}, request)).rejects.toBe(gateway);
+    expect(state.rpc).toHaveBeenCalledTimes(2);
+    expect(state.rpc.mock.calls.every(call => call[1].p_request === request)).toBe(true);
+    state.rpc.mockClear();
+    const denied = { code: "42501", message: "Permission denied" };
+    state.rpc.mockImplementation(() => ({ setHeader: async () => ({ data: null, error: denied, status: 503 }) }));
+    await expect(allocateDocumentNumber("invoice")).rejects.toBe(denied);
+    expect(state.rpc).toHaveBeenCalledTimes(1);
+  });
+  it("does not retry a lost response after the workspace or session account changes", async () => {
+    state.local = false;
+    state.rpc.mockImplementation(() => ({ setHeader: async () => {
+      state.org = "other"; state.account = "other:user:x";
+      throw new TypeError("Failed to fetch");
+    } }));
+    await expect(allocateDocumentNumber("invoice")).rejects.toThrow("account changed");
+    expect(state.rpc).toHaveBeenCalledTimes(1);
+    state.org = "org"; state.account = "org:user:00000000-0000-4000-8000-000000000001";
+    state.rpc.mockClear();
+    state.rpc.mockImplementation(() => ({ setHeader: async () => {
+      state.session.mockResolvedValue({ data: { session: { user: { id: "other" } } }, error: null });
+      throw new TypeError("Failed to fetch");
+    } }));
+    await expect(allocateDocumentNumber("invoice")).rejects.toThrow("account changed");
+    expect(state.rpc).toHaveBeenCalledTimes(1);
+  });
   it("rejects malformed/unbounded patterns without writing reservations", async () => {
     await expect(allocateDocumentNumber("invoice", [], { invoice: "X-{001}-{001}" })).rejects.toThrow("one counter");
     await expect(allocateDocumentNumber("invoice", [], { invoice: "X-{0000000000001}" })).rejects.toThrow("one counter");

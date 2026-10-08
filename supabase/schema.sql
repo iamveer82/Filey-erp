@@ -14180,6 +14180,15 @@ end $$;
 
 -- CREATE OR REPLACE preserves log_audit's owner, ACL and existing trigger links.
 notify pgrst, 'reload schema';
+
+-- Source: supabase/2026-10-08-supplier-invoice-details.sql
+-- Optional saved supplier location and electronic invoicing identity. Existing
+-- supplier rows, tenant policies, module access and table grants stay intact.
+
+alter table public.suppliers add column if not exists custom_fields jsonb default '{}';
+comment on column public.suppliers.custom_fields is
+  'Optional string-valued fields including city, country_subdivision, country_code and serialized einvoice_identity.';
+notify pgrst, 'reload schema';
 -- END GENERATED FRESH BOOTSTRAP current authority
 
 

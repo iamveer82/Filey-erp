@@ -1,4 +1,5 @@
 import { readEInvoiceParty } from "../lib/einvoice";
+import { supplierInvoiceDetails } from "../lib/supplierInvoiceDetails";
 import InvoiceImportModal from "../components/InvoiceImportModal";
 import { invoiceMessageVersion } from "../lib/messageOutbox";
 import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
@@ -100,7 +101,7 @@ import { reactToPdfBytes } from "../lib/reactPdf";
 import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
 import StatStrip from "../components/StatStrip";
-import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
+import { downloadElementAsPdf } from "../lib/pdfTools";
 import { autoSaveDocument, safeName } from "../lib/files";
 import {
   splitItemMeta,
@@ -138,6 +139,8 @@ import {
 } from "../components/StampSignatureSettings";
 import { ResizablePanels } from "../components/ResizablePanels";
 import EInvoiceReview from "../components/EInvoiceReview";
+import EInvoicePartyFields from "../components/EInvoicePartyFields";
+import { invoiceElectronicDetailPages, InvoiceElectronicDetailsPage } from "../components/InvoiceElectronicDetails";
 import { validateEInvoice, buildInvoiceXml } from "../lib/einvoiceXml";
 import {
   INVOICE_TYPE_CODES,
@@ -158,6 +161,7 @@ import {
   CORRECTIVE_TYPE_CODES,
   decodeTransactionType,
   encodeTransactionType,
+  type EInvoiceParty,
 } from "../lib/einvoice";
 import {
   PageHeader,
@@ -427,6 +431,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [numFmt, setNumFmt] = useState<DocFormats>({});
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
+  const draftNumber = useRef<{ predicted: string; reserved?: string; manual?: boolean; requestId: ReturnType<typeof crypto.randomUUID>; kind: "invoice" | "purchase_invoice"; formats: DocFormats } | null>(null);
+  const saveInFlight = useRef(false);
+  const [savedDetailsPending, setSavedDetailsPending] = useState(false);
   const [messageDialog, setMessageDialog] = useState<DocumentMessageProps | null>(null);
   const [companyOpen, setCompanyOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -504,9 +511,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     const scope = agentStorageScope();
     try {
       const f = blankForm(company, docs.map((d) => d.number), mode, numFmt);
-      f.number = await allocateDocumentNumber(mode === "purchase" ? "purchase_invoice" : "invoice", docs.map(d => d.number), numFmt);
       f.template = await startingTemplate("invoice", company.default_template, f.template);
       requireAgentStorageScope(scope ?? "signed-out");
+      draftNumber.current = { predicted: f.number, requestId: crypto.randomUUID(), kind: mode === "purchase" ? "purchase_invoice" : "invoice", formats: { ...numFmt } };
+      setSavedDetailsPending(false);
       setForm(f);
     } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
@@ -516,6 +524,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       const scope = agentStorageScope();
       const d = await billing.getDoc(id);
       requireAgentStorageScope(scope ?? "signed-out");
+      draftNumber.current = null;
+      setSavedDetailsPending(false);
       setForm({
         id: d.id,
         number: d.number,
@@ -577,6 +587,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             amount,
             itemFormula,
             discount,
+            tax,
           } = splitItemMeta(i.custom);
           return {
             description: i.description,
@@ -591,6 +602,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             itemFormula: itemFormula || null,
             tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
             discount,
+            tax,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -613,8 +625,11 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     try {
       const scope = agentStorageScope();
       const d = await billing.getDoc(id);
-      const number = await allocateDocumentNumber(mode === "purchase" ? "purchase_invoice" : "invoice", docs.map(x => x.number), credit ? { [mode === "purchase" ? "purchase_invoice" : "invoice"]: `CN-${d.number}-{0001}` } : numFmt);
+      const formats = credit ? { [mode === "purchase" ? "purchase_invoice" : "invoice"]: `CN-${d.number}-{0001}` } : { ...numFmt };
+      const number = pickInvoiceNumber(mode, docs.map(x => x.number), formats);
       requireAgentStorageScope(scope ?? "signed-out");
+      draftNumber.current = { predicted: number, requestId: crypto.randomUUID(), kind: mode === "purchase" ? "purchase_invoice" : "invoice", formats };
+      setSavedDetailsPending(false);
       setForm({
         number,
         status: "draft",
@@ -675,6 +690,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             amount,
             itemFormula,
             discount,
+            tax,
           } = splitItemMeta(i.custom);
           return {
             description: i.description,
@@ -689,6 +705,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             itemFormula: itemFormula || null,
             tax_category: i.tax_category || DEFAULT_TAX_CATEGORY,
             discount,
+            tax,
           };
         }),
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
@@ -699,10 +716,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
     }
   };
 
-  const save = async () => {
+  const save = async (status?: "draft" | "sent"): Promise<Form | undefined> => {
     // Guard re-entry (Ctrl+S bypasses the disabled buttons): a second call
     // before the first insert returns would create a duplicate document.
-    if (!form || saving) return;
+    if (!form || saveInFlight.current) return;
     // Validate
     if (!form.number.trim()) {
       toast.error("Invoice number is required");
@@ -717,17 +734,31 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       return;
     }
     // Check for duplicate invoice number
-    if (docs.some((d) => d.number === form.number && d.id !== (form.id || 0))) {
+    const reservation = !form.id ? draftNumber.current : null;
+    const automaticNumber = !!reservation && !reservation.manual && [reservation.predicted, reservation.reserved].includes(form.number);
+    if (!automaticNumber && docs.some((d) => d.number === form.number && d.id !== (form.id || 0))) {
       toast.error(
         `Invoice number "${form.number}" already exists. Use a different number.`
       );
       return;
     }
+    saveInFlight.current = true;
     setSaving(true);
+    const scope = agentStorageScope();
     try {
+      const number = automaticNumber && reservation
+        ? reservation.reserved ?? await allocateDocumentNumber(reservation.kind, docs.map(d => d.number), reservation.formats, reservation.requestId)
+        : form.number;
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (automaticNumber && reservation) reservation.reserved = number;
+      const snapshot = { ...form, number, ...(status ? { status } : {}) };
+      // Retain a reservation even if the subsequent save loses its response.
+      // Retrying this draft must never consume a new document number.
+      // An issued/draft status change is shown only after acknowledgement.
+      setForm({ ...form, number });
       // Empty date inputs must become undefined, not "" (invalid SQL date).
       const payload = {
-        ...form,
+        ...snapshot,
         // Persist user-defined columns + per-item unit & custom values so they
         // survive a reload (DB columns: invoice_docs.custom_columns,
         // invoice_doc_items.unit / .custom).
@@ -757,14 +788,37 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       // never a customer FK; null also clears a legacy wrongly linked purchase.
       if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
       const id = await billing.saveDoc(payload as InvoiceDocInput);
-      setForm({ ...form, id });
+      requireAgentStorageScope(scope ?? "signed-out");
+      const saved = { ...snapshot, id };
+      setForm(saved);
+      setSavedDetailsPending(true);
+      let persisted: InvoiceDoc;
+      try {
+        persisted = await billing.getDoc(id, true);
+        requireAgentStorageScope(scope ?? "signed-out");
+      } catch {
+        // The write is acknowledged. Keep its id/status even if the following
+        // read fails, and stop outputs until generated metadata is available.
+        if (scope === agentStorageScope()) toast.error("Invoice saved, but saved details could not be reloaded. Retry export or save.");
+        return;
+      }
+      const hydrated = { ...saved,
+        einvoice: saved.einvoice || persisted.einvoice ? { ...saved.einvoice, uuid: persisted.einvoice?.uuid } : undefined,
+        fx_rate: persisted.fx_rate ?? saved.fx_rate,
+        aed_exchange_rate: persisted.aed_exchange_rate ?? saved.aed_exchange_rate,
+        tax_country_code: persisted.tax_country_code ?? saved.tax_country_code,
+      };
+      setForm(hydrated);
+      setSavedDetailsPending(false);
       await loadDocs();
-      return id;
+      requireAgentStorageScope(scope ?? "signed-out");
+      return hydrated;
     } catch (e) {
       // Cap hit (client check or server trigger) → the global upgrade dialog.
       if (isPlanLimitError(e)) offerUpgrade();
       else toast.error(`Could not save: ${errMsg(e)}`);
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   };
@@ -773,71 +827,12 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   // counts as issued; revert → "draft"). Done at the parent so the freshly
   // saved id is applied to the form without a stale closure.
   const setDocStatus = async (status: "draft" | "sent") => {
-    if (!form || saving) return;
-    // Validate
-    if (!form.number.trim()) {
-      toast.error("Invoice number is required");
-      return;
-    }
-    if (!form.items.length || form.items.every((i) => !i.description.trim())) {
-      toast.error("Add at least one line item with a description");
-      return;
-    }
-    if (!form.customer_name.trim() && !(form.customer_email || "").trim()) {
-      toast.error(`${isPurchase ? "Supplier" : "Customer"} name or email is required`);
-      return;
-    }
-    // Check for duplicate invoice number
-    if (docs.some((d) => d.number === form.number && d.id !== (form.id || 0))) {
-      toast.error(
-        `Invoice number "${form.number}" already exists. Use a different number.`
-      );
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        ...form,
-        status,
-        custom_columns: sanitizeCustomColumns(form.customColumns),
-        items: form.items.map((it) => ({
-          description: it.description,
-          qty: it.qty,
-          unit_price: it.unit_price,
-          unit: it.unit || undefined,
-          custom: mergeItemMeta(it),
-          product_id: it.product_id,
-          tax_category: it.tax_category || undefined,
-        })),
-        issue_date: form.issue_date || undefined,
-        due_date: form.due_date || undefined,
-      };
-      // Remove Form-only camelCase alias (mapped to custom_columns above).
-      delete (payload as any).customColumns;
-      if (isPurchase) (payload as any).doc_type = "purchase";
-      else delete (payload as any).doc_type;
-      (payload as any).show_stamp = form.show_stamp ?? false;
-      (payload as any).show_signature = form.show_signature ?? false;
-      (payload as any).show_logo = form.show_logo ?? false;
-      (payload as any).show_bank = form.show_bank ?? false;
-      (payload as Record<string, unknown>).advance_applied = isPurchase ? 0 : Number(form.advance_applied) || 0;
-      if (isPurchase) (payload as Record<string, unknown>).customer_id = null;
-      const id = await billing.saveDoc(payload as InvoiceDocInput);
-      setForm({ ...form, id, status });
-      await loadDocs();
-      toast.success(
-        status === "sent"
-          ? "Invoice finalized - posted to Orders, Accounting & Inventory."
-          : "Moved back to draft."
-      );
-    } catch (e) {
-      if (isPlanLimitError(e)) offerUpgrade();
-      else toast.error(`Could not update: ${errMsg(e)}`);
-    } finally {
-      setSaving(false);
-    }
+    const saved = await save(status);
+    if (saved) toast.success(status === "sent"
+      ? "Invoice finalized - posted to Orders, Accounting & Inventory."
+      : "Moved back to draft.");
+    return saved;
   };
-
   // Share one invoice via WhatsApp / email / SMS, or copy its public portal
   // link (same real link as the bulk "Copy public link" action).
   const sendDoc = async (kind: ShareKind, d: Pick<InvoiceDocSummary, "id">) => {
@@ -988,13 +983,17 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         )}
         <Editor
           form={form}
-          setForm={setForm}
+          setForm={next => {
+            if (!next.id && draftNumber.current && next.number !== form.number) draftNumber.current.manual = true;
+            setForm(next);
+          }}
           onBack={() => {
+            draftNumber.current = null;
             setForm(null);
             loadDocs();
           }}
           onSave={save}
-          onMessage={async (channel) => { const id = await save(); if (id !== undefined) await sendDoc(channel, { id }); }}
+          onMessage={async (channel) => { const saved = await save(); if (saved?.id !== undefined) await sendDoc(channel, { id: saved.id }); }}
           onFinalize={() => setDocStatus("sent")}
           onRevertDraft={() => setDocStatus("draft")}
           saving={saving}
@@ -1003,6 +1002,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
           partyLabel={partyLabel}
           supplierMode={isPurchase}
           docs={docs}
+          provisionalNumber={!form.id && !!draftNumber.current && !draftNumber.current.manual && !draftNumber.current.reserved && form.number === draftNumber.current.predicted}
+          savedDetailsPending={savedDetailsPending}
         />
       </>
     );
@@ -1902,13 +1903,15 @@ function Editor({
   partyLabel,
   supplierMode,
   docs,
+  provisionalNumber,
+  savedDetailsPending,
 }: {
   form: Form;
   setForm: (f: Form) => void;
   onBack: () => void;
-  onSave: () => Promise<number | undefined>;
+  onSave: () => Promise<Form | undefined>;
   onMessage: (channel: MessageChannel) => Promise<void>;
-  onFinalize: () => void | Promise<void>;
+  onFinalize: () => Promise<Form | undefined>;
   onRevertDraft: () => void;
   saving: boolean;
   onEditCompany: () => void;
@@ -1916,6 +1919,8 @@ function Editor({
   partyLabel: string;
   supplierMode: boolean;
   docs: InvoiceDocSummary[];
+  provisionalNumber: boolean;
+  savedDetailsPending: boolean;
 }) {
   const { toast, prompt } = useUI();
   const invoiceRef = useRef<HTMLDivElement>(null);
@@ -1926,35 +1931,44 @@ function Editor({
   const [previewPage, setPreviewPage] = useState(1);
   const [editorTab, setEditorTab] = useState("details");
   const onSave = async () => {
-    const id = await saveDocument();
-    if (id == null) {
+    const saved = await saveDocument();
+    if (!saved) {
       if (!form.number.trim()) setEditorTab("details");
       else if (!form.items.some(item => item.description.trim())) setEditorTab("items");
       else if (!form.customer_name.trim() && !form.customer_email?.trim()) setEditorTab("details");
     }
-    return id;
+    return saved;
   };
   // Group items into A4 pages, honoring per-item manual page breaks.
   const pages = paginateItems(form.items);
+  const electronicPages = useMemo(() => invoiceElectronicDetailPages(form), [form]);
   useEffect(() => {
     setPreviewPage(1);
-  }, [form.items.length]);
+  }, [form.items.length, electronicPages.length]);
 
-  const previewPages = pages.length;
+  const previewPages = pages.length + electronicPages.length;
   const curPageIdx = Math.min(previewPage, previewPages) - 1;
   const pageStartIndex = pages
     .slice(0, curPageIdx)
     .reduce((n, g) => n + g.length, 0);
-  const isLastPreviewPage = curPageIdx === previewPages - 1;
+  const isLastPreviewPage = curPageIdx === pages.length - 1;
+  const electronicPreview = curPageIdx >= pages.length;
   const [downloading, setDownloading] = useState(false);
-  const [eInvoiceOpen, setEInvoiceOpen] = useState(false);
   const [eInvoiceJump, setEInvoiceJump] = useState<string | null>(null);
+  const supportsEInvoice = partyLabel !== "Supplier" && isUaeRegime(form.currency, form.tax_country_code);
   const editorRootRef = useRef<HTMLDivElement>(null);
   const [exportingXml, setExportingXml] = useState(false);
   const downloadPdf = async () => {
     if (downloading) return;
     setDownloading(true);
     try {
+      if (!form.id || savedDetailsPending) {
+        const saved = await onSave();
+        if (!saved) return;
+        const pdf = await reactToPdfBytes(<InvoiceExportSheet form={saved} companyStampSig={companyStampSig} bank={bank} />, saved.number);
+        await saveBytes(`${saved.number}.pdf`, pdf.bytes, "application/pdf");
+        return;
+      }
       const el = exportRef.current || invoiceRef.current;
       if (!el) throw new Error("The invoice preview is not ready. Please try again.");
       await downloadElementAsPdf(el, form.number || "invoice");
@@ -1969,7 +1983,7 @@ function Editor({
   const exportXml = async () => {
     if (exportingXml) return;
     const check = validateEInvoice(form);
-    if (check.errors.length) { setEInvoiceOpen(true); return; }
+    if (check.errors.length) { setEditorTab("einvoice"); return; }
     setExportingXml(true);
     const mode = isLocalMode(), scope = getCacheScope();
     const checkScope = () => {
@@ -1978,19 +1992,19 @@ function Editor({
     };
     try {
       checkScope();
-      const id = await onSave();
-      if (id == null) return;
+      const snapshot = await onSave();
+      if (snapshot?.id == null) return;
       checkScope();
-      const saved = await billing.getDoc(id);
+      const saved = await billing.getDoc(snapshot.id, true);
       checkScope();
       if (!saved.einvoice?.uuid) throw new Error("Save the e-invoice details before exporting.");
-      setForm({ ...form, id, einvoice: saved.einvoice });
-      const xml = buildInvoiceXml({ ...form, einvoice: saved.einvoice });
-      const name = `${form.number || "invoice"}.xml`;
+      setForm({ ...snapshot, einvoice: saved.einvoice });
+      const xml = buildInvoiceXml({ ...snapshot, einvoice: saved.einvoice });
+      const name = `${snapshot.number || "invoice"}.xml`;
       if (!(await saveBytes(name, new TextEncoder().encode(xml), "application/xml"))) return;
       const bytes = new TextEncoder().encode(xml);
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
-      const archiveName = `${safeName(form.number)}-${saved.einvoice.uuid}-${hash}.xml`;
+      const archiveName = `${safeName(snapshot.number)}-${saved.einvoice.uuid}-${hash}.xml`;
       checkScope();
       await autoSaveDocument(archiveName, "invoice", async () => ({ name: archiveName, bytes }));
       toast.success("XML exported. Submit it through your accredited provider.");
@@ -2000,16 +2014,14 @@ function Editor({
   // Finalize, then archive the issued invoice PDF to My Files (best-effort,
   // deduped by name so re-finalizing won't pile up copies).
   const handleFinalize = async () => {
-    await onFinalize();
+    const savedInvoice = await onFinalize();
+    if (!savedInvoice) return;
     try {
-      const el = exportRef.current || invoiceRef.current;
-      if (el) {
-        const base = form.number || "invoice";
-        const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () =>
-          elementToPdfBytes(el, base)
-        );
-        if (saved) toast.success("Saved a copy to My Files.");
-      }
+      const base = savedInvoice.number || "invoice";
+      const saved = await autoSaveDocument(`${base}.pdf`, "invoice", () =>
+        reactToPdfBytes(<InvoiceExportSheet form={savedInvoice} companyStampSig={companyStampSig} bank={bank} />, base)
+      );
+      if (saved) toast.success("Saved a copy to My Files.");
     } catch {
       /* archiving is a convenience — never block finalize on it */
     }
@@ -2201,7 +2213,8 @@ function Editor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierMode]);
 
-  const applySupplier = (supplier: Supplier, countryCode?: string) =>
+  const applySupplier = (supplier: Supplier, countryCode?: string) => {
+    const details = supplierInvoiceDetails(supplier.custom_fields);
     setForm({
       ...form,
       customer_id: undefined,
@@ -2209,33 +2222,37 @@ function Editor({
       customer_address: supplier.address ?? "",
       customer_email: supplier.email ?? "",
       customer_trn: supplier.tax_id ?? "",
-      buyer_country_code: countryCode || form.buyer_country_code,
+      buyer_city: details.city,
+      buyer_country_subdivision: details.country_subdivision,
+      buyer_country_code: countryCode || details.country_code,
+      einvoice: { ...form.einvoice, buyer: details.identity, buyer_delivery_mode: undefined, delivery: undefined },
       advance_applied: 0,
     });
+  };
 
   const applyCustomer = (c: CrmCustomer) =>
     setForm({
       ...form,
       customer_id: c.id,
-      einvoice: { ...form.einvoice, buyer: readEInvoiceParty(c.custom_fields?.einvoice_identity) },
+      einvoice: { ...form.einvoice, buyer: readEInvoiceParty(c.custom_fields?.einvoice_identity), buyer_delivery_mode: undefined, delivery: undefined },
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
       // Prefer the dedicated TRN field; fall back to the legacy segment hack.
       customer_trn:
         c.trn ??
-        (c.segment?.startsWith("TRN:") ? c.segment.slice(4).trim() : form.customer_trn),
+        (c.segment?.startsWith("TRN:") ? c.segment.slice(4).trim() : ""),
       // UAE e-invoice: snapshot buyer location from the CRM record.
-      buyer_city: c.city ?? form.buyer_city,
-      buyer_country_subdivision: c.country_subdivision ?? form.buyer_country_subdivision,
-      buyer_country_code: c.country_code ?? form.buyer_country_code ?? UAE_COUNTRY_CODE,
+      buyer_city: c.city || "",
+      buyer_country_subdivision: c.country_subdivision || "",
+      buyer_country_code: c.country_code || "",
     });
 
   const [viewAll, setViewAll] = useState(false);
   const [lineOptions, setLineOptions] = useState(() => !!form.unit_price_formula || form.customColumns.length > 0 || form.items.some((item) => (item.discount || 0) > 0 || (item.calcMode && item.calcMode !== "auto") || (item.tax_category && item.tax_category !== DEFAULT_TAX_CATEGORY)));
   const pricingField = form.unit_price_formula?.a || "qty";
   const pricingLabel = pricingField === "qty" ? "Quantity" : form.customColumns.find(column => column.key === pricingField)?.label;
-  const focusEInvoiceField = () => {
+  useEffect(() => {
     if (!eInvoiceJump) return;
     const control = Array.from(editorRootRef.current?.querySelectorAll<HTMLElement>('[data-einvoice-field], [id^="invoice-field-"]') || [])
       .find(element => element.dataset.einvoiceField === eInvoiceJump || element.id === `invoice-field-${eInvoiceJump.replace(/\./g, "-")}`)
@@ -2245,19 +2262,20 @@ function Editor({
     control?.scrollIntoView?.({ block: "center", inline: "nearest" });
     control?.focus({ preventScroll: true });
     setEInvoiceJump(null);
-  };
+  }, [eInvoiceJump, editorTab]);
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
   const [viewPage, setViewPage] = useState(1);
   // Paginate for the full-screen "View" modal the same way as live preview/PDF.
   const viewPages = paginateItems(form.items);
-  const viewPageCount = viewPages.length;
+  const viewPageCount = viewPages.length + electronicPages.length;
   const viewPageIdx = Math.min(viewPage, viewPageCount) - 1;
   const viewPageStart = viewPages
     .slice(0, viewPageIdx)
     .reduce((n, g) => n + g.length, 0);
-  const isLastViewPage = viewPageIdx === viewPageCount - 1;
+  const isLastViewPage = viewPageIdx === viewPages.length - 1;
+  const electronicViewPage = viewPageIdx >= viewPages.length;
 
   // Close view modal on Escape; reset to page 1 when reopening.
   useEffect(() => {
@@ -2277,9 +2295,9 @@ function Editor({
   const invoiceTotals = applyRoundOff(docTotals(form.items, form.discount || 0, form.tax_rate || 0, form.unit_price_formula), !!form.round_off);
 
   const saveAndSend = async () => {
-    const savedId = await onSave();
-    if (savedId === undefined) return;
-    const effectiveId = savedId;
+    const form = await onSave();
+    if (form?.id === undefined) return;
+    const effectiveId = form.id;
     if (!form.customer_email) {
       toast.error(`Add a ${partyLabel.toLowerCase()} email (Invoice Details) to send this invoice.`);
       return;
@@ -2300,16 +2318,13 @@ function Editor({
     // if PDF generation fails; the summary + portal link still go out).
     let attachments: { filename: string; content: string }[] | undefined;
     try {
-      const el = exportRef.current || invoiceRef.current;
-      if (el) {
-        const pdf = await elementToPdfBytes(el, form.number || "invoice");
-        attachments = [
-          {
-            filename: `${form.number || "invoice"}.pdf`,
-            content: bytesToBase64(pdf.bytes),
-          },
-        ];
-      }
+      const pdf = await reactToPdfBytes(<InvoiceExportSheet form={form} companyStampSig={companyStampSig} bank={bank} />, form.number || "invoice");
+      attachments = [
+        {
+          filename: `${form.number || "invoice"}.pdf`,
+          content: bytesToBase64(pdf.bytes),
+        },
+      ];
     } catch {
       /* attachment optional */
     }
@@ -2385,19 +2400,6 @@ function Editor({
   return (
     <div ref={editorRootRef}>
       <fieldset disabled={saving} aria-busy={saving} className="m-0 min-w-0 border-0 p-0">
-      <EInvoiceReview open={eInvoiceOpen} doc={form} busy={saving || exportingXml}
-        onClose={() => setEInvoiceOpen(false)} onChange={einvoice => set("einvoice", einvoice)}
-        onCloseAutoFocus={focusEInvoiceField}
-        onDocumentChange={setForm}
-        bankAccount={bank.iban || bank.account_number ? { id: bank.iban || bank.account_number, name: bank.account_name } : undefined}
-        onFix={issue => {
-          setEInvoiceOpen(false);
-          setEditorTab(issue.section === "items" ? "items" : "details");
-          if (issue.section === "items") setLineOptions(true);
-          if (issue.field === "discount") setShowDiscount(true);
-          setEInvoiceJump(issue.field);
-        }}
-        onExport={() => void exportXml()} />
       <PageHeader
         title={form.id ? (partyLabel === "Supplier" ? "Edit Purchase Invoice" : "Edit Invoice") : (partyLabel === "Supplier" ? "New Purchase Invoice" : "New Invoice")}
         subtitle={partyLabel === "Supplier" ? "Record a supplier invoice and its line items" : "Prepare an invoice for your customer"}
@@ -2426,11 +2428,11 @@ function Editor({
           </button>
           {/* Peppol PINT-AE is the UAE e-invoice — only meaningful for
               documents under the UAE VAT regime. */}
-          {partyLabel !== "Supplier" && isUaeRegime(form.currency, form.tax_country_code) && (
+          {supportsEInvoice && (
             <button
               className="btn-primary"
               disabled={saving || exportingXml}
-              onClick={() => setEInvoiceOpen(true)}
+              onClick={() => setEditorTab("einvoice")}
               title="Check required UAE e-invoice details and export XML for free"
               data-guide="invoice-einvoice"
             >
@@ -2546,9 +2548,10 @@ function Editor({
           </Step>
 
           <Tabs value={editorTab} onValueChange={setEditorTab}>
-            <TabsList aria-label="Invoice editor sections" className="grid w-full grid-cols-3">
+            <TabsList aria-label="Invoice editor sections" className={`grid w-full ${supportsEInvoice ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="items">Items <span className="text-xs tabular-nums text-muted-foreground">{form.items.length}</span></TabsTrigger>
+              {supportsEInvoice && <TabsTrigger value="einvoice">E-invoice</TabsTrigger>}
               <TabsTrigger value="finishing">Finishing touches</TabsTrigger>
             </TabsList>
           <TabsContent value="details" forceMount hidden={editorTab !== "details"}>
@@ -2733,7 +2736,7 @@ function Editor({
                   )}
               </div>
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,144px),1fr))] gap-3 content-start">
-                <Field label="Invoice Number">
+                <Field label="Invoice Number" hint={provisionalNumber ? "Provisional — a unique number is assigned when you save or export." : undefined}>
                   <div className="flex gap-2">
                     <input aria-label="Invoice number"
                       className="input"
@@ -2811,7 +2814,7 @@ function Editor({
                 )}
               </div>
             </div>
-            <details className="group mt-3 border-t border-border pt-2">
+            <details className="group mt-3 border-t border-border pt-2" open={isUaeRegime(form.currency, form.tax_country_code)}>
               <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">{isUaeRegime(form.currency, form.tax_country_code) ? "E-invoice details" : "Additional details"}<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
                 <Field label="Document Title">
@@ -3284,10 +3287,10 @@ function Editor({
               </table>
             </div>
             {isUaeRegime(form.currency, form.tax_country_code) && (
-              <details className="mt-4 border-t border-border pt-4" open={form.items.some(item => ["E", "AE"].includes(item.tax_category || "") || !!item.custom.einvoice_item_type)}>
+              <details className="mt-4 border-t border-border pt-4" open>
                 <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 text-sm font-medium">E-invoice line details <ChevronDown size={15} /></summary>
-                <section aria-label="Required line tax details" className="space-y-3 pt-3">
-                <p className="text-xs text-muted-foreground">Set an item classification where applicable. Goods need an HS code and services need a service accounting code when you specify their type.</p>
+                <section aria-label="Optional e-invoice line details" className="space-y-3 pt-3">
+                <p className="text-xs text-muted-foreground">Optional for drafts. For XML export, goods need an HS code and services need a service accounting code when you specify their type.</p>
                 {form.items.map((item, index) => (
                   <fieldset key={index} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <legend className="mb-2 text-xs text-muted-foreground">Line {index + 1} · {item.description || "Item"}</legend>
@@ -3300,11 +3303,11 @@ function Editor({
                       <input data-einvoice-field={`items.${index}.tax`} className="input" type="number" min="0" max="100" step="0.01" aria-label={`VAT rate for line ${index + 1}`}
                         value={item.tax ?? ""} onChange={event => setItem(index, { tax: event.target.value === "" ? undefined : Number(event.target.value) })} />
                     </Field>
-                    {["G", "B"].includes(item.custom.einvoice_item_type) && <Field label="HS classification code" required>
+                    {["G", "B"].includes(item.custom.einvoice_item_type) && <Field label="HS classification code (optional)">
                       <input data-einvoice-field={`items.${index}.custom.einvoice_hs_code`} className="input" aria-label={`HS classification code for line ${index + 1}`}
                         value={item.custom.einvoice_hs_code || ""} onChange={event => setItemCustom(index, "einvoice_hs_code", event.target.value)} />
                     </Field>}
-                    {["S", "B"].includes(item.custom.einvoice_item_type) && <Field label="Service accounting code" required>
+                    {["S", "B"].includes(item.custom.einvoice_item_type) && <Field label="Service accounting code (optional)">
                       <input data-einvoice-field={`items.${index}.custom.einvoice_service_code`} className="input" aria-label={`Service accounting code for line ${index + 1}`}
                         value={item.custom.einvoice_service_code || ""} onChange={event => setItemCustom(index, "einvoice_service_code", event.target.value)} />
                     </Field>}
@@ -3449,8 +3452,24 @@ function Editor({
               </div>
             )}
           </Step>
-          <div className="mt-4 flex justify-between gap-2"><button type="button" className="btn-ghost" onClick={() => setEditorTab("details")}>Back to details</button><button type="button" className="btn-ghost" onClick={() => setEditorTab("finishing")}>Finishing touches →</button></div>
+          <div className="mt-4 flex justify-between gap-2"><button type="button" className="btn-ghost" onClick={() => setEditorTab("details")}>Back to details</button><button type="button" className="btn-ghost" onClick={() => setEditorTab(supportsEInvoice ? "einvoice" : "finishing")}>{supportsEInvoice ? "E-invoice details →" : "Finishing touches →"}</button></div>
           </TabsContent>
+          {supportsEInvoice && <TabsContent value="einvoice" forceMount hidden={editorTab !== "einvoice"}>
+            <Step title="E-invoice details" subtitle="Optional details for this invoice. Use saved information or enter it manually.">
+              <EInvoiceReview embedded open doc={form} busy={saving || exportingXml}
+                onClose={() => setEditorTab("details")} onChange={einvoice => set("einvoice", einvoice)}
+                onDocumentChange={setForm}
+                bankAccount={bank.iban || bank.account_number ? { id: bank.iban || bank.account_number, name: bank.account_name } : undefined}
+                onFix={issue => {
+                  setEditorTab(issue.section === "items" ? "items" : "details");
+                  if (issue.section === "items") setLineOptions(true);
+                  if (issue.field === "discount") setShowDiscount(true);
+                  setEInvoiceJump(issue.field);
+                }}
+                onExport={() => void exportXml()} />
+            </Step>
+            <div className="mt-4 flex justify-end"><button type="button" className="btn-ghost" onClick={() => setEditorTab("finishing")}>Finishing touches →</button></div>
+          </TabsContent>}
           <TabsContent value="finishing" forceMount hidden={editorTab !== "finishing"} className="space-y-4">
           <p className="text-xs text-muted-foreground">Optional details for the finished document. Your company defaults are already included.</p>
           {/* Branding */}
@@ -3680,22 +3699,22 @@ function Editor({
                     column read 1, 2, 3, 5 with a stray 4 floating beside step 1. */}
                 <p className="font-semibold text-ink">Preview</p>
                 <p className="text-xs text-brand-500 mt-0.5">
-                  This is how your invoice will look
+                  {provisionalNumber ? "Draft preview · number is provisional until saved" : "This is how your invoice will look"}
                 </p>
               </div>
             </div>
 
-            <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
+            <FitPreview baseWidth={device === "desktop" || electronicPreview ? 794 : 420} zoom={zoom} padding={0}>
               {/* ponytail: data-no-i18n + dir=ltr - invoice preview stays English
                   (text + layout) regardless of app language; PDF export clones
                   this subtree so the exemption carries into the captured pages. */}
               <div ref={invoiceRef} data-no-i18n dir="ltr">
                 <div
                   style={{
-                    width: device === "desktop" ? 794 : 420,
-                    minHeight: device === "desktop" ? 1123 : 594,
+                    width: device === "desktop" || electronicPreview ? 794 : 420,
+                    minHeight: device === "desktop" || electronicPreview ? 1123 : 594,
                     position: "relative",
-                    padding: device === "desktop" ? 48 : 25,
+                    padding: device === "desktop" || electronicPreview ? 48 : 25,
                     boxSizing: "border-box",
                     background: "#fff",
                   }}
@@ -3706,13 +3725,13 @@ function Editor({
                     style={{
                       position: "relative",
                       width: "100%",
-                      minHeight: device === "desktop" ? 1027 : 498,
+                      minHeight: device === "desktop" || electronicPreview ? 1027 : 498,
                     }}
                   >
                   {/* Stamp & Signature - draggable, watermark-style overlay.
                       Per-document copy (form.stamp/signature) seeded from the
                       company asset; falls back to the company asset itself. */}
-                  <StampSignatureLayer
+                  {!electronicPreview && <StampSignatureLayer
                     stamp={
                       form.show_stamp
                         ? form.stamp?.data
@@ -3737,15 +3756,15 @@ function Editor({
                         : companyStampSig.signature;
                       if (base) setForm({ ...form, signature: { ...base, x, y } });
                     }}
-                  />
-                  <DocView
+                  />}
+                  {electronicPreview ? <InvoiceElectronicDetailsPage rows={electronicPages[curPageIdx - pages.length] || []} pageNumber={curPageIdx + 1} pageCount={previewPages} invoiceNumber={form.number} /> : <DocView
                     bank={form.show_bank ? bank : undefined}
                     form={form}
                     pageItems={pages[curPageIdx] ?? []}
                     itemStartIndex={pageStartIndex}
                     showTotals={isLastPreviewPage}
                     showFooter={isLastPreviewPage}
-                  />
+                  />}
                   </div>
                 </div>
               </div>
@@ -3852,14 +3871,14 @@ function Editor({
                         if (base) setForm({ ...form, signature: { ...base, x, y } });
                       }}
                     />}
-                    <DocView
+                    {electronicViewPage ? <div style={{ padding: 48, background: "#fff" }}><InvoiceElectronicDetailsPage rows={electronicPages[viewPageIdx - viewPages.length] || []} pageNumber={viewPageIdx + 1} pageCount={viewPageCount} invoiceNumber={form.number} /></div> : <DocView
                       bank={form.show_bank ? bank : undefined}
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
                       itemStartIndex={viewPageStart}
                       showTotals={isLastViewPage}
                       showFooter={isLastViewPage}
-                    />
+                    />}
                   </div>
             </FitPreview>
       </Modal>
@@ -3892,6 +3911,9 @@ function CustomerModal({
     phone: "",
     trn: "",
     country_code: "",
+    city: "",
+    country_subdivision: "",
+    einvoice: {} as EInvoiceParty,
   });
   const [saving, setSaving] = useState(false);
 
@@ -3904,7 +3926,10 @@ function CustomerModal({
         email: "",
         phone: "",
         trn: "",
-    country_code: "",
+        country_code: "",
+        city: "",
+        country_subdivision: "",
+        einvoice: {},
       });
   }, [open, supplierMode]);
 
@@ -3970,6 +3995,17 @@ function CustomerModal({
         {!trnValid && (
           <p className="text-xs text-danger">{trnError}</p>
         )}
+        <details className="border-t border-border pt-3">
+          <summary className="cursor-pointer font-medium">Electronic invoicing details (optional)</summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-xs text-muted-foreground">Save these as a preset for future invoices, or leave them blank and enter them on an invoice later.</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="City (optional)"><input className="input" aria-label="City" value={f.city} onChange={event => setF({ ...f, city: event.target.value })} /></Field>
+              <Field label="Emirate / region (optional)"><input className="input" aria-label="Emirate / region" value={f.country_subdivision} onChange={event => setF({ ...f, country_subdivision: event.target.value })} /></Field>
+            </div>
+            <EInvoicePartyFields value={f.einvoice} includeIdentifier onChange={einvoice => setF({ ...f, einvoice })} />
+          </div>
+        </details>
       </fieldset>
       <div className="flex justify-end gap-2 mt-5">
         <button className="btn-ghost" onClick={onClose} disabled={saving}>
@@ -3990,6 +4026,9 @@ function CustomerModal({
               address: f.address || undefined,
               trn: trn || undefined,
               country_code: f.country_code || undefined,
+              city: f.city || undefined,
+              country_subdivision: f.country_subdivision || undefined,
+              custom_fields: { einvoice_identity: JSON.stringify(f.einvoice) },
             };
             try {
               if (supplierMode) {
@@ -4000,9 +4039,10 @@ function CustomerModal({
                   phone: f.phone.trim() || undefined,
                   address: f.address.trim() || undefined,
                   tax_id: trn || undefined,
+                  custom_fields: { city: f.city, country_subdivision: f.country_subdivision, country_code: f.country_code, einvoice_identity: JSON.stringify(f.einvoice) },
                 };
                 const id = await suppliers.create(supplierFields);
-                // Country is a bill snapshot; suppliers has no country column.
+                // Reuse the saved optional metadata as this bill's snapshot.
                 onSupplierSaved({ id, created_at: "", ...supplierFields }, f.country_code || undefined);
                 return;
               }

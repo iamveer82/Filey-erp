@@ -16,7 +16,7 @@ it("places country-specific bank details after notes on the final page of every 
       notes: "Please use the invoice number as your payment reference.",
       items: [{ description: "Design", qty: 1, unit_price: 100 }, { description: "Review", qty: 1, unit_price: 50, pageBreakBefore: true }],
     }} />);
-    const pages = page.querySelectorAll(".invoice-print");
+    const pages = page.querySelectorAll(".invoice-print:not([data-einvoice-details-sheet])");
     expect(pages).toHaveLength(2);
     expect(pages[0].querySelector("[data-bank-details]")).toBeNull();
     const block = pages[1].querySelector("[data-bank-details]")!;
