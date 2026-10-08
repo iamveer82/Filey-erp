@@ -118,6 +118,34 @@ Deno.test("a lost hosted additive save stops before another model call or tool b
   }, () => response([useTool("one", "add_customer", { name: "Fixture" }), useTool("two", "add_customer", { name: "Fixture" })]));
 });
 
+Deno.test("hosted replies cannot claim a failed invoice action succeeded", async () => {
+  const { client, state } = database();
+  await providerTest(async requests => {
+    const reply = await aiReply("Create a fixture invoice", "Owner", client, state.org, OWNER_ID, "telegram", "42", () => Promise.resolve(true));
+    assertEquals(reply.includes("Draft DEMO-42 is ready"), false);
+    assertStringIncludes(reply, "couldn't verify completion");
+    assertEquals(state.rpcCalls, 0);
+    assertEquals(requests.length, 2);
+  }, (_request, round) => round === 0
+    ? response([useTool("one", "create_draft_invoice", { ...invoiceInput, items: [] })])
+    : response([], "Draft DEMO-42 is ready."));
+});
+
+Deno.test("hosted correction after a failed attempt reports only confirmed receipts", async () => {
+  const { client, state } = database();
+  await providerTest(async requests => {
+    const reply = await aiReply("Create a fixture invoice", "Owner", client, state.org, OWNER_ID, "telegram", "42", () => Promise.resolve(true));
+    assertStringIncludes(reply, "Confirmed results in Filey:");
+    assertStringIncludes(reply, "Draft DEMO-42");
+    assertEquals(reply.includes("DEMO-99"), false);
+    assertEquals(state.rpcCalls, 1);
+    assertEquals(requests.length, 3);
+  }, (_request, round) => round === 0
+    ? response([useTool("one", "create_draft_invoice", { ...invoiceInput, items: [] })])
+    : round === 1 ? response([useTool("two", "create_draft_invoice", invoiceInput)])
+    : response([], "Drafts DEMO-42 and DEMO-99 are ready."));
+});
+
 Deno.test("a provider failure after a confirmed save reports its receipt without running the write again", async () => {
   const { client, state } = database();
   await providerTest(async requests => {

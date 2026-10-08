@@ -3,6 +3,27 @@ const compact = value => (value ?? '').replace(/::text\b/gi, '').replace(/[\s()]
 const sourceText = value => (value ?? '').replace(/--[^\r\n]*/g, '').trim().replace(/\s+/g, ' ');
 const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 
+export function einvoiceSchemaIssues(catalog, sources) {
+  const issues = [];
+  for (const [table, column] of [['invoice_docs', 'einvoice'], ['company_profile', 'einvoice'],
+    ['crm_customers', 'custom_fields'], ['suppliers', 'custom_fields']]) {
+    if (!(catalog.columns ?? []).some(item => item.table === table && item.column === column && item.type === 'jsonb'))
+      issues.push(`Missing or invalid e-invoice identity column: ${table}.${column}`);
+  }
+  const functions = (catalog.functions ?? []).filter(fn => fn.name === 'preserve_einvoice_uuid');
+  const fn = functions[0];
+  if (functions.length !== 1 || fn.args !== '' || fn.result !== 'trigger' || fn.definer !== false
+    || !fn.config?.some(value => compact(value) === 'search_path=public'))
+    issues.push('Unexpected e-invoice UUID function contract');
+  if (!sources.has('preserve_einvoice_uuid') || sourceText(fn?.source) !== sourceText(sources.get('preserve_einvoice_uuid')))
+    issues.push('E-invoice UUID preservation function drift');
+  const trigger = (catalog.triggers ?? []).find(item => item.table === 'invoice_docs' && item.name === 'invoice_einvoice_identity');
+  if (!trigger || !['O', 'A'].includes(trigger.enabled) || trigger.type !== 23
+    || trigger.function !== 'preserve_einvoice_uuid' || trigger.condition != null || trigger.columns?.length)
+    issues.push('Missing or invalid e-invoice UUID preservation trigger');
+  return issues;
+}
+
 export function auditSchemaIssues(catalog, sources) {
   const issues=[];
   for(const [name,args,result,definer] of [['log_audit','','trigger',true],['filey_audit_snapshot','jsonb','jsonb',false]]) {

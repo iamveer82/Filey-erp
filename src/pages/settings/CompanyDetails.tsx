@@ -1,4 +1,5 @@
 import EInvoicePartyFields from "../../components/EInvoicePartyFields";
+import { companyInvoiceSeller } from "../../lib/invoiceSeller";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import CountryTaxFields from "../../components/CountryTaxFields";
 import CompanyDocuments from "../../components/CompanyDocuments";
@@ -146,6 +147,7 @@ export default function CompanyDetails() {
   const country = companyCountry(c);
   const india = country === "IN";
   const phoneHint = companyPhoneHint(country);
+  const seller = companyInvoiceSeller(c);
   const set = <K extends keyof CompanyProfile>(k: K, v: CompanyProfile[K]) => {
     setC({ ...c, [k]: v });
     setSaved(false);
@@ -476,15 +478,15 @@ export default function CompanyDetails() {
             <input
               className="input"
               placeholder={uae ? "CN-1234567" : "Company registration number"}
-              value={c.legal_id ?? ""}
-              onChange={(e) => set("legal_id", e.target.value)}
+              value={seller.seller_legal_id ?? ""}
+              onChange={(e) => { setC({ ...c, legal_id: e.target.value, einvoice: { ...c.einvoice, legal_id: e.target.value } }); setSaved(false); }}
             />
           </FormField>
           {uae && (
             <FormField label="ID Type" hint="UAE e-invoice">
               <SelectMenu
-                value={c.legal_id_type ?? ""}
-                onChange={(v) => set("legal_id_type", v)}
+                value={seller.seller_legal_id_type ?? ""}
+                onChange={(v) => { setC({ ...c, legal_id_type: v, einvoice: { ...c.einvoice, legal_id_type: v } }); setSaved(false); }}
                 options={[
                   { value: "", label: "Select…" },
                   ...LEGAL_ID_TYPES.map((t) => ({ value: t.code, label: t.label })),

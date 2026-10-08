@@ -8,7 +8,7 @@ vi.mock("../supabase", () => ({
   sb: () => ({ from: () => {
     let writing = false;
     const q = {
-      select: () => q, single: () => q, order: () => q, range: () => q, eq: () => q,
+      select: () => q, single: () => q, maybeSingle: () => q, order: () => q, range: () => q, eq: () => q,
       update: () => { writing = true; return q; },
       then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => (writing ? cloud.write() : cloud.read()).then(resolve, reject),
     };
@@ -65,6 +65,15 @@ it("never uses an invoice snapshot as proof of a save when a fresh reconciliatio
   expect(await billing.listDocs("sales")).toEqual([]);
   cloud.read.mockRejectedValue(new Error("Invoice list connection lost"));
   await expect(billing.listDocs("sales", true)).rejects.toThrow("Invoice list connection lost");
+});
+
+it("takes fresh company presets for document creation without falling back to an older cloud profile", async () => {
+  cloud.read.mockResolvedValue({ data: { name: "Company", city: "Old city", einvoice: {} }, error: null });
+  expect((await billing.getCompany()).city).toBe("Old city");
+  cloud.read.mockResolvedValue({ data: { name: "Company", city: "Dubai", einvoice: { tin: "1001234567" } }, error: null });
+  expect(await billing.getCompany(true)).toMatchObject({ city: "Dubai", einvoice: { tin: "1001234567" } });
+  cloud.read.mockRejectedValue(new Error("Current company unavailable"));
+  await expect(billing.getCompany(true)).rejects.toThrow("Current company unavailable");
 });
 
 async function cacheOldInvoice() {

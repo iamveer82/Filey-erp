@@ -43,12 +43,23 @@ profit-margin tax accounting.
 ## Implementation status
 
 - Corporate Tax identity, VAT TRN and electronic address are separate fields.
-  Invoice parties are snapshots; a saved document retains its UUID.
+  Invoice parties are snapshots; a saved document retains its preparation UUID.
+  The [MoF June 2026 guidelines, section 5.2](https://mof.gov.ae/wp-content/uploads/2026/06/UAE-Electronic-Invoicing-Guidelines_V-1.1-01June2026.pdf)
+  assign electronic invoice UUID generation to the ASP, not the FTA. Filey's
+  preparation UUID is not evidence of provider issuance or FTA reporting.
+  A future provider integration must store its returned identity and receipts
+  separately instead of overwriting the existing preparation identifier.
+- New invoices copy the current saved seller details. Existing drafts can fill
+  missing seller fields explicitly; manual values and issued snapshots remain
+  unchanged. Customer and supplier presets retain optional electronic identity
+  alongside their contact and location details, including deliberate clears.
 - The editor, PDF and XML share tax grouping, cent allocation and totals.
   Document discounts, applied advances and rounding appear in XML. Additional
   fees use normal invoice lines; document-level charges are not implemented.
 - **Check e-invoice** shows missing fields and exports after local checks.
   Export does not change payment status or claim network delivery/reporting.
+  Invalid stored types and XML-forbidden characters are reported before export;
+  valid Arabic, other Unicode text and optional party phone/email are retained.
 - The supported PINT-AE types are tax invoice `380`, commercial invoice `480`,
   tax credit note `381` and commercial credit note `81`. Legacy debit/prepayment
   types remain ordinary document options but are rejected for PINT-AE export.
@@ -88,6 +99,8 @@ Apply `supabase/2026-09-29-einvoice-identity.sql` before deploying the frontend.
 It adds JSON identity fields and preserves existing cloud invoice UUIDs.
 `schema.sql` includes the migration for new installations. Local stores already
 retain JSON fields; no destructive local migration is needed.
+`supabase/verify-runtime-schema.sql` and `scripts/check-cloud-schema.mjs` verify
+the live identity columns and UUID-preservation function/trigger against source.
 
 Do not advertise live UAE submission yet. It needs a selected accredited
 provider, its API documentation, sandbox access and registered party details.

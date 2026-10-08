@@ -62,10 +62,27 @@ it("groups live checks, focuses a missing seller field and enables export only a
   expect(within(seller).getByText("Checks passed")).toBeVisible();
   expect(screen.getByRole("button", { name: "Save & export XML" })).toBeEnabled();
   expect(screen.getByText("Ready for XML preparation")).toBeVisible();
-  expect(screen.getByText(/not FTA approval/)).toBeVisible();
+  expect(screen.getByText(/This check is not FTA approval/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Save & export XML" }));
   expect(exported).toHaveBeenCalledOnce();
   expect(fix).not.toHaveBeenCalled();
+});
+
+it("explains the document UUID separately from FTA identity and blocks a corrupt saved UUID", () => {
+  const changed = vi.fn();
+  const props = { open: true, busy: false, onClose: () => {}, onChange: changed, onFix: () => {}, onExport: () => {} };
+  const view = render(<UIProvider><EInvoiceReview {...props} doc={prepared} /></UIProvider>);
+  expect(screen.getByRole("textbox", { name: "Preparation UUID" })).toHaveAttribute("readonly");
+  expect(screen.getByRole("textbox", { name: "Preparation UUID" })).toHaveAttribute("placeholder", "Assigned when saved");
+  expect(screen.getByText(/separate from your FTA-issued TRN\/TIN/)).toBeVisible();
+  expect(screen.getByText(/provider is responsible for generating the final/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save & export XML" })).toBeEnabled();
+  view.rerender(<UIProvider><EInvoiceReview {...props} doc={{ ...prepared, einvoice: { ...prepared.einvoice, uuid: "invalid-saved-uuid" } }} /></UIProvider>);
+  expect(screen.getByRole("textbox", { name: "Preparation UUID" })).toHaveValue("invalid-saved-uuid");
+  expect(screen.getByRole("textbox", { name: "Preparation UUID" })).toHaveAttribute("aria-invalid", "true");
+  expect(screen.queryByRole("button", { name: /Edit:.*UUID/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
+  expect(changed).not.toHaveBeenCalled();
 });
 
 it("keeps registered identities and bank details empty until an explicit edit or copy", () => {

@@ -14,7 +14,7 @@ select jsonb_build_object(
      'filey_reserve_document_number','filey_document_numbers','filey_document_number_guard','filey_setting_number_guard',
      'filey_generate_recurring_invoice','filey_recurring_items_owned','filey_record_lead','filey_settle_stripe_checkout',
      'filey_workflow_children_owned','filey_workflow_totals',
-     'filey_save_document','filey_document_lines_replaceable','log_audit','filey_audit_snapshot',
+     'filey_save_document','filey_document_lines_replaceable','log_audit','filey_audit_snapshot','preserve_einvoice_uuid',
      'filey_workflow_effects_owned','filey_workflow_receipt_reversible','filey_workflow_credit_available','filey_workflow_advance','filey_workflow_account_for_owner',
      'filey_workflow_guard','filey_workflow_account','filey_workflow_entry','filey_workflow_reverse','filey_workflow_stock','filey_workflow_unstock','filey_workflow_unpost','filey_workflow_post','filey_workflow_payment',
      'filey_business_workflow','filey_order_workflow','filey_journal_workflow','filey_advance_workflow','filey_stock_workflow',
@@ -29,7 +29,8 @@ select jsonb_build_object(
      (select jsonb_agg(privilege order by privilege) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) privilege where has_table_privilege((select oid from pg_roles where rolname='filey_workflow_executor'),c.oid,privilege)) end))
    from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r'),
  'triggers',(select jsonb_agg(jsonb_build_object('table',c.relname,'name',t.tgname,'enabled',t.tgenabled,
-   'type',t.tgtype,'function',p.proname,'condition',substring(pg_get_triggerdef(t.oid) from 'WHEN \((.*)\) EXECUTE FUNCTION'),
+   'type',t.tgtype,'function',case when p.pronamespace='public'::regnamespace then p.proname::text else p.pronamespace::regnamespace::text || '.' || p.proname end,
+   'condition',substring(pg_get_triggerdef(t.oid) from 'WHEN \((.*)\) EXECUTE FUNCTION'),
    'columns',(select jsonb_agg(a.attname order by col.ordinality) from unnest(t.tgattr) with ordinality col(attnum,ordinality) join pg_attribute a on a.attrelid=t.tgrelid and a.attnum=col.attnum)))
    from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace join pg_proc p on p.oid=t.tgfoid where n.nspname='public' and not t.tgisinternal),
  'indexes',(select jsonb_agg(jsonb_build_object('table',c.relname,'name',idx.relname,'unique',i.indisunique,'valid',i.indisvalid,

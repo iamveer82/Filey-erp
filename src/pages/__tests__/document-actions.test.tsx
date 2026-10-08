@@ -145,10 +145,111 @@ describe("invoice editor actions", () => {
     fireEvent.change(view.getByRole("textbox", { name: "Description for line 1" }), { target: { value: "Draft item" } });
   }
 
+  it.each(["new", "edit", "duplicate"] as const)("ignores an older %s request after another invoice is opened and edited", async action => {
+    let finish!: () => void;
+    if (action === "new") vi.mocked(billing.getCompany).mockImplementation(fresh => fresh
+      ? new Promise(resolve => { finish = () => resolve(company); }) : Promise.resolve(company));
+    else vi.mocked(billing.getDoc).mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ ...invoice, customer_name: "Older loaded customer" });
+    }));
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    if (action === "new") fireEvent.click(view.getByRole("button", { name: "New invoice" }));
+    else {
+      fireEvent.click(view.getByRole("button", { name: "More actions" }));
+      fireEvent.click(await view.findByRole("menuitem", { name: action === "edit" ? "Edit" : "Duplicate" }));
+    }
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    const customer = await view.findByRole("textbox", { name: "Customer name" });
+    fireEvent.change(customer, { target: { value: "Keep this work" } });
+    await act(async () => finish());
+    expect(view.getByRole("heading", { name: "Edit Invoice" })).toBeInTheDocument();
+    expect(view.getByRole("textbox", { name: "Customer name" })).toHaveValue("Keep this work");
+  });
+
+  it.each(["edit", "close"] as const)("does not replace the current editor when the user chooses to %s during credit note loading", async action => {
+    vi.mocked(billing.getDoc).mockResolvedValue({ ...invoice, status: "sent" });
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    await view.findByRole("heading", { name: "Edit Invoice" });
+    let finish!: () => void;
+    vi.mocked(billing.getDoc).mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(invoice); }));
+    fireEvent.click(view.getByRole("button", { name: "Create credit note" }));
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    if (action === "edit") fireEvent.change(view.getByRole("textbox", { name: "Customer name" }), { target: { value: "Keep current edit" } });
+    else fireEvent.click(view.getByRole("button", { name: "Back" }));
+    await act(async () => finish());
+    if (action === "edit") {
+      expect(view.getByRole("heading", { name: "Edit Invoice" })).toBeInTheDocument();
+      expect(view.getByRole("textbox", { name: "Customer name" })).toHaveValue("Keep current edit");
+    } else {
+      expect(view.getByRole("button", { name: "New invoice" })).toBeInTheDocument();
+      expect(view.queryByRole("textbox", { name: "Customer name" })).not.toBeInTheDocument();
+    }
+  });
+
+  it("fills an older draft from fresh seller presets while retaining manual values and its buyer snapshot", async () => {
+    vi.mocked(billing.getCompany).mockImplementation(async fresh => ({ ...company, ...(fresh ? {
+      city: "Dubai", country_subdivision: "DXB", address: "Preset address", legal_id: "TL-PRESET", legal_id_type: "TL",
+      einvoice: { tin: "1001234567", legal_authority: "Dubai Economy" },
+    } : {}) }));
+    vi.mocked(billing.getDoc).mockResolvedValue({ ...invoice, seller_address: "Manual address", einvoice: { buyer: { tin: "1007774567" } } });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
+    expect(review.getByRole("textbox", { name: "Seller city" })).toHaveValue("");
+    fireEvent.click(review.getByRole("button", { name: "Fill missing seller details" }));
+    await waitFor(() => expect(review.getByRole("textbox", { name: "Seller city" })).toHaveValue("Dubai"));
+    expect(review.getByRole("textbox", { name: "Seller street address" })).toHaveValue("Manual address");
+    expect(review.getByRole("textbox", { name: "Electronic invoicing TIN" })).toHaveValue("1001234567");
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ seller_city: "Dubai", seller_address: "Manual address",
+      seller_legal_id: "TL-PRESET", einvoice: expect.objectContaining({ buyer: { tin: "1007774567" }, seller: expect.objectContaining({ tin: "1001234567" }) }),
+    })));
+  });
+
+  it("starts a new invoice with current company seller presets rather than the list's cached profile", async () => {
+    vi.mocked(billing.getCompany).mockImplementation(async fresh => ({ ...company, ...(fresh ? { city: "Dubai", legal_id: "CURRENT-LICENCE",
+      einvoice: { tin: "1001234567" } } : {}) }));
+    const view = wrap(<Invoicing />);
+    await openNewDraft(view);
+    fireEvent.click(view.getByRole("button", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
+    expect(review.getByRole("textbox", { name: "Seller city" })).toHaveValue("Dubai");
+    expect(review.getByRole("textbox", { name: "Legal registration number" })).toHaveValue("CURRENT-LICENCE");
+    expect(review.getByRole("textbox", { name: "Electronic invoicing TIN" })).toHaveValue("1001234567");
+  });
+
+  it("does not offer company preset enrichment on an issued invoice", async () => {
+    vi.mocked(billing.getDoc).mockResolvedValue({ ...invoice, status: "sent" });
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
+    expect(review.queryByRole("button", { name: "Fill missing seller details" })).not.toBeInTheDocument();
+  });
+
   it.each(["sales", "purchase"] as const)("uses optional %s party presets and clears the previous party's identity, tax and delivery details", async mode => {
     const identity = { identifier: "BUYER-NEW", tin: "1234567890" };
     vi.spyOn(crm, "customers").mockResolvedValue([
-      { id: 31, name: "Preset party", phone: "+971 50 123 4567", city: "Dubai", country_code: "AE", country_subdivision: "DU", custom_fields: { einvoice_identity: JSON.stringify(identity) } },
+      { id: 31, name: "Preset party", phone_e164: "+971501234567", city: "Dubai", country_code: "AE", country_subdivision: "DU", custom_fields: { einvoice_identity: JSON.stringify(identity) } },
       { id: 32, name: "Blank party" },
     ] as Awaited<ReturnType<typeof crm.customers>>);
     vi.spyOn(suppliers, "list").mockResolvedValue([
@@ -167,11 +268,12 @@ describe("invoice editor actions", () => {
     await waitFor(() => expect(select).toBeEnabled());
     fireEvent.keyDown(select, { key: "ArrowDown" });
     fireEvent.click(await view.findByRole("option", { name: "Preset party" }));
-    expect(view.getByLabelText(`${mode === "purchase" ? "Supplier" : "Customer"} phone`)).toHaveValue("+971 50 123 4567");
+    const expectedPhone = mode === "purchase" ? "+971 50 123 4567" : "+971501234567";
+    expect(view.getByLabelText(`${mode === "purchase" ? "Supplier" : "Customer"} phone`)).toHaveValue(expectedPhone);
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
     expect(save.mock.calls[0][0]).toMatchObject({ customer_name: "Preset party", customer_trn: "", buyer_city: "Dubai", buyer_country_code: "AE", buyer_country_subdivision: "DU", einvoice: { buyer: identity, seller: { tin: "5555555555" } } });
-    expect(save.mock.calls[0][0].einvoice?.buyer).toEqual({ ...identity, phone: "+971 50 123 4567" });
+    expect(save.mock.calls[0][0].einvoice?.buyer).toEqual({ ...identity, phone: expectedPhone });
     expect(save.mock.calls[0][0].einvoice?.delivery).toBeUndefined();
     expect(save.mock.calls[0][0].einvoice?.buyer_delivery_mode).toBeUndefined();
     await waitFor(() => expect(select).toBeEnabled());

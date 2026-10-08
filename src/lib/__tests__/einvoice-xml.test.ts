@@ -70,6 +70,11 @@ const extendedSamples = (): Record<string, EInvoiceDoc> => {
         delivery: { address: "Demo export destination", city: "Mumbai", region: "Maharashtra", country_code: "IN" } },
       items: [{ description: "Export goods", qty: 1, unit_price: 100, tax_category: "Z" }] },
     freezone: { ...doc, transaction_type: "10000000", einvoice: { ...doc.einvoice, beneficiary_id: "1001234567" } },
+    contacts: { ...doc, seller_phone: "+971 50 123 4567", seller_email: "accounts@example.test", customer_email: "buyer@example.test",
+      einvoice: { ...doc.einvoice, buyer: { ...doc.einvoice?.buyer, phone: "+971 50 765 4321" } } },
+    unicode: { ...doc, seller_name: "شركة دبي · 🛢️", customer_name: "客户 · شركة", notes: 'تجارة & "Oil" <supply>' },
+    classified: { ...doc, items: [{ ...doc.items[0], custom: { einvoice_item_type: "B", einvoice_gtin: "4006381333931",
+      einvoice_hs_code: "271019", einvoice_service_code: "9987" } }] },
     commercial,
     commercialCredit: { ...commercial, invoice_type_code: "81", original_invoice_number: "COMMERCIAL-OLD", original_invoice_date: "2026-06-01" },
     creditOptionalFields: { ...doc, invoice_type_code: "381", original_invoice_number: "INV-OLD", payment_means_code: undefined, original_invoice_date: undefined, due_date: undefined },
@@ -78,9 +83,9 @@ const extendedSamples = (): Record<string, EInvoiceDoc> => {
     foreignCommercial: { ...commercial, buyer_country_code: "IN", einvoice: { ...commercial.einvoice,
       buyer: { endpoint_scheme: "0088", endpoint_id: "4006381333931", legal_id: "FOREIGN-LICENCE" } } },
     tinyQuantity: { ...doc, items: [{ description: "Small quantity", qty: 1e-7, unit_price: 100000000 }] },
-    blankOptional: { ...doc, notes: "\u0000", terms: " ", po_number: " ", customer_trn: "  ",
-      einvoice: { ...doc.einvoice, payment_account_name: " ", buyer: { tin: "1007774567", identifier: "\u0001" } },
-      items: [{ ...doc.items[0], custom: { einvoice_hs_code: " ", einvoice_service_code: "\u0000", einvoice_gtin: " " } }] },
+    blankOptional: { ...doc, notes: "\t", terms: " ", po_number: " ", customer_trn: "  ",
+      einvoice: { ...doc.einvoice, payment_account_name: " ", buyer: { tin: "1007774567", identifier: "\n" } },
+      items: [{ ...doc.items[0], custom: { einvoice_hs_code: " ", einvoice_service_code: "\r", einvoice_gtin: " " } }] },
     exemptReasons: { ...doc, discount: 13.37, items: [doc.items[0],
       { description: "Residential lease", qty: 1, unit_price: 50, tax_category: "E", custom: { einvoice_exemption_code: "DL8.46.2" } },
       { description: "Bare land", qty: 1, unit_price: 30, tax_category: "E", custom: { einvoice_exemption_code: "DL8.46.3" } },
@@ -320,6 +325,40 @@ test("stable identity, canonical credit-note root and explicit TIN", () => {
   expect(() => buildInvoiceXml({ ...doc, einvoice: undefined })).toThrow("Save this invoice");
 });
 
+test("readiness distinguishes an unsaved UUID from an invalid saved identity without replacing it", () => {
+  const doc = sample();
+  const unsaved = { ...doc, einvoice: { ...doc.einvoice, uuid: undefined } };
+  expect(eInvoiceIssues(unsaved)).toEqual([]); // Save & export assigns the UUID first.
+  expect(() => buildInvoiceXml(unsaved)).toThrow("Save this invoice");
+  for (const uuid of ["not-a-uuid", "1001234567", "100123456700003"]) {
+    const invalid = { ...doc, einvoice: { ...doc.einvoice, uuid } };
+    expect(eInvoiceIssues(invalid)).toContainEqual(expect.objectContaining({ field: "einvoice.uuid" }));
+    expect(() => buildInvoiceXml(invalid)).toThrow("UUID");
+    expect(invalid.einvoice.uuid).toBe(uuid);
+  }
+});
+
+test("malformed saved metadata produces field-specific checks instead of crashing or inventing IDs", () => {
+  const doc = sample();
+  for (const value of [123, {}, [], false]) {
+    const invalid = { ...doc, einvoice: { ...doc.einvoice, seller: { ...doc.einvoice?.seller, endpoint_id: value } } } as unknown as EInvoiceDoc;
+    expect(eInvoiceIssues(invalid)).toContainEqual(expect.objectContaining({ field: "einvoice.seller.endpoint_id" }));
+    expect(() => buildInvoiceXml(invalid)).toThrow("electronic invoice checks");
+    const line = { ...doc, items: [{ ...doc.items[0], custom: { einvoice_gtin: value } }] } as unknown as EInvoiceDoc;
+    expect(eInvoiceIssues(line)).toContainEqual(expect.objectContaining({ field: "items.0.custom.einvoice_gtin" }));
+  }
+  expect(eInvoiceIssues({ ...doc, einvoice: [] } as unknown as EInvoiceDoc))
+    .toContainEqual(expect.objectContaining({ field: "einvoice" }));
+  expect(eInvoiceIssues({ ...doc, seller_trn: 123 } as unknown as EInvoiceDoc))
+    .toContainEqual(expect.objectContaining({ field: "seller_trn" }));
+  expect(eInvoiceIssues({ ...doc, issue_date: 123 } as unknown as EInvoiceDoc))
+    .toContainEqual(expect.objectContaining({ field: "issue_date" }));
+  expect(eInvoiceIssues({ ...doc, items: null } as unknown as EInvoiceDoc))
+    .toContainEqual(expect.objectContaining({ field: "items" }));
+  expect(eInvoiceIssues({ ...doc, items: [null] } as unknown as EInvoiceDoc))
+    .toContainEqual(expect.objectContaining({ field: "items.0" }));
+});
+
 test("discounts reconcile in cents across categories and preserve payable adjustments", () => {
   const doc = { ...sample(), discount: 13.37, advance_applied: 10, round_off: true };
   const total = computeTotals(doc);
@@ -407,7 +446,7 @@ test("XML export enforces the shared checks and refuses numeric overflow or lost
   expect(eInvoiceIssues({ ...sample(), issue_date: "0000-01-01" }).map(issue => issue.field)).toContain("issue_date");
 });
 
-test("optional whitespace or XML-control-only values are omitted, while required blank values block export", () => {
+test("optional XML whitespace is omitted, while forbidden characters and required blank values block export", () => {
   const xml = new DOMParser().parseFromString(buildInvoiceXml(extendedSamples().blankOptional), "application/xml");
   expect(Array.from(xml.getElementsByTagName("*")).filter(element => !element.children.length && !element.textContent?.trim())).toEqual([]);
   expect(xml.getElementsByTagName("cbc:Note")).toHaveLength(0);
@@ -416,6 +455,34 @@ test("optional whitespace or XML-control-only values are omitted, while required
   const commercial = buildInvoiceXml({ ...extendedSamples().commercial, seller_trn: " " });
   expect(commercial).toContain("<cbc:ID>TIN</cbc:ID>");
   expect(commercial).not.toContain("<cbc:CompanyID></cbc:CompanyID>");
+});
+
+test("optional supplied nature codes must match the official list even on standard-rated lines", () => {
+  const source = sample();
+  source.items[0].custom = { einvoice_nature: "not-a-code" };
+  expect(eInvoiceIssues(source)).toContainEqual(expect.objectContaining({ field: "items.0.custom.einvoice_nature" }));
+  expect(() => buildInvoiceXml(source)).toThrow("electronic invoice checks");
+});
+
+test("saved seller and buyer contacts reach XML without making optional contacts mandatory", () => {
+  const source = extendedSamples().contacts;
+  const xml = new DOMParser().parseFromString(buildInvoiceXml(source), "application/xml");
+  const seller = xml.getElementsByTagName("cac:AccountingSupplierParty")[0];
+  const buyer = xml.getElementsByTagName("cac:AccountingCustomerParty")[0];
+  expect(seller.getElementsByTagName("cbc:Telephone")[0]?.textContent).toBe(source.seller_phone);
+  expect(seller.getElementsByTagName("cbc:ElectronicMail")[0]?.textContent).toBe(source.seller_email);
+  expect(buyer.getElementsByTagName("cbc:Telephone")[0]?.textContent).toBe(source.einvoice?.buyer?.phone);
+  expect(buyer.getElementsByTagName("cbc:ElectronicMail")[0]?.textContent).toBe(source.customer_email);
+  expect(buildInvoiceXml(sample())).not.toContain("<cac:Contact>");
+  expect(eInvoiceIssues({ ...source, seller_email: "a\u0000@example.test" })).toContainEqual(expect.objectContaining({ field: "seller_email" }));
+});
+
+test("combined goods and services identifiers follow UBL sequence order", () => {
+  const source = extendedSamples().classified;
+  expect(eInvoiceIssues(source)).toEqual([]);
+  const xml = new DOMParser().parseFromString(buildInvoiceXml(source), "application/xml");
+  const names = Array.from(xml.getElementsByTagName("cac:Item")[0].children).map(element => element.tagName);
+  expect(names.indexOf("cac:StandardItemIdentification")).toBeLessThan(names.indexOf("cac:AdditionalItemIdentification"));
 });
 
 test("exempt document allowances preserve each exemption reason and reconcile in cents", () => {

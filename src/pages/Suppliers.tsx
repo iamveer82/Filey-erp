@@ -640,12 +640,12 @@ function SupplierModal({
     }
     const payload = {
       name: f.name.trim(),
-      contact_person: f.contact_person || undefined,
-      email: f.email || undefined,
-      phone: f.phone || undefined,
-      address: f.address || undefined,
-      tax_id: f.tax_id || undefined,
-      notes: f.notes || undefined,
+      contact_person: f.contact_person.trim(),
+      email: f.email.trim(),
+      phone: f.phone.trim(),
+      address: f.address.trim(),
+      tax_id: f.tax_id.trim(),
+      notes: f.notes.trim(),
       custom_fields: f.custom_fields,
     };
     pending.current = true;

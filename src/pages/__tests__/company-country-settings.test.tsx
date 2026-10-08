@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import CompanyDetails from "../settings/CompanyDetails";
+import CompanyModal from "../../components/CompanyModal";
 import { billing, tools, type CompanyProfile } from "../../lib/api";
 import { changeCompanyCountry, companyCountryCurrency, companyPhoneHint } from "../../lib/companyCountry";
 import { COUNTRY_OPTIONS } from "../../lib/taxRegimes";
@@ -101,6 +102,28 @@ it("allows a foreign currency override without changing the company's country", 
   fireEvent.keyDown(screen.getByRole("option", { name: "USD — US Dollar" }), { key: "Enter" });
   fireEvent.click(screen.getByRole("button", {name: "Save Changes"}));
   await waitFor(() => expect(company).toMatchObject({country_code: "IN", currency: "USD"}));
+});
+
+it("preserves legacy nested registration when company-modal TIN is edited", async () => {
+  company.einvoice = { legal_id: "LEGACY-LICENCE", legal_id_type: "TL", tin: "1001234567" };
+  render(<CompanyModal open company={company} onClose={() => {}} onSaved={() => {}} />);
+  fireEvent.click(screen.getByText("Electronic invoicing identity"));
+  expect(screen.getByLabelText("Legal registration number")).toHaveValue("LEGACY-LICENCE");
+  fireEvent.change(screen.getByLabelText("Electronic invoicing TIN"), { target: { value: "1007774567" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Company" }));
+  await waitFor(() => expect(company).toMatchObject({ legal_id: "LEGACY-LICENCE", legal_id_type: "TL",
+    einvoice: { legal_id: "LEGACY-LICENCE", legal_id_type: "TL", tin: "1007774567" } }));
+});
+
+it("shows legacy registration in settings and allows explicitly clearing both stored representations", async () => {
+  company.einvoice = { legal_id: "LEGACY-LICENCE", legal_id_type: "TL", tin: "1001234567" };
+  render(<CompanyDetails />);
+  expect(await screen.findByLabelText("Legal Registration ID")).toHaveValue("LEGACY-LICENCE");
+  fireEvent.change(screen.getByLabelText("Legal Registration ID"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Electronic invoicing TIN"), { target: { value: "1007774567" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+  await waitFor(() => expect(company).toMatchObject({ legal_id: "", einvoice: { legal_id: "", tin: "1007774567" } }));
+  expect(screen.getByLabelText("Legal Registration ID")).toHaveValue("");
 });
 
 it("prints only the bank identifiers belonging to the invoice's saved country", () => {

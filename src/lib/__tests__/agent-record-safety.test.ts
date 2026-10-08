@@ -17,7 +17,7 @@ it("copies saved electronic identities into AI drafts and reports missing detail
   vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Seller", currency: "AED", country_code: "AE", address: "Seller street", city: "Dubai",
     country_subdivision: "DXB", trn: "100123456700003", legal_id: "SELLER-TL", legal_id_type: "TL",
     einvoice: { tin: "1001234567", endpoint_id: "1001234567", legal_authority: "Dubai DET" }, default_tax_rate: 5 } as never);
-  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 9, name: "Buyer", phone: "+971500000001", city: "Sharjah", address: "Buyer street", country_code: "AE",
+  vi.spyOn(crm, "customers").mockResolvedValue([{ id: 9, name: "Buyer", phone: " ", phone_e164: "+971500000001", city: "Sharjah", address: "Buyer street", country_code: "AE",
     country_subdivision: "SHJ", trn: "100987654300003", custom_fields: { einvoice_identity: JSON.stringify({ tin: "1009876543", endpoint_id: "1009876543", legal_id: "BUYER-TL" }) } }] as never);
   vi.spyOn(erp, "products").mockResolvedValue([]);
   vi.spyOn(billing, "listDocs").mockResolvedValue([]);

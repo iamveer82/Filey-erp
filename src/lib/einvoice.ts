@@ -22,6 +22,11 @@ export const DEFAULT_TAX_SCHEME = "VAT";
 export const PINT_AE_SPEC_IDENTIFIER = "urn:peppol:pint:billing-1@ae-1";
 export const PINT_AE_PROCESS_ID = "urn:peppol:bis:billing";
 
+/** Filey's stable preparation identifier. The ASP is responsible for the final
+ * electronic invoice UUID under MoF guidelines section 5.2; neither is a TRN. */
+export const isInvoiceUuid = (value: unknown): value is string => typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
 /** First ten digits of the entity's own FTA TRN (any tax type), per MoF's
  * June 2026 guidelines. Never derive it from a tax-group representative's TRN.
  * The historical helper/JSON field name remains compatible with saved drafts. */

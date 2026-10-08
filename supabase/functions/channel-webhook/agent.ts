@@ -112,6 +112,7 @@ export async function aiReply(userText: string, name: string, client: any, orgId
   }
 
   const receipts = new Map<string, Promise<unknown>>();
+  let hadToolFailure = false;
   const incomplete = async (message: string): Promise<string> => {
     if (!canQuery) return message;
     if (!(await accessActive())) return accessChanged;
@@ -175,6 +176,10 @@ export async function aiReply(userText: string, name: string, client: any, orgId
             out = { error: "That action could not be completed. Do not claim it succeeded." };
           }
           if (!(await accessActive())) return accessChanged;
+          if (out && typeof out === "object" &&
+              (("error" in out && !!out.error) || ("ok" in out && out.ok === false) ||
+               ("success" in out && out.success === false) || ("successful" in out && out.successful === false) ||
+               ("isError" in out && out.isError === true))) hadToolFailure = true;
           // A write may have committed before its reply was lost. Stop this
           // run before another block or round can repeat an uncertain save.
           if (out && typeof out === "object" && "code" in out && out.code === "unconfirmed_write") {
@@ -191,6 +196,9 @@ export async function aiReply(userText: string, name: string, client: any, orgId
       }
 
       const text = message?.content;
+      // A later model assurance cannot establish that a failed step recovered.
+      // Use the saved receipts without repeating writes or spending another turn.
+      if (hadToolFailure) return incomplete("I couldn't verify completion of every requested step. Review the confirmed results in Filey before retrying.");
       return typeof text === "string" && text.trim() ? text : incomplete("No final response was returned. Check the confirmed results before retrying.");
     }
     return incomplete("I couldn't finish that task. Check Filey for any saved records before continuing.");

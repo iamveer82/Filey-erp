@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
 import { Modal, Field } from "./ui";
 import { billing, type CompanyProfile } from "../lib/api";
+import { companyInvoiceSeller } from "../lib/invoiceSeller";
 import { errMsg } from "../lib/format";
 import { useUI } from "../lib/ui";
 import { DOC_TEMPLATES } from "../lib/docTemplates";
@@ -198,7 +199,7 @@ export default function CompanyModal({
             <Field label="City"><input className="input" value={c.city || ""} onChange={event => setC({ ...c, city: event.target.value })} /></Field>
             <Field label="Emirate"><SelectMenu value={c.country_subdivision || ""} onChange={country_subdivision => setC({ ...c, country_subdivision })} options={[{ value: "", label: "Choose an emirate" }, ...EMIRATES.map(entry => ({ value: entry.code, label: entry.label }))]} /></Field>
           </div>
-          <EInvoicePartyFields value={{ ...c.einvoice, legal_id: c.legal_id, legal_id_type: c.legal_id_type }} onChange={value => setC({ ...c, einvoice: value, legal_id: value.legal_id, legal_id_type: value.legal_id_type })} />
+          <EInvoicePartyFields value={companyInvoiceSeller(c).einvoice.seller} onChange={value => setC({ ...c, einvoice: value, legal_id: value.legal_id, legal_id_type: value.legal_id_type })} />
         </details>}
         <Field label="Logo">
           <div className="flex items-center gap-3">

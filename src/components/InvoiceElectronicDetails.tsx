@@ -124,6 +124,6 @@ export function InvoiceAdditionalDetails({ form, omit = [], hideTax = false }: {
     text(details.beneficiary_id) && `Beneficiary TRN / TIN: ${text(details.beneficiary_id)}`,
     account ? `Payment account: ${account}` : "",
     joined(aedRate && !omit.includes("exchangeRate") ? `1 ${text(form.currency)} = ${aedRate} AED` : "", !hideTax && tax && `VAT total in AED: ${tax}`),
-    text(details.uuid) && `UUID: ${text(details.uuid)}`,
+    text(details.uuid) && `Preparation UUID: ${text(details.uuid)}`,
   ]} />;
 }

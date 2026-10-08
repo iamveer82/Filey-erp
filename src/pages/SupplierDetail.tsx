@@ -1187,11 +1187,11 @@ function EditSupplierModal({
     try {
       await suppliersApi.update(supplier.id, {
         name: f.name.trim(),
-        contact_person: f.contact_person.trim() || undefined,
-        email: f.email.trim() || undefined,
-        phone: f.phone.trim() || undefined,
-        address: f.address.trim() || undefined,
-        tax_id: f.tax_id.trim() || undefined,
+        contact_person: f.contact_person.trim(),
+        email: f.email.trim(),
+        phone: f.phone.trim(),
+        address: f.address.trim(),
+        tax_id: f.tax_id.trim(),
         custom_fields: f.custom_fields,
       });
       toast.success("Supplier updated.");
