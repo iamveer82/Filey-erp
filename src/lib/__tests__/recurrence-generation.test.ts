@@ -9,7 +9,7 @@ import { generateRecurringInvoice } from "../recurrenceGeneration";
 const user = "00000000-0000-4000-8000-000000000001";
 beforeEach(async () => {
   localStorage.clear(); clearLocalCache(); vi.clearAllMocks(); setCacheOrg("org", user); setDataMode("local");
-  await localClient.from("invoice_docs").insert({ id: 1, org_id: "org", user_id: user, number: "INV-2026-0010", status: "sent", seller_name: "Filey", customer_name: "Mary", currency: "AED", advance_applied: 50, due_date: "2026-08-31", quotation_id: 8, order_id: 9, shared: true, share_token: "private", einvoice: { uuid: "old", buyer: { city: "Dubai" } }, unit_price_formula: { a: "hours", b: "unit_price" } });
+  await localClient.from("invoice_docs").insert({ id: 1, org_id: "org", user_id: user, number: "INV-2026-0010", status: "sent", seller_name: "Filey", customer_name: "Mary", currency: "AED", advance_applied: 50, due_date: "2026-08-31", quotation_id: 8, order_id: 9, shared: true, public_shared: true, share_token: "private", einvoice: { uuid: "old", buyer: { city: "Dubai" } }, unit_price_formula: { a: "hours", b: "unit_price" } });
   await localClient.from("invoice_doc_items").insert({ id: 1, org_id: "org", invoice_id: 1, description: "Retainer", qty: 1, unit_price: 10, custom: { hours: "12.5", __calc_mode: "manual", __manual_amount: "1200" } });
   await localClient.from("invoice_recurrence").insert({ id: 1, org_id: "org", base_invoice_id: 1, next_run: "2026-09-01", interval: "monthly", active: true });
   cloud.session.mockResolvedValue({ data: { session: { user: { id: user }, access_token: "fixture" } }, error: null });
@@ -23,7 +23,7 @@ it("commits only one draft and schedule across eight simultaneous overdue genera
   const draft = (await loadColl("invoice_docs")).find(row => row.id !== 1)!;
   expect(draft).toMatchObject({ advance_applied: 0, status: "draft", issue_date: "2026-10-04", unit_price_formula: { a: "hours", b: "unit_price" }, einvoice: { buyer: { city: "Dubai" } } });
   expect(draft.einvoice.uuid).not.toBe("old");
-  for (const key of ["shared", "share_token", "due_date", "quotation_id", "order_id"]) expect(draft[key]).toBeUndefined();
+  for (const key of ["shared", "share_token", "public_shared", "due_date", "quotation_id", "order_id"]) expect(draft[key]).toBeUndefined();
   expect((await loadColl("invoice_doc_items")).find(row => row.invoice_id === draft.id)?.custom).toEqual({ hours: "12.5", __calc_mode: "manual", __manual_amount: "1200" });
 });
 it("rolls back the draft and lines if writing the schedule fails", async () => {

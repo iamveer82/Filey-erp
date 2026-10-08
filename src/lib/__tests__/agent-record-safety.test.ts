@@ -11,7 +11,21 @@ beforeEach(() => {
   setCacheOrg("test-org", "test-user");
   setAgentMode("auto");
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+it.each(["quotation", "purchase_order"] as const)("AI shares a hosted %s link and refuses local publication", async kind => {
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "https://app.gofiley.com/");
+  const source = kind === "quotation" ? quotes : pos;
+  if (kind === "quotation") vi.spyOn(quotes, "listDocs").mockResolvedValue([{ id: 8, number: "DOC-8" }] as never);
+  else vi.spyOn(pos, "list").mockResolvedValue([{ id: 8, po_number: "DOC-8" }] as never);
+  const publish = vi.spyOn(source, "publicLink").mockResolvedValue("share/token");
+  const tool = TOOLS.find(candidate => candidate.name === "share_document_link")!;
+  await expect(tool.run({ kind, number: "DOC-8" })).rejects.toThrow("Share the PDF");
+  expect(publish).not.toHaveBeenCalled();
+  setDataMode("cloud");
+  expect(await tool.run({ kind, number: "DOC-8" })).toEqual({ url: "https://app.gofiley.com/#/portal/share%2Ftoken", number: "DOC-8" });
+  expect(publish).toHaveBeenCalledExactlyOnceWith(8);
+});
 
 it("copies saved electronic identities into AI drafts and reports missing details without failing the save", async () => {
   vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Seller", currency: "AED", country_code: "AE", address: "Seller street", city: "Dubai",

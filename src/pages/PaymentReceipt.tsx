@@ -57,7 +57,6 @@ import {
   statusTone,
   Modal,
   Field,
-  ShareToggle,
   SearchInput,
   FilterChip,
 } from "../components/ui";
@@ -194,6 +193,8 @@ export default function PaymentReceipt() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [quickView, setQuickView] = useState<{ d: ReceiptSummary; doc: ReceiptDoc | null } | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const sharingRef = useRef(false);
   const [printRequested, setPrintRequested] = useState<number | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [zoom] = useState(100);
@@ -367,6 +368,7 @@ export default function PaymentReceipt() {
       number,
       status: "draft",
       shared: false,
+      public_shared: false,
       share_token: undefined,
       issue_date: today(),
       due_date: today(),
@@ -380,14 +382,21 @@ export default function PaymentReceipt() {
       toast.error("Save the receipt before sharing.");
       return;
     }
+    if (sharingRef.current) return;
+    sharingRef.current = true;
+    setSharing(true);
+    const id = form.id, scope = agentStorageScope(), request = editRequest.current;
     try {
-      await receipts.shareDoc(form.id, shared);
-      update({ shared });
+      const token = shared ? await receipts.publicLink(id) : undefined;
+      if (!shared) await receipts.revokePublicLink(id);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editRequest.current) return;
+      setForm(current => current?.id === id ? { ...current, public_shared: shared, share_token: token } : current);
       await refreshList();
       toast.success(shared ? "Public link enabled." : "Public link disabled.");
     } catch (e) {
-      toast.error(`Could not change receipt sharing: ${errMsg(e)}`);
-    }
+      if (scope === agentStorageScope()) toast.error(`Could not change receipt sharing: ${errMsg(e)}`);
+    } finally { sharingRef.current = false; setSharing(false); }
   };
 
   const copyPublicLink = async () => {
@@ -395,19 +404,30 @@ export default function PaymentReceipt() {
       toast.error("Save the receipt first.");
       return;
     }
+    if (sharingRef.current) return;
+    sharingRef.current = true;
+    setSharing(true);
+    const id = form.id, scope = agentStorageScope(), request = editRequest.current;
+    let linkEnabled = false;
     try {
       const base = publicAppBase();
       if (!base) throw new Error("Public receipt links need a hosted cloud address.");
-      const token = await receipts.publicLink(form.id);
+      const token = await receipts.publicLink(id);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editRequest.current) return;
+      linkEnabled = true;
+      setForm(current => current?.id === id ? { ...current, public_shared: true, share_token: token } : current);
+      void refreshList();
       const url = `${base}#/portal/${encodeURIComponent(token)}`;
       await navigator.clipboard.writeText(url);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editRequest.current) return;
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2000);
-      update({ shared: true, share_token: token });
-      await refreshList();
     } catch (e) {
-      toast.error("Could not create public link: " + errMsg(e));
-    }
+      if (request === editRequest.current && scope === agentStorageScope())
+        toast.error((linkEnabled ? "Public link enabled, but could not copy it: " : "Could not create public link: ") + errMsg(e));
+    } finally { sharingRef.current = false; setSharing(false); }
   };
 
   /** Clone the live preview onto a full A4 sheet parked off-screen and hand
@@ -522,7 +542,7 @@ export default function PaymentReceipt() {
     let url: string;
     try {
       url = await receiptPublicLink(d.id);
-      await refreshList(); // publicLink flips the doc's shared flag
+      await refreshList(); // Refresh the public-link state without changing team access
     } catch (error) {
       toast.error(errMsg(error));
       return;
@@ -566,6 +586,7 @@ export default function PaymentReceipt() {
         number,
         status: "draft",
         shared: false,
+        public_shared: false,
         share_token: undefined,
         issue_date: today(),
         due_date: today(),
@@ -788,10 +809,10 @@ export default function PaymentReceipt() {
                   render: (d) => <Badge tone={statusTone(d.status)}>{d.status}</Badge>,
                 },
                 {
-                  key: "shared",
+                  key: "public_shared",
                   label: "Public",
                   render: (d) =>
-                    d.shared ? <Badge tone="success">Shared</Badge> : <Badge tone="neutral">Private</Badge>,
+                    d.public_shared ? <Badge tone="success">Link enabled</Badge> : <Badge tone="neutral">Link disabled</Badge>,
                 },
                 { actions: true,
                   key: "actions",
@@ -799,6 +820,15 @@ export default function PaymentReceipt() {
                   render: (d) => (
                     <RowActions
                       onView={() => openQuickView(d)}
+                      onRevokePublicLink={d.public_shared ? async () => {
+                        const scope = agentStorageScope();
+                        try {
+                          await receipts.revokePublicLink(d.id);
+                          requireAgentStorageScope(scope ?? "signed-out");
+                          await refreshList();
+                          toast.success("Public link disabled. Team access is unchanged.");
+                        } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+                      } : undefined}
                       onEdit={() => loadDoc(d.id)}
                       onCopy={() => duplicateRow(d.id)}
                       onDelete={() => remove(d.id)}
@@ -960,11 +990,17 @@ export default function PaymentReceipt() {
                   <button
                     className="btn-ghost"
                     onClick={copyPublicLink}
+                    disabled={sharing}
                     title="Copy a public link to this receipt"
                   >
                     {shareCopied ? <Check size={15} /> : <Monitor size={15} />} Copy link
                   </button>
-                  <ShareToggle shared={!!form.shared} onToggle={share} />
+                  <button type="button" className="btn-ghost" aria-pressed={!!form.public_shared}
+                    disabled={sharing}
+                    title="Anyone with an enabled public link can view this receipt"
+                    onClick={() => void share(!form.public_shared)}>
+                    Public link {form.public_shared ? "on" : "off"}
+                  </button>
                 </div>}
               />
 

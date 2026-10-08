@@ -996,13 +996,15 @@ export default function Quoting() {
         toast.error("Save the quotation before sharing.");
         return;
       }
+      const id = form.id, next = !form.shared, scope = agentStorageScope();
       try {
-        await quotes.shareDoc(form.id, !form.shared);
-        setForm({ ...form, shared: !form.shared });
+        await quotes.shareDoc(id, next);
+        requireAgentStorageScope(scope ?? "signed-out");
+        setForm(current => current?.id === id ? { ...current, shared: next } : current);
         loadDocs();
-        toast.success(form.shared ? "Set to private." : "Shared with team.");
+        toast.success(next ? "Shared with team." : "Team sharing disabled. Public links are unchanged.");
       } catch (e) {
-        toast.error(errMsg(e));
+        if (scope === agentStorageScope()) toast.error(errMsg(e));
       }
     };
 
@@ -2504,6 +2506,15 @@ export default function Quoting() {
                 </button>
                 <RowActions
                   onView={() => openQuickView(d)}
+                  onRevokePublicLink={d.public_shared ? async () => {
+                    const scope = agentStorageScope();
+                    try {
+                      await quotes.revokePublicLink(d.id);
+                      requireAgentStorageScope(scope ?? "signed-out");
+                      loadDocs();
+                      toast.success("Public link disabled. Team access is unchanged.");
+                    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+                  } : undefined}
                   onEdit={() => editQuote(d.id)}
                   onCopy={() => duplicateQuote(d.id)}
                   onDelete={() => deleteRow(d)}

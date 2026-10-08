@@ -694,18 +694,12 @@ function namedCrmTarget(data: CrmData, name: string, kinds: CrmObject[]): string
 
 export type ShareableDoc = "invoice" | "quotation" | "purchase_order" | "receipt";
 
-/** A public, tokenised link to a stored document. Also flips the document's
- *  shared flag, which is what makes the portal serve it. */
+/** Explicitly publish a document using a hosted URL that recipients can open. */
 async function documentLink(kind: ShareableDoc, id: number): Promise<string> {
-  if (kind === "invoice")
-    return (await import("./documentMessage")).invoicePublicLink(id);
-  const token =
-    kind === "quotation"
-      ? await quotes.publicLink(id)
-      : kind === "purchase_order"
-        ? await pos.publicLink(id)
-        : await billing.publicLink(id);
-  return `${location.origin}${location.pathname}#/portal/${token}`;
+  const links = await import("./documentMessage");
+  return kind === "invoice" ? links.invoicePublicLink(id)
+    : kind === "quotation" ? links.quotationPublicLink(id)
+      : kind === "purchase_order" ? links.purchaseOrderPublicLink(id) : links.receiptPublicLink(id);
 }
 
 /** Render a stored invoice to a PDF attachment, the same sheet the Send button

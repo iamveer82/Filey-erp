@@ -23,7 +23,7 @@ export async function runReminders(
     // Purchase bills and credit notes are not debts owed by a customer.
     const { data, error } = await supa
       .from("invoice_docs")
-      .select("id,number,customer_name,customer_email,due_date,share_token,shared")
+      .select("id,number,customer_name,customer_email,due_date,share_token,public_shared")
       .eq("org_id", org)
       .eq("doc_type", "invoice")
       .or("invoice_type_code.is.null,invoice_type_code.not.in.(381,81)")
@@ -37,7 +37,7 @@ export async function runReminders(
     for (const inv of data) {
       if (!inv.customer_email) continue;
       const link =
-        inv.shared === true && inv.share_token && siteUrl
+        inv.public_shared === true && inv.share_token && siteUrl
           ? `${siteUrl}/#/portal/${encodeURIComponent(inv.share_token)}`
           : "";
       const html = `<p>Dear ${esc(inv.customer_name || "customer")},</p>

@@ -241,19 +241,56 @@ jobs:
           TAG: ${{ inputs.intel_recovery_tag || github.ref_name }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft > release.json
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir updater
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets > release.json
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern '*.sig' --dir updater
           # The DEB/RPM-only matrix has no AppImage. Its generic Linux fallback
           # can make old AppImage clients overwrite their executable with DEB bytes.
           node -e '
           const fs=require("node:fs");
-          if(!JSON.parse(fs.readFileSync("release.json","utf8")).isDraft) throw new Error("Published release assets must not be replaced");
+          const release=JSON.parse(fs.readFileSync("release.json","utf8")), tag=process.env.TAG;
+          if(release.isDraft!==true) throw new Error("Published release assets must not be replaced");
+          if(!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(tag) || release.tagName!==tag) throw new Error("Release tag mismatch");
           const path="updater/latest.json", manifest=JSON.parse(fs.readFileSync(path,"utf8"));
-          if(Object.hasOwn(manifest.platforms,"linux-x86_64")) {
-            delete manifest.platforms["linux-x86_64"];
+          const version=tag.slice(1), platforms=manifest.platforms;
+          if(manifest.version!==version) throw new Error("Updater version does not match release tag");
+          if(!platforms || typeof platforms!=="object" || Array.isArray(platforms)) throw new Error("Invalid updater platforms");
+          const changed=Object.hasOwn(platforms,"linux-x86_64");
+          delete platforms["linux-x86_64"];
+          const nsis=`Filey.ERP_${version}_x64-setup.exe`, msi=`Filey.ERP_${version}_x64_en-US.msi`;
+          const deb=`Filey.ERP_${version}_amd64.deb`, rpm=`Filey.ERP-${version}-1.x86_64.rpm`;
+          const arm="Filey.ERP_aarch64.app.tar.gz", intel="Filey.ERP_x64.app.tar.gz";
+          const expected={
+            "windows-x86_64":[msi,nsis], "windows-x86_64-msi":[msi], "windows-x86_64-nsis":[nsis],
+            "linux-x86_64-deb":[deb], "linux-x86_64-rpm":[rpm],
+            "darwin-aarch64":[arm], "darwin-aarch64-app":[arm],
+            "darwin-x86_64":[intel], "darwin-x86_64-app":[intel]
+          };
+          if(JSON.stringify(Object.keys(platforms).sort())!==JSON.stringify(Object.keys(expected).sort())) throw new Error("Missing or unsupported updater platform");
+          if(!Array.isArray(release.assets)) throw new Error("Missing release assets");
+          const assets=new Map(release.assets.map(asset=>[asset.name,asset]));
+          if(assets.size!==release.assets.length) throw new Error("Duplicate release asset names");
+          function requireAsset(name) {
+            const asset=assets.get(name);
+            if(!asset || asset.state!=="uploaded" || !Number.isSafeInteger(asset.size) || asset.size<=0) throw new Error(`Missing or empty release asset: ${name}`);
+          }
+          for(const name of [nsis,msi,deb,rpm,`Filey.ERP_${version}_aarch64.dmg`,`Filey.ERP_${version}_x64.dmg`,"latest.json"]) requireAsset(name);
+          const server=process.env.GITHUB_SERVER_URL || "https://github.com", repo=process.env.GITHUB_REPOSITORY;
+          if(!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("Invalid release repository");
+          for(const [platform,names] of Object.entries(expected)) {
+            const entry=platforms[platform];
+            if(!entry || typeof entry.url!=="string" || typeof entry.signature!=="string" || !entry.signature.trim()) throw new Error(`Missing updater URL or signature: ${platform}`);
+            const name=names.find(name=>entry.url===`${server}/${repo}/releases/download/${tag}/${encodeURIComponent(name)}`);
+            if(!name) throw new Error(`Updater URL does not match release/platform: ${platform}`);
+            requireAsset(name);
+            requireAsset(`${name}.sig`);
+            const signature=fs.readFileSync(`updater/${name}.sig`,"utf8").trim();
+            if(!signature || entry.signature.trim()!==signature) throw new Error(`Updater signature mismatch: ${platform}`);
+          }
+          if(changed) {
             fs.writeFileSync(path,JSON.stringify(manifest,null,2)+"\n");
             fs.writeFileSync("updater/changed","");
-          }'
+          }
+          console.log(`Verified updater ${version}: all 9 targets, release assets and signatures match`);'
           if [ -f updater/changed ]; then
             gh release upload "$TAG" updater/latest.json --repo "$GITHUB_REPOSITORY" --clobber
           fi

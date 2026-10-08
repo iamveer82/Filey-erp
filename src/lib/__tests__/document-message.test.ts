@@ -1,18 +1,19 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { internationalPhone, messageUrl, publicAppBase, invoicePublicLink, quotationPublicLink, receiptPublicLink } from "../documentMessage";
-import { billing, quotes, receipts } from "../api";
+import { internationalPhone, messageUrl, publicAppBase, invoicePublicLink, quotationPublicLink, purchaseOrderPublicLink, receiptPublicLink } from "../documentMessage";
+import { billing, quotes, pos, receipts } from "../api";
 import { isLocalMode } from "../dataMode";
 
 vi.mock("../api", () => ({
   billing: { publicLink: vi.fn(async () => "token/123") },
   quotes: { publicLink: vi.fn(async () => "token/123") },
+  pos: { publicLink: vi.fn(async () => "token/123") },
   receipts: { publicLink: vi.fn(async () => "token/123") },
 }));
 vi.mock("../dataMode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../dataMode")>()),
   isLocalMode: vi.fn(() => false),
 }));
-afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.mocked(isLocalMode).mockReturnValue(false); });
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.mocked(isLocalMode).mockReturnValue(false); });
 
 it("validates international recipients and safely encodes message drafts", () => {
   expect(internationalPhone("00971 (50) 123-4567")).toBe("+971501234567");
@@ -41,6 +42,7 @@ it("only creates public links for a hosted cloud app, preserving its base path",
 
 it.each([
   ["quotation", quotationPublicLink, () => quotes.publicLink],
+  ["purchase order", purchaseOrderPublicLink, () => pos.publicLink],
   ["receipt", receiptPublicLink, () => receipts.publicLink],
 ] as const)("creates usable %s links and refuses localhost, local mode and failed publication", async (_kind, createLink, backend) => {
   vi.stubEnv("VITE_PUBLIC_APP_URL", "https://billing.example.com/filey/");
@@ -56,4 +58,11 @@ it.each([
   vi.stubEnv("VITE_PUBLIC_APP_URL", "https://billing.example.com/filey/");
   vi.mocked(backend()).mockRejectedValueOnce(new Error("Publication unavailable"));
   await expect(createLink(9)).rejects.toThrow("Publication unavailable");
+});
+
+it("uses the hosted app for desktop cloud links without a configured public URL", async () => {
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "");
+  vi.stubGlobal("__TAURI_INTERNALS__", {});
+  expect(await purchaseOrderPublicLink(12)).toBe("https://app.gofiley.com/#/portal/token%2F123");
+  expect(pos.publicLink).toHaveBeenCalledExactlyOnceWith(12);
 });

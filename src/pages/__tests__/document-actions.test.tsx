@@ -751,6 +751,70 @@ describe("invoice editor actions", () => {
 });
 
 describe("receipt actions", () => {
+  it("shows public access independently of team access and revokes only the public link", async () => {
+    const list = vi.spyOn(receipts, "list").mockResolvedValue([{ ...receiptRow, shared: false, public_shared: true }]);
+    const revoke = vi.spyOn(receipts, "revokePublicLink").mockResolvedValue(undefined);
+    const teamShare = vi.spyOn(receipts, "shareDoc");
+    const view = wrap(<PaymentReceipt />);
+    await view.findByText("Link enabled");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Disable public link" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith(receiptRow.id));
+    expect(teamShare).not.toHaveBeenCalled();
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(1));
+  });
+
+  it("does not label a team-only receipt as public", async () => {
+    vi.spyOn(receipts, "list").mockResolvedValue([{ ...receiptRow, shared: true, public_shared: false }]);
+    const view = wrap(<PaymentReceipt />);
+    await view.findByText("Link disabled");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    await view.findByRole("menuitem", { name: "Copy link" });
+    expect(view.queryByRole("menuitem", { name: "Disable public link" })).toBeNull();
+  });
+
+  it("uses explicit public consent instead of team sharing in the receipt editor", async () => {
+    vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
+    vi.spyOn(receipts, "get").mockResolvedValue({ ...receipt, shared: true, public_shared: false });
+    const enable = vi.spyOn(receipts, "publicLink").mockResolvedValue("public-token");
+    const revoke = vi.spyOn(receipts, "revokePublicLink").mockResolvedValue(undefined);
+    const teamShare = vi.spyOn(receipts, "shareDoc");
+    const view = wrap(<PaymentReceipt />);
+    fireEvent.click(await view.findByText("RCPT-AUDIT"));
+    const off = await view.findByRole("button", { name: "Public link off" });
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(off);
+    await waitFor(() => expect(enable).toHaveBeenCalledWith(receipt.id));
+    const on = await view.findByRole("button", { name: "Public link on" });
+    await waitFor(() => expect(on).toBeEnabled());
+    fireEvent.click(on);
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith(receipt.id));
+    expect(teamShare).not.toHaveBeenCalled();
+    await view.findByRole("button", { name: "Public link off" });
+  });
+
+  it("keeps a newly enabled public receipt link visible when clipboard permission is denied", async () => {
+    vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
+    vi.spyOn(receipts, "get").mockResolvedValue({ ...receipt, public_shared: false });
+    vi.spyOn(receipts, "publicLink").mockResolvedValue("public-token");
+    vi.spyOn(documentMessage, "publicAppBase").mockReturnValue("https://app.gofiley.com/");
+    const before = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error("Clipboard denied")) } });
+    try {
+      const view = wrap(<PaymentReceipt />);
+      fireEvent.click(await view.findByText("RCPT-AUDIT"));
+      await view.findByRole("button", { name: "Public link off" });
+      setCacheOrg("document-test-org", "document-test-user");
+      fireEvent.click(view.getByRole("button", { name: "Copy link" }));
+      await view.findByRole("button", { name: "Public link on" });
+      expect(await view.findByText(/public link enabled.*could not copy/i)).toBeTruthy();
+    } finally {
+      if (before) Object.defineProperty(navigator, "clipboard", before);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
   it("keeps the saved receipt id and can finalize when the list refresh fails", async () => {
     const list = vi.spyOn(receipts, "list").mockResolvedValue([receiptRow]);
     vi.spyOn(receipts, "get").mockResolvedValue(receipt);

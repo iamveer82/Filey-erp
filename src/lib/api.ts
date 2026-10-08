@@ -390,6 +390,7 @@ export interface InvoiceItem {
   tax_category?: string;
 }
 export interface InvoiceDocSummary {
+  public_shared?: boolean;
   invoice_type_code?: string;
   id: number;
   customer_id?: number | null;
@@ -433,6 +434,7 @@ export interface InvoicePayment {
   paid_at: string;
 }
 export interface InvoiceDoc {
+  public_shared?: boolean;
   /** Amount of customer advance credit applied in this document's currency. */
   advance_applied?: number;
   einvoice?: import("./einvoice").EInvoiceDetails;
@@ -1430,6 +1432,25 @@ async function shareWithItems(
     .update({ shared })
     .eq(fk, id);
   if (error) throw error;
+}
+
+/** Public links are explicit publication, separate from read-only team access. */
+function setPublicDocumentLink(type: "invoice" | "quotation" | "purchase_order" | "receipt", id: number, enabled: boolean): Promise<string | null> {
+  const checkScope = workspaceGuard(), org = getCacheOrg();
+  if (isLocalMode()) return Promise.reject(new Error("Public links need Cloud mode — they don't work offline."));
+  if (!org || !Number.isSafeInteger(id) || id <= 0) return Promise.reject(new Error("Open a saved document in your cloud workspace before sharing."));
+  return online(async () => {
+    checkScope();
+    const client = sb();
+    const { data, error } = await client.rpc("filey_set_public_document_link", {
+      p_type: type, p_id: id, p_enabled: enabled, p_expected_org: org,
+    });
+    checkScope();
+    if (error) throw error;
+    if (enabled && (typeof data !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data)))
+      throw new Error("The public link could not be confirmed. Reopen the document and try again.");
+    return enabled ? data as string : null;
+  });
 }
 
 /** Read a jsonb column that the cloud returns already parsed and the local
@@ -4321,6 +4342,7 @@ export const billing = {
             issue_date: d.issue_date ?? undefined,
             due_date: d.due_date ?? undefined,
             shared: d.shared ?? undefined,
+            public_shared: d.public_shared === true,
             updated_at: d.updated_at,
             tax_rate: d.tax_rate ?? undefined,
             net_by_tax_category: Object.fromEntries(Object.entries(netByTaxCategory(
@@ -4648,26 +4670,9 @@ export const billing = {
       if (error) throw error;
       return data as { shared: boolean; shared_with: string[] | null; user_id: string };
     }, false),
-  /** Ensure the invoice is shared and return its public portal token. */
-  publicLink: (docId: number) =>
-    online(async () => {
-      if (isLocalMode())
-        throw new Error("Public links need Cloud mode — they don't work offline.");
-      await shareWithItems(
-        "invoice_docs",
-        "invoice_doc_items",
-        "invoice_id",
-        docId,
-        true
-      );
-      const { data, error } = await sb()
-        .from("invoice_docs")
-        .select("share_token")
-        .eq("id", docId)
-        .single();
-      if (error) throw error;
-      return (data as { share_token: string }).share_token;
-    }),
+  /** Explicitly enable a customer link without changing team visibility. */
+  publicLink: async (docId: number): Promise<string> => (await setPublicDocumentLink("invoice", docId, true))!,
+  revokePublicLink: async (docId: number): Promise<void> => { await setPublicDocumentLink("invoice", docId, false); },
   // ----- payments -----
   /** Complete dated payment history for reporting; consumers must join to the
    * relevant sales/purchase invoices before aggregating or converting currency. */
@@ -4988,6 +4993,8 @@ export const billing = {
       }, ["company_profile"], true, fresh
     ),
   saveCompany: async (input: CompanyProfile) => {
+    const checkWorkspace = workspaceGuard(), scope = activeCacheOrg;
+    checkWorkspace();
     validateCountry(input.country_code);
     const taxError = taxIdError(input.trn, input.country_code);
     if (taxError) throw new Error(taxError);
@@ -4999,37 +5006,43 @@ export const billing = {
         "You're offline. Company details need a connection to save."
       );
     await flushOutbox();
+    checkWorkspace();
+    const client = sb();
     const row = clean(input as unknown as Record<string, unknown>);
     // One profile per org. Update the existing row if present, else insert
     // (org_id/user_id fill from defaults). RLS permits writes for org
     // owners/admins only — so verify the write actually touched a row and
     // surface a clear reason instead of silently "succeeding".
-    const { data, error: selErr } = await sb()
+    const { data, error: selErr } = await client
       .from("company_profile")
       .select("id")
       .maybeSingle();
+    checkWorkspace();
     if (selErr) throw selErr;
     if (data) {
-      const { data: updated, error } = await sb()
+      const { data: updated, error } = await client
         .from("company_profile")
         .update(row)
         .eq("id", (data as { id: number }).id)
         .select("id");
+      checkWorkspace();
       if (error) throw error;
       if (!updated || updated.length === 0)
         throw new Error(
           "You don't have permission to edit company details — only an organization owner or admin can. (Switch to your own workspace, or ask an admin.)"
         );
     } else {
-      const { error } = await sb()
+      const { error } = await client
         .from("company_profile")
         .insert(row)
         .select("id")
         .single();
+      checkWorkspace();
       if (error) throw error;
     }
     markWrite();
-    await cacheWrite(`${activeCacheOrg}:company_profile`, input);
+    await cacheWrite(`${scope}:company_profile`, input);
+    checkWorkspace();
     notifyDataChanged();
   },
 };
@@ -5048,6 +5061,7 @@ export interface QuotationItem {
   custom?: Record<string, string>;
 }
 export interface QuotationSummary {
+  public_shared?: boolean;
   id: number;
   customer_id?: number | null;
   number: string;
@@ -5065,6 +5079,7 @@ export interface QuotationSummary {
   updated_at: string;
 }
 export interface QuotationDoc {
+  public_shared?: boolean;
   /** Frozen jurisdiction; changing currency never changes tax treatment. */
   tax_country_code?: string;
   id: number;
@@ -5274,6 +5289,7 @@ export const quotes = {
           status: d.status,
           template: d.template,
           shared: d.shared ?? false,
+          public_shared: d.public_shared === true,
           total: quoteTotal(byDoc.get(d.id) ?? [], d),
           // The list used to render every quote's total in the COMPANY's
           // currency, so a quote written in dollars was displayed as dirhams
@@ -5379,18 +5395,8 @@ export const quotes = {
         shared
       )
     ),
-  publicLink: async (docId: number) => {
-    if (isLocalMode())
-      throw new Error("Public links need Cloud mode — they don't work offline.");
-    await quotes.shareDoc(docId, true);
-    const { data, error } = await sb()
-      .from("quotations")
-      .select("share_token")
-      .eq("id", docId)
-      .single();
-    if (error) throw error;
-    return (data as { share_token: string }).share_token;
-  },
+  publicLink: async (docId: number): Promise<string> => (await setPublicDocumentLink("quotation", docId, true))!,
+  revokePublicLink: async (docId: number): Promise<void> => { await setPublicDocumentLink("quotation", docId, false); },
   convertToInvoice: (quotationId: number) =>
     online(async () => {
       if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
@@ -5569,6 +5575,7 @@ export interface PoPayment {
   paid_at: string;
 }
 export interface PoSummary {
+  public_shared?: boolean;
   /** AED per document currency unit, frozen when saved. */
   fx_rate?: number | null;
   id: number;
@@ -5592,6 +5599,7 @@ export interface PoSummary {
   tax_rate?: number;
 }
 export interface PurchaseOrder {
+  public_shared?: boolean;
   /** AED per document currency unit, frozen when saved. */
   fx_rate?: number | null;
   /** Frozen jurisdiction; changing currency never changes tax treatment. */
@@ -5747,6 +5755,7 @@ export const pos = {
             order_date: r.order_date,
             expected_date: r.expected_date ?? undefined,
             shared: r.shared ?? false,
+            public_shared: r.public_shared === true,
             updated_at: r.updated_at,
             tax_rate: r.tax_rate ?? undefined,
           };
@@ -5867,18 +5876,8 @@ export const pos = {
         shared
       )
     ),
-  publicLink: async (poId: number) => {
-    if (isLocalMode())
-      throw new Error("Public links need Cloud mode — they don't work offline.");
-    await pos.shareDoc(poId, true);
-    const { data, error } = await sb()
-      .from("purchase_orders")
-      .select("share_token")
-      .eq("id", poId)
-      .single();
-    if (error) throw error;
-    return (data as { share_token: string }).share_token;
-  },
+  publicLink: async (poId: number): Promise<string> => (await setPublicDocumentLink("purchase_order", poId, true))!,
+  revokePublicLink: async (poId: number): Promise<void> => { await setPublicDocumentLink("purchase_order", poId, false); },
   /** Receive items into stock: increments products.quantity by each line. */
   receive: (poId: number, requestId?: string) =>
     online(async () => {
@@ -6102,6 +6101,7 @@ export const advances = {
 
 // ===== Payment Receipts =====
 export interface ReceiptSummary {
+  public_shared?: boolean;
   id: number;
   number: string;
   customer_name: string;
@@ -6116,6 +6116,7 @@ export interface ReceiptSummary {
 }
 
 export interface ReceiptDoc {
+  public_shared?: boolean;
   tax_country_code?: string;
   id: number;
   number: string;
@@ -6177,6 +6178,7 @@ export const receipts = {
           currency: r.currency,
           payment_method: r.payment_method,
           shared: r.shared ?? false,
+          public_shared: r.public_shared === true,
           updated_at: r.updated_at,
         })) as ReceiptSummary[];
       },
@@ -6227,18 +6229,8 @@ export const receipts = {
       () => sUpdate("payment_receipts", id, { shared }),
       undefined
     ),
-  publicLink: async (id: number) => {
-    if (isLocalMode())
-      throw new Error("Public links need Cloud mode — they don't work offline.");
-    await receipts.shareDoc(id, true);
-    const { data, error } = await sb()
-      .from("payment_receipts")
-      .select("share_token")
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return (data as { share_token: string }).share_token;
-  },
+  publicLink: async (id: number): Promise<string> => (await setPublicDocumentLink("receipt", id, true))!,
+  revokePublicLink: async (id: number): Promise<void> => { await setPublicDocumentLink("receipt", id, false); },
 };
 
 /* tool_runs is an append-only log: one row every time a tool runs, forever.

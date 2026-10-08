@@ -2,9 +2,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { featureFunctionSources, featureSchemaIssues, einvoiceSchemaIssues, hostedDraftSchemaIssues } from './runtime-schema-checks.mjs';
+import { featureFunctionSources, featureSchemaIssues, einvoiceSchemaIssues, hostedDraftSchemaIssues, publicLinkSchemaIssues } from './runtime-schema-checks.mjs';
 
 const migration = name => readFileSync(new URL(`../supabase/${name}`, import.meta.url), 'utf8');
+
+test('public link catalog rejects legacy team gates, exposed helpers and missing copy/sync guards', () => {
+  const sources=featureFunctionSources(migration('2026-10-08-public-link-isolation.sql'));
+  const tables=['invoice_docs','quotations','purchase_orders','payment_receipts'];
+  const catalog={columns:tables.map(table=>({table,column:'public_shared',type:'bool',nullable:false,default:'false'})),
+    triggers:tables.map(table=>({table,name:'filey_public_link_guard',enabled:'O',type:23,function:'filey_public_link_guard',condition:null,columns:null})),
+    functions:[
+      ['filey_public_link_guard','','trigger',false,false,false],
+      ['filey_set_public_document_link','text, bigint, boolean, text','uuid',true,true,false],
+      ['filey_public_document_fields','jsonb','jsonb',false,false,false],
+      ['filey_public_document_item','jsonb','jsonb',false,false,false],
+      ['filey_public_einvoice','jsonb','jsonb',false,false,false],
+      ['get_shared_doc','uuid','jsonb',true,true,true],
+      ['get_shared_invoice','uuid','jsonb',true,true,true],
+    ].map(([name,args,result,definer,authenticated,anon])=>({name,args,result,definer,authenticated,anon,
+      config:['search_path=public, pg_temp'],source:sources.get(name)}))};
+  assert.deepEqual(publicLinkSchemaIssues(catalog,sources),[]);
+  for(const change of [c=>{c.columns[0].default='true';},c=>{c.columns[0].nullable=true;},c=>{c.triggers[0].enabled='D';},
+    c=>{c.triggers[0].function='untrusted.filey_public_link_guard';},c=>{c.functions[1].anon=true;},
+    c=>{c.functions[2].authenticated=true;},c=>{c.functions[5].source='select to_jsonb(d) from invoice_docs d where d.shared;';}]) {
+    const bad=structuredClone(catalog);change(bad);assert.notDeepEqual(publicLinkSchemaIssues(bad,sources),[]);
+  }
+});
 test('hosted draft catalog rejects exposed private helpers and stale numbering/snapshots', () => {
   const sources=featureFunctionSources(migration('2026-10-08-hosted-draft-parity.sql'));
   const catalog={functions:[

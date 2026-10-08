@@ -41,3 +41,21 @@ No real invoices, payments, customer messages or local database files were modif
 - The frozen frontend slice passed 144 focused tests across nine files and a production build. Independent hosted verification passed 54 Deno tests and 25 schema tests. Disposable PostgreSQL tests exercised simultaneous hosted/app numbering, replay, grants, totals, snapshots and repeat upgrades.
 
 Deployment order: apply `supabase/2026-10-08-hosted-draft-parity.sql` before the matching `channel-webhook` source. The regenerated fresh-install schema includes this upgrade. Local adapter compatibility is covered by isolated tests; user databases were not opened or rewritten. PR #57's clean CI, web deployment and persisted backend receipt fix were verified before this follow-up.
+
+## Follow-up: public document privacy and agent recovery
+
+- Reproduced anonymous document access after team-only sharing and hidden stamp/signature bytes in the public payload. Public consent now has an independent field and a guarded owner/admin RPC. Revocation rotates the token, clones start private, and stale saves/sync cannot restore access. Public JSON uses a field whitelist and respects artwork visibility.
+- Historical team-sharing flags do not prove public consent. Their old links are disabled until the owner explicitly enables a new one. Team access and document content are unchanged. The public viewer uses saved payment status, never a URL flag; overdue reminder links require explicit public access.
+- Reproduced a late company save contaminating another account's cache. Scope/mode epoch checks now protect every asynchronous boundary. Reproduced loss of a confirmed invoice receipt after a failed read-only follow-up; bounded earlier write receipts retain original run identity and remain separate from current task results.
+- Sharing SQL authorization, MFA/module/tenant boundaries, token rotation, hidden artwork, record-copy privacy, mappings and repeated upgrades passed in disposable PostgreSQL. Final fresh bootstrap passed with 94 tables, 1,215 columns, 158 inspected functions and no required-schema issues. Local persistence, recurrence and sync regressions passed without opening the user's database.
+- Root dependency audit reported zero known vulnerabilities. Browser security tests blocked arbitrary scripts, inline event handlers, dynamic JavaScript and private request redirects.
+
+Apply `supabase/2026-10-08-public-link-isolation.sql` before the matching frontend and redeploy `overdue-reminders` with its updated shared helper. This is a permission repair; no real public links were enabled, messages sent or customer records created during testing.
+
+## Production verification after upgrades
+
+Both reviewed October 8 migrations were applied successfully. The live read-only catalog passes the current verifier with 93 tables, 1,212 columns, 136 inspected functions and no issues. The hosted draft/receipt files and reminder helper were deployed through the existing authenticated dashboard; source copied back after reload matched the reviewed files exactly. The production web bundle for PR #58 was verified independently of the preview deployment.
+
+The old cloud-privacy fixture expected team visibility to authorize anonymous access. It now explicitly enables and revokes public links through the authenticated owner RPC, and asserts that team-only sharing remains private. The complete isolated privacy/bootstrap regression passes, including repeated installation and tenant isolation. Local upgrade, queued-save and concurrency checks passed without opening the user's database.
+
+Navigation and temporary cloud-response recovery are covered; a hard reload, app closure or OS termination still cannot resume the entire agent automatically. No live model calls, payment transactions, external messages or accredited e-invoice submissions were used for verification.

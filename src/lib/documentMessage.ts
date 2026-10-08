@@ -1,4 +1,4 @@
-import { billing, quotes, receipts } from "./api";
+import { billing, quotes, receipts, pos } from "./api";
 import { isLocalMode } from "./dataMode";
 import { requireAgentStorageScope } from "./agentStorage";
 import { deliverFile, type DeliveredFile } from "./agentFiles";
@@ -22,7 +22,7 @@ export function messageUrl(channel: MessageChannel, phone: string, text: string,
 }
 
 /** A recipient cannot open a localhost/Tauri/device-only portal. */
-export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || (isNativeApp() ? "https://app.gofiley.com/" : `${location.origin}${location.pathname}`)): string | null {
+export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || (isNativeApp() || (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) ? "https://app.gofiley.com/" : `${location.origin}${location.pathname}`)): string | null {
   try {
     const url = new URL(raw);
     const host = url.hostname.toLowerCase();
@@ -35,16 +35,17 @@ export function publicAppBase(raw = import.meta.env.VITE_PUBLIC_APP_URL || (isNa
   } catch { return null; }
 }
 
-async function documentPublicLink(kind: "invoice" | "quotation" | "receipt", id: number): Promise<string> {
+async function documentPublicLink(kind: "invoice" | "quotation" | "purchase_order" | "receipt", id: number): Promise<string> {
   const base = publicAppBase();
   if (isLocalMode() || !base)
     throw new Error(`Public ${kind} links need a hosted cloud address. Share the PDF from this device instead.`);
-  const token = await (kind === "invoice" ? billing.publicLink(id) : kind === "quotation" ? quotes.publicLink(id) : receipts.publicLink(id));
+  const token = await (kind === "invoice" ? billing.publicLink(id) : kind === "quotation" ? quotes.publicLink(id) : kind === "purchase_order" ? pos.publicLink(id) : receipts.publicLink(id));
   return `${base}#/portal/${encodeURIComponent(token)}`;
 }
 
 export const invoicePublicLink = (id: number): Promise<string> => documentPublicLink("invoice", id);
 export const quotationPublicLink = (id: number): Promise<string> => documentPublicLink("quotation", id);
+export const purchaseOrderPublicLink = (id: number): Promise<string> => documentPublicLink("purchase_order", id);
 export const receiptPublicLink = (id: number): Promise<string> => documentPublicLink("receipt", id);
 
 export interface DocumentMessageContext { expectedScope: string; signal?: AbortSignal }
