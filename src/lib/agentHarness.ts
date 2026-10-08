@@ -758,6 +758,7 @@ export async function* runAgentStream(
   let compressedThisRun = false;
   const compressedIds = new Set<string>();
   const recoveryRequest = invoiceRecoveryRequest(messages);
+  const recoveryNumbers = [...new Set(recoveryRequest?.match(/\bINV-[\w-]+\b/gi)?.map(number => number.toLowerCase()) ?? [])];
   let recoveryVerified = false;
   let recoveryChecks = 0;
   type PendingSave = { request_id: string; number: string };
@@ -766,7 +767,7 @@ export async function* runAgentStream(
   const recoveryMessage = () => !recoveryRequest || recoveryVerified ? undefined
     : pendingRecovery.length
       ? `I found ${pendingRecovery.length === 1 ? `the pending invoice save ${JSON.stringify(pendingRecovery[0].number)}` : "pending invoice saves"}, but I have not verified the saved invoice. No completed recovery is confirmed. ${pendingRecovery.length > 1 ? "Tell me which invoice number or customer to continue." : "Keep the original number and details when continuing."}`
-      : "No pending invoice save was found in this workspace. That does not prove the invoice was never saved. I have not confirmed a retry; check the original invoice before creating another one.";
+      : "No matching pending invoice save was found in this workspace. That does not prove the invoice was never saved. I have not confirmed a retry; check the original invoice before creating another one.";
 
   if (recoveryRequest) {
     assertActive();
@@ -777,7 +778,8 @@ export async function* runAgentStream(
     }
     opened.add("sales");
     const name = "list_pending_invoice_saves";
-    const args = /\b(?:purchase|supplier|bills?)\b/i.test(recoveryRequest) ? { doc_type: "purchase" } : {};
+    const args: Record<string, unknown> = /\b(?:purchase|supplier|bills?)\b/i.test(recoveryRequest) ? { doc_type: "purchase" } : {};
+    if (recoveryNumbers.length === 1) args.query = recoveryNumbers[0];
     const id = "invoice-recovery-preflight";
     yield { type: "tool_call", id, name, args };
     assertActive();
@@ -798,6 +800,7 @@ export async function* runAgentStream(
       return text;
     }
     pendingRecovery = result.filter((save): save is PendingSave => !!save && typeof save.request_id === "string" && typeof save.number === "string");
+    if (recoveryNumbers.length) pendingRecovery = pendingRecovery.filter(save => recoveryNumbers.includes(save.number.toLowerCase()));
     const named = pendingRecovery.filter(save => namesInvoice(recoveryRequest, save.number));
     if (named.length) pendingRecovery = named;
     const output = compressForModel(name, JSON.stringify(result));
@@ -1077,7 +1080,10 @@ export async function* runAgentStream(
       // A repeat of an identical call is answered from this run's memory —
       // reads return the earlier answer, writes are refused. Without it the
       // same invoice gets emailed twice when the model second-guesses itself.
-      const decided = guard.before(call.name, call.args);
+      const decided = call.name === "retry_invoice_save" && recoveryNumbers.length &&
+          !pendingRecovery.some(save => save.request_id === call.args.request_id)
+        ? { short: { error: "That pending save does not match the invoice number the user requested. Read the requested invoice; do not retry another invoice.", retry_safe: false } }
+        : guard.before(call.name, call.args);
       let raw: unknown;
       try {
         raw = "short" in decided ? decided.short : await runTool(
@@ -1108,7 +1114,7 @@ export async function* runAgentStream(
           recoveryVerified = pendingRecovery.length
             ? pendingRecovery.some(save => saved.number === save.number && (saved.verified_save_requests?.includes(save.request_id) ||
                 recoveryReceipts.get(save.request_id)?.id === saved.id))
-            : typeof call.args.invoice_number === "string" && saved.number === call.args.invoice_number && namesInvoice(recoveryRequest, saved.number);
+            : namesInvoice(recoveryRequest, saved.number);
         }
       }
       const result = coachResult(visual.result, maxRounds - round - 1);
