@@ -15,6 +15,9 @@ import { Worker } from "node:worker_threads";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createLocalClient, readLocalIdentity } from "./localdb.js";
+import { z } from "zod";
+import { loadDraftPresets } from "./draftPresets.js";
+import type { Ctx } from "./client.js";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "filey-mcp-"));
 const dbFile = path.join(dir, "filey-erp.db");
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
   const call = (name: string, args: any = {}) => {
     const tool = allTools.find((t) => t.name === name);
     assert.ok(tool, `tool ${name} is not registered`);
-    return tool!.handler(args) as Promise<any>;
+    return tool!.handler(z.object(tool!.inputSchema).parse(args)) as Promise<any>;
   };
   const noError = (r: any, what: string) => {
     assert.ok(!r?.error, `${what} returned an error: ${r?.error}`);
@@ -496,6 +499,143 @@ async function main(): Promise<void> {
     "a 16-digit exhausted counter must fail rather than be ignored and restart at one");
   assert.equal(raw("localdb:document_number_reservations"), JSON.stringify(exhaustedLedger));
   setRaw("localdb:document_number_reservations", completeLedger);
+
+  // Draft preset parity: real registered tools and schema parsing, exclusively
+  // against this throwaway DB. Existing docs keep their independent snapshots.
+  const company = {
+    id: 1, user_id: USER, org_id: ORG, name: "Synthetic Seller", currency: "USD", default_tax_rate: 0,
+    country_code: "AE", address: "Seller address", city: "Dubai", country_subdivision: "DU",
+    trn: "", vat_number: "100000000000001", email: "seller@example.test", phone: "+971500000001",
+    einvoice: { tin: "1000000001", endpoint_id: "SELLER-ID", endpoint_scheme: "0235", legal_id: "NESTED-TL", legal_id_type: "TL", uuid: "must-not-reuse", secret: "must-not-copy" },
+    unit_price_formula: { a: "litres", b: "unit_price" },
+  };
+  setRaw("localdb:company_profile", JSON.stringify([company, { ...company, id: 2, org_id: "other-org", name: "Wrong Seller" }]));
+  setRaw("localdb:app_settings", JSON.stringify([
+    { id: 1, user_id: USER, org_id: ORG, key: "invoice_number_format", value: "INV-DLS-{003}-{YY}" },
+    { id: 2, user_id: USER, org_id: ORG, key: "quote_number_format", value: "QU-{YYYY}-{001}" },
+    { id: 3, user_id: USER, org_id: ORG, key: "purchase_order_number_format", value: "BUY-{001}-{YY}" },
+    { id: 4, user_id: "another-user", org_id: ORG, shared: true, key: "invoice_number_format", value: "WRONG-{001}" },
+    { id: 5, user_id: USER, org_id: "other-org", key: "invoice_number_format", value: "WRONG-ORG-{001}" },
+    { id: 6, key: "invoice_number_format", value: "LEGACY-{001}" },
+  ]));
+  const year = new Date().toISOString().slice(0, 4);
+  setRaw("localdb:invoice_docs", JSON.stringify([...readColl("invoice_docs"), { id: 8000, user_id: USER, org_id: ORG, number: `INV-DLS-028-${year.slice(2)}`, status: "draft" }]));
+  const customer = { id: 1, user_id: USER, org_id: ORG, name: "Acme Trading", company: "Acme LLC", email: "ap@acme.test",
+    address: "Buyer address", trn: "100000000000002", city: "Abu Dhabi", country_code: "AE", country_subdivision: "AZ",
+    phone_e164: "+971500000002", custom_fields: { private_note: "not-an-identity-field", einvoice_identity: JSON.stringify({ legal_id: "BUY-TL", tin: "1000000002", endpoint_id: "BUYER-ID", secret: "do-not-copy" }) } };
+  setRaw("localdb:crm_customers", JSON.stringify([customer,
+    { ...customer, id: 2, org_id: "other-org", trn: "WRONG" },
+    { ...customer, id: 3, user_id: "private-other-user", trn: "WRONG" },
+  ]));
+  const presetInvoice = noError(await call("create_draft_invoice", {
+    customer_name: "aCmE LLC", items: [{ description: "Unchanged line", qty: 2, unit_price: 12.25 }], public_shared: true,
+  }), "invoice presets");
+  assert.equal(presetInvoice.number, `INV-DLS-029-${year.slice(2)}`, "saved format continues the existing sequence");
+  assert.equal(presetInvoice.total, 24.5, "saved zero VAT survives schema parsing and invoice totals");
+  const presetSaved = readColl("invoice_docs").find(row => row.number === presetInvoice.number);
+  assert.equal(presetSaved.currency, "USD");
+  assert.equal(presetSaved.tax_rate, 0);
+  assert.equal(presetSaved.customer_name, "aCmE LLC", "preserve the requested printed customer name");
+  assert.equal(presetSaved.customer_id, customer.id);
+  assert.equal(presetSaved.customer_email, customer.email);
+  assert.equal(presetSaved.customer_address, customer.address);
+  assert.equal(presetSaved.customer_trn, customer.trn);
+  assert.equal(presetSaved.buyer_country_subdivision, "AZ");
+  assert.equal(presetSaved.seller_name, company.name);
+  assert.equal(presetSaved.seller_trn, company.vat_number);
+  assert.equal(presetSaved.seller_legal_id, "NESTED-TL");
+  assert.equal(presetSaved.einvoice.seller.tin, "1000000001");
+  assert.equal(presetSaved.einvoice.buyer.tin, "1000000002");
+  assert.equal(presetSaved.einvoice.buyer.phone, customer.phone_e164);
+  assert.equal(presetSaved.einvoice.seller.secret, undefined);
+  assert.equal(presetSaved.einvoice.buyer.secret, undefined);
+  assert.equal(presetSaved.unit_price_formula, undefined, "unsupported preset calculation fields are not inherited");
+  assert.equal(presetSaved.public_shared, undefined);
+  assert.match(presetSaved.einvoice.uuid, /^[0-9a-f-]{36}$/);
+  const snapshot = JSON.stringify(presetSaved);
+  setRaw("localdb:company_profile", JSON.stringify([{ ...company, default_tax_rate: 5 }]));
+  const override = noError(await call("create_draft_invoice", { customer_name: "Acme Trading", currency: "EUR", tax_rate: 0,
+    customer_email: "manual@example.test", items: [{ description: "Zero price", qty: 3, unit_price: 0 }] }), "explicit overrides");
+  const overrideSaved = readColl("invoice_docs").find(row => row.number === override.number);
+  assert.equal(overrideSaved.currency, "EUR"); assert.equal(overrideSaved.tax_rate, 0); assert.equal(override.total, 0);
+  assert.equal(overrideSaved.customer_email, "manual@example.test");
+  assert.notEqual(overrideSaved.einvoice.uuid, presetSaved.einvoice.uuid, "each invoice has its own preparation UUID");
+  assert.equal(JSON.stringify(readColl("invoice_docs").find(row => row.number === presetInvoice.number)), snapshot, "later preset changes preserve saved identity and UUID");
+  const quotePreset = noError(await call("create_draft_quote", { customer_name: "Acme Trading", items: [{ description: "Quote", unit_price: 10 }] }), "quote presets");
+  assert.equal(quotePreset.number, `QU-${year}-001`); assert.equal(quotePreset.total, 10.5);
+  const quoteSaved = readColl("quotations").find(row => row.number === quotePreset.number);
+  assert.equal(quoteSaved.customer_trn, customer.trn); assert.equal(quoteSaved.seller_name, company.name);
+  setRaw("localdb:suppliers", JSON.stringify([{ id: 11, user_id: USER, org_id: ORG, name: "Supply Co", tax_id: "SUPPLIER-TRN", email: "supply@example.test", phone: "1234", address: "Supplier address" },
+    { id: 12, org_id: "other-org", name: "Supply Co", tax_id: "WRONG" }]));
+  const poPreset = noError(await call("create_draft_po", { supplier_name: "supply co", items: [{ description: "PO", qty: 2, unit_cost: 3.75 }] }), "PO presets");
+  const poSaved = readColl("purchase_orders").find(row => row.po_number === poPreset.po_number);
+  assert.equal(poPreset.po_number, `BUY-001-${year.slice(2)}`); assert.equal(poPreset.total, 7.88);
+  assert.equal(poSaved.total, poPreset.total); assert.equal(poSaved.supplier_trn, "SUPPLIER-TRN"); assert.equal(poSaved.supplier_id, 11);
+  setRaw("localdb:company_profile", JSON.stringify([{ ...company, tax_type: "None", default_tax_rate: 5 }]));
+  const noTax = noError(await call("create_draft_invoice", { customer_name: "Manual party", items: [{ description: "No tax", unit_price: 10 }] }), "no-tax company");
+  assert.equal(noTax.total, 10);
+  const explicitTax = noError(await call("create_draft_invoice", { customer_name: "Manual party", tax_rate: 5, items: [{ description: "Explicit VAT", unit_price: 10 }] }), "explicit tax override");
+  assert.equal(explicitTax.total, 10.5);
+
+  setRaw("localdb:crm_customers", JSON.stringify([customer, { ...customer, id: 20, name: "ACME TRADING" }]));
+  setRaw("localdb:suppliers", JSON.stringify([{ id: 11, org_id: ORG, name: "Supply Co" }, { id: 12, org_id: ORG, name: "SUPPLY CO" }]));
+  const beforeAmbiguous = raw("localdb:document_number_reservations");
+  for (const tool of ["create_draft_invoice", "create_draft_quote", "create_draft_po"]) {
+    const rejected = await call(tool, tool.endsWith("_po") ? { supplier_name: "Supply Co", items: [{ description: "x", unit_cost: 1 }] }
+      : { customer_name: "Acme Trading", items: [{ description: "x", unit_price: 1 }] });
+    assert.match(rejected.error, /Multiple (customers|suppliers)/);
+  }
+  assert.equal(raw("localdb:document_number_reservations"), beforeAmbiguous, "ambiguous parties consume no numbers");
+  const direct = noError(await local.rpc("filey_save_document", { p_table: "invoice_docs", p_header: { status: "draft", number: "STRIP-SHARING", public_shared: true, shared: true, share_token: "forged" }, p_items: [{ description: "Private", qty: 1, unit_price: 1, public_shared: true }] }), "defensive adapter strip");
+  assert.equal(readColl("invoice_docs").find(row => row.id === direct.data).public_shared, undefined);
+  assert.equal(readColl("invoice_doc_items").find(row => row.invoice_id === direct.data).public_shared, undefined);
+
+  // Cloud-shaped queries must pin settings to the actor and all presets to the
+  // workspace. This mock never connects to Supabase or reads account secrets.
+  const cloudRows: Record<string, any[]> = { company_profile: [company, { ...company, org_id: "other-org" }],
+    app_settings: [{ user_id: USER, org_id: ORG, key: "invoice_number_format", value: "CLOUD-{0001}-{YYYY}" },
+      { user_id: "other-user", org_id: ORG, key: "invoice_number_format", value: "WRONG-{001}" }],
+    crm_customers: [customer, { ...customer, id: 99, org_id: "other-org" }], suppliers: [] };
+  let failTable = "";
+  const cloud = { local: false, userId: USER, orgId: ORG, supabase: { from(table: string) {
+    const eq: Array<[string, unknown]> = [], ilike: Array<[string, string]> = [];
+    let limit = Infinity;
+    const query = { select() { return query; }, eq(key: string, value: unknown) { eq.push([key, value]); return query; },
+      ilike(key: string, value: string) { ilike.push([key, value]); return query; }, limit(value: number) { limit = value; return query; },
+      then(resolve: (result: unknown) => unknown) {
+        assert.ok(eq.some(([key, value]) => key === "org_id" && value === ORG), `${table} is workspace scoped`);
+        if (table === "app_settings") assert.ok(eq.some(([key, value]) => key === "user_id" && value === USER), "settings are actor scoped");
+        if (table === failTable) return Promise.resolve(resolve({ data: null, error: { message: "Synthetic access denied" } }));
+        const data = (cloudRows[table] ?? []).filter(row => eq.every(([key, value]) => row[key] === value) &&
+          ilike.every(([key, value]) => String(row[key] ?? "").toLowerCase() === value.replace(/\\(.)/g, "$1").toLowerCase())).slice(0, limit);
+        return Promise.resolve(resolve({ data, error: null }));
+      } };
+    return query;
+  } } } as unknown as Ctx;
+  const cloudPreset = await loadDraftPresets(cloud, "invoice", "aCmE LLC");
+  assert.equal(cloudPreset.pattern, "CLOUD-{0001}-{YYYY}"); assert.equal(cloudPreset.header.seller_name, company.name);
+  assert.equal(cloudPreset.header.customer_trn, customer.trn); assert.equal(cloudPreset.taxRate, 0);
+  cloudRows.company_profile = [{ ...company, default_tax_rate: "0" }];
+  assert.equal((await loadDraftPresets(cloud, "invoice", "Acme Trading")).taxRate, 0, "legacy numeric-string zero stays zero");
+  cloudRows.company_profile = [{ ...company, default_tax_rate: "7.5" }];
+  assert.equal((await loadDraftPresets(cloud, "invoice", "Acme Trading")).taxRate, 7.5);
+  for (const malformed of [false, [], {}, "", "   ", "invalid"]) {
+    cloudRows.company_profile = [{ ...company, default_tax_rate: malformed }];
+    await assert.rejects(loadDraftPresets(cloud, "invoice", "Acme Trading"), /saved company tax rate is invalid/, "malformed defaults must not become zero VAT");
+  }
+  cloudRows.company_profile = [{ ...company, currency: "EUR", country_code: "DE", default_tax_rate: null }];
+  await assert.rejects(loadDraftPresets(cloud, "invoice", "Acme Trading"), /explicit tax_rate/, "missing non-UAE rate cannot silently use UAE VAT");
+  assert.equal((await loadDraftPresets(cloud, "invoice", "Acme Trading", { tax_rate: 0 })).taxRate, 0);
+  cloudRows.company_profile = [company];
+  cloudRows.crm_customers = [{ ...customer, name: "A_%.,(B)\\Co", company: "" }];
+  assert.equal((await loadDraftPresets(cloud, "invoice", "A_%.,(B)\\Co")).header.customer_id, customer.id, "LIKE and filter metacharacters match literally");
+  cloudRows.crm_customers.push({ ...cloudRows.crm_customers[0], id: 2 });
+  await assert.rejects(loadDraftPresets(cloud, "invoice", "A_%.,(B)\\Co"), /Multiple customers/);
+  failTable = "company_profile";
+  await assert.rejects(loadDraftPresets(cloud, "invoice", "New customer"), /Synthetic access denied/, "read errors cannot silently fall back to incomplete documents");
+  failTable = "";
+  cloudRows.company_profile = []; cloudRows.app_settings = [];
+  assert.equal((await loadDraftPresets(cloud, "quote", "Manual party")).pattern, "QT-{YYYY}-{0001}", "unsaved format matches the app default");
   local.close();
   writer.close();
 

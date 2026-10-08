@@ -222,7 +222,7 @@ class Store {
       !Array.isArray(items) || items.length < 1 || items.length > 500 ||
       items.some(item => !item || typeof item !== "object" || Array.isArray(item))) throw new Error("Invalid draft document payload.");
     const strip = (row: Row) => Object.fromEntries(Object.entries(row).filter(([key]) =>
-      !["id", "user_id", "org_id", "created_at", "updated_at", "shared", "shared_with", "share_token", "stock_received"].includes(key)));
+      !["id", "user_id", "org_id", "created_at", "updated_at", "shared", "shared_with", "public_shared", "share_token", "stock_received"].includes(key)));
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const [saved] = this.insertRows(table, [strip(header)], identity);
