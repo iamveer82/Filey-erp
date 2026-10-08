@@ -33,7 +33,7 @@ import {
   type FullBackupResult,
 } from "../../lib/localPaths";
 import { todayYmd } from "../../lib/format";
-import { pendingCloudWrites } from "../../lib/api";
+import { flushOutbox, pendingCloudWrites } from "../../lib/api";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 import { Modal, Switch } from "../../components/ui";
 import { log } from "../../lib/log";
@@ -214,6 +214,8 @@ export default function DataModePanel() {
   const [dataDir, setDataDirState] = useState("");
   const [exportDir, setExportDirState] = useState(getExportDir());
   const [pendingWrites, setPendingWrites] = useState(0);
+  const [retryingWrites, setRetryingWrites] = useState(false);
+  const [pendingWriteError, setPendingWriteError] = useState("");
   const [progress, setProgress] = useState("");
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   /** Live cloud session, independent of which store is currently open. In local
@@ -227,9 +229,6 @@ export default function DataModePanel() {
       void Promise.all([getDataDir(), storageRecoveryStatus()])
         .then(([directory, recovery]) => { if (active) { setDataDirState(directory); setRecoveryError(recovery); } })
         .catch(error => { if (active) setErr(String(error?.message ?? error)); });
-    void pendingCloudWrites()
-      .then((rows) => { if (active) setPendingWrites(rows.length); })
-      .catch(() => {});
     if (supabase) {
       void supabase.auth.getSession()
         .then(({ data }) => { if (active) setCloudSession(data.session?.user.email ?? null); })
@@ -241,6 +240,34 @@ export default function DataModePanel() {
     }
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    let request = 0;
+    const refresh = () => {
+      const current = ++request;
+      void pendingCloudWrites().then(rows => {
+        if (active && current === request) setPendingWrites(rows.length);
+      }).catch(() => {});
+    };
+    refresh();
+    window.addEventListener("filey:outbox-change", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("filey:outbox-change", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [retryingWrites]);
+
+  const retryPendingWrites = async () => {
+    if (retryingWrites || busy || mode !== "cloud" || !cloudSession) return;
+    setRetryingWrites(true);
+    setPendingWriteError("");
+    try { await flushOutbox(); }
+    catch { setPendingWriteError("Couldn't reconnect to Filey Cloud. Your queued changes are preserved. Check your connection and account, then retry."); }
+    finally { setRetryingWrites(false); }
+  };
 
   const changeDataDir = async () => {
     if (storageBusy) return;
@@ -472,10 +499,16 @@ export default function DataModePanel() {
           <div role="status" className="border-t border-border pt-4 text-sm space-y-2">
             <h3 className="font-medium">Older offline saves need review</h3>
             <p className="text-muted-foreground">
-              {pendingWrites} queued changes remain on this device. Changes without a
-              verified source account are preserved and will not be sent automatically.
+              {pendingWrites} queued {pendingWrites === 1 ? "change remains" : "changes remain"} on this device, awaiting cloud confirmation.
+              Check your connection and select the original company account before retrying.
+              Changes with conflicts or without a verified source account are kept for review.
               Keep a device backup and contact support before clearing storage.
             </p>
+            {mode === "cloud" && <button type="button" className="btn-ghost" disabled={retryingWrites || busy || !cloudSession} onClick={() => void retryPendingWrites()}>
+              {retryingWrites ? "Retrying queued saves…" : "Retry queued saves"}
+            </button>}
+            {mode === "local" && <p className="text-muted-foreground">Open the original cloud workspace to retry these older cloud saves. Your local records stay on this device.</p>}
+            {pendingWriteError && <p role="alert" className="text-danger">{pendingWriteError}</p>}
           </div>
         )}
       </SettingsSection>

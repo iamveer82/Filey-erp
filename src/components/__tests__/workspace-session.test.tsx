@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
   refreshSession: vi.fn(),
   getSession: vi.fn(),
   profileRead: vi.fn(),
+  profileWrite: vi.fn(),
   signIn: vi.fn(),
   signUp: vi.fn(),
   verifyOtp: vi.fn(),
@@ -15,6 +16,7 @@ const fixture = vi.hoisted(() => ({
   entitlement: vi.fn(async () => ({})),
   setSession: vi.fn(async () => ({ error: null })),
   scope: "previous-org:previous-user",
+  identity: 0,
   onAuth: undefined as undefined | ((event: string, session: { user: { id: string; email: string } } | null) => void),
 }));
 vi.mock("../../lib/supabase", () => ({
@@ -35,6 +37,8 @@ vi.mock("../../lib/supabase", () => ({
       refreshSession: fixture.refreshSession,
     },
     from: () => ({
+      upsert: () => ({ select: () => ({ single: fixture.profileWrite }) }),
+      update: () => ({ eq: () => ({ select: () => ({ single: fixture.profileWrite }) }) }),
       select: () => ({
         eq: () => ({
           maybeSingle: fixture.profileRead,
@@ -45,7 +49,12 @@ vi.mock("../../lib/supabase", () => ({
 }));
 vi.mock("../../lib/api", () => ({
   getCacheScope: () => fixture.scope === "signed out" ? null : fixture.scope,
-  setCacheOrg: vi.fn((org?: string | null, user?: string) => { fixture.scope = user ? `${org || "default"}:${user}` : "signed out"; }),
+  getCacheIdentity: () => fixture.identity,
+  setCacheOrg: vi.fn((org?: string | null, user?: string) => {
+    const next = user ? `${org || "default"}:${user}` : "signed out";
+    if (next !== fixture.scope) fixture.identity++;
+    fixture.scope = next;
+  }),
 }));
 vi.mock("../../lib/realtime", () => ({ watchRealtimeSession: vi.fn(), stopRealtime: vi.fn() }));
 vi.mock("../../lib/license", () => ({
@@ -262,6 +271,8 @@ beforeEach(() => {
   fixture.expired = false;
   fixture.assurance.mockReset().mockResolvedValue(false);
   fixture.scope = "previous-org:previous-user";
+  fixture.identity = 0;
+  fixture.profileWrite.mockReset();
   fixture.onAuth = undefined;
   fixture.getSession.mockResolvedValue({ data: { session: { user: fixture.user } } });
   fixture.profileRead.mockImplementation(async () => ({ data: { ...fixture.user, name: "Owner", company: "Example", org_id: "org" }, error: fixture.expired ? { message: "JWT expired" } : null }));
@@ -274,6 +285,65 @@ beforeEach(() => {
   vi.spyOn(localAuth, "rememberLocalCredential").mockImplementation(async (email, userId) => { rememberLocalIdentity(email, userId); });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+it.each(["create", "update"])("keeps a confirmed %s profile save in the current workspace", async kind => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  fixture.profileWrite.mockResolvedValueOnce({ data: { ...currentAuth.profile, company: "Edited company" }, error: null });
+  await act(async () => {
+    if (kind === "create") await currentAuth.createProfile("Owner", "", "Edited company");
+    else await currentAuth.updateProfile({ company: "Edited company" });
+  });
+  expect(currentAuth.profile?.company).toBe("Edited company");
+  expect(screen.getByTestId("session")).toHaveAttribute("data-cache-scope", "org:owner");
+});
+
+it.each(["create", "update"].flatMap(kind =>
+  ["account", "workspace", "round-trip", "sign-out", "mode"].map(change => ({ kind, change }))
+))("ignores a late $kind profile response after a $change change", async ({ kind, change }) => {
+  localStorage.setItem("filey_data_mode", "cloud");
+  render(<AuthProvider><SessionProbe /></AuthProvider>);
+  await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+  let finish!: (value: unknown) => void;
+  fixture.profileWrite.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  let saving!: Promise<void>;
+  act(() => {
+    saving = kind === "create" ? currentAuth.createProfile("Owner", "", "Old save")
+      : currentAuth.updateProfile({ company: "Old save" });
+  });
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  if (change === "account" || change === "round-trip") {
+    const next = { id: "second", email: "second@example.test", name: "Second", company: "Second workspace", org_id: "second-org" };
+    fixture.profileRead.mockResolvedValueOnce({ data: next, error: null });
+    act(() => fixture.onAuth?.("SIGNED_IN", { user: { id: next.id, email: next.email } }));
+    await waitFor(() => expect(currentAuth.profile?.id).toBe("second"));
+    if (change === "round-trip") {
+      act(() => fixture.onAuth?.("SIGNED_IN", { user: fixture.user }));
+      await waitFor(() => expect(currentAuth.profile?.company).toBe("Example"));
+    }
+  } else if (change === "workspace") {
+    fixture.profileRead.mockResolvedValueOnce({ data: { ...currentAuth.profile, company: "Joined team", org_id: "joined-org" }, error: null });
+    await act(async () => { await currentAuth.reloadProfile(); });
+  } else if (change === "sign-out") {
+    // Invalidate the write as soon as sign-out starts, before its network response.
+    fixture.signOut.mockImplementationOnce(() => new Promise(() => {}));
+    act(() => { void currentAuth.signOut(); });
+  } else {
+    localStorage.setItem("filey_data_mode", "local");
+  }
+  const expectedProfile = currentAuth.profile;
+  const expectedUser = currentAuth.user;
+  const expectedScope = fixture.scope;
+  await act(async () => {
+    finish({ data: { ...fixture.user, name: "Owner", company: "Old save", org_id: "org" }, error: null });
+    await saving;
+  });
+  expect(currentAuth.user).toBe(expectedUser);
+  expect(currentAuth.profile).toBe(expectedProfile);
+  expect(fixture.scope).toBe(expectedScope);
+});
+
 it("blocks a loaded cloud profile until security verification completes, keeps it blocked on failure and supports retry", async () => {
   localStorage.setItem("filey_data_mode", "cloud");
   let fail!: (error: Error) => void;

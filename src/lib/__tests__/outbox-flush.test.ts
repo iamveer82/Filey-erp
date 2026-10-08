@@ -1,21 +1,21 @@
 // The offline outbox replays queued writes in order on reconnect. Order is why
 // a failure stops the replay — an insert has to land before the update that
-// follows it. But an op that can never succeed used to stop it in exactly the
-// same way and was never cleared, so the queue jammed on that entry and every
-// write made offline afterwards stayed stranded behind it, silently, forever.
+// follows it. Unconfirmed writes stay available for recovery.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // A table whose name starts with "doomed" always fails with a unique-violation;
-// "flaky" fails with a network error; everything else succeeds.
+// "flaky" fails with a network error; "blocked" returns no visible rows.
 const attempted: string[] = [];
 const state = vi.hoisted(() => ({ afterWrite: () => {}, userId: "owner", orgId: "default" }));
 vi.mock("../supabase", () => {
-  const result = (t: string) =>
+  const result = (t: string, id: number) =>
     t.startsWith("doomed")
       ? { error: { code: "23505", message: "duplicate key value" } }
       : t.startsWith("flaky")
         ? { error: { message: "Failed to fetch" } }
-        : { error: null };
+        : t.startsWith("blocked") ? { data: [], error: null }
+        : t.startsWith("no_rows") ? { data: null, error: { code: "PGRST116" } }
+        : { data: [{ id: t.startsWith("wrong_row") ? id + 1 : id }], error: null };
   return {
     isConfigured: true,
     supabase: {
@@ -24,22 +24,27 @@ vi.mock("../supabase", () => {
     },
     sb: () => ({
       from(t: string) {
+        let id = 1;
         const done = () => {
           attempted.push(t);
           state.afterWrite();
-          return Promise.resolve(result(t));
+          return Promise.resolve(result(t, id));
+        };
+        const mutation = {
+          eq: (_column: string, value: number) => { id = value; return mutation; },
+          select: done,
         };
         return {
-          insert: done,
-          update: () => ({ eq: done }),
-          delete: () => ({ eq: done }),
+          insert: () => mutation,
+          update: () => mutation,
+          delete: () => mutation,
         };
       },
     }),
   };
 });
 
-const { flushOutbox, outboxOpIsDoomed, setCacheOrg, erp } = await import("../api");
+const { flushOutbox, setCacheOrg, erp } = await import("../api");
 
 const queue = (ops: { k: string; t: string; id?: number; row?: unknown }[]) =>
   localStorage.setItem(
@@ -62,21 +67,39 @@ beforeEach(() => {
   setCacheOrg(null); setCacheOrg("default", "owner");
 });
 
-describe("outboxOpIsDoomed", () => {
-  it("treats integrity violations and no-rows as unrepeatable", () => {
-    expect(outboxOpIsDoomed({ code: "23505" })).toBe(true); // unique key taken
-    expect(outboxOpIsDoomed({ code: "23503" })).toBe(true); // foreign key gone
-    expect(outboxOpIsDoomed({ code: "PGRST116" })).toBe(true); // row deleted elsewhere
-  });
-
-  it("treats anything else as worth retrying", () => {
-    expect(outboxOpIsDoomed({ message: "Failed to fetch" })).toBe(false);
-    expect(outboxOpIsDoomed({ code: "500" })).toBe(false);
-    expect(outboxOpIsDoomed(null)).toBe(false);
-  });
-});
-
 describe("flushOutbox", () => {
+  it("removes only confirmed writes and drains them in order", async () => {
+    const change = vi.fn();
+    window.addEventListener("filey:outbox-change", change, { once: true });
+    queue([
+      { k: "insert", t: "products", row: { name: "New product" } },
+      { k: "update", t: "orders", id: 3, row: { status: "paid" } },
+      { k: "delete", t: "quotes", id: 4 },
+    ]);
+    await flushOutbox();
+    expect(attempted).toEqual(["products", "orders", "quotes"]);
+    expect(remaining()).toEqual([]);
+    expect(change).toHaveBeenCalledOnce();
+  });
+
+  it.each(["insert", "update", "delete"])("retains an unconfirmed %s and dependent entries when RLS returns no rows", async k => {
+    queue([
+      { k, t: "blocked_products", id: 7, row: { name: "Unsaved edit" } },
+      { k: "update", t: "orders", id: 3, row: { status: "paid" } },
+    ]);
+    const before = remaining();
+    await flushOutbox();
+    expect(attempted).toEqual(["blocked_products"]);
+    expect(remaining()).toEqual(before);
+  });
+
+  it.each(["no_rows", "wrong_row"])("retains a failed or mismatched %s acknowledgement", async table => {
+    queue([{ k: "update", t: table, id: 7, row: { name: "Unsaved edit" } }]);
+    const before = remaining();
+    await flushOutbox();
+    expect(attempted).toEqual([table]);
+    expect(remaining()).toEqual(before);
+  });
   it("preserves queued writes until the real account and workspace match the restored scope", async () => {
     queue([{ k: "insert", t: "products", row: { name: "Old solo workspace" } }]);
     setCacheOrg(null);
@@ -134,7 +157,7 @@ describe("flushOutbox", () => {
     expect(attempted).toEqual([]);
     expect(remaining()).toHaveLength(2);
   });
-  it("drops an op that can never apply and drains the rest", async () => {
+  it("preserves an integrity failure and dependent writes for explicit recovery", async () => {
     queue([
       { k: "insert", t: "doomed_products", row: { name: "dupe" } },
       { k: "insert", t: "products", row: { name: "stranded behind it" } },
@@ -143,9 +166,8 @@ describe("flushOutbox", () => {
 
     await flushOutbox();
 
-    // Every op was tried, not just the first, and the queue is empty.
-    expect(attempted).toEqual(["doomed_products", "products", "orders"]);
-    expect(remaining()).toEqual([]);
+    expect(attempted).toEqual(["doomed_products"]);
+    expect(remaining()).toHaveLength(3);
   });
 
   it("keeps a transient failure queued, with everything behind it", async () => {

@@ -9,6 +9,8 @@ const cloud = vi.hoisted(() => ({
   switchWorkspace: vi.fn(async () => {}),
   migrateLocalToCloud: vi.fn(async () => [] as { table: string; rows: number; error?: string }[]),
   hasLocalData: vi.fn(async () => true),
+  pendingWrites: vi.fn(async () => [] as { id: number; op: string }[]),
+  flushOutbox: vi.fn(async () => {}),
   reload: false,
 }));
 
@@ -59,7 +61,7 @@ vi.mock("../../lib/sync", async (importOriginal) => ({
   isMigrating: () => false,
   type: {},
 }));
-vi.mock("../../lib/api", () => ({ pendingCloudWrites: async () => [] }));
+vi.mock("../../lib/api", () => ({ pendingCloudWrites: cloud.pendingWrites, flushOutbox: cloud.flushOutbox }));
 vi.mock("../../lib/localPaths", () => ({
   hasTauri: false,
   getExportDir: () => "",
@@ -105,6 +107,8 @@ beforeEach(() => {
   cloud.switchWorkspace.mockReset().mockResolvedValue();
   cloud.migrateLocalToCloud.mockClear().mockResolvedValue([]);
   cloud.hasLocalData.mockClear().mockResolvedValue(true);
+  cloud.pendingWrites.mockReset().mockResolvedValue([]);
+  cloud.flushOutbox.mockReset().mockResolvedValue();
   confirm.mockClear().mockResolvedValue(true);
   cloud.reload = false;
   vi.stubGlobal("location", { ...window.location, reload: () => { cloud.reload = true; } });
@@ -123,6 +127,58 @@ it("shows the store as on and names the account holding the records", async () =
   render(<DataModePanel />);
   expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "true");
   expect(screen.getByText(/owner@example\.test/)).toBeInTheDocument();
+});
+
+it("shows retained queue counts and retries without exposing or deleting their data", async () => {
+  mode.value = "cloud";
+  cloud.pendingWrites.mockResolvedValue([{ id: 1, op: "private invoice customer details" }]);
+  let finish!: () => void;
+  cloud.flushOutbox.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<DataModePanel />);
+  expect(await screen.findByText(/1 queued change remains/)).toBeInTheDocument();
+  expect(screen.queryByText(/private invoice/)).toBeNull();
+  const retry = screen.getByRole("button", { name: "Retry queued saves" });
+  await waitFor(() => expect(retry).toBeEnabled());
+  fireEvent.click(retry);
+  expect(cloud.flushOutbox).toHaveBeenCalledOnce();
+  expect(screen.getByRole("button", { name: "Retrying queued saves…" })).toBeDisabled();
+  await act(async () => { finish(); });
+  expect(await screen.findByRole("button", { name: "Retry queued saves" })).toBeEnabled();
+  expect(screen.getByText(/1 queued change remains/)).toBeInTheDocument();
+  expect(screen.getByText(/conflicts.*kept for review/)).toBeInTheDocument();
+  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
+});
+
+it.each(["filey:outbox-change", "focus"])("refreshes retained saves when %s fires", async event => {
+  mode.value = "cloud";
+  cloud.pendingWrites.mockResolvedValue([{ id: 1, op: "saved elsewhere" }]);
+  render(<DataModePanel />);
+  await screen.findByText(/1 queued change remains/);
+  cloud.pendingWrites.mockResolvedValue([]);
+  act(() => window.dispatchEvent(new Event(event)));
+  await waitFor(() => expect(screen.queryByText(/queued change remains/)).toBeNull());
+});
+
+it("keeps queued saves visible after a retry failure without exposing server details", async () => {
+  mode.value = "cloud";
+  cloud.pendingWrites.mockResolvedValue([{ id: 1, op: "private customer data" }]);
+  cloud.flushOutbox.mockRejectedValueOnce(new Error("private SQL error"));
+  render(<DataModePanel />);
+  const retry = await screen.findByRole("button", { name: "Retry queued saves" });
+  await waitFor(() => expect(retry).toBeEnabled());
+  fireEvent.click(retry);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your queued changes are preserved");
+  expect(screen.queryByText(/private SQL|private customer/)).toBeNull();
+  expect(screen.getByText(/1 queued change remains/)).toBeInTheDocument();
+});
+
+it("does not replay legacy cloud saves while the user is in local mode", async () => {
+  cloud.pendingWrites.mockResolvedValue([{ id: 1, op: "old cloud save" }]);
+  render(<DataModePanel />);
+  await screen.findByText(/1 queued change remains/);
+  expect(screen.queryByRole("button", { name: "Retry queued saves" })).toBeNull();
+  expect(screen.getByText(/Open the original cloud workspace/)).toBeInTheDocument();
+  expect(cloud.flushOutbox).not.toHaveBeenCalled();
 });
 
 it("requires explicit upload confirmation before switching to cloud", async () => {

@@ -25,6 +25,23 @@ const unconfirmedWrite = {
   retry_safe: false,
 } as const;
 
+// Only known field-validation messages may reach chat. Other database details
+// remain private, and only a definitive transaction rejection is retryable.
+const draftValidationMessages = new Set([
+  "Multiple company profiles require review in Filey",
+  "Multiple customers match this name. Choose the customer in Filey",
+  "Invoice dates must be YYYY-MM-DD", "Invoice dates must be real calendar dates",
+  "Invoice notes and terms must be text within 4096 characters",
+  "Invalid invoice calculation fields", "Invalid invoice custom column",
+  "Choose an existing unique invoice pricing column",
+  "Company currency or tax defaults need review in Filey",
+  "Invoice tax rate has unsupported precision; use at most three decimals",
+  "Draft quantity or price has unsupported precision", "Invalid draft quantity or price",
+  "Invalid invoice unit or calculation fields", "Every invoice line needs a numeric pricing multiplier",
+  "Invoice pricing multiplier is too large", "Draft total is too large",
+  "Unsupported invoice custom field. Keep the original values and use Filey to review this invoice",
+]);
+
 /** An insert can commit before its response is lost. Only a usable row ID
  *  is a receipt; transport failure or malformed success is not a safe retry. */
 // deno-lint-ignore no-explicit-any
@@ -49,7 +66,6 @@ async function insertRecord(client: any, table: string, row: Record<string, unkn
  *  Math.random codes are gone: a guessable approval code is a remote-execution
  *  primitive on someone's books. Every insert also stamps a 24h expires_at so
  *  old rows can be pruned without guessing at created_at semantics. */
-// deno-lint-ignore no-explicit-any
 export async function insertPendingAction(
   // deno-lint-ignore no-explicit-any
   client: any,
@@ -111,8 +127,8 @@ export async function rememberMemory(client: any, org: string, ownerId: string, 
       .eq("user_id", ownerId).eq("org_id", org);
     if (se) return { error: se.message }; // e.g. table missing — fail soft
     const key = text.toLowerCase();
-    // deno-lint-ignore no-explicit-any
     const replaceId = String(input?.replace_id ?? "").trim();
+    // deno-lint-ignore no-explicit-any
     const dupe = (existing ?? []).find((r: any) => replaceId ? r.id === replaceId : String(r.text ?? "").trim().toLowerCase() === key);
     if (replaceId && !dupe) return { error: "Memory not found. Recall it again before correcting it." };
     if (dupe) {
@@ -186,8 +202,9 @@ export function rankMemories<T extends { text: string; tag?: string | null }>(ro
  *  only ever approves something executable. */
 // deno-lint-ignore no-explicit-any
 export async function proposePaymentReminder(client: any, org: string, ownerId: string, input: any, source?: ApprovalSource): Promise<unknown> {
-  const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
+  const number = String(input?.invoice_number ?? "").trim();
   if (!number) return { error: "invoice_number is required" };
+  if (number.length > 160 || [...number].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
   const { data: inv, error } = await client
     .from("invoice_docs")
     .select("id,number,customer_name,customer_email,due_date,status,currency")
@@ -226,7 +243,6 @@ export async function proposePaymentReminder(client: any, org: string, ownerId: 
   };
 }
 
-// deno-lint-ignore no-explicit-any
 export async function runWriteTool(
   // deno-lint-ignore no-explicit-any
   client: any,
@@ -251,6 +267,10 @@ export async function runWriteTool(
         const { data, error } = await client.rpc("filey_channel_create_draft", {
           p_owner: ownerId, p_org: org, p_kind: kind, p_input: input,
         });
+        if (error?.code === "22023") return {
+          error: `${draftValidationMessages.has(error.message) ? error.message : "The draft fields need review in Filey"}. No draft was saved by this action.`,
+          code: "invalid_arguments", save_outcome: "rejected", retry_safe: true,
+        };
         if (error || data?.created !== "draft" || !data?.id || !data?.number) {
           console.error("channel draft save", error?.code ?? "invalid_result");
           return unconfirmedWrite;

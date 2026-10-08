@@ -2,9 +2,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { featureFunctionSources, featureSchemaIssues, einvoiceSchemaIssues } from './runtime-schema-checks.mjs';
+import { featureFunctionSources, featureSchemaIssues, einvoiceSchemaIssues, hostedDraftSchemaIssues } from './runtime-schema-checks.mjs';
 
 const migration = name => readFileSync(new URL(`../supabase/${name}`, import.meta.url), 'utf8');
+test('hosted draft catalog rejects exposed private helpers and stale numbering/snapshots', () => {
+  const sources=featureFunctionSources(migration('2026-10-08-hosted-draft-parity.sql'));
+  const catalog={functions:[
+    ['filey_reserve_document_number_internal','text, text, integer, uuid, uuid, text','text',true,false],
+    ['filey_channel_party_identity','jsonb','jsonb',false,false],
+    ['filey_channel_create_draft','uuid, text, text, jsonb','jsonb',true,true],
+  ].map(([name,args,result,definer,service_role])=>({name,args,result,definer,service_role,
+    config:['search_path=public, pg_temp'],authenticated:false,anon:false,source:sources.get(name)}))};
+  assert.deepEqual(hostedDraftSchemaIssues(catalog,sources),[]);
+  for(const change of [c=>{c.functions[0].service_role=true;},c=>{c.functions[0].authenticated=true;},
+    c=>{c.functions[2].source='begin return null; end;';},c=>{c.functions[2].anon=true;},c=>{c.functions.pop();}]) {
+    const bad=structuredClone(catalog);change(bad);assert.notDeepEqual(hostedDraftSchemaIssues(bad,sources),[]);
+  }
+});
 test('e-invoice schema audit detects lost UUID protection and incompatible preset columns', () => {
   const identitySources = featureFunctionSources(migration('2026-09-29-einvoice-identity.sql'));
   const identity = {

@@ -33,6 +33,7 @@ jobs:
       - run: node scripts/test-stripe-totals-local.mjs
       - run: node scripts/test-mfa-local.mjs
       - run: node scripts/test-channel-agent-local.mjs
+      - run: node scripts/test-hosted-draft-local.mjs
       - run: node --test worker/paths.test.js worker/jobs.test.js worker/runtime.test.js
       - run: npm audit --omit=dev --prefix worker
       - run: npm ci --prefix mcp-server --no-audit --no-fund

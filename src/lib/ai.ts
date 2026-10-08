@@ -867,6 +867,7 @@ export interface ExtractedInvoice {
     description: string;
     qty: number;
     unit_price: number;
+    unit?: string;
     /** Tax category: S standard, Z zero-rated, E exempt, O out-of-scope. */
     tax_category?: string;
   }[];
@@ -887,7 +888,7 @@ export async function extractInvoiceFromImage(
       ? ` The document spans ${images.length} pages (images, in order) — combine them into ONE result and include every line item across all pages.`
       : "";
   const prompt = `You parse business documents. Read this invoice / receipt / quote and return STRICT JSON of this exact shape:
-{"seller_name":"","seller_trn":"","customer_name":"","customer_address":"","customer_trn":"","buyer_city":"","buyer_country_subdivision":"","buyer_country_code":"","invoice_type_code":"380","payment_means_code":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0,"tax_category":"S"}]}
+{"seller_name":"","seller_trn":"","customer_name":"","customer_address":"","customer_trn":"","buyer_city":"","buyer_country_subdivision":"","buyer_country_code":"","invoice_type_code":"380","payment_means_code":"","issue_date":"YYYY-MM-DD","due_date":"YYYY-MM-DD","currency":"ISO code e.g. AED","tax_rate":0,"notes":"","items":[{"description":"","qty":0,"unit_price":0,"unit":"","tax_category":"S"}]}
 seller_name / seller_trn are the issuing party (the vendor whose letterhead this is) and their tax registration number; customer_* is the party being billed.
 Rules: use an empty string, 0, or empty array when a field is unknown; numbers must be plain numbers; dates must be YYYY-MM-DD; tax_rate is the VAT/sales-tax percentage as a plain number (e.g. 5), 0 if the document has none; unit_price is the per-unit price excluding tax.
 For the buyer/customer: buyer_city is their city; buyer_country_subdivision is the emirate as an ISO 3166-2:AE code when the address is in the UAE — AE-AZ Abu Dhabi, AE-DU Dubai, AE-SH Sharjah, AE-AJ Ajman, AE-UQ Umm Al Quwain, AE-RK Ras Al Khaimah, AE-FU Fujairah — else "" ; buyer_country_code is the ISO alpha-2 country code (AE for the UAE).
@@ -899,7 +900,31 @@ Each line item's tax_category is "S" standard-rated, "Z" zero-rated (0% but taxa
     temperature: 0,
     ...opts,
   });
-  return parseJson<ExtractedInvoice>(out);
+  return parseInvoiceExtraction(out);
+}
+
+/** Model output is untrusted; reject invalid fields before rendering or saving. */
+export function parseInvoiceExtraction(output: string): ExtractedInvoice {
+  const doc = parseJson<ExtractedInvoice>(output);
+  const invalid = () => { throw new Error("The scan returned invalid invoice details. Scan again or enter the invoice manually."); };
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return invalid();
+  const textFields = ["seller_name", "seller_trn", "customer_name", "customer_address", "customer_trn", "buyer_city",
+    "buyer_country_subdivision", "buyer_country_code", "invoice_type_code", "payment_means_code", "issue_date", "due_date", "currency", "notes"] as const;
+  if (textFields.some(key => doc[key] != null && typeof doc[key] !== "string")) return invalid();
+  if (doc.tax_rate != null && (!Number.isFinite(doc.tax_rate) || doc.tax_rate < 0 || doc.tax_rate > 100)) return invalid();
+  if (!Array.isArray(doc.items) || doc.items.length > 500) return invalid();
+  let cents = 0;
+  for (const item of doc.items) {
+    if (!item || typeof item !== "object" || Array.isArray(item) || typeof item.description !== "string"
+      || !Number.isFinite(item.qty) || item.qty < 0 || !Number.isFinite(item.unit_price) || item.unit_price < 0
+      || item.unit != null && typeof item.unit !== "string"
+      || item.tax_category != null && !["S", "Z", "E", "O"].includes(item.tax_category)) return invalid();
+    const lineCents = Math.round(item.qty * item.unit_price * 100);
+    cents += lineCents;
+    if (!Number.isSafeInteger(lineCents) || !Number.isSafeInteger(cents)) return invalid();
+  }
+  if (!Number.isSafeInteger(Math.round(cents * (1 + (doc.tax_rate ?? 0) / 100)))) return invalid();
+  return doc;
 }
 
 export interface ExtractedExpense {

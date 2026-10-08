@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {featureFunctionSources,workflowSchemaIssues,auditSchemaIssues} from './runtime-schema-checks.mjs';
-const sources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-07-document-save-performance.sql']
+const sources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-07-document-save-performance.sql','2026-10-08-hosted-draft-parity.sql']
   .map(name=>readFileSync(new URL('../supabase/'+name,import.meta.url),'utf8')));
 const fields={
   document_number_reservations:['org_id','namespace','request_id','user_id','pattern','year','number','created_at'],

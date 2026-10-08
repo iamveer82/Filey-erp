@@ -106,7 +106,7 @@ export const TOOLS: ToolDef[] = [
     input_schema: {
       type: "object",
       properties: {
-        invoice_number: { type: "string", description: "Exact invoice number, e.g. INV-2026-0042." },
+        invoice_number: { type: "string", maxLength: 160, description: "Exact complete invoice number (up to 160 characters), e.g. INV-2026-0042." },
       },
       required: ["invoice_number"],
       additionalProperties: false,
@@ -189,15 +189,34 @@ export const WRITE_TOOLS: ToolDef[] = [
     description:
       "Create a DRAFT invoice the owner will review and finalize in Filey. " +
       "Use find_customer first to get the exact name/email when the customer " +
-      "exists. The draft is never sent automatically.",
+      "exists. The draft is never sent automatically. Keep physical qty, unit and unit_price unchanged. " +
+      "For T.Liters pricing, use custom_columns [{key:'liters',label:'T.Liters'}], each line custom {liters:'1000'}, and price_by:'liters'; amount is liters × unit_price, not qty × unit_price. " +
+      "Manual amounts and per-line formula overrides need Filey AI in the app; never flatten or omit requested calculation fields.",
     input_schema: {
       type: "object",
       properties: {
         customer_name: { type: "string", description: "Customer or company name." },
         customer_email: { type: "string", description: "Customer email, if known." },
-        items: LINE_ITEM_SCHEMA,
-        currency: { type: "string", description: "3-letter currency, default AED." },
-        tax_rate: { type: "number", description: "VAT % — default 5 (UAE standard)." },
+        items: { ...LINE_ITEM_SCHEMA, items: {
+          ...LINE_ITEM_SCHEMA.items, properties: {
+            ...LINE_ITEM_SCHEMA.items.properties,
+            unit: { type: "string", description: "Keep the user's physical unit, such as L, drum or carton." },
+            custom: { type: "object", additionalProperties: { type: "string" }, description: "Values by custom column key; e.g. {liters:'1000'}. Active pricing values must be non-negative decimal text without separators." },
+          },
+        } },
+        custom_columns: { type: "array", maxItems: 12, items: {
+          type: "object", properties: {
+            key: { type: "string", description: `Unique letters/digits/underscore key beginning with a letter, at most 40 characters. Cannot use built-in or metadata keys: ${[...RESERVED_ITEM_COLUMNS].join(", ")}.` },
+            label: { type: "string", description: `Visible heading, such as T.Liters, up to 80 characters. Cannot reuse built-in headings: ${[...DEFAULT_COLUMN_LABELS].join(", ")}.` },
+          }, required: ["key", "label"], additionalProperties: false,
+        } },
+        price_by: { type: "string", description: "Custom column key multiplied by unchanged unit_price. Omit for qty × unit_price." },
+        currency: { type: "string", description: "3-letter currency; defaults to the saved company currency." },
+        tax_rate: { type: "number", minimum: 0, maximum: 100, multipleOf: 0.001, description: "VAT %, at most three decimals; defaults to the saved company tax setting." },
+        issue_date: { type: "string", format: "date", description: "Preserve the requested invoice date as YYYY-MM-DD. Defaults to today only when omitted." },
+        due_date: { anyOf: [{ type: "string", format: "date" }, { type: "string", enum: [""] }], description: "Requested due date, YYYY-MM-DD; omit or use empty text for none." },
+        notes: { type: "string", description: "Invoice notes, preserved as supplied, up to 4096 characters." },
+        terms: { type: "string", description: "Payment/delivery terms, preserved as supplied, up to 4096 characters." },
       },
       required: ["customer_name", "items"],
       additionalProperties: false,
@@ -316,7 +335,7 @@ export const CONFIRM_TOOLS: ToolDef[] = [
     input_schema: {
       type: "object",
       properties: {
-        invoice_number: { type: "string", description: "Exact invoice number, e.g. INV-2026-0042." },
+        invoice_number: { type: "string", maxLength: 160, description: "Exact complete invoice number (up to 160 characters), e.g. INV-2026-0042." },
       },
       required: ["invoice_number"],
       additionalProperties: false,
@@ -433,7 +452,7 @@ import {
   runWriteTool,
 } from "./tools-writes.ts";
 import type { InboundMsg } from "./parse.ts";
-import { storedDocTotals, type DocItem } from "../_shared/docItems.ts";
+import { storedDocTotals, sanitizeCustomColumns, RESERVED_ITEM_COLUMNS, DEFAULT_COLUMN_LABELS, type DocItem, type DocCustomColumn } from "../_shared/docItems.ts";
 import { applyRoundOff, isCreditNote, POSTED_INVOICE_STATUSES, r2 } from "../_shared/money.ts";
 
 type StoredItem = Omit<DocItem, "description"> & { description?: string; invoice_id?: number | string };
@@ -473,6 +492,8 @@ export function boundedToolResult(result: unknown): string {
 /** The provider's JSON schema is guidance, not validation at this boundary. */
 export function validateToolInput(value: unknown, schema: Record<string, unknown>, path = "input"): string | null {
   const invalid = (reason: string) => `Invalid tool input: ${path} ${reason}.`;
+  if (Array.isArray(schema.anyOf)) return schema.anyOf.some(option => !validateToolInput(value, option, path))
+    ? null : invalid("does not match the supported field formats");
   if (schema.type === "object") {
     if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("must be an object");
     const object = value as Record<string, unknown>;
@@ -481,8 +502,11 @@ export function validateToolInput(value: unknown, schema: Record<string, unknown
       if (object[key] === undefined || (typeof object[key] === "string" && !String(object[key]).trim())) return invalid(`requires ${key}`);
     }
     for (const [key, child] of Object.entries(object)) {
-      if (!Object.hasOwn(properties, key)) return invalid("contains an unsupported field");
-      const error = validateToolInput(child, properties[key], `${path}.${key}`);
+      const extra = schema.additionalProperties;
+      const childSchema = Object.hasOwn(properties, key) ? properties[key]
+        : extra && typeof extra === "object" ? extra as Record<string, unknown> : undefined;
+      if (!childSchema) return invalid("contains an unsupported field");
+      const error = validateToolInput(child, childSchema, `${path}.${key}`);
       if (error) return error;
     }
   } else if (schema.type === "array") {
@@ -503,7 +527,6 @@ export function validateToolInput(value: unknown, schema: Record<string, unknown
   return null;
 }
 
-// deno-lint-ignore no-explicit-any
 export async function runTool(
   // deno-lint-ignore no-explicit-any
   client: any,
@@ -521,8 +544,32 @@ export async function runTool(
   if (!org.trim()) return { error: "Workspace is not configured." };
   const definition = ALL_TOOLS.find((tool) => tool.name === name);
   if (!definition) return { error: `unknown tool: ${name}` };
+  // This connection cannot represent manual/per-line overrides. Stop
+  // before allocation instead of coaching a model to remove those fields.
+  if (name === "create_draft_invoice" && input && typeof input === "object" &&
+      ("unit_price_formula" in input ||
+       Array.isArray(input.items) && input.items.some((item: unknown) => item && typeof item === "object" &&
+         (["calcMode", "amount", "itemFormula"].some(key => key in item) ||
+          "custom" in item && item.custom && typeof item.custom === "object" && Object.keys(item.custom).some(key => key.startsWith("__")))))) return {
+    error: "This hosted chat connection cannot preserve manual amounts or per-line formula overrides. Use Filey AI in the app. Your quantities and rates have not been changed; no invoice was saved.",
+    code: "unsupported_invoice_calculation", retry_safe: false,
+  };
   const invalid = validateToolInput(input, definition.input_schema);
   if (invalid) return { error: invalid };
+  if (name === "create_draft_invoice" && input.tax_rate !== undefined &&
+      (input.tax_rate > 100 || Number(input.tax_rate.toFixed(3)) !== input.tax_rate)) return {
+    error: "Invoice tax rate must be from 0 to 100 with at most three decimal places. No invoice was saved; the requested rate has not been rounded.",
+    code: "invalid_arguments",
+  };
+  if (name === "create_draft_invoice" && Array.isArray(input.custom_columns)) {
+    const columns = input.custom_columns as DocCustomColumn[];
+    if (sanitizeCustomColumns(columns).length !== columns.length ||
+        columns.some(column => !/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(column.key) || !column.label.trim() || column.label.length > 80) ||
+        new Set(columns.map(column => column.key)).size !== columns.length) return {
+      error: "Invoice custom columns must have unique keys and headings that do not replace built-in or calculation fields. Keep the requested values; choose a different heading/key. No invoice was saved.",
+      code: "invalid_arguments",
+    };
+  }
 
   // A model may repeat a successful write while continuing its tool loop.
   // Reuse its receipt, including an in-flight write, within this task only.
@@ -651,7 +698,6 @@ export async function runTool(
         if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
         const byDoc = linesByDocument(items ?? []);
         const byCurrency = new Map<string, Record<string, { invoices: number; total: number }>>();
-        // deno-lint-ignore no-explicit-any
         for (const d of sales) {
           const mo = String(d.issue_date ?? "").slice(0, 7);
           if (!mo) continue;
@@ -683,7 +729,6 @@ export async function runTool(
         if (itemError) return { error: "Invoice line details could not be loaded. No totals were calculated." };
         const byDoc = linesByDocument(items ?? []);
         const byCurrency = new Map<string, Map<string, number>>();
-        // deno-lint-ignore no-explicit-any
         for (const d of sales) {
           const c = d.customer_name || "—";
           const currency = documentCurrency(d), byCustomer = byCurrency.get(currency) ?? new Map<string, number>();
@@ -734,8 +779,9 @@ export async function runTool(
       return data ?? [];
     }
     case "get_invoice_detail": {
-      const number = String(input?.invoice_number ?? "").trim().slice(0, 60);
+      const number = String(input?.invoice_number ?? "").trim();
       if (!number) return { error: "invoice_number is required" };
+      if (number.length > 160 || [...number].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return { error: "Use the complete saved invoice number, up to 160 characters without control characters." };
       const { data: inv, error } = await client
         .from("invoice_docs")
         .select("id,number,status,currency,customer_name,customer_email,issue_date,due_date,tax_rate,discount,unit_price_formula,round_off,invoice_type_code")
@@ -778,7 +824,7 @@ export async function runTool(
         .gte("issue_date", date)
         .lte("issue_date", to);
       if (error) return { error: error.message };
-      const ids = (docs ?? []).map((d: any) => d.id);
+      const ids = (docs ?? []).map((d: StoredDocument) => d.id);
       const { data: items, error: itemError } = ids.length
         ? await client.from("invoice_doc_items").select("invoice_id,qty,unit_price,custom,tax_category").eq("org_id", org).in("invoice_id", ids)
         : { data: [], error: null };

@@ -31,3 +31,13 @@ Preparation, validation, preview and XML generation are distinct from accredited
 - The first full unit run overlapped source edits and reported five stale-module failures; all three affected files passed after the tree was frozen. Clean pull-request CI remains the final full-suite gate.
 
 No real invoices, payments, customer messages or local database files were modified during testing. This is a scoped audit, not a certification that every possible defect or security issue has been eliminated.
+
+## Follow-up: hosted drafts, imports and queued saves
+
+- Hosted invoice, quote and purchase-order drafts share the authenticated app's numbering allocator. The service-only wrapper checks the current owner's workspace and locks the same numbering namespace. Retries reuse their reservation; existing documents are not renumbered.
+- Hosted drafts retain requested dates, notes, terms, company/customer identity snapshots and custom pricing fields. The supplied quantity, unit and rate remain unchanged. Unsupported overrides and invalid amounts fail before allocating a number.
+- Scans retain zero quantities and units, reject invalid output, stop when their dialog/workspace closes, and retain the exact save request after an uncertain acknowledgement. Oversized PDFs explicitly fail instead of silently omitting pages.
+- Supplier XML imports preserve their original AED exchange rate and supplier identity. Delayed profile requests cannot replace another account's profile. Failed/conflicting legacy queued saves remain available, with pending counts and retry controls in Settings.
+- The frozen frontend slice passed 144 focused tests across nine files and a production build. Independent hosted verification passed 54 Deno tests and 25 schema tests. Disposable PostgreSQL tests exercised simultaneous hosted/app numbering, replay, grants, totals, snapshots and repeat upgrades.
+
+Deployment order: apply `supabase/2026-10-08-hosted-draft-parity.sql` before the matching `channel-webhook` source. The regenerated fresh-install schema includes this upgrade. Local adapter compatibility is covered by isolated tests; user databases were not opened or rewritten. PR #57's clean CI, web deployment and persisted backend receipt fix were verified before this follow-up.

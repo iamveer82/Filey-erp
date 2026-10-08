@@ -11,7 +11,7 @@ import {
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isConfigured, createSignupClient } from "./supabase";
 import { isLocalMode } from "./dataMode";
-import { getCacheScope, setCacheOrg } from "./api";
+import { getCacheIdentity, getCacheScope, setCacheOrg } from "./api";
 import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
 import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache } from "./license";
@@ -876,6 +876,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!supabase || !user) throw new Error("Not signed in");
+    const identity = getCacheIdentity();
+    const attempt = authAttemptRevision.current;
     const name = `${firstName.trim()} ${lastName.trim()}`.trim();
     // org_id is provisioned by the signup trigger — do NOT set it here,
     // or the upsert would clobber the user's organization.
@@ -886,6 +888,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       company: company.trim(),
     };
     const { data, error } = await supabase.from("profiles").upsert(row).select().single();
+    if (identity !== getCacheIdentity() || attempt !== authAttemptRevision.current
+      || loadedFor.current !== user.id || isLocalMode()) return;
     if (error) throw error;
     setCacheOrg((data as Profile).org_id, user.id);
     setProfile(data as Profile);
@@ -901,12 +905,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!supabase || !user) return;
+    const identity = getCacheIdentity();
+    const attempt = authAttemptRevision.current;
     const { data, error } = await supabase
       .from("profiles")
       .update(patch)
       .eq("id", user.id)
       .select()
       .single();
+    if (identity !== getCacheIdentity() || attempt !== authAttemptRevision.current
+      || loadedFor.current !== user.id || isLocalMode()) return;
     if (error) throw error;
     setCacheOrg((data as Profile).org_id, user.id);
     setProfile(data as Profile);

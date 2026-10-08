@@ -1,6 +1,6 @@
 import { FileySpinner as Loader2 } from "./FileySpinner";
 import { taxRegimeFor } from "../lib/taxRegimes";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload, Sparkles, FileText } from "lucide-react";
 import { Modal } from "./ui";
@@ -8,9 +8,9 @@ import { DateField } from "./DatePicker";
 import { useUI } from "../lib/ui";
 import { extractInvoiceFromImage, aiReady, type ExtractedInvoice } from "../lib/ai";
 import { fileToImages } from "../lib/docScan";
-import { billing, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
+import { billing, getCacheIdentity, invoiceSaveOutcome, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
 import { companyInvoiceSeller } from "../lib/invoiceSeller";
-import { requireAgentStorageScope } from "../lib/agentStorage";
+import { AGENT_STORAGE_EVENT, agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import { getDisplayCurrency, numInput, todayYmd } from "../lib/format";
 
 /* Scan an invoice/receipt with the user's AI model and create a draft.
@@ -34,8 +34,35 @@ export default function ScanDocModal({
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [data, setData] = useState<ExtractedInvoice | null>(null);
+  const request = useRef(0);
+  const activeScan = useRef<{ controller: AbortController; scope: string; identity: number } | null>(null);
+  const saving = useRef(false);
+  const pendingSave = useRef<{ data: ExtractedInvoice; input: InvoiceDocInput; requestId: string; identity: number } | null>(null);
+  const latestData = useRef(data);
+  latestData.current = data;
+  useEffect(() => {
+    setFileName("");
+    setData(null);
+    setBusy(false);
+    setCreating(false);
+    const checkScanScope = () => {
+      const scan = activeScan.current;
+      if (scan && (scan.identity !== getCacheIdentity() || scan.scope !== agentStorageScope())) scan.controller.abort();
+    };
+    const events = [AGENT_STORAGE_EVENT, "filey:workspace-transition", "filey:workspace-changed", "storage"];
+    events.forEach(event => window.addEventListener(event, checkScanScope));
+    return () => {
+      // Invalidate the latest request, including one started after this effect.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      request.current++;
+      activeScan.current?.controller.abort();
+      events.forEach(event => window.removeEventListener(event, checkScanScope));
+    };
+  }, [open, mode]);
 
   const reset = () => {
+    request.current++;
+    activeScan.current?.controller.abort();
     setFileName("");
     setData(null);
     setBusy(false);
@@ -53,9 +80,20 @@ export default function ScanDocModal({
     setFileName(file.name);
     setData(null);
     setBusy(true);
+    const current = ++request.current, identity = getCacheIdentity();
+    activeScan.current?.controller.abort();
+    const controller = new AbortController();
     try {
+      const scope = requireAgentStorageScope();
+      activeScan.current = { controller, scope, identity };
       const imgs = await fileToImages(file);
-      const extracted = await extractInvoiceFromImage(imgs);
+      if (current !== request.current) return;
+      requireAgentStorageScope(scope);
+      if (identity !== getCacheIdentity()) throw new Error("Your workspace changed. Scan the document again.");
+      const extracted = await extractInvoiceFromImage(imgs, { signal: controller.signal });
+      if (current !== request.current) return;
+      requireAgentStorageScope(scope);
+      if (identity !== getCacheIdentity()) throw new Error("Your workspace changed. Scan the document again.");
       // Supplier bill: the document's SELLER is our party; the buyer fields
       // describe our own company, so they don't belong on the draft.
       setData(
@@ -72,9 +110,10 @@ export default function ScanDocModal({
           : extracted
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      if (current === request.current) toast.error(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      if (activeScan.current?.controller === controller) activeScan.current = null;
+      if (current === request.current) setBusy(false);
     }
   };
 
@@ -91,12 +130,19 @@ export default function ScanDocModal({
     );
 
   const createDraft = async () => {
-    if (!data) return;
+    if (!data || saving.current) return;
+    saving.current = true;
+    const current = request.current, identity = getCacheIdentity();
     setCreating(true);
     try {
       const scope = requireAgentStorageScope();
       const co = await billing.getCompany(true);
+      if (current !== request.current) return;
       requireAgentStorageScope(scope);
+      if (identity !== getCacheIdentity()) throw new Error("Your workspace changed. Scan the document again.");
+      if (latestData.current !== data) throw new Error("The scanned details changed. Review them before creating the draft.");
+      if (pendingSave.current && (pendingSave.current.data !== data || pendingSave.current.identity !== identity))
+        throw new Error("An earlier scan save still needs verification. Review pending saves in Invoicing before starting another draft.");
       const today = todayYmd();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const input: InvoiceDocInput = {
@@ -128,8 +174,9 @@ export default function ScanDocModal({
         discount: 0,
         items: (data.items ?? []).map((it) => ({
           description: it.description || "",
-          qty: Number(it.qty) || 1,
-          unit_price: Number(it.unit_price) || 0,
+          qty: it.qty,
+          unit_price: it.unit_price,
+          unit: it.unit,
           tax_category: it.tax_category || "S",
         })),
       };
@@ -137,7 +184,12 @@ export default function ScanDocModal({
         input.doc_type = "purchase";
         input.doc_title = "Purchase Invoice";
       }
-      await billing.saveDoc(input);
+      // A lost acknowledgement must retry the exact input and request, including its number.
+      pendingSave.current ??= { data, input, requestId: crypto.randomUUID(), identity };
+      await billing.saveDoc(pendingSave.current.input, pendingSave.current.requestId);
+      pendingSave.current = null;
+      if (current !== request.current || identity !== getCacheIdentity()) return;
+      requireAgentStorageScope(scope);
       toast.success(
         isPurchase
           ? "Draft purchase invoice created from the document"
@@ -147,9 +199,11 @@ export default function ScanDocModal({
       reset();
       navigate(isPurchase ? "/purchase-invoices" : "/invoicing");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      if (invoiceSaveOutcome(e) === "rejected") pendingSave.current = null;
+      if (current === request.current) toast.error(e instanceof Error ? e.message : String(e));
     } finally {
-      setCreating(false);
+      saving.current = false;
+      if (current === request.current) setCreating(false);
     }
   };
 
@@ -242,17 +296,20 @@ export default function ScanDocModal({
               <div key={i} className="flex gap-2">
                 <input
                   className="input flex-1"
+                  aria-label={`Line ${i + 1} description`}
                   value={it.description}
                   placeholder="Description"
                   onChange={(e) => patchItem(i, { description: e.target.value })}
                 />
                 <input
                   className="input w-16"
+                  aria-label={`Line ${i + 1} quantity`}
                   value={String(it.qty)}
                   onChange={(e) => patchItem(i, { qty: numInput(e.target.value) })}
                 />
                 <input
                   className="input w-24"
+                  aria-label={`Line ${i + 1} unit price`}
                   value={String(it.unit_price)}
                   onChange={(e) => patchItem(i, { unit_price: numInput(e.target.value) })}
                 />
