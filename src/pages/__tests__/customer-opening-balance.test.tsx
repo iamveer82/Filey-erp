@@ -94,6 +94,85 @@ it.each([125.75, -125.75])("opens the full customer editor on the correct side a
   await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({ opening_balance, credit_limit: 750 })));
 });
 
+async function editCustomerDetails(record: CrmCustomer) {
+  vi.mocked(crm.customers).mockResolvedValue([record]);
+  render(<MemoryRouter initialEntries={["/customers/17"]}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  return within(await screen.findByRole("dialog", { name: "Edit customer" }));
+}
+
+it("keeps the detail editor's new location and identity fields optional", async () => {
+  const dialog = await editCustomerDetails({ ...customer, custom_fields: { account_reference: "KEEP-17" } });
+  expect(dialog.getByLabelText("City (optional)")).not.toBeRequired();
+  expect(dialog.getByRole("combobox", { name: "Country" })).toHaveTextContent("Select country");
+  fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
+  expect(dialog.getByRole("textbox", { name: "Buyer identifier" })).not.toBeRequired();
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    city: "", country_subdivision: "", country_code: "", custom_fields: { account_reference: "KEEP-17" },
+  })));
+});
+
+it("edits a customer detail preset, resets the previous region on country change and retains unrelated custom fields", async () => {
+  const dialog = await editCustomerDetails({ ...customer, city: "Dubai", country_code: "AE", country_subdivision: "AE-DU",
+    custom_fields: { account_reference: "KEEP-17", einvoice_identity: JSON.stringify({ identifier: "OLD-ID", tin: "1001234567" }) } });
+  expect(dialog.getByRole("combobox", { name: "Emirate" })).toHaveTextContent("Dubai");
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Country" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: "India" }));
+  expect(dialog.getByLabelText("State / Union territory (optional)")).toHaveValue("");
+  fireEvent.change(dialog.getByLabelText("State / Union territory (optional)"), { target: { value: "Maharashtra" } });
+  fireEvent.change(dialog.getByLabelText("City (optional)"), { target: { value: "Mumbai" } });
+  fireEvent.change(dialog.getByLabelText("Phone"), { target: { value: "9876543210" } });
+  fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
+  fireEvent.change(dialog.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "NEW-ID" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    city: "Mumbai", country_subdivision: "Maharashtra", country_code: "IN", phone_e164: "+919876543210",
+    custom_fields: { account_reference: "KEEP-17", einvoice_identity: JSON.stringify({ identifier: "NEW-ID", tin: "1001234567" }) },
+  })));
+});
+
+it("explicitly clears saved customer detail locations and identity values instead of omitting the update", async () => {
+  const dialog = await editCustomerDetails({ ...customer, city: "Dubai", country_code: "AE", country_subdivision: "DXB",
+    custom_fields: { account_reference: "KEEP-17", einvoice_identity: JSON.stringify({ identifier: "OLD-ID", tin: "1001234567" }) } });
+  fireEvent.change(dialog.getByLabelText("City (optional)"), { target: { value: "" } });
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Country" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: "Select country" }));
+  fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
+  fireEvent.change(dialog.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "" } });
+  fireEvent.change(dialog.getByRole("textbox", { name: "Electronic invoicing TIN" }), { target: { value: "" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    city: "", country_subdivision: "", country_code: "",
+    custom_fields: { account_reference: "KEEP-17", einvoice_identity: JSON.stringify({ identifier: "", tin: "" }) },
+  })));
+});
+
+it("clears the directory editor's saved location and keeps it blank when reopened", async () => {
+  let record: CrmCustomer = { ...customer, city: "Dubai", country_code: "AE", country_subdivision: "DXB", custom_fields: { account_reference: "KEEP-17" } };
+  vi.mocked(crm.customers).mockImplementation(async () => [record]);
+  vi.mocked(crm.updateCustomer).mockImplementation(async (_id, patch) => { record = { ...record, ...patch }; });
+  render(<MemoryRouter><Customers /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
+  await waitFor(() => expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  fireEvent.change(dialog.getByLabelText("City"), { target: { value: "" } });
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Country" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: "Select country" }));
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    city: "", country_code: "", country_subdivision: "", custom_fields: { account_reference: "KEEP-17" },
+  })));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit customer" })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  const reopened = within(await screen.findByRole("dialog", { name: "Edit customer" }));
+  expect(reopened.getByLabelText("City")).toHaveValue("");
+  expect(reopened.getByRole("combobox", { name: "Country" })).toHaveTextContent("Select country");
+  expect(reopened.getByLabelText("State / Province")).toHaveValue("");
+});
+
 it("clears a previously saved balance explicitly to zero through the directory editor", async () => {
   vi.mocked(crm.customers).mockResolvedValue([{ ...customer, opening_balance: -50 }]);
   render(<MemoryRouter><Customers /></MemoryRouter>);
