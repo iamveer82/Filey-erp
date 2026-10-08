@@ -135,7 +135,9 @@ async function documentContext(
     buyer_city: "city" in party ? party.city : "custom_fields" in party ? party.custom_fields?.city : undefined,
     buyer_country_subdivision: "country_subdivision" in party ? party.country_subdivision : "custom_fields" in party ? party.custom_fields?.country_subdivision : undefined,
     buyer_country_code: "country_code" in party ? party.country_code : "custom_fields" in party ? party.custom_fields?.country_code : undefined,
-    buyer_identity: "custom_fields" in party && party.custom_fields?.einvoice_identity ? readEInvoiceParty(party.custom_fields.einvoice_identity) : undefined,
+    buyer_identity: party.phone || "custom_fields" in party && party.custom_fields?.einvoice_identity
+      ? { ...("custom_fields" in party ? readEInvoiceParty(party.custom_fields?.einvoice_identity) : {}), phone: party.phone || "" }
+      : undefined,
   } : {}) };
   if (!validateItems) return context;
   const products = await erp.products();

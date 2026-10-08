@@ -40,6 +40,8 @@ export interface EInvoiceParty {
   legal_id_type?: string;
   legal_authority?: string;
   identifier?: string;
+  /** Optional contact snapshot for the readable invoice, separate from routing IDs. */
+  phone?: string;
 }
 
 /** Stored with the document, so identities survive offline saves and sync. */
@@ -72,7 +74,7 @@ export function readEInvoiceParty(value?: string): EInvoiceParty {
     const parsed: unknown = JSON.parse(value || "{}");
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(Object.entries(parsed).filter(([key, entry]) =>
-      ["corporate_trn", "tin", "endpoint_id", "endpoint_scheme", "legal_id", "legal_id_type", "legal_authority", "identifier"].includes(key) && typeof entry === "string"));
+      ["corporate_trn", "tin", "endpoint_id", "endpoint_scheme", "legal_id", "legal_id_type", "legal_authority", "identifier", "phone"].includes(key) && typeof entry === "string"));
   } catch { return {}; }
 }
 

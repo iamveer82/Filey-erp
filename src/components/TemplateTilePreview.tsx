@@ -32,6 +32,7 @@ export default memo(function TemplateTilePreview({ templateId, customTemplates, 
   }, []);
 
   const form: DocViewForm = {
+    doc_type: { invoice: "invoice", quote: "quotation", po: "purchase_order", receipt: "receipt" }[type],
     template: templateId, accent: custom?.accent || "#252525", currency: "AED", tax_country_code: "AE",
     doc_title: TITLES[type], number: "EXAMPLE-001", seller_name: "Your company", seller_address: "Business address · City",
     seller_trn: "100000000000003", customer_name: type === "po" ? "Supplier company" : "Customer company",

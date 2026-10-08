@@ -54,7 +54,7 @@ const invoice = {
   tax_rate: 5, discount: 0, created_at: "2026-09-07", updated_at: "2026-09-07",
   items: [{ description: "Office supplies", qty: 1, unit_price: 100, custom: {} }],
 } as InvoiceDoc;
-const vendor: Supplier = { id: 42, name: "Gulf Supplies", email: "billing@gulf.example", address: "Dubai", tax_id: "100123456789003", created_at: "2026-09-01" };
+const vendor: Supplier = { id: 42, name: "Gulf Supplies", email: "billing@gulf.example", phone: "+971 50 222 3344", address: "Dubai", tax_id: "100123456789003", created_at: "2026-09-01" };
 
 async function openPurchase() {
   const view = render(<MemoryRouter><AuthProvider><UIProvider><Invoicing mode="purchase" /></UIProvider></AuthProvider></MemoryRouter>);
@@ -112,13 +112,14 @@ describe("purchase invoice parties", () => {
     setCacheOrg("purchase-test-org", "purchase-test-user");
     fireEvent.click(view.getByRole("button", {name: "New purchase invoice"}));
     expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
-    expect(view.getByText("Supplier Email / GSTIN", {selector: "label"})).toBeVisible();
+    expect(view.getByText("Supplier Contact / GSTIN", {selector: "label"})).toBeVisible();
+    expect(view.getByLabelText("Supplier phone")).toHaveValue("");
     expect(view.getByLabelText("Supplier State / Union territory").tagName).toBe("INPUT");
     expect(view.queryByLabelText("Supplier Emirate")).toBeNull();
     view.unmount();
     const existing = await openPurchase();
     expect(existing.getByLabelText("Currency")).toHaveTextContent("AED");
-    expect(existing.getByText("Supplier Email / TRN", {selector: "label"})).toBeVisible();
+    expect(existing.getByText("Supplier Contact / TRN", {selector: "label"})).toBeVisible();
     expect(billing.saveDoc).not.toHaveBeenCalled();
   });
 
@@ -154,12 +155,14 @@ describe("purchase invoice parties", () => {
     fireEvent.keyDown(view.getByRole("option", { name: vendor.name }), { key: "Enter" });
     expect(view.getByLabelText("Supplier name")).toHaveValue(vendor.name);
     expect(view.getByLabelText("Supplier email")).toHaveValue(vendor.email);
+    expect(view.getByLabelText("Supplier phone")).toHaveValue(vendor.phone);
     expect(view.queryByText("Apply customer advance")).toBeNull();
     if (action === "Save") fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
     else fireEvent.click(view.getByRole("button", { name: action }));
     await waitFor(() => expect(billing.saveDoc).toHaveBeenCalledWith(expect.objectContaining({
       doc_type: "purchase", customer_id: null, advance_applied: 0,
       customer_name: vendor.name, customer_email: vendor.email, customer_address: vendor.address, customer_trn: vendor.tax_id,
+      einvoice: expect.objectContaining({ buyer: expect.objectContaining({ phone: vendor.phone }) }),
       status: action === "Save" ? "draft" : "sent",
     })));
     expect(crm.customers).not.toHaveBeenCalled();

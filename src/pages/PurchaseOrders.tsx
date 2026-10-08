@@ -1247,6 +1247,7 @@ function Editor({
 
   const docViewForm = useMemo(
     () => ({
+      doc_type: "purchase_order",
       template: form.template,
       accent: form.accent,
       currency: form.currency,

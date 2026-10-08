@@ -10,15 +10,13 @@ import { resolveTemplateId } from "./DocTemplates";
 import UaePackDoc from "./UaePackDoc";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
 import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
+import { InvoicePartyDetails, InvoicePartyLocation, InvoiceLineDetails, InvoiceAdditionalDetails, supportsInvoiceDetails } from "./InvoiceElectronicDetails";
 import { BankDetailsBlock, EMPTY_BANK, type BankInfo } from "./BankDetails";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   INVOICE_TYPE_CODES,
   PAYMENT_MEANS_CODES,
   TAX_CATEGORY_CODES,
-  EMIRATES,
-  LEGAL_ID_TYPES,
-  partyTin,
   type Code,
 } from "../lib/einvoice";
 
@@ -88,6 +86,7 @@ export interface DocViewForm {
   customer_address?: string | null;
   customer_trn?: string | null;
   customer_email?: string | null;
+  customer_phone?: string | null;
   buyer_city?: string | null;
   buyer_country_subdivision?: string | null;
   buyer_country_code?: string | null;
@@ -174,12 +173,18 @@ export default function DocView({
       {!loading && <button type="button" className="btn-ghost no-print mt-3" onClick={reload}>Retry</button>}
     </div>;
   }
-  const form = customTemplate ? {
+  const templateForm = customTemplate ? {
     ...inputForm,
     show_logo: customTemplate.showLogo === false ? false : inputForm.show_logo,
     notes: customTemplate.showNotes === false ? null : inputForm.notes,
     terms: customTemplate.showTerms === false ? null : inputForm.terms,
   } : inputForm;
+  const form = {
+    ...templateForm,
+    customer_phone: typeof inputForm.einvoice?.buyer?.phone === "string"
+      ? inputForm.einvoice.buyer.phone.trim()
+      : typeof inputForm.customer_phone === "string" ? inputForm.customer_phone.trim() : undefined,
+  };
   const showSeller = customTemplate?.showSeller !== false;
   const showCustomer = customTemplate?.showCustomer !== false;
   const customFont = customTemplate ? { fontFamily: customTemplate.font } : undefined;
@@ -251,7 +256,7 @@ export default function DocView({
         {itemsToRender.map((it, i) => (
           <tr key={i} className="border-b border-neutral-200" style={bordered ? { borderColor: "#000" } : undefined}>
             <td className="py-2 px-2 text-right text-neutral-500 tabular-nums">{itemStartIndex + i + 1}</td>
-            <td dir="auto" className="py-2 px-2">{it.description || "—"}</td>
+            <td dir="auto" className="py-2 px-2">{it.description || "—"}<InvoiceLineDetails form={form} item={it} hideTax={customTemplate?.showTax === false} /></td>
             <td className="py-2 px-2 text-right">{it.qty}</td>
             <td className="py-2 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
             {(form.customColumns || []).map((col) => (
@@ -269,7 +274,7 @@ export default function DocView({
 
   const Totals = ({ compact = false }: { compact?: boolean } = {}) =>
     showTotals ? (
-      <div className={compact ? "ml-auto w-full text-[10px]" : "ml-auto w-72 max-w-full mt-6 text-sm"}>
+      <div className={compact ? "ml-auto w-full text-[10px]" : "ml-auto w-72 max-w-full mt-4 text-sm"}>
         <Row k="Subtotal" v={m(t.subtotal)} />
         {(t.discount || 0) > 0 && <Row k="Discount" v={`- ${m(t.discount)}`} />}
         {customTemplate?.showTax !== false && (form.tax_rate || 0) > 0 && (
@@ -305,11 +310,17 @@ export default function DocView({
 
   const freeWatermark = showFreePlanBranding();
 
+  const additionalOmit: ("supplyDate" | "purchaseOrder" | "paymentAccount")[] = [];
+  if (bank && (paymentAccount || paymentAccountName)) additionalOmit.push("paymentAccount");
+  if (form.po_number && (["green-gold", "fta", "executive"].includes(templateId) || internationalLayout && !customTemplate)) additionalOmit.push("purchaseOrder");
+  if (form.date_of_supply && (templateId === "monogram" || internationalLayout && !customTemplate)) additionalOmit.push("supplyDate");
+
   const Footer = () => showFooter ? (
     <>
+      <InvoiceAdditionalDetails form={form} omit={additionalOmit} hideTax={customTemplate?.showTax === false} />
       <InvoiceTransactionSummary form={form} />
       {(form.notes || form.terms || freeWatermark) && (
-        <div className="mt-10 pt-4 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
+        <div className="mt-4 pt-2 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
           {form.notes && <p dir="auto" className="whitespace-pre-line">{form.notes}</p>}
           {form.terms && <p dir="auto" className="whitespace-pre-line text-neutral-400">{form.terms}</p>}
           {freeWatermark && (
@@ -321,6 +332,13 @@ export default function DocView({
     </>
   ) : null;
 
+  const Summary = () => supportsInvoiceDetails(form) && showTotals && showFooter && templateId !== "receipt"
+    ? <div className="mt-4 grid grid-cols-[minmax(0,1fr)_minmax(0,260px)] items-start gap-6">
+        <div className="min-w-0"><Footer /></div>
+        <div className="min-w-0"><Totals /></div>
+      </div>
+    : <><Totals /><Footer /></>;
+
   // Logo is hidden when the doc explicitly turns it off (show_logo === false).
   // Other doc types leave show_logo undefined, so their logo still shows.
   const logoSrc = form.show_logo === false ? null : (form.logo ?? null);
@@ -330,27 +348,33 @@ export default function DocView({
       <img src={logoSrc} alt="logo" style={{ height: size }} className="object-contain" />
     ) : null;
 
-  const SellerContact = ({ cls = "text-neutral-500" }: { cls?: string }) => (
-    <>
-      {form.seller_email && <p className={`text-xs ${cls}`}>{form.seller_email}</p>}
-      {form.seller_phone && <p className={`text-xs ${cls}`}>{form.seller_phone}</p>}
-    </>
-  );
+  const PartyDetails = ({ party }: { party: "seller" | "buyer" }) => {
+    const seller = party === "seller";
+    const address = seller ? form.seller_address : form.customer_address;
+    const trn = seller ? form.seller_trn : form.customer_trn;
+    const phone = seller ? form.seller_phone : form.customer_phone;
+    const email = seller ? form.seller_email : form.customer_email;
+    return <div data-invoice-party={party} className="text-xs leading-4 [overflow-wrap:anywhere]">
+      {address && <p dir="auto" className="whitespace-pre-line">{address}</p>}
+      <InvoicePartyLocation form={form} party={party} />
+      {trn && <p>{trnLbl}: {trn}</p>}
+      {phone && <p dir="auto">{phone}</p>}
+      {email && <p dir="auto">{email}</p>}
+      <InvoicePartyDetails form={form} party={party} />
+    </div>;
+  };
 
   const Parties = () => (
     <div className="grid grid-cols-2 gap-8 text-sm mt-8">
       <div>
         <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
         <p dir="auto" className="font-semibold mt-1">{form.seller_name}</p>
-        <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-        {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
-        <SellerContact />
+        <PartyDetails party="seller" />
       </div>
       <div>
         <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
         <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-        <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
-        {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
+        <PartyDetails party="buyer" />
       </div>
     </div>
   );
@@ -361,7 +385,6 @@ export default function DocView({
       <p>
         {issuedLabel} {fmtDate(form.issue_date)} · {dueLabel} {fmtDate(form.due_date)}
         {form.date_of_supply && <> · Supply {fmtDate(form.date_of_supply)}</>}
-        {form.po_date && <> · PO Date {fmtDate(form.po_date)}</>}
       </p>
     </div>
   );
@@ -386,24 +409,21 @@ export default function DocView({
       [issuedLabel, fmtDate(form.issue_date)],
       ...(form.due_date ? [[dueLabel, fmtDate(form.due_date)]] : []),
       ...(form.date_of_supply ? [["Date of Supply", fmtDate(form.date_of_supply)]] : []),
-      ...(form.po_number ? [["PO Reference", form.po_number]] : []),
+      ...(form.po_number ? [["PO Reference", [form.po_number, form.po_date && fmtDate(form.po_date)].filter(Boolean).join(" · ")]] : []),
     ];
     return <InvoiceLayoutFrame
       templateId={resolvedLayout}
       accent={a}
       brand={<div><Logo /><div>
         <p dir="auto" className="invoice-seller-name">{form.seller_name}</p>
-        <p dir="auto" className="whitespace-pre-line">{form.seller_address}</p>
-        {form.seller_trn && <p>{trnLbl}: {form.seller_trn}</p>}
-        <SellerContact />
+        <PartyDetails party="seller" />
       </div></div>}
       title={<p className="invoice-title">{docTitle}</p>}
       meta={<table><tbody>{metadata.map(([key, value]) => <tr key={key}><td>{key}</td><td>{value}</td></tr>)}</tbody></table>}
       parties={<div className="invoice-party">
         <p className="invoice-label">{partyLabel}</p>
         <p dir="auto" className="font-semibold">{form.customer_name}</p>
-        <p dir="auto" className="whitespace-pre-line">{form.customer_address}</p>
-        {form.customer_trn && <p>{trnLbl}: {form.customer_trn}</p>}
+        <PartyDetails party="buyer" />
       </div>}
     >
       <Items styled />
@@ -441,8 +461,7 @@ export default function DocView({
         {showSeller && <Section k="seller">
           {logoSrc && <img src={logoSrc} alt="logo" style={{ height: 40 }} className="object-contain mb-1.5" />}
           <p dir="auto" className="font-bold text-sm text-neutral-900">{form.seller_name}</p>
-          <p dir="auto" className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.seller_address}</p>
-          {form.seller_trn && <p className="text-[9px] text-neutral-500 mt-0.5">{trnLbl}: {form.seller_trn}</p>}
+          <PartyDetails party="seller" />
         </Section>}
         <Section k="header">
           <p className="text-2xl font-extrabold tracking-tight" style={{ color: ac }}>{docTitle}</p>
@@ -453,12 +472,12 @@ export default function DocView({
         {showCustomer && <Section k="customer">
           <p className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">{partyLabel}</p>
           <p dir="auto" className="font-semibold text-xs text-neutral-900">{form.customer_name}</p>
-          <p dir="auto" className="text-[10px] text-neutral-600 whitespace-pre-line leading-tight">{form.customer_address}</p>
-          {form.customer_trn && <p className="text-[9px] text-neutral-500 mt-0.5">{trnLbl}: {form.customer_trn}</p>}
+          <PartyDetails party="buyer" />
         </Section>}
         <Section k="items"><Items headerBg={ac} compact /></Section>
         <Section k="totals"><Totals compact /></Section>
         {showFooter && <Section k="footer">
+          <InvoiceAdditionalDetails form={form} omit={additionalOmit} hideTax={customTemplate?.showTax === false} />
           <InvoiceTransactionSummary form={form} />
           {form.notes && <p dir="auto" className="whitespace-pre-line text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p dir="auto" className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
@@ -483,8 +502,7 @@ export default function DocView({
             <Logo />
             {showSeller && <>
             <p dir="auto" className="font-bold text-lg mt-3">{form.seller_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-            {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
+            <PartyDetails party="seller" />
             </>}
           </div>
           <div className="text-right">
@@ -492,12 +510,11 @@ export default function DocView({
             <p className="text-sm font-medium mt-1">{form.number}</p>
           </div>
         </div>
-        <div className="flex justify-between mt-10 text-sm">
+        <div className="flex justify-between mt-6 text-sm">
           {showCustomer && <div>
             <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
             <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>}
           <div className="text-right text-xs text-neutral-500">
             <p>{issuedLabel}: {fmtDate(form.issue_date)}</p>
@@ -505,8 +522,7 @@ export default function DocView({
           </div>
         </div>
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -529,15 +545,12 @@ export default function DocView({
           {showSeller && <div className="border border-neutral-300 p-4">
             <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">From</p>
             <p dir="auto" className="font-semibold">{form.seller_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-            {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
-            {form.seller_email && <p className="text-xs text-neutral-500">{form.seller_email}</p>}
+            <PartyDetails party="seller" />
           </div>}
           {showCustomer && <div className="border border-neutral-300 p-4">
             <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">{partyLabel}</p>
             <p dir="auto" className="font-semibold">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>}
         </div>
         <div className="flex justify-between text-xs text-neutral-500 mt-4">
@@ -547,8 +560,7 @@ export default function DocView({
           </p>
         </div>
         <Items headerBg={a} bordered />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -565,22 +577,19 @@ export default function DocView({
             <Logo size={96} />
             <div>
               <p dir="auto" className="font-bold text-xl">{form.seller_name}</p>
-              <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-              <SellerContact />
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold tracking-wide" style={{ color: a }}>{docTitle.toUpperCase()}</p>
             <p className="text-sm font-medium mt-1">{form.number}</p>
-            {form.seller_trn && <p className="text-xs text-neutral-500 mt-1">{trnLbl} {form.seller_trn}</p>}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm mt-6">
           <div className="bg-neutral-50 p-4 rounded">
             <p className="text-xs uppercase tracking-wider text-neutral-400 mb-1">{partyLabel}</p>
             <p dir="auto" className="font-semibold">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="bg-neutral-50 p-4 rounded text-right">
             <p className="text-xs text-neutral-500">{issuedLabel} {fmtDate(form.issue_date)}</p>
@@ -588,8 +597,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg={a} />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -604,22 +612,20 @@ export default function DocView({
           <div className="mx-auto w-16 h-px my-3" style={{ background: a }} />
           <p className="text-xs tracking-widest text-neutral-500">{form.number} · {fmtDate(form.issue_date)}</p>
         </div>
-        <div className="flex justify-between mt-10 text-sm">
+        <div className="flex justify-between mt-6 text-sm">
           <div>
             <p className="text-[11px] uppercase tracking-widest text-neutral-400">From</p>
             <p dir="auto" className="font-semibold mt-1">{form.seller_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-            <SellerContact />
+            <PartyDetails party="seller" />
           </div>
           <div className="text-right">
             <p className="text-[11px] uppercase tracking-widest text-neutral-400">Billed To</p>
             <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+            <PartyDetails party="buyer" />
           </div>
         </div>
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -629,7 +635,7 @@ export default function DocView({
     return (
       <div className="text-neutral-900">
         <div
-          className="-mx-12 -mt-12 px-12 pt-12 pb-10 mb-8"
+          className="-mx-12 -mt-12 px-12 pt-12 pb-6 mb-8"
           style={{ background: a, color: accentText }}
         >
           <div className="flex justify-between items-start">
@@ -639,7 +645,7 @@ export default function DocView({
           <div className="flex justify-between items-end mt-8">
             <div>
               <p dir="auto" className="text-lg font-bold">{form.seller_name}</p>
-              <p dir="auto" className="text-xs opacity-80 whitespace-pre-line">{form.seller_address}</p>
+              <PartyDetails party="seller" />
             </div>
             <div className="text-right text-sm">
               <p className="font-medium">{form.number}</p>
@@ -650,11 +656,10 @@ export default function DocView({
         <div className="text-sm">
           <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
           <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-          <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+          <PartyDetails party="buyer" />
         </div>
         <Items headerBg={a} />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -667,8 +672,7 @@ export default function DocView({
           <div>
             <Logo size={80} />
             <p dir="auto" className="text-sm font-bold mt-2">{form.seller_name}</p>
-            <p dir="auto" className="text-[11px] text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-            <SellerContact cls="text-neutral-500" />
+            <PartyDetails party="seller" />
           </div>
           <div
             className="px-4 py-3 rounded-lg text-right"
@@ -682,11 +686,10 @@ export default function DocView({
         <div className="mt-8 text-xs">
           <span className="text-neutral-400">{"// bill_to"}</span>
           <p dir="auto" className="font-bold text-sm mt-1">{form.customer_name}</p>
-          <p dir="auto" className="text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+          <PartyDetails party="buyer" />
         </div>
         <Items headerBg={a} />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -704,7 +707,7 @@ export default function DocView({
             <Initial size={52} />
             <div>
               <p dir="auto" className="font-bold text-lg">{form.seller_name}</p>
-              <SellerContact />
+              <PartyDetails party="seller" />
             </div>
           </div>
           <p className="text-4xl font-extrabold italic" style={{ color: a }}>{docTitle}</p>
@@ -717,7 +720,7 @@ export default function DocView({
             <div>
               <p className="text-xs uppercase tracking-wider text-neutral-500">{partyLabel}</p>
               <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-              <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+              <PartyDetails party="buyer" />
             </div>
             <div className="text-right text-xs text-neutral-500">
               <p className="font-medium">{form.number}</p>
@@ -727,8 +730,7 @@ export default function DocView({
           </div>
         </div>
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -739,8 +741,7 @@ export default function DocView({
       <div className="text-neutral-900 max-w-sm mx-auto text-center">
         <Initial size={44} />
         <p dir="auto" className="font-bold text-lg mt-2">{form.seller_name}</p>
-        <p dir="auto" className="text-[11px] text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-        <SellerContact />
+        <PartyDetails party="seller" />
         <div className="border-t-2 border-dashed border-neutral-300 my-4" />
         <div className="flex justify-between text-xs">
           <span className="text-neutral-500">{docTitle}</span>
@@ -754,13 +755,13 @@ export default function DocView({
           <span className="text-neutral-500">Customer</span>
           <span dir="auto" className="font-semibold">{form.customer_name}</span>
         </div>
+        <PartyDetails party="buyer" />
         <div className="border-t-2 border-dashed border-neutral-300 my-4" />
         <div className="text-left">
           <Items />
         </div>
         <div className="border-t-2 border-dashed border-neutral-300 my-4" />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -772,8 +773,6 @@ export default function DocView({
         <div className="flex flex-col items-center">
           <Initial size={64} />
           <p dir="auto" className="font-bold text-xl mt-3">{form.seller_name}</p>
-          <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line text-center">{form.seller_address}</p>
-          <SellerContact />
         </div>
         <div
           className="mt-6 py-2 text-center text-sm font-semibold tracking-[0.25em]"
@@ -784,8 +783,7 @@ export default function DocView({
         <Parties />
         <Meta />
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -809,8 +807,7 @@ export default function DocView({
             <Logo size={64} />
             <div>
               <p dir="auto" className="font-extrabold text-xl tracking-tight" style={{ color: "#1B5E20" }}>{form.seller_name}</p>
-              <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line leading-relaxed">{form.seller_address}</p>
-              {form.seller_trn && <p className="text-[11px] text-neutral-400 mt-0.5">{trnLbl}: {form.seller_trn}</p>}
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
@@ -834,8 +831,7 @@ export default function DocView({
               {partyLabel}
             </p>
             <p dir="auto" className="font-bold text-sm">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line leading-relaxed mt-1">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div
             className="rounded-lg p-4"
@@ -856,16 +852,15 @@ export default function DocView({
             {form.po_number && (
               <div className="flex justify-between text-xs text-neutral-600 mt-2">
                 <span>PO Number</span>
-                <span className="font-medium">{form.po_number}</span>
+                <span className="font-medium">{form.po_number}{form.po_date && <> · {fmtDate(form.po_date)}</>}</span>
               </div>
             )}
           </div>
         </div>
         <Items headerBg="#1B5E20" />
-        <Totals />
-        <Footer />
+        <Summary />
         <div
-          className="-mx-12 mt-8"
+          className="-mx-12 mt-4"
           style={{
             background: "linear-gradient(135deg, #1B5E20 0%, #2E7D32 40%, #388E3C 100%)",
             height: 3,
@@ -890,8 +885,7 @@ export default function DocView({
           <div>
             <Logo size={56} />
             <p dir="auto" className="font-bold text-lg mt-2">{form.seller_name}</p>
-            <p dir="auto" className="text-[11px] text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-            <SellerContact />
+            <PartyDetails party="seller" />
           </div>
           <div className="text-right">
             <div className="inline-block px-6 py-3 rounded-sm" style={{ background: "#1a1a1a" }}>
@@ -905,8 +899,7 @@ export default function DocView({
           <div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-semibold">{partyLabel}</p>
             <p dir="auto" className="font-bold mt-2">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="space-y-2 text-xs">
             <div className="flex justify-between py-1.5 px-3 rounded" style={{ background: "#f5f5f5" }}>
@@ -924,8 +917,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg="#1a1a1a" />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -935,11 +927,6 @@ export default function DocView({
     const invType =
       codeLabel(INVOICE_TYPE_CODES, form.invoice_type_code) || "Tax invoice";
     const payMeans = codeLabel(PAYMENT_MEANS_CODES, form.payment_means_code);
-    const sellerEmirate = codeLabel(EMIRATES, form.seller_country_subdivision);
-    const buyerEmirate = codeLabel(EMIRATES, form.buyer_country_subdivision);
-    const sellerLegalType = codeLabel(LEGAL_ID_TYPES, form.seller_legal_id_type);
-    const sellerTin = partyTin(form.einvoice?.seller);
-    const buyerTin = partyTin(form.einvoice?.buyer);
 
     // Category-aware tax math: VAT only on standard-rated lines, document
     // discount allocated pro-rata by line net so the breakdown reconciles with
@@ -969,17 +956,6 @@ export default function DocView({
             <Logo size={52} />
             <div>
               <p dir="auto" className="font-bold text-lg leading-tight">{form.seller_name}</p>
-              {form.seller_address && (
-                <p dir="auto" className="text-[11px] text-neutral-600 whitespace-pre-line">
-                  {form.seller_address}
-                </p>
-              )}
-              {(form.seller_city || sellerEmirate) && (
-                <p className="text-[11px] text-neutral-600">
-                  {[form.seller_city, sellerEmirate].filter(Boolean).join(", ")}
-                </p>
-              )}
-              <p className="text-[11px] text-neutral-600">United Arab Emirates</p>
             </div>
           </div>
           <div className="text-right">
@@ -992,40 +968,20 @@ export default function DocView({
         </div>
 
         {/* Seller / Buyer identity */}
-        <div className="grid grid-cols-2 gap-6 mt-5 text-[11px]">
+        <div className="grid grid-cols-2 gap-6 mt-4 text-[11px]">
           <div className="rounded-lg p-3" style={{ background: "#f6f7f9" }}>
             <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
               Seller
             </p>
             <p dir="auto" className="font-semibold text-[12px]">{form.seller_name}</p>
-            {form.seller_trn && <p className="text-neutral-600">{trnLbl}: {form.seller_trn}</p>}
-            {sellerTin && <p className="text-neutral-500">TIN: {sellerTin}</p>}
-            {form.seller_legal_id && (
-              <p className="text-neutral-500">
-                {sellerLegalType || "Reg. No"}: {form.seller_legal_id}
-              </p>
-            )}
-            <SellerContact cls="text-neutral-500" />
+            <PartyDetails party="seller" />
           </div>
           <div className="rounded-lg p-3" style={{ background: "#f6f7f9" }}>
             <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
               {partyLabel}
             </p>
             <p dir="auto" className="font-semibold text-[12px]">{form.customer_name}</p>
-            {form.customer_address && (
-              <p dir="auto" className="text-neutral-600 whitespace-pre-line">
-                {form.customer_address}
-              </p>
-            )}
-            {(form.buyer_city || buyerEmirate || form.buyer_country_code) && (
-              <p className="text-neutral-500">
-                {[form.buyer_city, buyerEmirate, form.buyer_country_code]
-                  .filter(Boolean)
-                  .join(", ")}
-              </p>
-            )}
-            {form.customer_trn && <p className="text-neutral-600">{trnLbl}: {form.customer_trn}</p>}
-            {buyerTin && <p className="text-neutral-500">TIN: {buyerTin}</p>}
+            <PartyDetails party="buyer" />
           </div>
         </div>
 
@@ -1051,18 +1007,21 @@ export default function DocView({
         </div>
         {form.po_number && (
           <p className="text-[10px] text-neutral-500 mt-1.5">
-            PO Reference: {form.po_number}
+            PO Reference: {form.po_number}{form.po_date && <> · {fmtDate(form.po_date)}</>}
           </p>
         )}
 
         {/* Items */}
-        <table className="w-full text-[12px] border-collapse mt-4">
+        <table className="w-full text-[12px] border-collapse mt-3">
           <thead>
             <tr style={{ background: a, color: accentText }}>
               <th className="text-right py-2 px-2 font-semibold w-8">#</th>
               <th className="text-left py-2 px-2 font-semibold">Description</th>
               <th className="text-right py-2 px-2 font-semibold w-12">Qty</th>
               <th className="text-right py-2 px-2 font-semibold w-12">Unit</th>
+              {(form.customColumns || []).map((col) => (
+                <th key={col.key} className="text-right py-2 px-2 font-semibold text-[10px]">{col.label}</th>
+              ))}
               <th className="text-right py-2 px-2 font-semibold w-24">Unit Price</th>
               <th className="text-center py-2 px-2 font-semibold w-12">Tax</th>
               <th className="text-right py-2 px-2 font-semibold w-28">Amount</th>
@@ -1074,9 +1033,12 @@ export default function DocView({
                 <td className="py-1.5 px-2 text-right text-neutral-500 tabular-nums">
                   {itemStartIndex + i + 1}
                 </td>
-                <td dir="auto" className="py-1.5 px-2">{it.description || "—"}</td>
+                <td dir="auto" className="py-1.5 px-2">{it.description || "—"}<InvoiceLineDetails form={form} item={it} /></td>
                 <td className="py-1.5 px-2 text-right">{it.qty}</td>
                 <td className="py-1.5 px-2 text-right text-neutral-500">{it.unit || "—"}</td>
+                {(form.customColumns || []).map((col) => (
+                  <td key={col.key} className="py-1.5 px-2 text-right text-[10px] text-neutral-500">{it.custom?.[col.key] || "—"}</td>
+                ))}
                 <td className="py-1.5 px-2 text-right">{m(it.unit_price)}</td>
                 <td className="py-1.5 px-2 text-center text-neutral-500">
                   {it.tax_category || "S"}
@@ -1090,8 +1052,8 @@ export default function DocView({
         </table>
 
         {showTotals && (
-          <div className="flex justify-between gap-6 mt-6">
-            <div className="text-[11px]">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,256px)] gap-6 mt-4">
+            <div className="text-[11px] min-w-0">
               <p className="text-[9px] uppercase tracking-[0.18em] font-bold text-neutral-400 mb-1.5">
                 {taxLbl} Breakdown
               </p>
@@ -1117,8 +1079,9 @@ export default function DocView({
                   ))}
                 </tbody>
               </table>
+              <Footer />
             </div>
-            <div className="w-64 text-sm">
+            <div className="text-sm">
               <div className="flex justify-between py-1">
                 <span className="text-neutral-500">Subtotal</span>
                 <span>{m(grossNet)}</span>
@@ -1182,7 +1145,7 @@ export default function DocView({
             </div>
           </div>
         )}
-        <Footer />
+        {!showTotals && <Footer />}
       </div>
     );
   }
@@ -1211,8 +1174,7 @@ export default function DocView({
               <Logo size={48} />
               <div>
                 <p dir="auto" className="font-extrabold text-lg tracking-tight" style={{ color: "#2C3E50" }}>{form.seller_name}</p>
-                <p dir="auto" className="text-[10px] text-neutral-500 whitespace-pre-line uppercase tracking-wide">{form.seller_address}</p>
-                {form.seller_trn && <p className="text-[9px] text-neutral-400 mt-0.5">{trnLbl}: {form.seller_trn}</p>}
+                <PartyDetails party="seller" />
               </div>
             </div>
             <div
@@ -1221,8 +1183,7 @@ export default function DocView({
             >
               <p className="text-[9px] uppercase tracking-[0.3em] font-bold text-neutral-500 mb-1">{partyLabel}</p>
               <p dir="auto" className="font-bold">{form.customer_name}</p>
-              <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
-              {form.customer_trn && <p className="text-[10px] text-neutral-400">{trnLbl}: {form.customer_trn}</p>}
+              <PartyDetails party="buyer" />
             </div>
           </div>
           <div className="text-right">
@@ -1238,11 +1199,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg="#2C3E50" bordered />
-        <Totals />
-        <Footer />
-        <div className="mt-8 pt-4 text-center" style={{ borderTop: "2px solid #2C3E50" }}>
-          <p dir="auto" className="text-[9px] text-neutral-400 uppercase tracking-[0.3em]">{form.terms || "Thank you for your business"}</p>
-        </div>
+        <Summary />
       </div>
     );
   }
@@ -1255,7 +1212,7 @@ export default function DocView({
         style={{ fontFamily: "'Lora', 'Plus Jakarta Sans', Georgia, serif" }}
       >
         <div
-          className="-mx-12 -mt-12 mb-10 px-12 py-10"
+          className="-mx-12 -mt-12 mb-6 px-12 py-6"
           style={{
             background: "linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%)",
             color: "#fff",
@@ -1271,7 +1228,7 @@ export default function DocView({
                 >
                   {form.seller_name}
                 </p>
-                <p dir="auto" className="text-xs opacity-60 whitespace-pre-line mt-1 leading-relaxed">{form.seller_address}</p>
+                <PartyDetails party="seller" />
               </div>
             </div>
             <div className="text-right">
@@ -1292,8 +1249,7 @@ export default function DocView({
               <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-400 font-semibold">{partyLabel}</p>
             </div>
             <p dir="auto" className="font-bold text-base" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line mt-1 leading-relaxed">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -1312,7 +1268,7 @@ export default function DocView({
               {form.po_number && (
                 <div className="flex justify-between">
                   <span className="text-neutral-400">PO #</span>
-                  <span className="font-medium text-xs">{form.po_number}</span>
+                  <span className="font-medium text-xs">{form.po_number}{form.po_date && <> · {fmtDate(form.po_date)}</>}</span>
                 </div>
               )}
             </div>
@@ -1321,16 +1277,7 @@ export default function DocView({
         <div className="mt-8 pt-6" style={{ borderTop: "1px solid #e5e5e5" }}>
           <Items headerBg="#0a0a0a" />
         </div>
-        <Totals />
-        <Footer />
-        <div className="mt-10 pt-6 text-center" style={{ borderTop: "2px solid #C9A84C" }}>
-          <p dir="auto"
-            className="text-[10px] text-neutral-400 tracking-widest uppercase"
-            style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
-          >
-            {form.terms || "Net 30"}
-          </p>
-        </div>
+        <Summary />
       </div>
     );
   }
@@ -1353,7 +1300,7 @@ export default function DocView({
               {form.seller_name}
               <span className="text-neutral-400 font-normal text-sm ml-2">{docTitle}</span>
             </p>
-            <SellerContact cls="text-neutral-400 text-[11px]" />
+            <PartyDetails party="seller" />
           </div>
           <div className="text-right">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: "#EBF4FF" }}>
@@ -1373,8 +1320,7 @@ export default function DocView({
           <div className="col-span-3 p-5" style={{ background: "#FAFBFF" }}>
             <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-neutral-400 mb-2">{partyLabel}</p>
             <p dir="auto" className="font-bold text-base">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line mt-1">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-[10px] text-neutral-400 mt-1">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="col-span-2 p-5" style={{ background: "#4C51BF", color: "#fff" }}>
             <p className="text-[10px] uppercase tracking-wider opacity-60">{totalLabel}</p>
@@ -1394,14 +1340,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg="#F7F8FC" />
-        <Totals />
-        <Footer />
-        <div className="mt-8 text-center">
-          <p className="text-[11px] text-neutral-400">
-            Questions? Contact{" "}
-            <span className="font-medium text-neutral-600">{form.seller_email || form.seller_name}</span>
-          </p>
-        </div>
+        <Summary />
       </div>
     );
   }
@@ -1418,9 +1357,7 @@ export default function DocView({
             <Logo size={48} />
             <div>
               <p dir="auto" className="text-[15px] font-semibold uppercase tracking-wider">{form.seller_name}</p>
-              <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line mt-1">{form.seller_address}</p>
-              {form.seller_trn && <p className="text-xs text-neutral-600 mt-0.5">{trnLbl}: {form.seller_trn}</p>}
-              <SellerContact cls="text-neutral-600" />
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
@@ -1432,8 +1369,7 @@ export default function DocView({
           <div>
             <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{partyLabel}</p>
             <p dir="auto" className="font-medium mt-1">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-600 mt-0.5">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="text-right">
             <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{issuedLabel}</p>
@@ -1447,8 +1383,7 @@ export default function DocView({
           </div>
         </div>
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -1461,14 +1396,12 @@ export default function DocView({
             <Logo size={48} />
             <div>
               <p dir="auto" className="text-[14px] font-bold uppercase">{form.seller_name}</p>
-              <p dir="auto" className="text-xs text-neutral-700 whitespace-pre-line mt-0.5">{form.seller_address}</p>
-              <SellerContact cls="text-neutral-700" />
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
             <p className="text-[16px] font-bold tracking-wider uppercase">{docTitle}</p>
             <p className="text-neutral-700 mt-1 text-sm">{form.number}</p>
-            {form.seller_trn && <p className="text-xs text-neutral-700">{trnLbl}: {form.seller_trn}</p>}
           </div>
         </div>
         <div className="h-px bg-neutral-900 my-3" />
@@ -1476,8 +1409,7 @@ export default function DocView({
           <div>
             <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{partyLabel}</p>
             <p dir="auto" className="font-semibold">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-700 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-700">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="text-right">
             <p className="text-neutral-500 text-[10px] uppercase tracking-wider">{issuedLabel}</p>
@@ -1491,8 +1423,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg="#171717" />
-        <Totals />
-        <Footer />
+        <Summary />
       </div>
     );
   }
@@ -1505,7 +1436,7 @@ export default function DocView({
             <img src={logoSrc} alt="logo" style={{ height: 56 }} className="object-contain mx-auto mb-2" />
           )}
           <p dir="auto" className="text-[18px] font-bold tracking-widest uppercase">{form.seller_name}</p>
-          <p dir="auto" className="text-neutral-700 mt-1 text-xs whitespace-pre-line">{form.seller_address}</p>
+          <PartyDetails party="seller" />
         </div>
         <div className="text-center py-4">
           <p className="text-[20px] tracking-[0.3em] uppercase font-semibold">{docTitle}</p>
@@ -1515,8 +1446,7 @@ export default function DocView({
           <div>
             <p className="italic text-neutral-600">{partyLabel}</p>
             <p dir="auto" className="font-semibold">{form.customer_name}</p>
-            <p dir="auto" className="text-xs text-neutral-700 whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-xs text-neutral-700">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="text-right">
             <p className="italic text-neutral-600">{issuedLabel}</p>
@@ -1530,8 +1460,7 @@ export default function DocView({
           </div>
         </div>
         <Items bordered />
-        <Totals />
-        <Footer />
+        <Summary />
         <p className="text-center italic text-neutral-600 text-xs mt-8 pt-4 border-t border-neutral-300">
           — Thank you for your patronage —
         </p>
@@ -1555,8 +1484,7 @@ export default function DocView({
             <Logo size={48} />
             <div>
               <p dir="auto" className="text-[14px] font-semibold">{form.seller_name}</p>
-              <p dir="auto" className="text-neutral-500 text-xs whitespace-pre-line">{form.seller_address}</p>
-              {form.seller_trn && <p className="text-neutral-500 text-xs">{trnLbl}: {form.seller_trn}</p>}
+              <PartyDetails party="seller" />
             </div>
           </div>
         </div>
@@ -1564,7 +1492,7 @@ export default function DocView({
           <div className="bg-neutral-50 rounded-lg p-3" style={{ borderLeft: `2px solid ${blue}` }}>
             <p className="text-[9px] uppercase text-neutral-500 tracking-wider">{partyLabel}</p>
             <p dir="auto" className="font-semibold mt-0.5">{form.customer_name}</p>
-            <p dir="auto" className="text-neutral-600 text-xs whitespace-pre-line">{form.customer_address}</p>
+            <PartyDetails party="buyer" />
           </div>
           <div className="bg-neutral-50 rounded-lg p-3">
             <p className="text-[9px] uppercase text-neutral-500 tracking-wider">{issuedLabel}</p>
@@ -1580,8 +1508,7 @@ export default function DocView({
           </div>
         </div>
         <Items headerBg={blue} />
-        <Totals />
-        <Footer />
+        <Summary />
         <div className="mt-6 -mx-12 -mb-12 bg-neutral-50 px-12 py-4 text-neutral-600 text-xs">
           Thank you for your business. Please contact us for any questions regarding this document.
         </div>
@@ -1599,7 +1526,7 @@ export default function DocView({
             )}
             <div>
               <p dir="auto" className="text-[18px] font-bold uppercase tracking-wider">{form.seller_name}</p>
-              <p dir="auto" className="text-neutral-300 text-xs whitespace-pre-line">{form.seller_address}</p>
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
@@ -1611,8 +1538,7 @@ export default function DocView({
           <div>
             <p className="text-[10px] uppercase text-neutral-500 tracking-wider font-semibold">{partyLabel}</p>
             <p dir="auto" className="font-semibold text-[14px] mt-0.5">{form.customer_name}</p>
-            <p dir="auto" className="text-neutral-700 text-xs whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-neutral-700 text-xs">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase text-neutral-500 tracking-wider font-semibold">{issuedLabel}</p>
@@ -1626,8 +1552,7 @@ export default function DocView({
           </div>
         </div>
         <Items bordered />
-        <Totals />
-        <Footer />
+        <Summary />
         <div className="mt-6 -mx-12 -mb-12 bg-neutral-900 text-neutral-300 px-12 py-3 text-xs">
           Thank you for your business. All payments due within 30 days.
         </div>
@@ -1649,7 +1574,7 @@ export default function DocView({
               <p dir="auto" className="text-[19px] uppercase tracking-[0.25em] font-semibold" style={{ color: amber }}>
                 {form.seller_name}
               </p>
-              <p dir="auto" className="text-neutral-700 whitespace-pre-line text-xs mt-1">{form.seller_address}</p>
+              <PartyDetails party="seller" />
             </div>
           </div>
           <div className="text-right">
@@ -1661,8 +1586,7 @@ export default function DocView({
           <div>
             <p className="italic" style={{ color: amber }}>{partyLabel}</p>
             <p dir="auto" className="font-semibold text-[14px]">{form.customer_name}</p>
-            <p dir="auto" className="text-neutral-700 text-xs whitespace-pre-line">{form.customer_address}</p>
-            {form.customer_trn && <p className="text-neutral-700 text-xs">{trnLbl}: {form.customer_trn}</p>}
+            <PartyDetails party="buyer" />
           </div>
           <div className="text-right">
             <p className="italic" style={{ color: amber }}>{issuedLabel}</p>
@@ -1676,8 +1600,7 @@ export default function DocView({
           </div>
         </div>
         <Items />
-        <Totals />
-        <Footer />
+        <Summary />
         <p
           className="text-center italic text-xs mt-8 pt-4"
           style={{ color: amber, borderTop: "1px solid rgba(146,64,14,0.3)" }}
@@ -2109,14 +2032,13 @@ export default function DocView({
         {showSeller && <div>
           <p className="text-xs uppercase tracking-wider text-neutral-400">From</p>
           <p dir="auto" className="font-semibold mt-1">{form.seller_name}</p>
-          <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.seller_address}</p>
-          {form.seller_trn && <p className="text-xs text-neutral-500">{trnLbl}: {form.seller_trn}</p>}
+          <PartyDetails party="seller" />
         </div>}
         <div>
           {showCustomer && <>
           <p className="text-xs uppercase tracking-wider text-neutral-400">{partyLabel}</p>
           <p dir="auto" className="font-semibold mt-1">{form.customer_name}</p>
-          <p dir="auto" className="text-xs text-neutral-500 whitespace-pre-line">{form.customer_address}</p>
+          <PartyDetails party="buyer" />
           </>}
           <p className="text-xs text-neutral-500 mt-2">
             {issuedLabel} {fmtDate(form.issue_date)} · {dueLabel} {fmtDate(form.due_date)}
@@ -2124,8 +2046,7 @@ export default function DocView({
         </div>
       </div>
       <Items />
-      <Totals />
-      <Footer />
+      <Summary />
     </div>
   );
 }

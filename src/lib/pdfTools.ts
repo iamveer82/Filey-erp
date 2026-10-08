@@ -2799,6 +2799,78 @@ export async function downloadFile(f: OutFile): Promise<boolean> {
  *  If `el` contains multiple direct page children, each becomes one PDF page.
  *  Otherwise the element itself is captured as a single page. */
 class TemplateBackgroundError extends Error {}
+class InvoiceLayoutOverflowError extends Error {}
+
+/** Invoice sheets opt in with their available content height. Check the laid
+ * out clone, including text inside a clipped custom section, before rasterizing.
+ * Other document types and intentionally positioned stamps are unchanged. */
+function assertInvoiceContentFits(root: HTMLElement) {
+  const regions = root.matches("[data-invoice-content]") ? [root] : Array.from(root.querySelectorAll<HTMLElement>("[data-invoice-content]"));
+  const fail = () => { throw new InvoiceLayoutOverflowError("This invoice does not fit on its A4 page. In Items, add a page break before a line, or adjust the template or long text, then preview and export again. No PDF was exported."); };
+  for (const region of regions) {
+    const height = Number(region.dataset.invoiceContent);
+    if (!Number.isFinite(height) || height <= 0) continue;
+    const bounds = region.getBoundingClientRect();
+    const scale = region.offsetWidth > 0 ? bounds.width / region.offsetWidth : 0;
+    if (!(scale > 0)) continue;
+    // Classic and the full-bleed layouts deliberately place header text in
+    // the paper margin. Honor actual paper edges while reserving bottom space.
+    const paper = region.closest<HTMLElement>(".invoice-print")?.getBoundingClientRect();
+    const edges = paper && paper.width > 0 && paper.height > 0 ? paper : bounds;
+    const bottom = bounds.top + height * scale;
+    const tolerance = 1.5 * scale;
+    const outside = (rect: DOMRect) => rect.width > 0 && rect.height > 0 && (rect.bottom > bottom + tolerance || rect.top < edges.top - tolerance || rect.left < edges.left - tolerance || rect.right > edges.right + tolerance);
+    const clipping = new Map<HTMLElement, { x: boolean; y: boolean; left: number; top: number; right: number; bottom: number }>();
+    const clippedByAncestor = (element: HTMLElement | null, rect: DOMRect) => {
+      if (!(rect.width > 0 && rect.height > 0)) return false;
+      for (let ancestor = element; ancestor; ancestor = ancestor.parentElement) {
+        let clip = clipping.get(ancestor);
+        if (!clip) {
+          const style = getComputedStyle(ancestor);
+          const overflow = style.overflow.split(/\s+/);
+          const clips = (value: string) => /^(hidden|clip|scroll|auto)$/.test(value);
+          const x = clips(style.overflowX || overflow[0]);
+          const y = clips(style.overflowY || overflow[1] || overflow[0]);
+          const box = ancestor.getBoundingClientRect();
+          const sx = ancestor.offsetWidth > 0 ? box.width / ancestor.offsetWidth : scale;
+          const sy = ancestor.offsetHeight > 0 ? box.height / ancestor.offsetHeight : scale;
+          // Overflow clips at the padding edge, inside any border. Check the
+          // actual axis so an intentional full-bleed header remains allowed.
+          clip = { x, y,
+            left: box.left + (parseFloat(style.borderLeftWidth) || 0) * sx,
+            right: box.right - (parseFloat(style.borderRightWidth) || 0) * sx,
+            top: box.top + (parseFloat(style.borderTopWidth) || 0) * sy,
+            bottom: box.bottom - (parseFloat(style.borderBottomWidth) || 0) * sy,
+          };
+          clipping.set(ancestor, clip);
+        }
+        if (clip.x && (rect.left < clip.left - tolerance || rect.right > clip.right + tolerance)
+          || clip.y && (rect.top < clip.top - tolerance || rect.bottom > clip.bottom + tolerance)) return true;
+        if (ancestor === region) break;
+      }
+      return false;
+    };
+    const decoration = "[data-doc-mark], [data-template-background-status]";
+    // Full-bleed templates intentionally extend container padding/decoration
+    // into the margin. Inspect their text and images, not the wrapper boxes.
+    const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    try {
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim() || node.parentElement?.closest(decoration)) continue;
+        if (node.parentElement && getComputedStyle(node.parentElement).visibility === "hidden") continue;
+        range.selectNodeContents(node);
+        // Rects measure the complete text even inside overflow:hidden boxes.
+        // display:none text has no rects and is not part of the invoice.
+        if (Array.from(range.getClientRects()).some(rect => outside(rect) || clippedByAncestor(node.parentElement, rect))) fail();
+      }
+    } finally { range.detach(); }
+    for (const image of Array.from(region.querySelectorAll<HTMLImageElement>("img"))) {
+      const rect = image.getBoundingClientRect();
+      if (!image.closest(decoration) && getComputedStyle(image).visibility !== "hidden" && (outside(rect) || clippedByAncestor(image.parentElement, rect))) fail();
+    }
+  }
+}
 
 export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<OutFile> {
   // Off-screen exports can mount a fresh PDF background. Wait for its image,
@@ -3012,6 +3084,8 @@ export async function elementToPdfBytes(el: HTMLElement, name: string): Promise<
       await new Promise((resolve) => requestAnimationFrame(resolve));
       await new Promise((resolve) => setTimeout(resolve, 120));
 
+      assertInvoiceContentFits(clone);
+
       // Measured after the clone is in the document, so the rects are real.
       // Marks are hidden here and painted onto the page below.
       const marks = extractMarks(clone);
@@ -3090,7 +3164,7 @@ export async function downloadElementAsPdf(el: HTMLElement, name: string) {
   try {
     return await downloadFile(await elementToPdfBytes(el, name));
   } catch (e) {
-    if (e instanceof TemplateBackgroundError) throw e;
+    if (e instanceof TemplateBackgroundError || e instanceof InvoiceLayoutOverflowError) throw e;
     console.error("PDF export failed:", e);
     window.print();
     return false;

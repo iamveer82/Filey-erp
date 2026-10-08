@@ -1,17 +1,22 @@
 import { decodeTransactionType, TRANSACTION_TYPE_FLAGS, PINT_AE_INVOICE_TYPE_CODES, INVOICE_TYPE_CODES, PAYMENT_MEANS_CODES } from "../lib/einvoice";
-import { isUaeRegime } from "../lib/taxRegimes";
+import { supportsInvoiceDetails } from "./InvoiceElectronicDetails";
 import type { DocViewForm } from "./DocView";
 
 /** Customer-readable counterpart of the transaction flags carried in XML. */
 export default function InvoiceTransactionSummary({ form }: { form: DocViewForm }) {
-  if (!isUaeRegime(form.currency || "AED", form.tax_country_code)) return null;
-  const flags = decodeTransactionType(form.transaction_type);
+  if (!supportsInvoiceDetails(form)) return null;
+  const invoiceCode = typeof form.invoice_type_code === "string" ? form.invoice_type_code.trim() : "";
+  const paymentCode = typeof form.payment_means_code === "string" ? form.payment_means_code.trim() : "";
+  const transactionCode = typeof form.transaction_type === "string" && /^[01]{8}$/.test(form.transaction_type.trim())
+    ? form.transaction_type.trim() : "";
+  const flags = decodeTransactionType(transactionCode || undefined);
   const selected = TRANSACTION_TYPE_FLAGS.filter(flag => flags[flag.key]);
-  const invoiceLabel = [...PINT_AE_INVOICE_TYPE_CODES, ...INVOICE_TYPE_CODES].find(code => code.code === form.invoice_type_code)?.label;
-  const paymentLabel = PAYMENT_MEANS_CODES.find(code => code.code === form.payment_means_code)?.label;
+  const invoiceLabel = [...PINT_AE_INVOICE_TYPE_CODES, ...INVOICE_TYPE_CODES].find(code => code.code === invoiceCode)?.label;
+  const paymentLabel = PAYMENT_MEANS_CODES.find(code => code.code === paymentCode)?.label;
   const codes = [
-    form.invoice_type_code && `Invoice type: ${form.invoice_type_code}${invoiceLabel ? ` (${invoiceLabel})` : ""}`,
-    form.payment_means_code && `Payment: ${form.payment_means_code}${paymentLabel ? ` (${paymentLabel})` : ""}`,
+    invoiceCode && `Invoice type: ${invoiceCode}${invoiceLabel ? ` (${invoiceLabel})` : ""}`,
+    paymentCode && `Payment: ${paymentCode}${paymentLabel ? ` (${paymentLabel})` : ""}`,
+    transactionCode && `Transaction type: ${transactionCode}`,
   ].filter(Boolean);
   if (!selected.length && !codes.length) return null;
 
