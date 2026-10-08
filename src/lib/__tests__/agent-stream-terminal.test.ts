@@ -37,6 +37,29 @@ function terminalWrites(writes: { mock: { calls: Parameters<typeof storage.write
     && JSON.parse(value).some((row: { outcome: string }) => row.outcome === outcome));
 }
 
+it("delivers a saved record receipt even if its optional progress checkpoint cannot be stored", async () => {
+  const write = storage.writeAgentStorage;
+  vi.spyOn(storage, "writeAgentStorage").mockImplementation((key, value, scope) => {
+    if (key === "filey.agent.progress" && value?.includes('"completed"'))
+      throw new DOMException("Storage full", "QuotaExceededError");
+    write(key, value, scope);
+  });
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.mocked(runAgentStream).mockImplementation(async function* () {
+    yield toolCall;
+    yield toolResult;
+    yield { type: "done", text: "Exported INV-DEMO.", reason: "answered" };
+    return "Exported INV-DEMO.";
+  });
+  const events = [];
+  for await (const event of aiAgentStream([{ role: "user", text: "Export INV-DEMO" }], {
+    isOwner: true, agentId: "checkpoint-full",
+  })) events.push(event);
+  expect(events).toContainEqual(toolResult);
+  expect(events[events.length - 1]).toMatchObject({ type: "done", text: "Exported INV-DEMO." });
+  expect(warning).toHaveBeenCalledWith("Agent progress could not be saved on this device.");
+});
+
 it("closes a provider failure once while returning files already produced to the remote transport", async () => {
   const writes = vi.spyOn(storage, "writeAgentStorage");
   vi.mocked(runAgentStream).mockImplementation(async function* (_messages, opts) {
@@ -55,6 +78,23 @@ it("closes a provider failure once while returning files already produced to the
   result.delivered();
   result.delivered();
   expect(terminalWrites(writes, "error")).toHaveLength(1);
+});
+
+it("does not treat a changed workspace as an optional checkpoint failure", async () => {
+  vi.spyOn(storage, "writeAgentStorage").mockImplementation(() => {
+    setCacheOrg("different-org", "different-user");
+    throw new Error("Your account changed. Start the assistant task again.");
+  });
+  vi.mocked(runAgentStream).mockImplementation(async function* () {
+    yield toolCall;
+    yield toolResult;
+    return "Done";
+  });
+  const stream = aiAgentStream([{ role: "user", text: "Export INV-DEMO" }], {
+    isOwner: true, agentId: "checkpoint-scope",
+  });
+  await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+  expect(progress()).toEqual([]);
 });
 
 it("records stopped on an early consumer close and leaves completed output available", async () => {

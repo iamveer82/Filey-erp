@@ -1,4 +1,4 @@
-import { billing, setCacheOrg } from "../api";
+import { billing, crm, quotes, setCacheOrg } from "../api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiAgent, aiAgentStream, setAiConfig } from "../ai";
 import { runAgentStream, type AgentEvent } from "../agentHarness";
@@ -332,6 +332,84 @@ it("shares the request allowance with delegates instead of multiplying it per ch
   const result = await collect(aiAgentStream([{ role: "user", text: "Review my preferences" }], { maxRounds: 2 }));
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "exhausted" });
+});
+
+describe("delegated task outcomes", () => {
+  const call = (name: string, args: unknown) => ({ id: name, type: "function", function: { name, arguments: JSON.stringify(args) } });
+  const goal = "Read the saved preferences";
+  it.each(["direct", "delegate"] as const)("preserves a failed child outcome and permits verified %s recovery", async recovery => {
+    const bodies: unknown[] = [];
+    const replies = [
+      oa("", [call("spawn_subtask", { goal })]),
+      new Error("Provider unavailable"),
+      oa("", [call(recovery === "direct" ? "recall" : "spawn_subtask", recovery === "direct" ? {} : { goal })]),
+      ...(recovery === "delegate" ? [oa("", [call("recall", {})]), oa("No saved preferences.")] : []),
+      oa("No saved preferences."),
+    ];
+    const result = await collect(runAgentStream([{ role: "user", text: goal }], {}, {
+      cfg: { provider: "openai", baseUrl: "https://example.test", model: "fixture", apiKey: "test" },
+      fetchFn: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        const reply = replies.shift();
+        if (reply instanceof Error) throw reply;
+        return new Response(JSON.stringify(reply));
+      },
+    }));
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "spawn_subtask", result: expect.objectContaining({ ok: false, outcome: "error", error: expect.any(String) }) }));
+    expect(JSON.stringify(bodies[2])).toContain('\\"outcome\\":\\"error\\"');
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "recall", result: { memories: [] } }));
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered", text: "No saved preferences." });
+    if (recovery === "delegate") expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "spawn_subtask", result: expect.objectContaining({ ok: true, outcome: "answered" }) }));
+  });
+
+  it("reports an exhausted child separately from the parent's remaining request budget", async () => {
+    let count = 0;
+    const result = await collect(runAgentStream([{ role: "user", text: goal }], {}, {
+      cfg: { provider: "openai", baseUrl: "https://example.test", model: "fixture", apiKey: "test" },
+      fetchFn: async () => new Response(JSON.stringify(++count === 1
+        ? oa("", [call("spawn_subtask", { goal })])
+        : count <= 9 ? oa("", [call("list_toolsets", {})]) : oa("This work did not finish."))),
+    }));
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", name: "spawn_subtask", result: expect.objectContaining({ ok: false, outcome: "exhausted", error: expect.any(String) }) }));
+    expect(count).toBe(10);
+  });
+});
+
+describe("in-flight action receipts after Stop", () => {
+  it.each(["stop", "other-workspace", "away-and-back"] as const)("handles %s after a quotation save is dispatched", async interruption => {
+    setAiConfig({ provider: "openai", baseUrl: "https://api.openai.com/v1", model: "fixture", apiKey: "test" });
+    vi.spyOn(crm, "customers").mockResolvedValue([]);
+    vi.spyOn(quotes, "listDocs").mockResolvedValue([]);
+    let release!: (id: number) => void;
+    const save = vi.spyOn(quotes, "saveDoc").mockImplementation(() => new Promise<number>(resolve => { release = resolve; }));
+    const args = { customer_name: "Receipt fixture", items: [{ description: "Service", qty: 2, rate: 10 }] };
+    stubResponses([oa("", [
+      { id: "first", type: "function", function: { name: "create_quote", arguments: JSON.stringify(args) } },
+      { id: "second", type: "function", function: { name: "create_quote", arguments: JSON.stringify({ ...args, customer_name: "Must not run" }) } },
+    ])]);
+    const controller = new AbortController();
+    const stream = aiAgentStream([{ role: "user", text: "Create two quotation drafts" }], { signal: controller.signal, isOwner: true, agentId: "stop-save-receipt" });
+    expect((await stream.next()).value).toMatchObject({ type: "tool_call", id: "first" });
+    const pending = stream.next();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    if (interruption === "stop") {
+      controller.abort();
+      release(42);
+      expect((await pending).value).toMatchObject({ type: "tool_result", id: "first", result: { ok: true, id: 42 } });
+      await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+      const rows = JSON.parse(localStorage.getItem(agentStorageKey("filey.agent.progress")!)!);
+      expect(rows).toEqual([expect.objectContaining({ outcome: "stopped", actions: [expect.objectContaining({ id: "first", status: "completed", references: expect.objectContaining({ id: 42 }) })] })]);
+    } else {
+      setCacheOrg("other-org", "test-user");
+      if (interruption === "away-and-back") setCacheOrg("test-org", "test-user");
+      const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      release(42);
+      await rejected;
+      expect(priorAgentProgress("stop-save-receipt")).not.toContain('"status":"completed"');
+    }
+    expect(save).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
 });
 
 describe("agent harness", () => {

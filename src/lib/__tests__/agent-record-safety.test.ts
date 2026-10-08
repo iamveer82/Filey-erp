@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { billing, erp, hr, quotes, pos, crm, suppliers, receipts, setCacheOrg, tools as settings } from "../api";
+import { billing, erp, fin, hr, quotes, pos, crm, suppliers, receipts, setCacheOrg, tools as settings } from "../api";
 import { runTool, TOOLS } from "../aiTools";
 import { setDataMode } from "../dataMode";
 import { setAgentMode } from "../agentMode";
@@ -411,6 +411,44 @@ it.each(["organization", "account"] as const)("does not revive an approved actio
     .rejects.toMatchObject({ name: "AbortError" });
   expect(approve).toHaveBeenCalledOnce();
   expect(status).not.toHaveBeenCalled();
+});
+
+it("retains a confirmed in-flight write receipt when Stop arrives before its acknowledgement", async () => {
+  let started!: () => void, finish!: (id: number) => void;
+  const dispatched = new Promise<void>(resolve => { started = resolve; });
+  const committed = new Promise<number>(resolve => { finish = resolve; });
+  const write = vi.spyOn(fin, "createExpense").mockImplementation(() => { started(); return committed; });
+  const controller = new AbortController();
+  const result = runTool("log_expense", { amount: 20, description: "Fixture expense" }, undefined, true, undefined, controller.signal);
+  await dispatched;
+  controller.abort();
+  finish(42);
+  await expect(result).resolves.toMatchObject({ ok: true, id: 42 });
+  expect(write).toHaveBeenCalledOnce();
+});
+
+it.each(["workspace", "workspace_return", "account_return"] as const)("does not expose an in-flight write receipt after %s", async change => {
+  let started!: () => void, finish!: (id: number) => void;
+  const dispatched = new Promise<void>(resolve => { started = resolve; });
+  const committed = new Promise<number>(resolve => { finish = resolve; });
+  const write = vi.spyOn(fin, "createExpense").mockImplementation(() => { started(); return committed; });
+  const result = runTool("log_expense", { amount: 20, description: "Private fixture expense" }, undefined, true);
+  const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+  await dispatched;
+  setCacheOrg(change === "account_return" ? "test-org" : "other-org", change === "account_return" ? "other-user" : "test-user");
+  if (change !== "workspace") setCacheOrg("test-org", "test-user");
+  finish(42);
+  await rejected;
+  expect(write).toHaveBeenCalledOnce();
+});
+
+it("does not dispatch a new write when the task is already stopped", async () => {
+  const write = vi.spyOn(fin, "createExpense");
+  const controller = new AbortController();
+  controller.abort();
+  await expect(runTool("log_expense", { amount: 20 }, undefined, true, undefined, controller.signal))
+    .rejects.toMatchObject({ name: "AbortError" });
+  expect(write).not.toHaveBeenCalled();
 });
 
 it("keeps approval valid when the active workspace identity has not changed", async () => {

@@ -28,7 +28,7 @@ const DIGEST_LIMIT = 12; // how many to surface in the system prompt
 
 function load(forWrite = false): Memory[] {
   try {
-    const raw = readAgentStorage(KEY);
+    const raw = readAgentStorage(KEY, forWrite);
     if (!raw) return [];
     const v = JSON.parse(raw);
     const valid = Array.isArray(v)

@@ -5,7 +5,7 @@ const resp = (status: number, body = "{}") =>
   new Response(body, { status, headers: { "content-type": "application/json" } });
 
 describe("aiFetch retry", () => {
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it.each(["GET", "HEAD"])("retries a transient 503 for %s then succeeds", async (method) => {
     const fetchMock = vi
@@ -88,6 +88,7 @@ describe("aiFetch retry", () => {
   // A `Retry-After: 60` used to mean Stop did nothing for a minute: the wait
   // ran to completion and only the attempt after it noticed the abort.
   it("aborts during the backoff wait instead of sleeping it out", async () => {
+    vi.useFakeTimers();
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -96,9 +97,11 @@ describe("aiFetch retry", () => {
     vi.stubGlobal("fetch", fetchMock);
     const ctl = new AbortController();
     const p = aiFetch("https://example.test", { method: "POST", signal: ctl.signal }, { baseDelayMs: 1 });
-    await Promise.resolve(); // let the first attempt reach the backoff
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
     ctl.abort();
     await expect(p).rejects.toMatchObject({ name: "AbortError" });
     expect(fetchMock).toHaveBeenCalledTimes(1); // no second attempt
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

@@ -31,11 +31,13 @@ export function agentStorageKey(key: string): string | null {
   return scope ? `${key}:${encodeURIComponent(scope)}` : null;
 }
 
-export function readAgentStorage(key: string): string | null {
+/** Mutating callers must distinguish an unreadable store from an empty one. */
+export function readAgentStorage(key: string, strict = false): string | null {
   try {
     const scoped = agentStorageKey(key);
     return scoped ? localStorage.getItem(scoped) : null;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return null;
   }
 }

@@ -774,7 +774,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       } else {
         const failedFiles = endTurn(turnId);
         setErr(e instanceof AiError || e instanceof Error ? e.message : String(e));
-        if (!followUpEditedRef.current) {
+        // A failed reply can follow a completed or unconfirmed write. Do not
+        // prepare the original instruction for replay after any action began.
+        if (!trace.actions.length && !followUpEditedRef.current) {
           setInput(raw);
           attach(attached);
         }

@@ -735,13 +735,16 @@ export async function* runAgentStream(
   const budget = opts.budget ?? { requests: maxRounds, tools: 128 };
   const scope = agentStorageScope();
   const identity = getCacheIdentity();
-  const assertActive = () => {
-    opts.signal?.throwIfAborted();
+  const assertScope = () => {
     if (agentStorageScope() !== scope || getCacheIdentity() !== identity)
       throw new DOMException(
         "The workspace changed. Start a new task in the current workspace.",
         "AbortError"
       );
+  };
+  const assertActive = () => {
+    opts.signal?.throwIfAborted();
+    assertScope();
   };
   let plan: AgentPlanStep[] = [];
   /** Domains the model has asked for this run (see toolsets.ts). */
@@ -1029,6 +1032,7 @@ export async function* runAgentStream(
         // Keep delegation diagnostics out of normal chat; the parent receives
         // its report and the existing progress events still record the work.
         let report: string;
+        let childReason: AgentDoneReason = "error";
         try {
           const child = runAgentStream(
             [
@@ -1057,6 +1061,7 @@ export async function* runAgentStream(
                 break;
               }
               // A child's done event must never finish the parent's UI or journal.
+              if (step.value.type === "done") childReason = step.value.reason;
               if (step.value.type === "tool_call" || step.value.type === "tool_result")
                 yield { ...step.value, id: `${call.id}/${step.value.id}` };
             }
@@ -1068,7 +1073,11 @@ export async function* runAgentStream(
           report = "This part of the task could not finish. Verify its outcome before retrying.";
         }
         assertActive();
+        const childCompleted = childReason === "answered" || childReason === "finished";
         const result = {
+          ok: childCompleted,
+          outcome: childReason,
+          ...(!childCompleted ? { error: "The delegated task did not complete. Check its earlier actions before retrying the same goal, or report the task blocked." } : {}),
           report,
           note: "This is the sub-agent's summary of its own work. Verify anything critical before acting on it, and fold it into your own report to the user.",
         };
@@ -1101,7 +1110,9 @@ export async function* runAgentStream(
         raw = { error: "This action ended unexpectedly. Verify its actual outcome before attempting it again.", retry_safe: false,
           ...(["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft", "retry_invoice_save"].includes(call.name) ? { save_outcome: "unconfirmed" } : {}) };
       }
-      assertActive();
+      // A completed in-flight action still needs its receipt after Stop. Do
+      // not expose it across a workspace/account transition, including A→B→A.
+      assertScope();
       const visual = toolImage(raw);
       if (!("short" in decided)) guard.after(call.name, call.args, visual.result, isToolArgumentRejection(raw));
       if (recoveryRequest && !("short" in decided) && !toolFailure(visual.result) && visual.result && typeof visual.result === "object") {
@@ -1120,6 +1131,7 @@ export async function* runAgentStream(
       const result = coachResult(visual.result, maxRounds - round - 1);
 
       yield { type: "tool_result", id: call.id, name: call.name, result };
+      assertActive();
       // The UI event carries the full result; the WIRE gets the compressed
       // form (headroom), with the original retrievable by id. The clip inside
       // compressForModel is the same 6000-char backstop as before.

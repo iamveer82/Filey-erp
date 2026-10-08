@@ -524,7 +524,14 @@ async function errText(res: Response): Promise<string> {
   }
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await withAbort(new Promise<void>(resolve => { timer = setTimeout(resolve, ms); }), signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const isTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -532,14 +539,13 @@ const isTauri =
 /** Reject the moment `signal` fires, whatever `p` is still doing. */
 function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
   if (!signal) return p;
-  const abortErr = () => new DOMException("Aborted", "AbortError");
-  if (signal.aborted) return Promise.reject(abortErr());
-  return Promise.race([
-    p,
-    new Promise<never>((_, reject) =>
-      signal.addEventListener("abort", () => reject(abortErr()), { once: true })
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => { cleanup(); reject(new DOMException("Aborted", "AbortError")); };
+    const cleanup = () => signal.removeEventListener("abort", stop);
+    signal.addEventListener("abort", stop, { once: true });
+    p.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+    if (signal.aborted) stop();
+  });
 }
 
 /** One request. Browser fetch requires provider CORS; mobile uses native HTTPS.
@@ -555,6 +561,7 @@ function withAbort<T>(p: Promise<T>, signal?: AbortSignal | null): Promise<T> {
  *  needs a request id and a cancel command; add it if that waste ever shows up
  *  on a bill. */
 async function transportFetch(input: string, init: RequestInit): Promise<Response> {
+  init.signal?.throwIfAborted();
   const endpoint = aiEndpoint(input);
   if (isNativeApp()) {
     const url = endpoint;
@@ -596,6 +603,8 @@ async function transportFetch(input: string, init: RequestInit): Promise<Respons
     return fetch(input, request);
   }
   const { invoke } = await import("@tauri-apps/api/core");
+  // Stop can arrive while loading the bridge. Check before starting a billable call.
+  init.signal?.throwIfAborted();
   const headers: Record<string, string> = {};
   new Headers(init.headers).forEach((value, key) => { headers[key] = value; });
   const r = await withAbort(
@@ -636,7 +645,7 @@ export async function aiFetch(
       if (!RETRYABLE.has(res.status) || (!replaySafe && res.status !== 429) || attempt === retries)
         throw new AiError(redactAiError(await errText(res), init.headers).slice(0, 1000), res.status);
       const ra = Number(res.headers.get("retry-after"));
-      await withAbort(sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt), init.signal);
+      await sleep(ra > 0 ? ra * 1000 : base * 2 ** attempt, init.signal);
     } catch (e) {
       if (e instanceof AiError) throw e; // non-retryable HTTP status
       if ((e as Error)?.name === "AbortError") throw e; // user cancelled
@@ -644,7 +653,7 @@ export async function aiFetch(
         throw new AiError("The provider took too long to respond. Check your connection or try another model.");
       lastErr = e; // network failure
       if (!replaySafe || attempt === retries) break;
-      await withAbort(sleep(base * 2 ** attempt), init.signal);
+      await sleep(base * 2 ** attempt, init.signal);
     }
   }
   throw new AiError(
@@ -700,7 +709,12 @@ export async function* aiAgentStream(
       const step = await stream.next();
       if (step.done) return step.value;
       if (step.value.type === "done") completed = true;
-      checkpoint?.(step.value);
+      try { checkpoint?.(step.value); }
+      catch {
+        if (scope !== agentStorageScope())
+          throw new DOMException("The workspace changed. Start a new task in the current workspace.", "AbortError");
+        console.warn("Agent progress could not be saved on this device.");
+      }
       if (step.value.type === "tool_result") events.push(step.value);
       if (step.value.type === "done" && opts.isOwner !== false && scope && scope === agentStorageScope())
         recordRun({ goal, reason: step.value.reason, failures: failuresFrom(events) }, scope);
