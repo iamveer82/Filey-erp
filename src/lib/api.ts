@@ -5211,15 +5211,23 @@ export const recurrences = {
       const today = new Date().toISOString().slice(0, 10);
       const due = ((data ?? []) as Recurrence[]).filter(r => r.next_run <= today);
       let made = 0;
-      for (const r of due) {
-        let next = addInterval(r.next_run, r.interval);
-        while (next <= today) next = addInterval(next, r.interval);
-        checkScope();
-        if (await generateRecurringInvoice(r.id, r.next_run, today, next)) made++;
-        checkScope();
+      let attempted = false;
+      try {
+        for (const r of due) {
+          let next = addInterval(r.next_run, r.interval);
+          while (next <= today) next = addInterval(next, r.interval);
+          checkScope();
+          if (!attempted) { markWrite(); attempted = true; }
+          if (await generateRecurringInvoice(r.id, r.next_run, today, next)) made++;
+          checkScope();
+        }
+      } finally {
+        // A false result can retire a schedule, and a failed response may follow
+        // a committed invoice. Refresh after either, but never for an empty scan.
+        if (attempted) { markWrite(); notifyDataChanged(); }
       }
       return made;
-    }),
+    }, false),
 };
 
 const quoteTotal = (items: QuotationItem[], doc: QuotationDoc) =>
