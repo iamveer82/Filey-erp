@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCtx, type Ctx } from "./client.js";
+import { loadDraftPresets } from "./draftPresets.js";
 
 export interface ToolDef {
   name: string;
@@ -224,14 +225,15 @@ async function nextNumber(
   ctx: Ctx,
   table: string,
   column: string,
-  prefix: string
+  pattern: string,
+  date: string,
 ): Promise<string> {
-  const year = new Date().getFullYear();
+  const year = Number(date.slice(0, 4));
   const kinds: Record<string, string> = { invoice_docs: "invoice", quotations: "quote", purchase_orders: "purchase_order" };
   const kind = kinds[table];
   if (!kind || column !== (table === "purchase_orders" ? "po_number" : "number")) throw new Error("Unsupported document numbering type.");
   const { data, error } = await ctx.supabase.rpc("filey_reserve_document_number", {
-    p_kind: kind, p_pattern: `${prefix}-{YYYY}-A{0001}`, p_year: year,
+    p_kind: kind, p_pattern: pattern, p_year: year,
     p_request: crypto.randomUUID(), p_actor: ctx.userId, p_org: ctx.orgId,
   });
   if (error || typeof data !== "string" || !data.trim())
@@ -647,8 +649,8 @@ const writeTools: ToolDef[] = [
       customer_name: z.string().min(1),
       customer_email: z.string().email().optional(),
       items: z.array(InvoiceItem).min(1).max(500),
-      currency: z.string().optional().describe("ISO currency code (default AED)"),
-      tax_rate: z.number().min(0).optional().describe("Tax rate % applied to the net total (default 5)"),
+      currency: z.string().optional().describe("ISO currency code (defaults to saved company currency)"),
+      tax_rate: z.number().min(0).max(100).optional().describe("Tax rate % (defaults to saved company tax settings)"),
     },
     handler: safe(async (args: {
       customer_name: string;
@@ -658,11 +660,13 @@ const writeTools: ToolDef[] = [
       tax_rate?: number;
     }) => {
       const ctx = await getCtx();
-      const number = await nextNumber(ctx, "invoice_docs", "number", "INV");
+      const date = today();
+      const preset = await loadDraftPresets(ctx, "invoice", args.customer_name, args);
+      const number = await nextNumber(ctx, "invoice_docs", "number", preset.pattern, date);
       const head = {
-        number, customer_name: args.customer_name, customer_email: args.customer_email ?? null,
-        status: "draft", doc_type: "invoice", issue_date: today(), currency: args.currency ?? "AED",
-        tax_rate: args.tax_rate ?? 5,
+        ...preset.header, number, customer_name: args.customer_name,
+        customer_email: args.customer_email ?? preset.header.customer_email ?? null,
+        status: "draft", doc_type: "invoice", issue_date: date, tax_rate: preset.taxRate,
       };
       const rows = args.items.map((item, position) => ({
         description: item.description, qty: item.qty ?? 1, unit_price: item.unit_price, position,
@@ -679,18 +683,22 @@ const writeTools: ToolDef[] = [
     inputSchema: {
       customer_name: z.string().min(1),
       items: z.array(InvoiceItem).min(1).max(500),
-      currency: z.string().optional().describe("ISO currency code (default AED)"),
+      currency: z.string().optional().describe("ISO currency code (defaults to saved company currency)"),
+      tax_rate: z.number().min(0).max(100).optional().describe("Tax rate % (defaults to saved company tax settings)"),
     },
     handler: safe(async (args: {
       customer_name: string;
       items: Array<{ description: string; qty?: number; unit_price: number }>;
       currency?: string;
+      tax_rate?: number;
     }) => {
       const ctx = await getCtx();
-      const number = await nextNumber(ctx, "quotations", "number", "Q");
+      const date = today();
+      const preset = await loadDraftPresets(ctx, "quote", args.customer_name, args);
+      const number = await nextNumber(ctx, "quotations", "number", preset.pattern, date);
       const head = {
-        number, customer_name: args.customer_name, status: "draft",
-        quote_date: today(), currency: args.currency ?? "AED",
+        ...preset.header, number, customer_name: args.customer_name, status: "draft",
+        quote_date: date, tax_rate: preset.taxRate,
       };
       const rows = args.items.map((item, position) => ({
         product: item.description, qty: item.qty ?? 1, rate: item.unit_price, position,
@@ -698,7 +706,7 @@ const writeTools: ToolDef[] = [
       await saveDraft(ctx, "quotations", head, rows);
 
       await audit(ctx, "create_draft_quote", "quotations", { number, customer: args.customer_name });
-      return { number, status: "draft", total: r2(args.items.reduce((sum, item) => sum + (item.qty ?? 1) * item.unit_price, 0)) };
+      return { number, status: "draft", total: invoiceTotal(head, args.items.map(item => ({ ...item, qty: item.qty ?? 1 }))) };
     }),
   },
   {
@@ -708,34 +716,23 @@ const writeTools: ToolDef[] = [
     inputSchema: {
       supplier_name: z.string().min(1),
       items: z.array(PoItem).min(1).max(500),
-      currency: z.string().optional().describe("ISO currency code (default AED)"),
+      currency: z.string().optional().describe("ISO currency code (defaults to saved company currency)"),
+      tax_rate: z.number().min(0).max(100).optional().describe("Tax rate % (defaults to saved company tax settings)"),
     },
     handler: safe(async (args: {
       supplier_name: string;
       items: Array<{ description: string; qty?: number; unit_cost: number }>;
       currency?: string;
+      tax_rate?: number;
     }) => {
       const ctx = await getCtx();
-
-      // Best-effort supplier link by name.
-      const q = args.supplier_name.replace(/[%,().]/g, "").trim();
-      let supplierId: string | null = null;
-      if (q) {
-        const { data: sup } = await ctx.supabase
-          .from("suppliers")
-          .select("id")
-          .eq("org_id", ctx.orgId)
-          .ilike("name", `%${q}%`)
-          .limit(2)
-          .maybeSingle();
-        supplierId = sup?.id ?? null;
-      }
-
-      const poNumber = await nextNumber(ctx, "purchase_orders", "po_number", "PO");
-      const total = args.items.reduce((s, it) => s + (it.qty ?? 1) * it.unit_cost, 0);
+      const date = today();
+      const preset = await loadDraftPresets(ctx, "purchase_order", args.supplier_name, args);
+      const poNumber = await nextNumber(ctx, "purchase_orders", "po_number", preset.pattern, date);
+      const total = invoiceTotal({ tax_rate: preset.taxRate }, args.items.map(item => ({ qty: item.qty ?? 1, unit_price: item.unit_cost })));
       const head = {
-        po_number: poNumber, supplier_id: supplierId, supplier_name: args.supplier_name,
-        status: "draft", order_date: today(), currency: args.currency ?? "AED", total: r2(total),
+        ...preset.header, po_number: poNumber, supplier_name: args.supplier_name,
+        status: "draft", order_date: date, total,
       };
       const rows = args.items.map((item, position) => ({
         description: item.description, quantity: item.qty ?? 1, unit_cost: item.unit_cost, position,
@@ -746,8 +743,8 @@ const writeTools: ToolDef[] = [
       return {
         po_number: poNumber,
         status: "draft",
-        supplier_linked: supplierId !== null,
-        total: Math.round(total * 100) / 100,
+        supplier_linked: preset.header.supplier_id !== null,
+        total,
       };
     }),
   },
