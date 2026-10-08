@@ -56,6 +56,8 @@ import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
 import { loadDocFormats } from "./numberFormat";
 import { allocateDocumentNumber } from "./documentNumbers";
 import { readEInvoiceParty, type EInvoiceParty } from "./einvoice";
+import { companyInvoiceSeller } from "./invoiceSeller";
+import { customerPhoneE164 } from "./companyCountry";
 import { isUaeRegime } from "./taxRegimes";
 import { readUrl, searchWeb, asUntrustedContext, httpFetch, webBridge } from "./reach";
 import {
@@ -126,17 +128,18 @@ async function documentContext(
   const party = matches.length === 1 ? matches[0] : null;
   if (selectedId != null && (!party || ![party.name, "company" in party ? party.company : ""].some(value => str(value).trim().toLowerCase() === name)))
     throw documentInputError(`The saved ${kind} ID and name do not match. Look up the saved record before changing the document.`);
+  const phone = party?.phone?.trim() ? party.phone : customerPhoneE164(party && "phone_e164" in party ? str(party.phone_e164) : "") || "";
   const context: Record<string, unknown> = { ...args, ...(party ? {
     [kind + "_id"]: party.id,
     [kind + "_email"]: party.email,
-    [kind + "_phone"]: party.phone,
+    [kind + "_phone"]: phone,
     [kind + "_address"]: "address" in party ? party.address : undefined,
     [kind + "_trn"]: "tax_id" in party ? party.tax_id : "trn" in party ? party.trn : undefined,
     buyer_city: "city" in party ? party.city : "custom_fields" in party ? party.custom_fields?.city : undefined,
     buyer_country_subdivision: "country_subdivision" in party ? party.country_subdivision : "custom_fields" in party ? party.custom_fields?.country_subdivision : undefined,
     buyer_country_code: "country_code" in party ? party.country_code : "custom_fields" in party ? party.custom_fields?.country_code : undefined,
-    buyer_identity: party.phone || "custom_fields" in party && party.custom_fields?.einvoice_identity
-      ? { ...("custom_fields" in party ? readEInvoiceParty(party.custom_fields?.einvoice_identity) : {}), phone: party.phone || "" }
+    buyer_identity: phone || "custom_fields" in party && party.custom_fields?.einvoice_identity
+      ? { ...("custom_fields" in party ? readEInvoiceParty(party.custom_fields?.einvoice_identity) : {}), phone }
       : undefined,
   } : {}) };
   if (!validateItems) return context;
@@ -1669,7 +1672,8 @@ export const TOOLS: ToolDef[] = [
       // Not swallowed: these details carry the company's TRN onto the document,
       // and a UAE tax invoice issued without one is a compliance problem. Fail
       // loudly rather than quietly draft an invalid invoice.
-      const co = await billing.getCompany();
+      const co = await billing.getCompany(true);
+      const seller = companyInvoiceSeller(co);
       const items = Array.isArray(args.items)
         ? (args.items as Record<string, unknown>[])
         : [];
@@ -1688,17 +1692,8 @@ export const TOOLS: ToolDef[] = [
           "minimal",
         accent: co?.default_accent || "#FFD600",
         currency: str(args.currency) || co?.currency || getDisplayCurrency(),
-        seller_name: co?.name || "",
-        tax_country_code: co?.country_code,
-        seller_address: co?.address,
-        seller_trn: co?.trn,
-        seller_email: co?.email,
-        seller_phone: co?.phone,
-        seller_city: co?.city,
-        seller_country_subdivision: co?.country_subdivision,
-        seller_legal_id: co?.legal_id,
-        seller_legal_id_type: co?.legal_id_type,
-        einvoice: { seller: co?.einvoice, buyer: args.buyer_identity as EInvoiceParty | undefined },
+        ...seller,
+        einvoice: { ...seller.einvoice, buyer: args.buyer_identity as EInvoiceParty | undefined },
         logo: co?.logo,
         customer_name: str(args.customer_name),
         customer_id: args.customer_id == null ? undefined : Number(args.customer_id),
@@ -3367,7 +3362,8 @@ export const TOOLS: ToolDef[] = [
     run: async (a, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
       a = await documentContext(a, "supplier");
-      const co = await billing.getCompany();
+      const co = await billing.getCompany(true);
+      const seller = companyInvoiceSeller(co);
       const items = Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : [];
       if (!items.length) return { error: "A bill needs at least one line." };
       const input = {
@@ -3379,15 +3375,8 @@ export const TOOLS: ToolDef[] = [
         template: co?.default_template || "minimal",
         accent: co?.default_accent || "#FFD600",
         currency: str(a.currency) || co?.currency || getDisplayCurrency(),
-        seller_name: co?.name || "",
-        tax_country_code: co?.country_code,
-        seller_trn: co?.trn,
-        seller_address: co?.address,
-        seller_city: co?.city,
-        seller_country_subdivision: co?.country_subdivision,
-        seller_legal_id: co?.legal_id,
-        seller_legal_id_type: co?.legal_id_type,
-        einvoice: { seller: co?.einvoice, buyer: a.buyer_identity as EInvoiceParty | undefined },
+        ...seller,
+        einvoice: { ...seller.einvoice, buyer: a.buyer_identity as EInvoiceParty | undefined },
         customer_name: str(a.supplier_name),
         customer_address: str(a.supplier_address),
         customer_email: str(a.supplier_email),

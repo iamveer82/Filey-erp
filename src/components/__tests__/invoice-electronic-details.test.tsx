@@ -62,6 +62,7 @@ describe("inline e-invoice details", () => {
       expect(actual, template).not.toContain(PINT_AE_PROCESS_ID);
       expect(actual, template).not.toContain(PINT_AE_SPEC_IDENTIFIER);
       expect(actual, template).not.toContain("FTA approved");
+      expect(actual, template).toContain(`Preparation UUID: ${fixture.einvoice!.uuid}`);
       for (const contact of [fixture.seller_phone!, fixture.seller_email!, fixture.customer_email!, fixture.einvoice!.buyer!.phone!]) {
         expect(actual.split(contact).length - 1, `${template}: ${contact} printed once`).toBe(1);
       }

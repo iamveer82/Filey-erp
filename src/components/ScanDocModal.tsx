@@ -9,6 +9,8 @@ import { useUI } from "../lib/ui";
 import { extractInvoiceFromImage, aiReady, type ExtractedInvoice } from "../lib/ai";
 import { fileToImages } from "../lib/docScan";
 import { billing, type InvoiceDocInput, type InvoiceItem } from "../lib/api";
+import { companyInvoiceSeller } from "../lib/invoiceSeller";
+import { requireAgentStorageScope } from "../lib/agentStorage";
 import { getDisplayCurrency, numInput, todayYmd } from "../lib/format";
 
 /* Scan an invoice/receipt with the user's AI model and create a draft.
@@ -92,7 +94,9 @@ export default function ScanDocModal({
     if (!data) return;
     setCreating(true);
     try {
-      const co = await billing.getCompany().catch(() => null);
+      const scope = requireAgentStorageScope();
+      const co = await billing.getCompany(true);
+      requireAgentStorageScope(scope);
       const today = todayYmd();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
       const input: InvoiceDocInput = {
@@ -101,12 +105,7 @@ export default function ScanDocModal({
         template: co?.default_template || "classic",
         accent: co?.default_accent || "#FFD600",
         currency: data.currency || co?.currency || getDisplayCurrency(),
-        tax_country_code: co?.country_code,
-        seller_name: co?.name || "",
-        seller_address: co?.address,
-        seller_trn: co?.trn,
-        seller_email: co?.email,
-        seller_phone: co?.phone,
+        ...companyInvoiceSeller(co),
         logo: co?.logo,
         customer_name: data.customer_name || "",
         customer_address: data.customer_address,
@@ -177,7 +176,7 @@ export default function ScanDocModal({
               {busy ? "Reading the document…" : fileName || "Upload a PDF or image"}
             </span>
             <span className="text-xs text-brand-400">
-              Your AI model extracts the fields - nothing is sent to Filey.
+              Your selected AI connection reads the document. Review extracted details before saving.
             </span>
             <input
               type="file"

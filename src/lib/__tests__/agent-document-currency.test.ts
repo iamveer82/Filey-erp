@@ -37,6 +37,18 @@ const drafts = [
 ];
 
 describe.each(["local", "cloud"] as const)("agent document currency in %s mode", mode => {
+  it.each(drafts.slice(0, 2))("snapshots fresh company seller details for $name", async spec => {
+    setDataMode(mode);
+    vi.mocked(billing.getCompany).mockImplementation(async fresh => ({ name: "Fixture Company", currency: "AED", default_tax_rate: 0,
+      ...(fresh ? { city: "Dubai", country_subdivision: "DXB", legal_id: "TL-CURRENT", legal_id_type: "TL", email: "current@example.test",
+        einvoice: { tin: "1001234567", legal_authority: "Dubai Economy" } } : {}),
+    } as never));
+    const save = spec.save().mockResolvedValue(81);
+    expect(await runTool(spec.name, spec.args)).toMatchObject({ ok: true });
+    expect(save.mock.calls[0][0]).toMatchObject({ seller_city: "Dubai", seller_country_subdivision: "DXB", seller_legal_id: "TL-CURRENT",
+      seller_email: "current@example.test", einvoice: { seller: { tin: "1001234567", legal_authority: "Dubai Economy" } } });
+  });
+
   it.each(drafts)("uses the company currency for $name without converting or relabeling entered rates", async spec => {
     setDataMode(mode);
     const save = spec.save().mockResolvedValue(81);

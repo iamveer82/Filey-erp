@@ -2,9 +2,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { featureFunctionSources, featureSchemaIssues } from './runtime-schema-checks.mjs';
+import { featureFunctionSources, featureSchemaIssues, einvoiceSchemaIssues } from './runtime-schema-checks.mjs';
 
 const migration = name => readFileSync(new URL(`../supabase/${name}`, import.meta.url), 'utf8');
+test('e-invoice schema audit detects lost UUID protection and incompatible preset columns', () => {
+  const identitySources = featureFunctionSources(migration('2026-09-29-einvoice-identity.sql'));
+  const identity = {
+    columns: [['invoice_docs', 'einvoice'], ['company_profile', 'einvoice'], ['crm_customers', 'custom_fields'], ['suppliers', 'custom_fields']]
+      .map(([table, column]) => ({ table, column, type: 'jsonb' })),
+    functions: [{ name: 'preserve_einvoice_uuid', args: '', result: 'trigger', definer: false,
+      config: ['search_path=public'], source: identitySources.get('preserve_einvoice_uuid') }],
+    triggers: [{ table: 'invoice_docs', name: 'invoice_einvoice_identity', enabled: 'O', type: 23,
+      function: 'preserve_einvoice_uuid', condition: null, columns: null }],
+  };
+  assert.deepEqual(einvoiceSchemaIssues(identity, identitySources), []);
+  for (const breakContract of [
+    value => { value.triggers = []; },
+    value => { value.triggers[0].enabled = 'D'; },
+    value => { value.triggers[0].type = 7; },
+    value => { value.triggers[0].condition = 'false'; },
+    value => { value.triggers[0].function = 'other_schema.preserve_einvoice_uuid'; },
+    value => { value.functions[0].source = 'begin return new; end;'; },
+    value => { value.functions[0].definer = true; },
+    value => { value.columns[3].type = 'text'; },
+  ]) {
+    const broken = structuredClone(identity);
+    breakContract(broken);
+    assert.notDeepEqual(einvoiceSchemaIssues(broken, identitySources), []);
+  }
+});
 const sources = featureFunctionSources(migration('2026-10-03-letters.sql'), migration('2026-10-03-stocktake-reliability.sql'), migration('2026-10-06-letter-rich-document.sql'));
 const fixture = () => ({
   functions: [

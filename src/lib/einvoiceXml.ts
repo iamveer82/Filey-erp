@@ -32,6 +32,7 @@ import {
   isCreditNote,
   isCommercialInvoice,
   buyerEndpoint,
+  isInvoiceUuid,
 } from "./einvoice";
 
 export interface EInvoiceItem extends DocItem {
@@ -74,6 +75,8 @@ export interface EInvoiceDoc {
   seller_name?: string | null;
   seller_address?: string | null;
   seller_trn?: string | null;
+  seller_email?: string | null;
+  seller_phone?: string | null;
   seller_city?: string | null;
   seller_country_subdivision?: string | null;
   seller_legal_id?: string | null;
@@ -81,6 +84,7 @@ export interface EInvoiceDoc {
   customer_name?: string | null;
   customer_address?: string | null;
   customer_trn?: string | null;
+  customer_email?: string | null;
   buyer_city?: string | null;
   buyer_country_subdivision?: string | null;
   buyer_country_code?: string | null;
@@ -148,6 +152,54 @@ const validGs1 = (value: string) => {
 export function eInvoiceIssues(doc: EInvoiceDoc): EInvoiceIssue[] {
   const issues: EInvoiceIssue[] = [];
   const add = (field: string, label: string, section: EInvoiceIssue["section"] = "details") => issues.push({ field, label, section });
+  // Imported/legacy JSON is untrusted even though the editor has typed fields.
+  // Validate text before calling string methods; never turn a corrupt identity
+  // into an empty value that could be replaced by another entity's default.
+  const text = (value: unknown, field: string, section: EInvoiceIssue["section"] = "einvoice") => {
+    if (value != null && typeof value !== "string") add(field, `${field}: the saved value must contain text`, section);
+    // Reject XML-forbidden characters without changing a supplied identity.
+    // eslint-disable-next-line no-control-regex
+    if (typeof value === "string" && /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE\uFFFF]/u.test(value))
+      add(field, `${field}: contains a character not supported by XML; correct the original value`, section);
+  };
+  const record = (value: unknown, field: string, section: EInvoiceIssue["section"] = "einvoice") => {
+    if (value == null) return undefined;
+    if (typeof value !== "object" || Array.isArray(value)) {
+      add(field, `${field}: saved details must be an object`, section);
+      return undefined;
+    }
+    return value as Record<string, unknown>;
+  };
+  const metadata = record(doc.einvoice, "einvoice");
+  for (const key of ["uuid", "credit_reason", "payment_account_id", "payment_account_name", "beneficiary_id", "buyer_delivery_mode"])
+    text(metadata?.[key], `einvoice.${key}`);
+  for (const role of ["seller", "buyer"] as const) {
+    const party = record(metadata?.[role], `einvoice.${role}`);
+    for (const key of ["corporate_trn", "tin", "endpoint_id", "endpoint_scheme", "legal_id", "legal_id_type", "legal_authority", "identifier", "phone"])
+      text(party?.[key], `einvoice.${role}.${key}`);
+  }
+  const deliveryDetails = record(metadata?.delivery, "einvoice.delivery");
+  for (const key of ["address", "city", "region", "country_code"]) text(deliveryDetails?.[key], `einvoice.delivery.${key}`);
+  for (const key of ["number", "issue_date", "due_date", "date_of_supply", "original_invoice_date", "currency", "invoice_type_code", "transaction_type", "payment_means_code", "tax_country_code", "notes", "terms", "po_number", "original_invoice_number", "seller_name", "seller_address", "seller_trn", "seller_email", "seller_phone", "seller_city", "seller_country_subdivision", "seller_legal_id", "seller_legal_id_type", "customer_name", "customer_address", "customer_trn", "customer_email", "buyer_city", "buyer_country_subdivision", "buyer_country_code"] as const)
+    text(doc[key], key, "details");
+  if (!Array.isArray(doc.items)) {
+    add("items", "Invoice lines must be a list", "items");
+    return issues;
+  }
+  doc.items.forEach((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      add(`items.${index}`, `Item ${index + 1}: saved line must be an object`, "items");
+      return;
+    }
+    for (const key of ["description", "unit", "tax_category"] as const) text(item[key], `items.${index}.${key}`, "items");
+    const custom = record(item.custom, `items.${index}.custom`, "items");
+    for (const [key, value] of Object.entries(custom || {})) text(value, `items.${index}.custom.${key}`, "items");
+  });
+  if (issues.length) return issues;
+  // Missing UUID is allowed here: Save & export assigns it before serialization.
+  // An existing invalid identity must not be silently regenerated on export.
+  if (doc.einvoice?.uuid && !isInvoiceUuid(doc.einvoice.uuid))
+    add("einvoice.uuid", "This saved identifier is not in Filey's UUID format. It is preserved unchanged; contact support to review this record before XML preparation.", "einvoice");
   if (doc.tax_country_code && doc.tax_country_code !== "AE") add("tax_country_code", "PINT-AE export requires a UAE tax document");
   if (!esc(doc.number).trim()) add("number", "Invoice number");
   if (!validDate(doc.issue_date)) add("issue_date", "Valid invoice date");
@@ -193,8 +245,10 @@ export function eInvoiceIssues(doc: EInvoiceDoc): EInvoiceIssue[] {
     if (isCommercialInvoice(type) && !["E", "O", "Z"].includes(category)) error("tax_category", "commercial invoices can only use exempt, out-of-scope or zero-rated categories");
     if (category === "E" && !TAX_EXEMPTION_CODES.some(code => code.code === item.custom?.einvoice_exemption_code)) error("custom.einvoice_exemption_code", "choose a VAT exemption reason");
     const gtin = item.custom?.einvoice_gtin?.trim();
+    const nature = item.custom?.einvoice_nature;
+    if ((category === "AE" || nature?.trim()) && !REVERSE_CHARGE_TYPES.some(code => code.code === nature))
+      error("custom.einvoice_nature", "choose a supported reverse-charge goods or services type");
     if (category === "AE") {
-      if (!REVERSE_CHARGE_TYPES.some(code => code.code === item.custom?.einvoice_nature)) error("custom.einvoice_nature", "choose the reverse-charge goods or services type");
       if (!gtin) error("custom.einvoice_gtin", "enter the item's GTIN for reverse charge");
     }
     if (gtin && (!/^(?:\d{8}|\d{12,14})$/.test(gtin) || !validGs1(gtin))) error("custom.einvoice_gtin", "enter a valid GTIN including its check digit");
@@ -313,12 +367,6 @@ export function validateEInvoice(doc: EInvoiceDoc): { errors: string[]; warnings
 
 const esc = (s: unknown) =>
   String(s ?? "")
-    // XML 1.0 forbids control characters outright (tab, LF and CR excepted),
-    // so one arriving in a customer name from a paste or a CSV import makes the
-    // whole document unparseable, and the FTA rejects it with an error that
-    // points nowhere near the field that caused it. Drop them before escaping.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -373,6 +421,8 @@ function partyXml(
     city?: string | null;
     emirate?: string | null;
     country?: string | null;
+    phone?: string | null;
+    email?: string | null;
     identity?: EInvoiceParty | null;
     endpoint?: { id: string; scheme: string };
     taxRegistration?: string;
@@ -399,7 +449,8 @@ ${esc(p.trn).trim() ? `      <cac:PartyTaxScheme>
       </cac:PartyTaxScheme>\n` : ""}${p.taxRegistration ? `      <cac:PartyTaxScheme><cbc:CompanyID>${esc(p.taxRegistration)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>TIN</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>\n` : ""}      <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(p.name)}</cbc:RegistrationName>
 ${esc(p.legalId).trim() ? `        <cbc:CompanyID${p.legalScheme ? ` schemeAgencyID="${esc(p.legalScheme)}" schemeAgencyName="${esc(p.identity?.legal_authority || p.legalScheme)}"` : ""}>${esc(p.legalId)}</cbc:CompanyID>\n` : ""}      </cac:PartyLegalEntity>
-    </cac:Party>
+${p.phone?.trim() || p.email?.trim() ? `      <cac:Contact>
+${p.phone?.trim() ? `        <cbc:Telephone>${esc(p.phone)}</cbc:Telephone>\n` : ""}${p.email?.trim() ? `        <cbc:ElectronicMail>${esc(p.email)}</cbc:ElectronicMail>\n` : ""}      </cac:Contact>\n` : ""}    </cac:Party>
   </cac:${role}>`;
 }
 
@@ -411,7 +462,7 @@ export function buildInvoiceXml(doc: EInvoiceDoc): string {
   if (!PINT_AE_INVOICE_TYPE_CODES.some(type => type.code === typeCode)) throw new Error("This document type is not supported by UAE electronic invoicing.");
   // Identity belongs to the saved invoice, never to an export attempt.
   const uuid = doc.einvoice?.uuid;
-  if (!uuid || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid))
+  if (!uuid)
     throw new Error("Save this invoice before exporting its electronic document.");
   const issues = eInvoiceIssues(doc);
   if (issues.length) throw new Error(`Complete the electronic invoice checks: ${issues.map(issue => issue.label).join("; ")}`);
@@ -470,7 +521,7 @@ ${esc(custom.einvoice_nature).trim() ? `        <cbc:NatureCode>${esc(custom.ein
     <cac:Item>
       <cbc:Description>${esc(it.description)}</cbc:Description>
       <cbc:Name>${esc(it.description)}</cbc:Name>
-${esc(custom.einvoice_service_code).trim() ? `      <cac:AdditionalItemIdentification><cbc:ID schemeID="SAC">${esc(custom.einvoice_service_code)}</cbc:ID></cac:AdditionalItemIdentification>\n` : ""}${esc(custom.einvoice_gtin).trim() ? `      <cac:StandardItemIdentification><cbc:ID schemeID="0160">${esc(custom.einvoice_gtin.trim())}</cbc:ID></cac:StandardItemIdentification>\n` : ""}${classification}      <cac:ClassifiedTaxCategory>
+${esc(custom.einvoice_gtin).trim() ? `      <cac:StandardItemIdentification><cbc:ID schemeID="0160">${esc(custom.einvoice_gtin.trim())}</cbc:ID></cac:StandardItemIdentification>\n` : ""}${esc(custom.einvoice_service_code).trim() ? `      <cac:AdditionalItemIdentification><cbc:ID schemeID="SAC">${esc(custom.einvoice_service_code)}</cbc:ID></cac:AdditionalItemIdentification>\n` : ""}${classification}      <cac:ClassifiedTaxCategory>
         <cbc:ID>${esc(cat)}</cbc:ID>
 ${taxPercent(cat, rate)}${exemptReason(cat, custom.einvoice_exemption_code)}        <cac:TaxScheme><cbc:ID>${DEFAULT_TAX_SCHEME}</cbc:ID></cac:TaxScheme>
       </cac:ClassifiedTaxCategory>
@@ -561,6 +612,8 @@ ${taxCurrencyCode}${root === "CreditNote" ? `  <cac:DiscrepancyResponse><cbc:Res
     emirate: doc.seller_country_subdivision,
     country: UAE_COUNTRY_CODE,
     identity: doc.einvoice?.seller,
+    phone: doc.seller_phone?.trim() ? doc.seller_phone : doc.einvoice?.seller?.phone,
+    email: doc.seller_email,
     taxRegistration: !doc.seller_trn?.trim() && isCommercialInvoice(typeCode) ? partyTin(doc.einvoice?.seller) : undefined,
   })}
 ${partyXml("AccountingCustomerParty", {
@@ -571,6 +624,8 @@ ${partyXml("AccountingCustomerParty", {
     emirate: doc.buyer_country_subdivision,
     country: doc.buyer_country_code,
     identity: doc.einvoice?.buyer,
+    phone: doc.einvoice?.buyer?.phone,
+    email: doc.customer_email,
     legalId: doc.einvoice?.buyer?.legal_id,
     legalScheme: doc.einvoice?.buyer?.legal_id_type,
     endpoint: buyerEndpoint(doc.einvoice, doc.buyer_country_code || UAE_COUNTRY_CODE),

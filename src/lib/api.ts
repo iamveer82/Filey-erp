@@ -6,7 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { sb, isConfigured, supabase, invokeFn } from "./supabase";
 import { isLocalMode, assertWorkspaceCurrent, setWorkspaceTransition } from "./dataMode";
 import { applyRoundOff, r2, isPostedInvoiceStatus } from "./money";
-import { isCreditNote } from "./einvoice";
+import { isCreditNote, readEInvoiceParty } from "./einvoice";
+import { fillMissingInvoiceSeller, invoiceSellerMatchesCompany } from "./invoiceSeller";
+import { customerPhoneE164 } from "./companyCountry";
 import {
   splitItemMeta,
   mergeItemMeta,
@@ -4963,7 +4965,7 @@ export const billing = {
       };
       await businessWorkflow("invoice", "payment-remove", { payment_id: id }, remove, requestId);
     }),
-  getCompany: () =>
+  getCompany: (fresh = false) =>
     readCached<CompanyProfile>(
       "company_profile",
       async () => {
@@ -5010,7 +5012,7 @@ export const billing = {
         default_tax_rate: 5,
         default_accent: "#222222",
         default_template: "minimal",
-      }, ["company_profile"]
+      }, ["company_profile"], true, fresh
     ),
   saveCompany: async (input: CompanyProfile) => {
     validateCountry(input.country_code);
@@ -5419,7 +5421,7 @@ export const quotes = {
   convertToInvoice: (quotationId: number) =>
     online(async () => {
       if (!Number.isSafeInteger(quotationId) || quotationId <= 0) throw new Error("Choose a saved quotation.");
-      const client = sb(), local = isLocalMode(), scope = activeCacheOrg, checkScope = workspaceGuard();
+      const client = sb(), local = isLocalMode(), checkScope = workspaceGuard();
       // Reopening an already converted quote must not consume another number.
       // Keep the check inside convert too: a second caller can finish while
       // this caller is reserving its own number.
@@ -5427,7 +5429,7 @@ export const quotes = {
       checkScope();
       if (linked.error) throw linked.error;
       if (linked.data) return Number(linked.data.id);
-      const company = await billing.getCompany();
+      const company = await billing.getCompany(true);
       const { loadDocFormats } = await import("./numberFormat");
       const formats = await loadDocFormats();
       // Number allocation owns its own local commit. Reserve before opening
@@ -5437,7 +5439,7 @@ export const quotes = {
       const reservedNumber = await allocateDocumentNumber("invoice", numbers.map(row => row.number), formats);
       checkScope();
       const convert = async (tx: { from: (table: string) => any }) => {
-        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        checkScope();
         const { data: q, error } = await tx.from("quotations").select("*").eq("id", quotationId).single();
         if (error || !q) throw error || new Error("Quotation not found.");
         const existing = await sChildren<{ id: number }>("invoice_docs", "quotation_id", quotationId, [{ col: "id", asc: true }], tx);
@@ -5445,8 +5447,20 @@ export const quotes = {
         const qd = q as QuotationDoc;
         const items = await sChildren<any>("quotation_items", "quotation_id", quotationId, [{ col: "position", asc: true }], tx);
         if (!items.length || items.length > 500) throw new Error("A quotation needs between 1 and 500 lines before conversion.");
+        let buyer: CrmCustomer | null = null;
+        if (qd.customer_id) {
+          const savedBuyer = await tx.from("crm_customers").select("*").eq("id", qd.customer_id).maybeSingle();
+          if (savedBuyer.error) throw savedBuyer.error;
+          buyer = savedBuyer.data as CrmCustomer | null;
+          // A manually named tax entity must not acquire another entity's routing ID.
+          if (buyer && (qd.customer_trn?.trim() && buyer.trn?.trim() && qd.customer_trn.trim() !== buyer.trn.trim()
+            || qd.customer_name.trim() && ![buyer.company, buyer.name].some(name => name?.trim().toLowerCase() === qd.customer_name.trim().toLowerCase()))) buyer = null;
+        }
         const due = new Date(); due.setDate(due.getDate() + 30);
-        const header = {
+        const snapshot = {
+          ...(buyer ? { buyer_city: buyer.city, buyer_country_subdivision: buyer.country_subdivision, buyer_country_code: buyer.country_code,
+            einvoice: { buyer: { ...readEInvoiceParty(buyer.custom_fields?.einvoice_identity),
+              phone: buyer.phone?.trim() ? buyer.phone : customerPhoneE164(buyer.phone_e164 || "") || "" } } } : {}),
           number: reservedNumber,
           status: "draft", doc_type: "invoice", quotation_id: quotationId,
           template: qd.template || company.default_template || "minimal",
@@ -5456,25 +5470,31 @@ export const quotes = {
           seller_trn: qd.seller_trn ?? null, seller_email: qd.seller_email ?? null,
           seller_phone: qd.seller_phone ?? null, logo: qd.logo ?? null,
           customer_id: qd.customer_id ?? null, customer_name: qd.customer_name,
-          customer_address: qd.customer_address ?? null, customer_trn: qd.customer_trn ?? null,
-          customer_email: qd.customer_email ?? null, issue_date: todayYmd(), due_date: localYmd(due),
+          customer_address: qd.customer_address ?? buyer?.address ?? null, customer_trn: qd.customer_trn ?? buyer?.trn ?? null,
+          customer_email: qd.customer_email ?? buyer?.email ?? null, issue_date: todayYmd(), due_date: localYmd(due),
           notes: qd.notes ?? null, terms: qd.terms ?? null, tax_rate: qd.tax_rate ?? 0,
           discount: qd.discount ?? 0, round_off: qd.round_off ?? false,
           custom_columns: qd.custom_columns ?? [], show_stamp: qd.show_stamp ?? false,
           show_signature: qd.show_signature ?? false,
         };
+        const header = invoiceSellerMatchesCompany(snapshot, company)
+          ? fillMissingInvoiceSeller(snapshot, company) : snapshot;
+        for (const key of ["seller_address", "seller_trn", "seller_email", "seller_phone"] as const)
+          if (typeof snapshot[key] === "string") header[key] = snapshot[key];
         const lines = items.map((it, position) => ({
           product_id: it.product_id ?? null,
           description: it.sku ? `${it.product} (${it.sku})` : it.product,
           qty: it.qty, unit: it.unit ?? null, ...convertedLine(it, qd.unit_price_formula), position,
         }));
-        if (local !== isLocalMode() || scope !== activeCacheOrg) throw new Error("Workspace changed. Reopen the quotation.");
+        checkScope();
         await checkFreeInvoiceCap(invoicesThisMonth);
+        checkScope();
         if (!local) {
           const { data, error: conversionError } = await client.rpc("filey_convert_quotation", {
             p_id: quotationId, p_header: header, p_items: lines,
             p_updated_at: (q as { updated_at?: string }).updated_at ?? null,
           });
+          checkScope();
           if (conversionError?.code === "PGRST202") throw new Error("Cloud quotation conversion needs the CRM sales workflow database update. Ask your administrator to apply the 2026-09-12 migration, then retry.");
           if (conversionError) throw conversionError;
           if (!Number.isSafeInteger(Number(data)) || Number(data) <= 0) throw new Error("The conversion result could not be confirmed. Refresh sales documents before retrying.");
@@ -5483,6 +5503,7 @@ export const quotes = {
         const id = await sInsert("invoice_docs", clean(header), tx);
         await sInsertMany("invoice_doc_items", lines.map(line => ({ ...line, invoice_id: id })), tx);
         await sUpdate("quotations", quotationId, { status: "accepted" }, tx);
+        checkScope();
         return id;
       };
       return local ? withLocalTransaction(convert) : convert(client);

@@ -1,4 +1,5 @@
 import { readEInvoiceParty } from "../lib/einvoice";
+import { companyInvoiceSeller, fillMissingInvoiceSeller, syncInvoiceSellerPreset } from "../lib/invoiceSeller";
 import { supplierInvoiceDetails } from "../lib/supplierInvoiceDetails";
 import InvoiceImportModal from "../components/InvoiceImportModal";
 import { invoiceMessageVersion } from "../lib/messageOutbox";
@@ -81,7 +82,7 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed, unratedCurrency } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
-import { subdivisionLabel } from "../lib/companyCountry";
+import { customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { startingTemplate } from "../components/DocPresetBar";
@@ -357,19 +358,8 @@ function blankForm(
     template: c.default_template || "minimal",
     accent: c.default_accent || "#222222",
     currency,
-    seller_name: c.name,
-    tax_country_code: c.country_code,
-    seller_address: c.address,
-    seller_trn: c.trn,
-    seller_email: c.email,
-    seller_phone: c.phone,
+    ...companyInvoiceSeller(c),
     logo: c.logo,
-    // UAE e-invoice: autofill seller identity from company settings (once).
-    seller_city: c.city,
-    seller_country_subdivision: c.country_subdivision,
-    seller_legal_id: c.legal_id,
-    seller_legal_id_type: c.legal_id_type,
-    einvoice: { seller: c.einvoice },
     customer_name: "",
     customer_address: "",
     customer_trn: "",
@@ -430,6 +420,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [numFmt, setNumFmt] = useState<DocFormats>({});
   const [docs, setDocs] = useState<InvoiceDocSummary[]>([]);
   const [form, setForm] = useState<Form | null>(null);
+  const editorRequest = useRef(0);
+  const currentForm = useRef(form);
+  currentForm.current = form;
+  useEffect(() => () => { editorRequest.current++; }, [mode]);
   const draftNumber = useRef<{ predicted: string; reserved?: string; manual?: boolean; requestId: ReturnType<typeof crypto.randomUUID>; kind: "invoice" | "purchase_invoice"; formats: DocFormats } | null>(null);
   const saveInFlight = useRef(false);
   const [savedDetailsPending, setSavedDetailsPending] = useState(false);
@@ -507,22 +501,26 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
 
   const newInvoice = async () => {
     if (!company) return;
-    const scope = agentStorageScope();
+    const scope = agentStorageScope(), request = ++editorRequest.current, original = form;
     try {
-      const f = blankForm(company, docs.map((d) => d.number), mode, numFmt);
-      f.template = await startingTemplate("invoice", company.default_template, f.template);
+      const currentCompany = await billing.getCompany(true);
+      const f = blankForm(currentCompany, docs.map((d) => d.number), mode, numFmt);
+      f.template = await startingTemplate("invoice", currentCompany.default_template, f.template);
       requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editorRequest.current || currentForm.current !== original) return;
+      setCompany(currentCompany);
       draftNumber.current = { predicted: f.number, requestId: crypto.randomUUID(), kind: mode === "purchase" ? "purchase_invoice" : "invoice", formats: { ...numFmt } };
       setSavedDetailsPending(false);
       setForm(f);
-    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+    } catch (e) { if (request === editorRequest.current && scope === agentStorageScope()) toast.error(errMsg(e)); }
   };
 
   const editInvoice = useCallback(async (id: number) => {
+    const scope = agentStorageScope(), request = ++editorRequest.current, original = currentForm.current;
     try {
-      const scope = agentStorageScope();
       const d = await billing.getDoc(id);
       requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editorRequest.current || currentForm.current !== original) return;
       draftNumber.current = null;
       setSavedDetailsPending(false);
       setForm({
@@ -608,7 +606,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         unit_price_formula: d.unit_price_formula || null,
       });
     } catch (e: any) {
-      toast.error(e?.message || "Failed to load invoice");
+      if (request === editorRequest.current && scope === agentStorageScope()) toast.error(e?.message || "Failed to load invoice");
     }
   }, [toast, isPurchase]);
 
@@ -621,12 +619,13 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   }, [params, company, editInvoice, setParams, toast]);
 
   const duplicateInvoice = async (id: number, credit = false) => {
+    const scope = agentStorageScope(), request = ++editorRequest.current, original = form;
     try {
-      const scope = agentStorageScope();
       const d = await billing.getDoc(id);
       const formats = credit ? { [mode === "purchase" ? "purchase_invoice" : "invoice"]: `CN-${d.number}-{0001}` } : { ...numFmt };
       const number = pickInvoiceNumber(mode, docs.map(x => x.number), formats);
       requireAgentStorageScope(scope ?? "signed-out");
+      if (request !== editorRequest.current || currentForm.current !== original) return;
       draftNumber.current = { predicted: number, requestId: crypto.randomUUID(), kind: mode === "purchase" ? "purchase_invoice" : "invoice", formats };
       setSavedDetailsPending(false);
       setForm({
@@ -711,7 +710,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         unit_price_formula: d.unit_price_formula || null,
       });
     } catch (e: any) {
-      toast.error(e?.message || "Failed to duplicate invoice");
+      if (request === editorRequest.current && scope === agentStorageScope()) toast.error(e?.message || "Failed to duplicate invoice");
     }
   };
 
@@ -959,23 +958,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             onClose={() => setCompanyOpen(false)}
             onSaved={(c) => {
               setCompany(c);
-              setForm((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  seller_name: c.name,
-    tax_country_code: c.country_code,
-                  seller_address: c.address ?? prev.seller_address,
-                  seller_trn: c.trn ?? prev.seller_trn,
-                  seller_email: c.email ?? prev.seller_email,
-                  seller_phone: c.phone ?? prev.seller_phone,
-                  seller_city: c.city, seller_country_subdivision: c.country_subdivision,
-                  seller_legal_id: c.legal_id, seller_legal_id_type: c.legal_id_type,
-                  einvoice: { ...prev.einvoice, seller: c.einvoice },
-                  logo: c.logo ?? prev.logo,
-                  tax_rate: c.default_tax_rate ?? prev.tax_rate,
-                };
-              });
+              setForm(prev => prev ? syncInvoiceSellerPreset(prev, company, c) : prev);
               setCompanyOpen(false);
             }}
           />
@@ -987,6 +970,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
             setForm(next);
           }}
           onBack={() => {
+            editorRequest.current++;
             draftNumber.current = null;
             setForm(null);
             loadDocs();
@@ -1615,23 +1599,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
           onClose={() => setCompanyOpen(false)}
           onSaved={(c) => {
             setCompany(c);
-            setForm((prev) => {
-              if (!prev) return prev;
-              return {
-                ...prev,
-                seller_name: c.name,
-    tax_country_code: c.country_code,
-                seller_address: c.address ?? prev.seller_address,
-                seller_trn: c.trn ?? prev.seller_trn,
-                seller_email: c.email ?? prev.seller_email,
-                seller_phone: c.phone ?? prev.seller_phone,
-                  seller_city: c.city, seller_country_subdivision: c.country_subdivision,
-                  seller_legal_id: c.legal_id, seller_legal_id_type: c.legal_id_type,
-                  einvoice: { ...prev.einvoice, seller: c.einvoice },
-                logo: c.logo ?? prev.logo,
-                tax_rate: c.default_tax_rate ?? prev.tax_rate,
-              };
-            });
+            setForm(prev => prev ? syncInvoiceSellerPreset(prev, company, c) : prev);
             setCompanyOpen(false);
           }}
         />
@@ -1922,6 +1890,23 @@ function Editor({
   savedDetailsPending: boolean;
 }) {
   const { toast, prompt } = useUI();
+  const latestForm = useRef<Form | null>(form);
+  latestForm.current = form;
+  useEffect(() => () => { latestForm.current = null; }, []);
+  const [applyingSeller, setApplyingSeller] = useState(false);
+  const applySavedSeller = async () => {
+    const snapshot = form, scope = agentStorageScope();
+    if (snapshot.status !== "draft") return;
+    setApplyingSeller(true);
+    try {
+      const preset = await billing.getCompany(true);
+      requireAgentStorageScope(scope ?? "signed-out");
+      if (latestForm.current !== snapshot) throw new Error("The invoice changed while loading company details. Try again.");
+      setForm(fillMissingInvoiceSeller(snapshot, preset));
+      toast.success("Missing seller details filled. Review and save the draft.");
+    } catch (error) { if (latestForm.current && scope === agentStorageScope()) toast.error(errMsg(error)); }
+    finally { if (latestForm.current) setApplyingSeller(false); }
+  };
   const invoiceRef = useRef<HTMLDivElement>(null);
   // Off-screen container that renders EVERY page stacked as real A4 sheets —
   // captured for the PDF so the export contains all items (not just the page
@@ -2231,7 +2216,7 @@ function Editor({
     setForm({
       ...form,
       customer_id: c.id,
-      einvoice: { ...form.einvoice, buyer: { ...readEInvoiceParty(c.custom_fields?.einvoice_identity), phone: c.phone || "" }, buyer_delivery_mode: undefined, delivery: undefined },
+      einvoice: { ...form.einvoice, buyer: { ...readEInvoiceParty(c.custom_fields?.einvoice_identity), phone: c.phone?.trim() ? c.phone : customerPhoneE164(c.phone_e164 || "") || "" }, buyer_delivery_mode: undefined, delivery: undefined },
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
@@ -3458,7 +3443,8 @@ function Editor({
           </TabsContent>
           {supportsEInvoice && <TabsContent value="einvoice" forceMount hidden={editorTab !== "einvoice"}>
             <Step title="E-invoice details" subtitle="Optional details for this invoice. Use saved information or enter it manually.">
-              <EInvoiceReview embedded open doc={form} busy={saving || exportingXml}
+              <EInvoiceReview embedded open doc={form} busy={saving || exportingXml || applyingSeller}
+                onApplySellerPreset={form.status === "draft" ? () => void applySavedSeller() : undefined}
                 onClose={() => setEditorTab("details")} onChange={einvoice => set("einvoice", einvoice)}
                 onDocumentChange={setForm}
                 bankAccount={bank.iban || bank.account_number ? { id: bank.iban || bank.account_number, name: bank.account_name } : undefined}

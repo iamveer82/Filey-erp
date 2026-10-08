@@ -29,7 +29,7 @@ function issueGroup(issue: EInvoiceIssue): GroupId {
   return "invoice";
 }
 
-export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy, onClose, onCloseAutoFocus, onChange, onDocumentChange, onFix, onExport, bankAccount, embedded = false }: {
+export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy, onClose, onCloseAutoFocus, onChange, onDocumentChange, onFix, onExport, bankAccount, embedded = false, onApplySellerPreset }: {
   open: boolean; doc: T; busy: boolean; onClose: () => void;
   onChange: (details: EInvoiceDetails) => void;
   onDocumentChange?: (doc: T) => void;
@@ -38,6 +38,7 @@ export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy,
   onExport: () => void;
   bankAccount?: { id: string; name?: string };
   embedded?: boolean;
+  onApplySellerPreset?: () => void;
 }) {
   const id = useId();
   const issues = useMemo(() => eInvoiceIssues(doc), [doc]);
@@ -95,14 +96,18 @@ export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy,
             <div><h3 className="text-base font-semibold">{item.title}</h3><p className="mt-1 text-sm text-muted-foreground">{item.description}</p></div>
             {selectedIssues.length > 0 && <ul aria-label={`${item.title} issues`} className="divide-y divide-border rounded-lg border border-border">
               {selectedIssues.map((issue, index) => <li key={`${issue.field}-${index}`} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">
-                <span className="pt-2">{issue.label}</span><button type="button" className="btn-ghost min-h-11 shrink-0" disabled={busy}
-                  aria-label={`Edit: ${issue.label}`} onClick={() => fix(issue)}>Edit <ArrowRight size={14} /></button>
+                <span className="pt-2">{issue.label}</span>{issue.field !== "einvoice.uuid" && <button type="button" className="btn-ghost min-h-11 shrink-0" disabled={busy}
+                  aria-label={`Edit: ${issue.label}`} onClick={() => fix(issue)}>Edit <ArrowRight size={14} /></button>}
               </li>)}
             </ul>}
             <fieldset disabled={busy} className="space-y-4">
               {item.id === "invoice" && <>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {text("number", "Invoice number", true)}{date("issue_date", "Invoice date", true)}
+                  <Field label="Preparation UUID" error={error("einvoice.uuid")} hint="Filey keeps this identifier for XML preparation. Your accredited service provider is responsible for generating the final electronic invoice UUID. It is separate from your FTA-issued TRN/TIN and is not FTA approval.">
+                    <input id={fieldId("einvoice.uuid")} className="input font-mono text-xs" readOnly
+                      value={typeof details.uuid === "string" ? details.uuid : ""} placeholder="Assigned when saved" />
+                  </Field>
                   <Field label="Invoice type" required={!embedded} error={error("invoice_type_code")}><SelectMenu id={fieldId("invoice_type_code")} ariaLabel="Invoice type"
                     disabled={!onDocumentChange} value={doc.invoice_type_code || "380"} onChange={value => set("invoice_type_code", value)}
                     options={PINT_AE_INVOICE_TYPE_CODES.map(code => ({ value: code.code, label: `${code.code} · ${code.label}` }))} /></Field>
@@ -131,6 +136,10 @@ export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy,
               </>}
               {(item.id === "seller" || item.id === "buyer") && <>
                 <p className="text-xs text-muted-foreground">Edits apply to this invoice. Your saved business and customer profiles keep their existing details.</p>
+                {item.id === "seller" && onApplySellerPreset && <div className="space-y-1">
+                  <button type="button" className="btn-secondary" disabled={busy} onClick={onApplySellerPreset}>Fill missing seller details</button>
+                  <p className="text-xs text-muted-foreground">Use your saved company profile. Values already entered on this draft are kept.</p>
+                </div>}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {text(item.id === "seller" ? "seller_name" : "customer_name", `${item.title} name`, true)}
                   {text(item.id === "seller" ? "seller_address" : "customer_address", `${item.title} street address`, true, undefined, true)}
@@ -199,7 +208,7 @@ export default function EInvoiceReview<T extends EInvoiceDoc>({ open, doc, busy,
         </TabsContent>)}
       </Tabs>
       <div className="border-t border-border pt-4">
-        <p className="text-xs text-muted-foreground">Filey generates line identifiers, calculated totals and the PINT-AE specification metadata. A document UUID is assigned when you save. This check is not FTA approval, schema certification or confirmation of reporting.</p>
+        <p className="text-xs text-muted-foreground">Filey generates line identifiers, calculated totals and the PINT-AE specification metadata. This check is not FTA approval, schema certification or confirmation of reporting.</p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-ghost min-h-11" disabled={busy} onClick={onClose}>{embedded ? "Back to details" : "Back to invoice"}</button>
           <button type="button" className="btn-primary min-h-11" disabled={busy || issues.length > 0} onClick={onExport}><Download size={16} />{busy ? "Saving…" : "Save & export XML"}</button>

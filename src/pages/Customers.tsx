@@ -742,10 +742,10 @@ function CustomerModal({
         trn: edit.trn ?? "",
         address: edit.address ?? "",
         city: edit.city ?? "",
-        country_subdivision: (edit.country_code ?? defaultCountry) === "AE" ? normalizeEmirate(edit.country_subdivision) : edit.country_subdivision || "",
-        country_code: edit.country_code ?? defaultCountry,
+        country_subdivision: edit.country_code === "AE" ? normalizeEmirate(edit.country_subdivision) : edit.country_subdivision || "",
+        country_code: edit.country_code ?? "",
         email: edit.email ?? "",
-        phone: edit.phone ?? "",
+        phone: edit.phone || edit.phone_e164 || "",
         credit_limit: edit.credit_limit != null ? String(edit.credit_limit) : "",
         opening_balance: customerOpeningBalanceInputs(edit.opening_balance),
         custom_fields: edit.custom_fields ?? {},
@@ -786,11 +786,11 @@ function CustomerModal({
       const e164 = customerPhoneE164(f.phone, f.country_code);
       const payload: Record<string, unknown> = {
         name: f.name.trim(),
-        company: f.company.trim() || undefined,
-        trn: f.trn.trim() || undefined,
-        email: f.email.trim() || undefined,
-        phone: f.phone.trim() || undefined,
-        address: f.address.trim() || undefined,
+        company: f.company.trim(),
+        trn: f.trn.trim(),
+        email: f.email.trim(),
+        phone: f.phone.trim(),
+        address: f.address.trim(),
         // Explicit blanks clear an existing preset; undefined is omitted by
         // the API patch and would keep the old location on future invoices.
         city: f.city.trim(),
@@ -798,7 +798,7 @@ function CustomerModal({
         country_code: f.country_code.trim(),
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
         opening_balance: openingBalance.value,
-        phone_e164: e164 ?? undefined,
+        phone_e164: e164 ?? "",
         custom_fields:
           Object.keys(f.custom_fields || {}).length > 0
             ? f.custom_fields

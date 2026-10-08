@@ -1558,7 +1558,7 @@ function EditCustomerModal({
             company: customer.company ?? "",
             trn: customer.trn ?? "",
             email: customer.email ?? "",
-            phone: customer.phone ?? "",
+            phone: customer.phone || customer.phone_e164 || "",
             address: customer.address ?? "",
             city: customer.city ?? "",
             country_subdivision: customer.country_code === "AE" ? normalizeEmirate(customer.country_subdivision) : customer.country_subdivision || "",
@@ -1585,18 +1585,18 @@ function EditCustomerModal({
     try {
       await crm.updateCustomer(customer.id, {
         name: f.name.trim(),
-        company: f.company.trim() || undefined,
-        trn: f.trn.trim() || undefined,
-        email: f.email.trim() || undefined,
-        phone: f.phone.trim() || undefined,
-        address: f.address.trim() || undefined,
+        company: f.company.trim(),
+        trn: f.trn.trim(),
+        email: f.email.trim(),
+        phone: f.phone.trim(),
+        address: f.address.trim(),
         // Empty strings deliberately clear saved optional values. Undefined
         // would be omitted by the API patch and leave the old preset behind.
         city: f.city.trim(),
         country_subdivision: f.country_subdivision.trim(),
         country_code: f.country_code,
         custom_fields: f.custom_fields,
-        segment: f.segment.trim() || undefined,
+        segment: f.segment.trim(),
         credit_limit: f.credit_limit.trim() === "" ? undefined : Number(f.credit_limit),
         opening_balance: openingBalance.value,
         phone_e164: customerPhoneE164(f.phone, f.country_code || (!customer.country_code ? country : "")) ?? "",

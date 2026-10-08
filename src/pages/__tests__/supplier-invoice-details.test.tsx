@@ -49,11 +49,17 @@ it("stores optional identity and location in the supplier record", async () => {
   fireEvent.click(dialog.getByText("Electronic invoicing identity · optional"));
   fireEvent.change(dialog.getByLabelText("Electronic invoicing TIN"), { target: { value: identity.tin } });
   fireEvent.change(dialog.getByLabelText("Electronic invoicing address"), { target: { value: identity.endpoint_id } });
+  fireEvent.change(dialog.getByLabelText("Own FTA-issued TRN"), { target: { value: "100123456700003" } });
+  fireEvent.change(dialog.getByLabelText("Address scheme"), { target: { value: "0235" } });
+  fireEvent.change(dialog.getByLabelText("Legal registration number"), { target: { value: "LIC-100" } });
+  fireEvent.change(dialog.getByLabelText("Issuing authority / passport country"), { target: { value: "Dubai" } });
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Registration type" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: "Commercial / Trade license" }));
   fireEvent.click(dialog.getByRole("button", { name: "Create supplier" }));
   await waitFor(() => expect(suppliers.create).toHaveBeenCalled());
   const saved = vi.mocked(suppliers.create).mock.calls[0][0];
   expect(saved.custom_fields?.city).toBe("Dubai");
-  expect(supplierInvoiceDetails(saved.custom_fields).identity).toEqual({ tin: identity.tin, endpoint_id: identity.endpoint_id });
+  expect(supplierInvoiceDetails(saved.custom_fields).identity).toEqual({ ...identity, corporate_trn: "100123456700003", legal_authority: "Dubai", legal_id_type: "TL" });
 });
 
 it("directory editing loads saved identity and allows clearing fields while preserving unrelated metadata", async () => {
@@ -82,6 +88,30 @@ it("full supplier editor preserves the same saved metadata", async () => {
   expect(dialog.getByLabelText("Legal registration number")).toHaveValue("LIC-100");
   fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(suppliers.update).toHaveBeenCalledWith(18, expect.objectContaining({ custom_fields: supplier.custom_fields })));
+});
+
+it.each(["directory", "detail"])("clears outdated tax and contact presets in the %s supplier editor", async editor => {
+  vi.mocked(suppliers.list).mockResolvedValue([{ ...supplier, contact_person: "Old contact", email: "old@example.test",
+    phone: "+971501234567", address: "Old address", notes: "Old instructions" }]);
+  if (editor === "directory") {
+    render(<MemoryRouter><Suppliers /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  } else {
+    render(<MemoryRouter initialEntries={["/suppliers/18"]}><Routes><Route path="/suppliers/:id" element={<SupplierDetail />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  }
+  const dialog = within(await screen.findByRole("dialog", { name: "Edit supplier" }));
+  for (const label of ["Contact person", "TRN", "Email", "Phone", "Address"]) {
+    expect(dialog.getByLabelText(label)).not.toHaveValue("");
+    fireEvent.change(dialog.getByLabelText(label), { target: { value: "" } });
+  }
+  if (editor === "directory") fireEvent.change(dialog.getByLabelText("Notes"), { target: { value: "" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(suppliers.update).toHaveBeenCalledWith(18, expect.objectContaining({
+    contact_person: "", tax_id: "", email: "", phone: "", address: "", custom_fields: supplier.custom_fields,
+    ...(editor === "directory" ? { notes: "" } : {}),
+  })));
 });
 
 it("strictly reads imported metadata without converting objects or numbers into legal identifiers", () => {

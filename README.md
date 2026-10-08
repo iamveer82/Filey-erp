@@ -154,7 +154,9 @@ local PDF tools, module enable/disable. AGPL-licensed.
 Not done yet (contributions welcome — see [ROADMAP.md](ROADMAP.md)):
 
 - Warehouse inventory valuation & full procure-to-pay depth.
-- UAE e-invoice XML submission (fields captured; serializer awaits the mandate).
+- Live UAE e-invoice submission through an accredited provider (local field
+  checks and supported PINT-AE XML export are available; see
+  [validation and provider requirements](docs/pint-ae/README.md)).
 - Broader automated test coverage (Playwright e2e) and a systematic QA pass.
 
 ## Contributing

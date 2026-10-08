@@ -101,9 +101,19 @@ async function editCustomerDetails(record: CrmCustomer) {
   return within(await screen.findByRole("dialog", { name: "Edit customer" }));
 }
 
-it("keeps the detail editor's new location and identity fields optional", async () => {
-  const dialog = await editCustomerDetails({ ...customer, custom_fields: { account_reference: "KEEP-17" } });
-  expect(dialog.getByLabelText("City (optional)")).not.toBeRequired();
+it.each(["directory", "detail"])("keeps the %s editor's new location and identity fields optional without assuming the seller country", async editor => {
+  const record = { ...customer, custom_fields: { account_reference: "KEEP-17" } };
+  vi.mocked(crm.customers).mockResolvedValue([record]);
+  if (editor === "directory") {
+    render(<MemoryRouter><Customers /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  } else {
+    await editCustomerDetails(record);
+  }
+  const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
+  await waitFor(() => expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  expect(dialog.getByLabelText(editor === "detail" ? "City (optional)" : "City")).not.toBeRequired();
   expect(dialog.getByRole("combobox", { name: "Country" })).toHaveTextContent("Select country");
   fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
   expect(dialog.getByRole("textbox", { name: "Buyer identifier" })).not.toBeRequired();
@@ -171,6 +181,70 @@ it("clears the directory editor's saved location and keeps it blank when reopene
   expect(reopened.getByLabelText("City")).toHaveValue("");
   expect(reopened.getByRole("combobox", { name: "Country" })).toHaveTextContent("Select country");
   expect(reopened.getByLabelText("State / Province")).toHaveValue("");
+});
+
+it.each(["directory", "detail"])("clears outdated tax and contact presets in the %s customer editor", async editor => {
+  const record: CrmCustomer = { ...customer, company: "Old company", trn: "100123456700003", email: "old@example.test",
+    phone: "+971501234567", phone_e164: "+971501234567", address: "Old address", country_code: "AE", segment: "Old segment",
+    custom_fields: { account_reference: "KEEP-17", einvoice_identity: JSON.stringify({ tin: "1001234567", legal_id: "LIC-17" }) } };
+  vi.mocked(crm.customers).mockResolvedValue([record]);
+  if (editor === "directory") {
+    render(<MemoryRouter><Customers /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  } else {
+    await editCustomerDetails(record);
+  }
+  const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
+  await waitFor(() => expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  for (const label of ["Company", "TRN", "Email", "Phone", "Address"]) {
+    expect(dialog.getByLabelText(label)).not.toHaveValue("");
+    fireEvent.change(dialog.getByLabelText(label), { target: { value: "" } });
+  }
+  if (editor === "detail") fireEvent.change(dialog.getByLabelText("Segment"), { target: { value: "" } });
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    company: "", trn: "", email: "", phone: "", phone_e164: "", address: "", custom_fields: record.custom_fields,
+    ...(editor === "detail" ? { segment: "" } : {}),
+  })));
+});
+
+it.each(["directory", "detail"])("preserves an existing E.164-only phone in the %s customer editor", async editor => {
+  const record: CrmCustomer = { ...customer, phone_e164: "+971501234567", country_code: "AE" };
+  vi.mocked(crm.customers).mockResolvedValue([record]);
+  if (editor === "directory") {
+    render(<MemoryRouter><Customers /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  } else {
+    await editCustomerDetails(record);
+  }
+  const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
+  await waitFor(() => expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  expect(dialog.getByLabelText("Phone")).toHaveValue(record.phone_e164);
+  fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({
+    phone: record.phone_e164, phone_e164: record.phone_e164,
+  })));
+});
+
+it("captures a complete optional buyer identity while adding a customer", async () => {
+  const dialog = await newCustomer();
+  fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
+  const values = {
+    "Own FTA-issued TRN": "100123456700003", "Electronic invoicing TIN": "1001234567",
+    "Electronic invoicing address": "1001234567", "Address scheme": "0235", "Buyer identifier": "BUYER-17",
+    "Legal registration number": "LIC-17", "Issuing authority / passport country": "Dubai",
+  };
+  for (const [label, value] of Object.entries(values)) fireEvent.change(dialog.getByLabelText(label), { target: { value } });
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Registration type" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: "Commercial / Trade license" }));
+  fireEvent.click(dialog.getByRole("button", { name: "Create customer" }));
+  await waitFor(() => expect(crm.createCustomer).toHaveBeenCalled());
+  expect(JSON.parse(vi.mocked(crm.createCustomer).mock.calls[0][0].custom_fields!.einvoice_identity)).toEqual({
+    corporate_trn: "100123456700003", tin: "1001234567", endpoint_id: "1001234567", endpoint_scheme: "0235",
+    identifier: "BUYER-17", legal_id: "LIC-17", legal_authority: "Dubai", legal_id_type: "TL",
+  });
 });
 
 it("clears a previously saved balance explicitly to zero through the directory editor", async () => {
