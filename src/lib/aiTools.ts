@@ -1347,7 +1347,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "get_invoice",
-    description: "Read saved invoice lines, pricing, dates, buyer, tax and current totals. Use an exact number or id:<id> for duplicates. Read back after edits. Image presence flags replace raw images.",
+    description: "Read saved invoice details and current totals by exact number or id:<id>. Read back after edits.",
     parameters: {
       type: "object",
       properties: { invoice_number: { type: "string", minLength: 1, maxLength: 200 }, doc_type: { type: "string", enum: ["sales", "purchase"] } },
@@ -1575,7 +1575,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_invoice_draft",
     description:
-      "Create a draft; never guess buyer, item, qty or rate. Preserve item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Saved company/customer e-invoice identities are copied; review returned missing details before electronic export. Edit with revise_invoice; verify with get_invoice(invoice_number:'id:<id>').",
+      "Create draft; never guess buyer, item, qty or rate. Keep item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Reuses e-invoice identities; review gaps before XML. Edit with revise_invoice; verify with get_invoice(invoice_number:'id:<id>').",
     parameters: {
       type: "object",
       properties: {
