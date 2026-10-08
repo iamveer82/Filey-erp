@@ -5,9 +5,10 @@ import type { ReactElement } from "react";
 import { UIProvider } from "../../lib/ui";
 import { notifyDataChanged } from "../../lib/realtime";
 import { AuthProvider } from "../../lib/auth";
-import { billing, erp, hr, pos, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type Payroll, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary, type PoSummary } from "../../lib/api";
+import { billing, crm, suppliers, erp, hr, pos, quotes, receipts, recurrences, tools, setCacheOrg, type CompanyProfile, type Employee, type Payroll, type InvoiceDoc, type Product, type QuotationDoc, type ReceiptDoc, type ReceiptSummary, type PoSummary } from "../../lib/api";
 import * as filesApi from "../../lib/files";
 import * as pdfTools from "../../lib/pdfTools";
+import * as reactPdf from "../../lib/reactPdf";
 import * as emailApi from "../../lib/email";
 import * as csvApi from "../../lib/csv";
 import * as localPaths from "../../lib/localPaths";
@@ -130,6 +131,262 @@ describe("invoice editor actions", () => {
     vi.spyOn(exchangeRates, "getExchangeRates").mockResolvedValue({ AED: 1 });
   });
 
+  async function openNewDraft(view: ReturnType<typeof wrap>) {
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "New invoice" }));
+    await view.findByRole("heading", { name: "New Invoice" });
+  }
+
+  async function fillNewDraft(view: ReturnType<typeof wrap>) {
+    await openNewDraft(view);
+    fireEvent.change(view.getByRole("textbox", { name: "Customer name" }), { target: { value: "Draft customer" } });
+    fireEvent.mouseDown(view.getByRole("tab", { name: /^Items/ }), { button: 0, ctrlKey: false });
+    fireEvent.change(view.getByRole("textbox", { name: "Description for line 1" }), { target: { value: "Draft item" } });
+  }
+
+  it.each(["sales", "purchase"] as const)("uses optional %s party presets and clears the previous party's identity, tax and delivery details", async mode => {
+    const identity = { identifier: "BUYER-NEW", tin: "1234567890" };
+    vi.spyOn(crm, "customers").mockResolvedValue([
+      { id: 31, name: "Preset party", city: "Dubai", country_code: "AE", country_subdivision: "DU", custom_fields: { einvoice_identity: JSON.stringify(identity) } },
+      { id: 32, name: "Blank party" },
+    ] as Awaited<ReturnType<typeof crm.customers>>);
+    vi.spyOn(suppliers, "list").mockResolvedValue([
+      { id: 31, name: "Preset party", created_at: "", custom_fields: { city: "Dubai", country_code: "AE", country_subdivision: "DU", einvoice_identity: JSON.stringify(identity) } },
+      { id: 32, name: "Blank party", created_at: "" },
+    ]);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, customer_trn: "100000000000003", buyer_city: "Old city", buyer_country_code: "US", buyer_country_subdivision: "CA", einvoice: { buyer: { identifier: "OLD" }, seller: { tin: "5555555555" }, buyer_delivery_mode: "export-unregistered", delivery: { address: "Old delivery" } } });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(invoice.id);
+    const view = wrap(<Invoicing mode={mode} />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    const party = mode === "purchase" ? "supplier" : "customer";
+    const select = await view.findByRole("combobox", { name: `Select saved ${party}` });
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.click(await view.findByRole("option", { name: "Preset party" }));
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save.mock.calls[0][0]).toMatchObject({ customer_name: "Preset party", customer_trn: "", buyer_city: "Dubai", buyer_country_code: "AE", buyer_country_subdivision: "DU", einvoice: { buyer: identity, seller: { tin: "5555555555" } } });
+    expect(save.mock.calls[0][0].einvoice?.delivery).toBeUndefined();
+    expect(save.mock.calls[0][0].einvoice?.buyer_delivery_mode).toBeUndefined();
+    await waitFor(() => expect(select).toBeEnabled());
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.click(await view.findByRole("option", { name: "Blank party" }));
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0]).toMatchObject({ customer_name: "Blank party", buyer_city: "", buyer_country_code: "", buyer_country_subdivision: "", einvoice: { buyer: {} } });
+  });
+
+  it.each(["sales", "purchase"] as const)("creates an optional %s identity preset from the invoice quick-add form", async mode => {
+    vi.spyOn(crm, "customers").mockResolvedValue([]);
+    vi.spyOn(suppliers, "list").mockResolvedValue([]);
+    const createCustomer = vi.spyOn(crm, "createCustomer").mockResolvedValue(31);
+    const createSupplier = vi.spyOn(suppliers, "create").mockResolvedValue(31);
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(invoice.id);
+    const view = wrap(<Invoicing mode={mode} />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    const party = mode === "purchase" ? "supplier" : "customer";
+    fireEvent.click(await view.findByRole("button", { name: `Add ${party}` }));
+    const dialog = within(await view.findByRole("dialog"));
+    fireEvent.change(dialog.getByRole("textbox", { name: "Company name" }), { target: { value: "Quick preset" } });
+    fireEvent.click(dialog.getByText("Electronic invoicing details (optional)"));
+    fireEvent.change(dialog.getByRole("textbox", { name: "City" }), { target: { value: "Sharjah" } });
+    fireEvent.change(dialog.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "CUSTOM-ID" } });
+    fireEvent.click(dialog.getByRole("button", { name: `Create ${party}` }));
+    await waitFor(() => expect(view.queryByRole("dialog")).not.toBeInTheDocument());
+    const created = mode === "purchase" ? createSupplier.mock.calls[0][0] : createCustomer.mock.calls[0][0];
+    expect(created.custom_fields?.einvoice_identity).toBe(JSON.stringify({ identifier: "CUSTOM-ID" }));
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ customer_name: "Quick preset", buyer_city: "Sharjah", einvoice: expect.objectContaining({ buyer: { identifier: "CUSTOM-ID" } }) })));
+  });
+
+  it("shows the same electronic details continuation pages in the full invoice preview", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, po_number: "PO-PREVIEW-OPTIONAL" });
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.click(await view.findByRole("button", { name: "Preview" }));
+    const preview = within(await view.findByRole("dialog"));
+    expect(preview.queryByRole("heading", { name: "Electronic invoice details" })).not.toBeInTheDocument();
+    fireEvent.click(preview.getByRole("button", { name: "Next page" }));
+    expect(preview.getByRole("heading", { name: "Electronic invoice details" })).toBeVisible();
+    expect(preview.getByText("PO-PREVIEW-OPTIONAL")).toBeVisible();
+    expect(preview.getByText("Page 2 of 2")).toBeVisible();
+  });
+
+  it("does not reserve numbers for opening, previewing, canceling or duplicating a draft", async () => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-RESERVED");
+    const save = vi.spyOn(billing, "saveDoc");
+    const view = wrap(<Invoicing />);
+    await openNewDraft(view);
+    expect(view.getByText(/Provisional — a unique number is assigned/)).toBeVisible();
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await view.findByText("Add at least one line item with a description");
+    fireEvent.click(view.getByRole("button", { name: "Back" }));
+    await view.findByText("INV-AUDIT");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Duplicate" }));
+    await view.findByRole("heading", { name: "New Invoice" });
+    fireEvent.click(view.getByRole("button", { name: "Preview" }));
+    expect(allocate).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reuses the draft reservation ID after a lost reply and the reserved number after a save failure", async () => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockRejectedValueOnce(new Error("Reservation response lost"))
+      .mockResolvedValue("INV-RESERVED");
+    const save = vi.spyOn(billing, "saveDoc").mockRejectedValueOnce(new Error("Save response lost")).mockResolvedValue(50);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await view.findByText("Could not save: Reservation response lost");
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await view.findByText("Could not save: Save response lost");
+    expect(allocate).toHaveBeenCalledTimes(2);
+    expect(allocate.mock.calls[0][3]).toMatch(/^[\da-f]{8}-[\da-f-]{27}$/i);
+    expect(allocate.mock.calls[1][3]).toBe(allocate.mock.calls[0][3]);
+    expect(save.mock.calls[0][0].number).toBe("INV-RESERVED");
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0].number).toBe("INV-RESERVED");
+    expect(allocate).toHaveBeenCalledTimes(2);
+    await view.findByRole("heading", { name: "Edit Invoice" });
+  });
+
+  it("reserves once across concurrent save commands and does not renumber the saved invoice", async () => {
+    let finish!: (number: string) => void;
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    act(() => {
+      fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+      fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    });
+    await waitFor(() => expect(allocate).toHaveBeenCalledOnce());
+    expect(save).not.toHaveBeenCalled();
+    await act(async () => finish("INV-RESERVED"));
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0]).toMatchObject({ id: 50, number: "INV-RESERVED" });
+    expect(allocate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["manual", "original prediction"])("preserves an explicitly entered %s number without reserving another", async choice => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber");
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.mouseDown(view.getByRole("tab", { name: "Details" }), { button: 0, ctrlKey: false });
+    const field = view.getByRole("textbox", { name: "Invoice number" }) as HTMLInputElement;
+    const selected = choice === "manual" ? "MANUAL-2026-1" : field.value;
+    fireEvent.change(field, { target: { value: "TEMPORARY-CHOICE" } });
+    fireEvent.change(field, { target: { value: selected } });
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ number: selected })));
+    expect(allocate).not.toHaveBeenCalled();
+  });
+
+  it.each(["button", "print shortcut"])("saves a new invoice before PDF export via %s and renders its allocated number", async trigger => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-PDF-RESERVED");
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, id: 50, number: "INV-PDF-RESERVED", fx_rate: 3.6725, einvoice: { uuid: "persisted-uuid" } });
+    const renderPdf = vi.spyOn(reactPdf, "reactToPdfBytes").mockResolvedValue({ name: "invoice.pdf", bytes: new Uint8Array([1, 2]) });
+    const write = vi.spyOn(localPaths, "saveBytes").mockResolvedValue("invoice.pdf");
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    if (trigger === "button") fireEvent.click(view.getByTitle("Download PDF (Ctrl+P)"));
+    else fireEvent.keyDown(window, { key: "p", ctrlKey: true });
+    await waitFor(() => expect(write).toHaveBeenCalledWith("INV-PDF-RESERVED.pdf", new Uint8Array([1, 2]), "application/pdf"));
+    expect(allocate).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
+    expect(renderPdf).toHaveBeenCalledWith(expect.objectContaining({ props: expect.objectContaining({ form: expect.objectContaining({ id: 50, number: "INV-PDF-RESERVED", fx_rate: 3.6725, einvoice: expect.objectContaining({ uuid: "persisted-uuid" }) }) }) }), "INV-PDF-RESERVED");
+  });
+
+  it("retains the saved id when metadata readback fails and retries PDF without a second create", async () => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-SAVED");
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    vi.spyOn(billing, "getDoc").mockRejectedValueOnce(new Error("Read response lost"))
+      .mockResolvedValue({ ...invoice, id: 50, number: "INV-SAVED", einvoice: { uuid: "confirmed-uuid" } });
+    const renderPdf = vi.spyOn(reactPdf, "reactToPdfBytes").mockResolvedValue({ name: "invoice.pdf", bytes: new Uint8Array([1, 2]) });
+    const write = vi.spyOn(localPaths, "saveBytes").mockResolvedValue(null);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.click(view.getByTitle("Download PDF (Ctrl+P)"));
+    await view.findByText("Invoice saved, but saved details could not be reloaded. Retry export or save.");
+    expect(view.getByRole("heading", { name: "Edit Invoice" })).toBeVisible();
+    expect(renderPdf).not.toHaveBeenCalled();
+    expect(save.mock.calls[0][0].id).toBeUndefined();
+    fireEvent.click(view.getByTitle("Download PDF (Ctrl+P)"));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("INV-SAVED.pdf", new Uint8Array([1, 2]), "application/pdf"));
+    expect(save.mock.calls[1][0]).toMatchObject({ id: 50, number: "INV-SAVED" });
+    expect(allocate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["Edit", "Duplicate"])("preserves a saved line VAT override through %s and save", async action => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, items: [{ ...invoice.items[0], custom: { __tax_pct: "7.5" } }] });
+    vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-COPY");
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: action }));
+    fireEvent.mouseDown(await view.findByRole("tab", { name: /^Items/ }), { button: 0, ctrlKey: false });
+    expect(view.getByRole("spinbutton", { name: "VAT rate for line 1" })).toHaveValue(7.5);
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ custom: expect.objectContaining({ __tax_pct: "7.5" }) })] })));
+  });
+
+  it("finalizes a new draft through the shared reserved-number save and archives only the confirmed snapshot", async () => {
+    const allocate = vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-FINAL-RESERVED");
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.click(view.getByRole("button", { name: "Mark as done" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ number: "INV-FINAL-RESERVED", status: "sent" })));
+    await waitFor(() => expect(filesApi.autoSaveDocument).toHaveBeenCalledWith("INV-FINAL-RESERVED.pdf", "invoice", expect.any(Function)));
+    expect(allocate).toHaveBeenCalledOnce();
+  });
+
+  it("exports XML with the newly allocated invoice number instead of the provisional preview", async () => {
+    vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-XML-RESERVED");
+    vi.spyOn(billing, "saveDoc").mockResolvedValue(50);
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, id: 50, number: "INV-XML-RESERVED", einvoice: { uuid: "test-document-uuid" } });
+    vi.spyOn(invoiceXml, "validateEInvoice").mockReturnValue({ errors: [], warnings: [] });
+    vi.spyOn(invoiceXml, "eInvoiceIssues").mockReturnValue([]);
+    const xml = vi.spyOn(invoiceXml, "buildInvoiceXml").mockReturnValue("<Invoice />");
+    const write = vi.spyOn(localPaths, "saveBytes").mockResolvedValue(null);
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.click(view.getByRole("button", { name: "Check E-invoice" }));
+    fireEvent.click(view.getByRole("button", { name: "Save & export XML" }));
+    await waitFor(() => expect(write).toHaveBeenCalledWith("INV-XML-RESERVED.xml", expect.anything(), "application/xml"));
+    expect(Array.from(write.mock.calls[0][1])).toEqual(Array.from(new TextEncoder().encode("<Invoice />")));
+    expect(xml).toHaveBeenCalledWith(expect.objectContaining({ id: 50, number: "INV-XML-RESERVED", einvoice: { uuid: "test-document-uuid" } }));
+  });
+
+  it("does not display a finalized state or archive a PDF when finalization has no acknowledgement", async () => {
+    vi.spyOn(documentNumbers, "allocateDocumentNumber").mockResolvedValue("INV-UNCERTAIN");
+    vi.spyOn(billing, "saveDoc").mockRejectedValue(new Error("Save response lost"));
+    const view = wrap(<Invoicing />);
+    await fillNewDraft(view);
+    fireEvent.click(view.getByRole("button", { name: "Mark as done" }));
+    await view.findByText("Could not save: Save response lost");
+    expect(view.getByRole("button", { name: "Mark as done" })).toBeEnabled();
+    expect(filesApi.autoSaveDocument).not.toHaveBeenCalled();
+  });
+
   it("locks invoice editing while a save is pending and restores it after acknowledgement", async () => {
     let finish!: (id: number) => void;
     vi.spyOn(billing, "saveDoc").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
@@ -164,17 +421,19 @@ describe("invoice editor actions", () => {
     const check = actions.getByRole("button", { name: "Check E-invoice" });
     expect(check).toHaveClass("btn-primary");
     fireEvent.click(check);
-    const review = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
+    expect(view.queryByRole("dialog", { name: "Check E-invoice" })).toBeNull();
+    expect(view.getByRole("tab", { name: "E-invoice", selected: true })).toBeVisible();
     expect(review.getAllByRole("tab")).toHaveLength(5);
     fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
     fireEvent.change(review.getByRole("textbox", { name: "Own FTA-issued TRN" }), { target: { value: "123456789012345" } });
     fireEvent.change(review.getByLabelText(/^Seller street address/), { target: { value: "Edited invoice seller address" } });
     expect(review.getByRole("textbox", { name: "Own FTA-issued TRN" })).toHaveValue("123456789012345");
     expect(review.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
-    fireEvent.click(review.getByRole("button", { name: "Back to invoice" }));
-    await waitFor(() => expect(view.queryByRole("dialog", { name: "Check E-invoice" })).toBeNull());
+    fireEvent.click(review.getByRole("button", { name: "Back to details" }));
+    await waitFor(() => expect(view.queryByRole("region", { name: "E-invoice details" })).toBeNull());
     fireEvent.click(actions.getByRole("button", { name: "Check E-invoice" }));
-    const reopened = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    const reopened = within(await view.findByRole("region", { name: "E-invoice details" }));
     expect(reopened.getByRole("textbox", { name: "Own FTA-issued TRN" })).toHaveValue("123456789012345");
     expect(reopened.getByLabelText(/^Seller street address/)).toHaveValue("Edited invoice seller address");
     expect(save).not.toHaveBeenCalled();
@@ -202,6 +461,36 @@ describe("invoice editor actions", () => {
     })));
   });
 
+  it("saves editable identity, delivery and bank fields from the invoice tab while allowing an incomplete draft", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, transaction_type: "10000001", payment_means_code: "30", einvoice: {} });
+    const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(10);
+    const view = wrap(<Invoicing />);
+    await view.findByText("INV-AUDIT");
+    setCacheOrg("document-test-org", "document-test-user");
+    fireEvent.click(view.getByRole("button", { name: "More actions" }));
+    fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
+    fireEvent.mouseDown(await view.findByRole("tab", { name: "E-invoice" }), { button: 0, ctrlKey: false });
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
+    fireEvent.change(review.getByLabelText(/^Free-zone beneficiary identifier/), { target: { value: "DEMO-BENEFICIARY" } });
+    fireEvent.change(review.getByLabelText(/^Delivery city/), { target: { value: "Mumbai" } });
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
+    fireEvent.change(review.getByRole("textbox", { name: "Electronic invoicing TIN" }), { target: { value: "1001234567" } });
+    fireEvent.change(review.getByRole("textbox", { name: "Legal registration number" }), { target: { value: "TL-DEMO" } });
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Buyer/ }), { button: 0, ctrlKey: false });
+    fireEvent.change(review.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "BUYER-DEMO" } });
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Tax & Payment/ }), { button: 0, ctrlKey: false });
+    fireEvent.change(review.getByRole("textbox", { name: "Bank account / IBAN" }), { target: { value: "AE-DEMO-ACCOUNT" } });
+    expect(review.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
+    fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      status: "draft", seller_legal_id: "TL-DEMO", einvoice: expect.objectContaining({
+        seller: expect.objectContaining({ tin: "1001234567", legal_id: "TL-DEMO" }),
+        buyer: expect.objectContaining({ identifier: "BUYER-DEMO" }), beneficiary_id: "DEMO-BENEFICIARY",
+        delivery: { city: "Mumbai" }, payment_account_id: "AE-DEMO-ACCOUNT",
+      }),
+    })));
+  });
+
   it("jumps from a classification issue to its actual editable line field and preserves the correction", async () => {
     vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice,
       items: [{ ...invoice.items[0], unit: "pcs", custom: { einvoice_item_type: "G" } }] });
@@ -212,7 +501,7 @@ describe("invoice editor actions", () => {
     fireEvent.click(view.getByRole("button", { name: "More actions" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
     fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
-    const review = within(await view.findByRole("dialog", { name: "Check E-invoice" }));
+    const review = within(await view.findByRole("region", { name: "E-invoice details" }));
     fireEvent.mouseDown(review.getByRole("tab", { name: /^Items/ }), { button: 0, ctrlKey: false });
     fireEvent.click(review.getByRole("button", { name: /Edit:.*HS classification code/ }));
     const hsCode = await view.findByRole("textbox", { name: "HS classification code for line 1" });
@@ -248,10 +537,8 @@ describe("invoice editor actions", () => {
     setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "More actions" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-    const section = (await view.findByText("E-invoice details")).closest("details")!;
+    const section = (await view.findByText("E-invoice details", { selector: "summary" })).closest("details")!;
     const disclosure = section.querySelector("summary")!;
-    expect(section).not.toHaveAttribute("open");
-    fireEvent.click(disclosure);
     expect(section).toHaveAttribute("open");
     fireEvent.change(view.getByLabelText("Purchase order number"), { target: { value: "PO-COMPACT-27" } });
     fireEvent.click(disclosure);

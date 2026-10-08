@@ -47,6 +47,8 @@ import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
 import LinkedRecords from "../components/LinkedRecords";
 import PartyBankDetails from "../components/PartyBankDetails";
+import SupplierInvoiceFields from "../components/SupplierInvoiceFields";
+import { supplierCustomFields } from "../lib/supplierInvoiceDetails";
 import AdvanceCard from "../components/AdvanceCard";
 import StatementModal, {
   type StatementDocRef,
@@ -1150,6 +1152,7 @@ function EditSupplierModal({
     phone: "",
     address: "",
     tax_id: "",
+    custom_fields: {} as Record<string, string>,
   };
   const [f, setF] = useState(blank);
   const [saving, setSaving] = useState(false);
@@ -1167,6 +1170,7 @@ function EditSupplierModal({
             phone: supplier.phone ?? "",
             address: supplier.address ?? "",
             tax_id: supplier.tax_id ?? "",
+            custom_fields: supplierCustomFields(supplier.custom_fields),
           }
         : blank
     );
@@ -1188,6 +1192,7 @@ function EditSupplierModal({
         phone: f.phone.trim() || undefined,
         address: f.address.trim() || undefined,
         tax_id: f.tax_id.trim() || undefined,
+        custom_fields: f.custom_fields,
       });
       toast.success("Supplier updated.");
       onSaved();
@@ -1252,6 +1257,7 @@ function EditSupplierModal({
           </Field>
         </div>
       </div>
+      <div className="mt-3"><SupplierInvoiceFields value={f.custom_fields} onChange={custom_fields => setF({ ...f, custom_fields })} /></div>
       <div className="flex flex-wrap justify-end gap-2 pt-4 mt-5 border-t border-border">
         <button onClick={onClose} className="btn-ghost">
           Cancel

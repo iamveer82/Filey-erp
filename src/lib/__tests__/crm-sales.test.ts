@@ -24,6 +24,19 @@ it("converts once under simultaneous requests, preserves currency and terms and 
   expect((await quotes.getDoc(quote)).status).toBe("accepted");
   expect((await localClient.from("invoice_payments").select()).data).toEqual([]);
 });
+it("returns an already converted invoice without consuming another number or reloading company artwork", async () => {
+  const quote = await quotes.saveDoc(draft);
+  const invoice = await quotes.convertToInvoice(quote);
+  const before = (await localClient.from("document_number_reservations").select()).data;
+  const company = vi.spyOn(billing, "getCompany");
+  try {
+    expect(await quotes.convertToInvoice(quote)).toBe(invoice);
+    expect(await quotes.convertToInvoice(quote)).toBe(invoice);
+    expect((await localClient.from("document_number_reservations").select()).data).toEqual(before);
+    expect(company).not.toHaveBeenCalled();
+    expect(await billing.listDocs()).toHaveLength(1);
+  } finally { company.mockRestore(); }
+});
 it("rolls back the new invoice and quote status when line persistence fails", async () => {
   const quote = await quotes.saveDoc(draft);
   const original = Storage.prototype.setItem;

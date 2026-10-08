@@ -908,10 +908,11 @@ function CustomerModal({
             />
           </Field>
         </div>
-        {f.country_code === "AE" && <details className="border-t border-border pt-3 mt-3">
-          <summary className="cursor-pointer font-medium mb-3">Electronic invoicing identity</summary>
-          <EInvoicePartyFields value={readEInvoiceParty(f.custom_fields?.einvoice_identity)} onChange={identity => setF({ ...f, custom_fields: { ...f.custom_fields, einvoice_identity: JSON.stringify(identity) } })} />
-        </details>}
+        <details className="border-t border-border pt-3 mt-3">
+          <summary className="cursor-pointer font-medium mb-3">Electronic invoicing (optional)</summary>
+          <p className="mb-3 text-sm text-muted-foreground">Save these details once to reuse on invoices, or leave them blank and enter them on an individual invoice.</p>
+          <EInvoicePartyFields includeIdentifier value={readEInvoiceParty(f.custom_fields?.einvoice_identity)} onChange={identity => setF({ ...f, custom_fields: { ...f.custom_fields, einvoice_identity: JSON.stringify(identity) } })} />
+        </details>
         {/* Opening balances retain their existing signed accounting meaning. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
           <Field label="Credit limit (AED)">

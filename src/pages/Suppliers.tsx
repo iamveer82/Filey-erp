@@ -27,6 +27,8 @@ import { useUI } from "../lib/ui";
 import { aed, num, money, cn, errMsg } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
+import SupplierInvoiceFields from "../components/SupplierInvoiceFields";
+import { supplierCustomFields } from "../lib/supplierInvoiceDetails";
 import { Button, Card, Field, Badge, Modal, PageHeader, ErrorBanner } from "../components/primitives";
 import { keyActivate, MetricCard } from "../components/ui";
 import {
@@ -609,6 +611,7 @@ function SupplierModal({
     address: "",
     tax_id: "",
     notes: "",
+    custom_fields: {} as Record<string, string>,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -624,6 +627,7 @@ function SupplierModal({
         address: initial?.address ?? "",
         tax_id: initial?.tax_id ?? "",
         notes: initial?.notes ?? "",
+        custom_fields: supplierCustomFields(initial?.custom_fields),
       });
     }
   }, [open, initial]);
@@ -642,6 +646,7 @@ function SupplierModal({
       address: f.address || undefined,
       tax_id: f.tax_id || undefined,
       notes: f.notes || undefined,
+      custom_fields: f.custom_fields,
     };
     pending.current = true;
     setSaving(true);
@@ -727,6 +732,7 @@ function SupplierModal({
             onChange={(e) => setF({ ...f, notes: e.target.value })}
           />
         </Field>
+        <SupplierInvoiceFields value={f.custom_fields} onChange={custom_fields => setF({ ...f, custom_fields })} />
       </div>
       <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
         <button type="button" className="btn-ghost" onClick={onClose}>

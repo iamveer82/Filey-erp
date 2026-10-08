@@ -5,6 +5,7 @@ import { nextFromPattern } from "./docNumber";
 import { withLocalTransaction } from "./localdb";
 import { DOC_NUMBER_KINDS, type DocFormats, type DocNumberKind } from "./numberFormat";
 import { sb } from "./supabase";
+import { isTransientConnectionError } from "./connectionError";
 
 const shapes: Record<DocNumberKind, [string, string, string]> = {
   invoice: ["invoice_docs", "number", "invoice"],
@@ -42,18 +43,35 @@ export async function allocateDocumentNumber(
   const current = () => { requireAgentStorageScope(scope); };
   if (!isLocalMode()) {
     const client = sb();
-    const { data: session, error: sessionError } = await client.auth.getSession();
-    current();
-    if (sessionError || !session.session || !account.endsWith(`:user:${session.session.user.id}`))
-      throw new Error("Your account changed. Reopen the document.");
-    const { data, error } = await client.rpc("filey_reserve_document_number", {
-      p_kind: kind, p_pattern: pattern, p_year: year, p_request: requestId,
-      p_actor: session.session.user.id, p_org: org,
-    }).setHeader("Authorization", `Bearer ${session.session.access_token}`);
-    current();
-    if (error) throw error;
-    if (typeof data !== "string" || !data.trim()) throw new Error("A document number could not be reserved. Retry creating the document.");
-    return data;
+    // The reservation may commit before its response is lost. This RPC is
+    // idempotent by requestId, so one transport retry recovers the same number.
+    // Independent calls still get distinct IDs; never share a pending number
+    // merely because two new documents have the same kind or format.
+    for (let attempt = 0; ; attempt++) {
+      current();
+      const { data: session, error: sessionError } = await client.auth.getSession();
+      current();
+      if (sessionError || !session.session || !account.endsWith(`:user:${session.session.user.id}`))
+        throw new Error("Your account changed. Reopen the document.");
+      let response;
+      try {
+        response = await client.rpc("filey_reserve_document_number", {
+          p_kind: kind, p_pattern: pattern, p_year: year, p_request: requestId,
+          p_actor: session.session.user.id, p_org: org,
+        }).setHeader("Authorization", `Bearer ${session.session.access_token}`);
+      } catch (error) {
+        current();
+        if (attempt === 0 && isTransientConnectionError(error)) continue;
+        throw error;
+      }
+      current();
+      if (response.error) {
+        if (attempt === 0 && isTransientConnectionError(response.error, response.status)) continue;
+        throw response.error;
+      }
+      if (typeof response.data !== "string" || !response.data.trim()) throw new Error("A document number could not be reserved. Retry creating the document.");
+      return response.data;
+    }
   }
   return withLocalTransaction(async client => {
     current();

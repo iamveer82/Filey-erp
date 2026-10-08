@@ -26,7 +26,7 @@ export const PINT_AE_PROCESS_ID = "urn:peppol:bis:billing";
  * June 2026 guidelines. Never derive it from a tax-group representative's TRN.
  * The historical helper/JSON field name remains compatible with saved drafts. */
 export function tinFromCorporateTrn(trn?: string | null): string {
-  const value = (trn ?? "").trim();
+  const value = typeof trn === "string" ? trn.trim() : "";
   return /^\d{15}$/.test(value) ? value.slice(0, 10) : "";
 }
 
@@ -59,12 +59,12 @@ export interface EInvoiceDetails {
 export function buyerEndpoint(details: EInvoiceDetails | undefined, country = UAE_COUNTRY_CODE) {
   const predefined = details?.buyer_delivery_mode === "export-unregistered" ? "9900000099"
     : details?.buyer_delivery_mode === "outside-uae-scope" ? "9900000098" : "";
-  return { id: predefined || details?.buyer?.endpoint_id?.trim() || (country === UAE_COUNTRY_CODE ? partyTin(details?.buyer) : ""),
-    scheme: predefined ? UAE_EAS_SCHEME : details?.buyer?.endpoint_scheme || (country === UAE_COUNTRY_CODE ? UAE_EAS_SCHEME : "") };
+  return { id: predefined || (typeof details?.buyer?.endpoint_id === "string" ? details.buyer.endpoint_id.trim() : "") || (country === UAE_COUNTRY_CODE ? partyTin(details?.buyer) : ""),
+    scheme: predefined ? UAE_EAS_SCHEME : (typeof details?.buyer?.endpoint_scheme === "string" ? details.buyer.endpoint_scheme : "") || (country === UAE_COUNTRY_CODE ? UAE_EAS_SCHEME : "") };
 }
 
 export function partyTin(party?: EInvoiceParty | null): string {
-  return party?.tin?.trim() || tinFromCorporateTrn(party?.corporate_trn);
+  return (typeof party?.tin === "string" ? party.tin.trim() : "") || tinFromCorporateTrn(party?.corporate_trn);
 }
 
 export function readEInvoiceParty(value?: string): EInvoiceParty {

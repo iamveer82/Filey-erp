@@ -132,12 +132,10 @@ async function documentContext(
     [kind + "_phone"]: party.phone,
     [kind + "_address"]: "address" in party ? party.address : undefined,
     [kind + "_trn"]: "tax_id" in party ? party.tax_id : "trn" in party ? party.trn : undefined,
-    ...(kind === "customer" ? {
-      buyer_city: "city" in party ? party.city : undefined,
-      buyer_country_subdivision: "country_subdivision" in party ? party.country_subdivision : undefined,
-      buyer_country_code: "country_code" in party ? party.country_code : undefined,
-      buyer_identity: "custom_fields" in party && party.custom_fields?.einvoice_identity ? readEInvoiceParty(party.custom_fields.einvoice_identity) : undefined,
-    } : {}),
+    buyer_city: "city" in party ? party.city : "custom_fields" in party ? party.custom_fields?.city : undefined,
+    buyer_country_subdivision: "country_subdivision" in party ? party.country_subdivision : "custom_fields" in party ? party.custom_fields?.country_subdivision : undefined,
+    buyer_country_code: "country_code" in party ? party.country_code : "custom_fields" in party ? party.custom_fields?.country_code : undefined,
+    buyer_identity: "custom_fields" in party && party.custom_fields?.einvoice_identity ? readEInvoiceParty(party.custom_fields.einvoice_identity) : undefined,
   } : {}) };
   if (!validateItems) return context;
   const products = await erp.products();
@@ -620,7 +618,7 @@ async function findProduct(name: unknown) {
 
 /** Report draft readiness without treating missing tax details as a failed save. */
 async function invoiceReadiness(doc: InvoiceDocInput) {
-  if (!isUaeRegime(doc.currency || "AED", doc.tax_country_code)) return {};
+  if (doc.doc_type === "purchase" || !isUaeRegime(doc.currency || "AED", doc.tax_country_code)) return {};
   const { eInvoiceIssues } = await import("./einvoiceXml");
   const issues = eInvoiceIssues({ ...doc, items: doc.items.map(item => ({ ...item, ...splitItemMeta(item.custom) })) });
   return { einvoice_review: {
@@ -3375,7 +3373,19 @@ export const TOOLS: ToolDef[] = [
         seller_name: co?.name || "",
         tax_country_code: co?.country_code,
         seller_trn: co?.trn,
+        seller_address: co?.address,
+        seller_city: co?.city,
+        seller_country_subdivision: co?.country_subdivision,
+        seller_legal_id: co?.legal_id,
+        seller_legal_id_type: co?.legal_id_type,
+        einvoice: { seller: co?.einvoice, buyer: a.buyer_identity as EInvoiceParty | undefined },
         customer_name: str(a.supplier_name),
+        customer_address: str(a.supplier_address),
+        customer_email: str(a.supplier_email),
+        customer_trn: str(a.supplier_trn),
+        buyer_city: str(a.buyer_city),
+        buyer_country_subdivision: str(a.buyer_country_subdivision),
+        buyer_country_code: str(a.buyer_country_code),
         issue_date: str(a.issue_date) || today(),
         due_date: str(a.due_date) || undefined,
         tax_rate: co?.default_tax_rate ?? 0,

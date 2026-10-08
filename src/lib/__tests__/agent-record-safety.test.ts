@@ -33,6 +33,18 @@ it("copies saved electronic identities into AI drafts and reports missing detail
     einvoice: { seller: { tin: "1001234567", legal_authority: "Dubai DET" }, buyer: { tin: "1009876543", legal_id: "BUYER-TL" } } });
 });
 
+it("AI purchase drafts retain optional supplier identity and location presets", async () => {
+  vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Our company", country_code: "AE" } as never);
+  vi.spyOn(suppliers, "list").mockResolvedValue([{ id: 5, name: "Supplier", address: "Supplier street", tax_id: "100987654300003",
+    custom_fields: { city: "Dubai", country_subdivision: "DXB", country_code: "AE", einvoice_identity: JSON.stringify({ tin: "1009876543" }) } }] as never);
+  vi.spyOn(erp, "products").mockResolvedValue([]);
+  vi.spyOn(billing, "listDocs").mockResolvedValue([]);
+  const save = vi.spyOn(billing, "saveDoc").mockResolvedValue(1 as never);
+  expect(await runTool("create_purchase_invoice_draft", { supplier_name: "Supplier", items: [{ description: "Goods", qty: 2, unit_price: 50 }] })).toMatchObject({ ok: true });
+  expect(save.mock.calls[0][0]).toMatchObject({ doc_type: "purchase", customer_address: "Supplier street", customer_trn: "100987654300003",
+    buyer_city: "Dubai", buyer_country_subdivision: "DXB", buyer_country_code: "AE", einvoice: { buyer: { tin: "1009876543" } } });
+});
+
 it("a buyer change uses the new saved e-invoice profile and preserves only the seller and document identity", async () => {
   vi.spyOn(billing, "listDocs").mockResolvedValue([{ id: 1, number: "INV-1", status: "draft" }] as never);
   vi.spyOn(billing, "getDoc").mockResolvedValue({ id: 1, number: "INV-1", status: "draft", customer_name: "Old Buyer", customer_id: 3,

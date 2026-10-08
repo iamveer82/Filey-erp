@@ -4,6 +4,8 @@ import { supabase } from "../lib/supabase";
 import DocView, { type DocViewForm, type DocViewLabels } from "../components/DocView";
 import { splitItemMeta } from "../lib/docItems";
 import { Spinner, EmptyState } from "../components/ui";
+import { InvoiceElectronicDetailsPage, invoiceElectronicDetailPages } from "../components/InvoiceElectronicDetails";
+import FitPreview from "../components/FitPreview";
 
 
 /* Public, unauthenticated document viewer for shared links.
@@ -16,7 +18,7 @@ import { Spinner, EmptyState } from "../components/ui";
 interface SharedDoc {
   doc_type: "invoice" | "quotation" | "purchase_order" | "receipt";
   doc: Record<string, unknown>;
-  items: { description: string; qty: number; unit_price: number; unit?: string; discount?: number; tax?: number; custom?: Record<string, string> }[];
+  items: { description: string; qty: number; unit_price: number; unit?: string; discount?: number; tax?: number; tax_category?: string | null; custom?: Record<string, string> }[];
 }
 
 function tokenFromHash(): string {
@@ -72,6 +74,8 @@ export default function PortalView() {
   const d = shared.doc;
   const ccy = String(d.currency || "AED");
   const form: DocViewForm = {
+    doc_type: shared.doc_type,
+    einvoice: shared.doc_type === "invoice" && d.einvoice && typeof d.einvoice === "object" && !Array.isArray(d.einvoice) ? d.einvoice as DocViewForm["einvoice"] : undefined,
     template: String(d.template || "minimal"),
     accent: String(d.accent || "#222222"),
     currency: ccy,
@@ -85,13 +89,29 @@ export default function PortalView() {
     seller_trn: d.seller_trn ? String(d.seller_trn) : null,
     seller_email: d.seller_email ? String(d.seller_email) : null,
     seller_phone: d.seller_phone ? String(d.seller_phone) : null,
+    seller_city: d.seller_city ? String(d.seller_city) : null,
+    seller_country_subdivision: d.seller_country_subdivision ? String(d.seller_country_subdivision) : null,
+    seller_legal_id: d.seller_legal_id ? String(d.seller_legal_id) : null,
+    seller_legal_id_type: d.seller_legal_id_type ? String(d.seller_legal_id_type) : null,
     customer_name: String(d.customer_name || ""),
     customer_address: d.customer_address ? String(d.customer_address) : null,
     customer_trn: d.customer_trn ? String(d.customer_trn) : null,
     customer_email: d.customer_email ? String(d.customer_email) : null,
+    buyer_city: d.buyer_city ? String(d.buyer_city) : null,
+    buyer_country_subdivision: d.buyer_country_subdivision ? String(d.buyer_country_subdivision) : null,
+    buyer_country_code: d.buyer_country_code ? String(d.buyer_country_code) : null,
+    invoice_type_code: d.invoice_type_code ? String(d.invoice_type_code) : null,
+    payment_means_code: d.payment_means_code ? String(d.payment_means_code) : null,
+    original_invoice_number: d.original_invoice_number ? String(d.original_invoice_number) : null,
+    original_invoice_date: d.original_invoice_date ? String(d.original_invoice_date) : null,
+    date_of_supply: d.date_of_supply ? String(d.date_of_supply) : null,
+    advance_applied: typeof d.advance_applied === "number" ? d.advance_applied : null,
+    aed_exchange_rate: typeof d.aed_exchange_rate === "number" ? d.aed_exchange_rate : null,
+    fx_rate: typeof d.fx_rate === "number" ? d.fx_rate : null,
     issue_date: d.issue_date ? String(d.issue_date) : null,
     due_date: d.due_date ? String(d.due_date) : null,
     po_number: d.po_number ? String(d.po_number) : null,
+    po_date: d.po_date ? String(d.po_date) : null,
     tax_rate: typeof d.tax_rate === "number" ? d.tax_rate : 0,
     discount: typeof d.discount === "number" ? d.discount : 0,
     notes: d.notes ? String(d.notes) : null,
@@ -101,6 +121,9 @@ export default function PortalView() {
     // through the share RPC (which returns the whole row) into DocView.
     unit_price_formula:
       (d.unit_price_formula as { a: string; b: string } | null) || null,
+    customColumns: Array.isArray(d.custom_columns)
+      ? d.custom_columns.filter((column): column is { key: string; label: string } => !!column && typeof column === "object" && typeof column.key === "string" && typeof column.label === "string")
+      : undefined,
     round_off: typeof d.round_off === "boolean" ? d.round_off : false,
     items: shared.items.map((it) => {
       const { custom, calcMode, amount, itemFormula, discount, tax } = splitItemMeta(
@@ -116,6 +139,7 @@ export default function PortalView() {
         // for the undiscounted line.
         discount: discount ?? it.discount,
         tax: tax ?? it.tax,
+        tax_category: it.tax_category,
         custom,
         calcMode,
         amount,
@@ -125,6 +149,7 @@ export default function PortalView() {
   };
 
   const labels: DocViewLabels = labelsFor(shared.doc_type);
+  const detailPages = invoiceElectronicDetailPages(form);
   const status = String(d.status || "draft");
 
   return (
@@ -140,6 +165,13 @@ export default function PortalView() {
         <div className="paper-texture rounded-xl border border-border p-8 shadow-sm min-h-[1123px]" data-no-i18n dir="ltr">
           <DocView form={form} labels={labels} />
         </div>
+        {detailPages.map((rows, index) => <div key={index} className="mt-4" data-no-i18n dir="ltr">
+          <FitPreview baseWidth={794} zoom={100} padding={0} zoomable>
+            <div style={{ width: 794, minHeight: 1123, padding: 48, boxSizing: "border-box", background: "#fff" }}>
+              <InvoiceElectronicDetailsPage rows={rows} pageNumber={index + 1} pageCount={detailPages.length} invoiceNumber={form.number} />
+            </div>
+          </FitPreview>
+        </div>)}
 
         {shared.doc_type === "invoice" && status !== "paid" && !paid && (
           <div className="mt-6 rounded-xl border border-border bg-muted px-4 py-3 text-center text-sm text-muted-foreground">

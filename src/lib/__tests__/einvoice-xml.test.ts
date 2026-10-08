@@ -7,7 +7,17 @@ import {
   buildInvoiceXml,
   type EInvoiceDoc,
 } from "../einvoiceXml";
-import { buyerEndpoint, isCreditNote } from "../einvoice";
+import { buyerEndpoint, isCreditNote, partyTin, tinFromCorporateTrn } from "../einvoice";
+
+test("legacy non-string identity values do not crash previews or become invented identifiers", () => {
+  for (const malformed of [123, {}, [], false]) {
+    expect(tinFromCorporateTrn(malformed as never)).toBe("");
+    expect(partyTin({ tin: malformed, corporate_trn: malformed } as never)).toBe("");
+    expect(buyerEndpoint({ buyer: { endpoint_id: malformed, endpoint_scheme: malformed, tin: malformed } } as never))
+      .toEqual({ id: "", scheme: "0235" });
+  }
+  expect(partyTin({ tin: 123 as never, corporate_trn: "100123456700003" })).toBe("1001234567");
+});
 
 const sample = (): EInvoiceDoc => ({
   einvoice: { uuid: "e054df09-2f88-41ee-a45e-559f1d5f5408",

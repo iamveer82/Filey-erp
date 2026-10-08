@@ -36,10 +36,16 @@ it("prints only selected transaction details once on the final page of every inv
     expect(section({ tax_country_code: "IN" }), template.id).toHaveLength(0);
     const all = section({ transaction_type: "11111111", currency: "USD" });
     for (const flag of TRANSACTION_TYPE_FLAGS) expect(all[0].textContent, template.id).toContain(flag.label);
+    const metadata = document.createElement("div");
+    const ordinaryForm = { ...form, template: template.id, transaction_type: undefined, invoice_type_code: "380", payment_means_code: "30" };
+    metadata.innerHTML = renderToStaticMarkup(<DocView form={ordinaryForm} customTemplate={template.custom} />);
+    expect(metadata.querySelector("[data-invoice-payment]")?.textContent, template.id).toBe("Invoice type: 380 (Tax invoice) · Payment: 30 (Credit transfer)");
+    expect(metadata.querySelector("[data-invoice-transactions]"), template.id).toBeNull();
+    expect(renderToStaticMarkup(<DocView form={ordinaryForm} customTemplate={template.custom} showFooter={false} />), template.id).not.toContain("data-invoice-payment");
   }
   const pdf = document.createElement("div");
   pdf.innerHTML = renderToStaticMarkup(<InvoiceExportSheet form={{ ...form, accent: "#222222", template: "corporate", items: [form.items[0], { ...form.items[0], pageBreakBefore: true }] }} bank={EMPTY_BANK} />);
-  const pages = pdf.querySelectorAll(".invoice-print");
+  const pages = pdf.querySelectorAll(".invoice-print:not([data-einvoice-details-sheet])");
   expect(pages).toHaveLength(2);
   expect(pages[0].querySelector("[data-invoice-transactions]")).toBeNull();
   expect(pages[1].querySelector("[data-invoice-transactions]")?.textContent).toContain("Free Trade zone · Exports");

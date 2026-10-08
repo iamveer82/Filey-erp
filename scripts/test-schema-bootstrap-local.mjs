@@ -113,6 +113,8 @@ try {
   mkdirSync(join(root,'output'),{recursive:true});
   writeFileSync(catalogPath,JSON.stringify({rows:[{catalog}]},null,2)+'\n');
   console.log('PASS: actual full installer runs from empty public schema.');
+  const supplierUpgrade=sql('supabase/2026-10-08-supplier-invoice-details.sql').replace(/^(?:begin;|commit;)\s*$/gmi,'');
+  console.log(run('psql',args('postgres'),sql('scripts/fixtures/supplier-invoice-details.sql').replace('-- APPLY SUPPLIER UPGRADE',()=>supplierUpgrade+'\n'+supplierUpgrade)).trim());
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/bootstrap-workflows.sql')).trim());
   if(removedMemberOnly) {
     await testRemovedMembership();
@@ -132,7 +134,7 @@ try {
   run('psql',args('postgres'),`update public.filey_bootstrap_migrations set source_sha256='${installedHash}' where name='stripe-billing.sql';`);
   assert.equal(query('postgres',snapshotSql),before,'A changed migration receipt allowed partial canonical changes');
   console.log('PASS: installed source hash mismatch refuses silently changed historical migrations and leaves saved data intact.');
-  const currentUpgradePaths=['2026-10-04-document-child-authority.sql','2026-10-04-tool-job-authority.sql','2026-10-04-atomic-document-save.sql','2026-10-04-workspace-device-authority.sql','2026-10-04-public-document-privacy.sql','2026-10-04-atomic-payroll.sql','2026-10-04-subscription-claim-serialization.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-04-cloud-storage-privacy.sql','2026-10-04-scheduled-agent-privacy.sql','2026-10-04-ai-credit-test-promotion.sql','2026-10-04-ai-credit-checkout-resume.sql','2026-10-07-removed-member-workspace-recovery.sql','2026-10-07-profile-workspace-authority.sql','2026-10-07-document-save-performance.sql','2026-10-08-audit-artwork-metadata.sql'];
+  const currentUpgradePaths=['2026-10-04-document-child-authority.sql','2026-10-04-tool-job-authority.sql','2026-10-04-atomic-document-save.sql','2026-10-04-workspace-device-authority.sql','2026-10-04-public-document-privacy.sql','2026-10-04-atomic-payroll.sql','2026-10-04-subscription-claim-serialization.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-04-cloud-storage-privacy.sql','2026-10-04-scheduled-agent-privacy.sql','2026-10-04-ai-credit-test-promotion.sql','2026-10-04-ai-credit-checkout-resume.sql','2026-10-07-removed-member-workspace-recovery.sql','2026-10-07-profile-workspace-authority.sql','2026-10-07-document-save-performance.sql','2026-10-08-audit-artwork-metadata.sql','2026-10-08-supplier-invoice-details.sql'];
   for(const file of currentUpgradePaths) run('psql',args('postgres'),sql('supabase/'+file)+'\n'+sql('supabase/'+file));
   assert.equal(query('postgres',snapshotSql),before,'Repeated current upgrade changed seeded customer records');
   console.log('PASS: current explicit upgrades apply repeatably to the populated installed database without rewriting saved records.');

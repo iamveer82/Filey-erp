@@ -10,7 +10,7 @@ import { resolveTemplateId } from "./DocTemplates";
 import UaePackDoc from "./UaePackDoc";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
 import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
-import { BankDetailsBlock, type BankInfo } from "./BankDetails";
+import { BankDetailsBlock, EMPTY_BANK, type BankInfo } from "./BankDetails";
 import { taxRegimeFor } from "../lib/taxRegimes";
 import {
   INVOICE_TYPE_CODES,
@@ -60,7 +60,11 @@ export interface DocViewCustomColumn {
 }
 
 export interface DocViewForm {
+  doc_type?: string;
   einvoice?: import("../lib/einvoice").EInvoiceDetails;
+  original_invoice_number?: string | null;
+  original_invoice_date?: string | null;
+  aed_exchange_rate?: number | null;
   tax_country_code?: string | null;
   template?: string | null;
   accent?: string | null;
@@ -148,10 +152,17 @@ export default function DocView({
   itemStartIndex = 0,
   showTotals = true,
   showFooter = true,
-  bank,
+  bank: suppliedBank,
   labels,
   customTemplate: providedTemplate,
 }: DocViewProps) {
+  // A document's payment instructions are a snapshot. A later company bank
+  // change must not print a different payment destination on this invoice.
+  const paymentAccount = typeof inputForm.einvoice?.payment_account_id === "string" ? inputForm.einvoice.payment_account_id.trim() : "";
+  const paymentAccountName = typeof inputForm.einvoice?.payment_account_name === "string" ? inputForm.einvoice.payment_account_name.trim() : "";
+  const bank = suppliedBank && (paymentAccount || paymentAccountName)
+    ? { ...EMPTY_BANK, account_number: paymentAccount, account_name: paymentAccountName }
+    : suppliedBank;
   const customId = inputForm.template?.startsWith("custom-") ? inputForm.template : null;
   const { templates, loading, error, reload } = useCustomTemplates(!!customId && !providedTemplate);
   const customTemplate = customId
