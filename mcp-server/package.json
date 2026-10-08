@@ -14,7 +14,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "smoke": "node dist/smoke.js",
-    "smoke:local": "node dist/smoke-local.js"
+    "smoke:local": "node dist/smoke-local.js",
+    "smoke:pilot": "node dist/smoke-pilot.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -186,6 +186,74 @@ returns `{error: "..."}` payloads on failure instead of crashing.
   Stdio MCP tools cannot create portable approval codes or send reminders.
 - **Stdio hygiene.** All logging goes to stderr; stdout carries JSON-RPC only.
 
+## Restricted Hermes pilot
+
+The backend pilot starts a separate, short-lived MCP child for one verified Filey
+user/workspace. It must explicitly set `FILEY_MCP_MODE=hermes-pilot`. With that
+mode absent (or `standard`), the existing 17-tool local/cloud MCP is unchanged.
+An unknown mode is an error, rather than a fallback to unrestricted tools.
+
+The runner supplies this exact child environment in addition to the Node runtime
+environment. Values come from the authenticated backend, never model arguments:
+
+```text
+FILEY_MCP_MODE=hermes-pilot
+FILEY_HERMES_BINDING={"version":1,"user_id":"<authenticated-user-UUID>","org_id":"<current-workspace-ID>","data_mode":"cloud"}
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_ANON_KEY=<anon-JWT-or-sb_publishable-key>
+SUPABASE_ACCESS_TOKEN=<authenticated-user-JWT>
+```
+
+The pilot accepts only cloud mode and a user JWT. It refuses local database
+configuration, email/password authentication, service-role tokens, secret/admin
+API keys and a binding whose user or organization differs from the verified
+Supabase user/profile. Production URLs require HTTPS; HTTP loopback is supported
+for development Supabase and the throwaway test fixture. Redirects are refused.
+JWT claims are only an early rejection check; `auth.getUser` verifies the token
+with Supabase before access is granted. The binding is pinned for the process
+lifetime; changing it, the mode, endpoint or credentials requires a new child.
+
+The only exposed pilot tools are:
+
+| Tool | Required module access |
+|---|---|
+| `get_financial_summary` | accounting, invoicing, inventory |
+| `list_invoices`, `get_invoice` | invoicing |
+| `list_quotes` | quoting |
+| `list_orders` | orders |
+| `list_purchase_orders` | purchase-orders |
+| `list_customers`, `find_customer` | customers |
+| `list_products`, `list_low_stock` | inventory |
+| `run_report` | reports, invoicing |
+
+Current membership and module permissions are verified through
+`filey_module_access` at startup and before/after each call. Owners/admins and
+members with unrestricted (`null`) modules retain the same module rights as
+Filey. Private/shared record access remains enforced by Postgres RLS under the
+user JWT; the module gate does not grant access to another user's private rows.
+If a scope changes or permission is revoked during a read, the result is discarded
+and the caller receives a generic error. Draft, issue, send, delete, reminder,
+SQL and filesystem operations are not exposed by the pilot.
+
+Keep the user JWT exclusively in this MCP child, outside Hermes. An authenticated
+Filey relay should give Hermes only an opaque job capability for the fixed
+allowlist. This child is not a shared multi-user server; Hermes still needs
+whole-process isolation, controlled network access and a trusted plugin/tool
+configuration. The cloud pilot cannot read offline users' device databases.
+
+Validation commands after `npm run build`:
+
+```text
+npm run smoke
+npm run smoke:local
+npm run smoke:pilot
+```
+
+The pilot test launches the actual built stdio server and uses fixture-only
+Supabase HTTP responses. It covers startup/list/calls, malformed binding and
+privileged credentials, cross-user/workspace checks, live role revocation and
+post-read result suppression; it does not verify a deployed Supabase project.
+
 ## Troubleshooting
 
 | Symptom | Fix |

@@ -12,6 +12,7 @@
  */
 
 import { runAgentStream, type AgentDoneReason, type AgentEvent } from "./agentHarness";
+import { hermesAgentStream } from "./hermesAgent";
 // Type-only: erased at compile time, so this cannot reintroduce a runtime cycle
 // with aiTools (see the note at the top of agentHarness.ts).
 import type { ConfirmFn } from "./aiTools";
@@ -354,6 +355,8 @@ interface ChatOpts {
 
 /** Extra controls for the agentic loop (used by the autonomous runner). */
 interface AgentOpts extends ChatOpts {
+  /** Explicit opt-in only; the hosted Hermes pilot is currently read-only. */
+  runtime?: "filey" | "hermes";
   /** Max tool rounds before giving up. Default MAX_TOOL_ROUNDS. */
   maxRounds?: number;
   /** Tool definitions appended to the built-in TOOLS (e.g. the finish tool). */
@@ -700,7 +703,10 @@ export async function* aiAgentStream(
   const prior = opts.isOwner === false ? "" : [journalDigest(), opts.agentId && scope ? priorAgentProgress(opts.agentId) : ""].filter(Boolean).join("\n\n");
   const checkpoint = opts.isOwner && opts.agentId && scope ? agentProgressRecorder(opts.agentId, scope) : undefined;
   const context = prior ? [{ role: "system" as const, text: prior }, ...messages] : messages;
-  const stream = runAgentStream(context, opts, { cfg, fetchFn: cfg.billing ? createCreditFetch(cfg.billing) : aiFetch });
+  const stream = opts.runtime === "hermes"
+    ? hermesAgentStream(context, { funding: cfg.billing ?? "byok", isOwner: opts.isOwner,
+      reasoningEnabled: opts.reasoningEnabled ?? cfg.reasoningEnabled, signal: opts.signal, agentId: opts.agentId })
+    : runAgentStream(context, opts, { cfg, fetchFn: cfg.billing ? createCreditFetch(cfg.billing) : aiFetch });
   const events: AgentEvent[] = [];
   let completed = false;
   let interruption: AgentDoneReason = "stopped";

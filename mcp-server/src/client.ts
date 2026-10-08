@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createLocalClient, readLocalIdentity, resolveDbPath } from "./localdb.js";
+import { pilotPolicy } from "./pilot.js";
 
 export interface Ctx {
   supabase: SupabaseClient;
@@ -33,6 +34,7 @@ function envError(msg: string): never {
  *   FILEY_EMAIL + FILEY_PASSWORD — we sign in with password and supabase-js keeps the session refreshed
  */
 export function getCtx(): Promise<Ctx> {
+  pilotPolicy?.assertCurrent();
   if (!cached) {
     cached = initCtx().catch((err) => {
       cached = null; // allow retry on next call
@@ -61,13 +63,26 @@ function localDbPath(): string | null {
  *  loop. Merges with any signal the caller already set instead of overwriting. */
 function timedFetch(ms: number): typeof fetch {
   return async (input, init) => {
+    pilotPolicy?.assertCurrent();
     const timeout = AbortSignal.timeout(ms);
     const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
-    return fetch(input, { ...init, signal, redirect: "error" });
+    const response = await fetch(input, { ...init, signal, redirect: "error" });
+    pilotPolicy?.assertCurrent();
+    return response;
   };
 }
 
 async function initCtx(): Promise<Ctx> {
+  // The pilot never auto-detects a desktop database or accepts passwords/admin keys.
+  if (pilotPolicy) {
+    const supabase = createClient(pilotPolicy.url, pilotPolicy.anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { headers: { Authorization: `Bearer ${pilotPolicy.accessToken}` }, fetch: timedFetch(15_000) },
+    });
+    const ctx = { supabase, userId: pilotPolicy.binding.user_id, orgId: pilotPolicy.binding.org_id, local: false };
+    await pilotPolicy.authorize(ctx);
+    return ctx;
+  }
   const file = localDbPath();
   if (file) {
     const { userId, orgId } = readLocalIdentity(file);
