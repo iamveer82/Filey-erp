@@ -55,7 +55,8 @@ function setup(route = "/invoicing") {
 
 async function openGuide() {
   fireEvent.click(screen.getByRole("button", { name: "How this section works" }));
-  return screen.findByRole("dialog", { name: "Create and collect an invoice" });
+  // The first guide imports its lazy chunk; a full suite can exceed the default 1s wait.
+  return screen.findByRole("dialog", { name: "Create and collect an invoice" }, { timeout: 5_000 });
 }
 
 function visible(element: HTMLElement) {
