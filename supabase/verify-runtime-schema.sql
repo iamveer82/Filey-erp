@@ -3,7 +3,7 @@
 -- Sources are limited to the new feature guards so migration order/drift can
 -- be checked without exporting unrelated function bodies.
 select jsonb_build_object(
- 'columns',(select jsonb_agg(jsonb_build_object('table',table_name,'column',column_name,'type',udt_name)) from information_schema.columns where table_schema='public'),
+ 'columns',(select jsonb_agg(jsonb_build_object('table',table_name,'column',column_name,'type',udt_name,'nullable',is_nullable='YES','default',column_default)) from information_schema.columns where table_schema='public'),
  'functions',(select jsonb_agg(jsonb_build_object('name',p.proname,'args',oidvectortypes(p.proargtypes),'result',p.prorettype::regtype::text,
    'definer',p.prosecdef,'config',p.proconfig,'anon',has_function_privilege((select oid from pg_roles where rolname='anon'),p.oid,'execute'),
    'authenticated',has_function_privilege((select oid from pg_roles where rolname='authenticated'),p.oid,'execute'),
@@ -18,7 +18,8 @@ select jsonb_build_object(
      'filey_workflow_effects_owned','filey_workflow_receipt_reversible','filey_workflow_credit_available','filey_workflow_advance','filey_workflow_account_for_owner',
      'filey_workflow_guard','filey_workflow_account','filey_workflow_entry','filey_workflow_reverse','filey_workflow_stock','filey_workflow_unstock','filey_workflow_unpost','filey_workflow_post','filey_workflow_payment',
      'filey_business_workflow','filey_order_workflow','filey_journal_workflow','filey_advance_workflow','filey_stock_workflow',
-     'filey_agent_workspace_allowed','prune_tool_runs','filey_ai_wallet') then p.prosrc end))
+     'filey_agent_workspace_allowed','prune_tool_runs','filey_ai_wallet','filey_public_link_guard','filey_set_public_document_link',
+     'filey_public_document_fields','filey_public_document_item','filey_public_einvoice','get_shared_doc','get_shared_invoice') then p.prosrc end))
    from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f'),
  'tables',(select jsonb_agg(jsonb_build_object('table',c.relname,'rls',c.relrowsecurity,
    'authenticated',case when c.relname in ('app_settings','stocktake_requests','document_number_reservations','lead_setup_requests','business_workflow_requests','filey_bootstrap_migrations','ai_credit_orders') then

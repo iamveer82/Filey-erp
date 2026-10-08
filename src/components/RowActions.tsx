@@ -42,6 +42,7 @@ export function RowActions({
   onDelete,
   onSend,
   onShare,
+  onRevokePublicLink,
   shareLabel = "Share",
   align = "right",
 }: {
@@ -51,6 +52,8 @@ export function RowActions({
   onDelete?: () => void;
   /** Team-share this record — appears in the row menu. */
   onShare?: () => void;
+  /** Disable anonymous access without changing team access. */
+  onRevokePublicLink?: () => void;
   shareLabel?: string;
   onSend?: {
     whatsapp?: () => void;
@@ -71,6 +74,7 @@ export function RowActions({
     { label: "Email", icon: <Mail size={16} />, run: onSend?.email },
     { label: "SMS", icon: <Phone size={16} />, run: onSend?.sms },
     { label: "Copy link", icon: <Link2 size={16} />, run: onSend?.copyLink },
+    { label: "Disable public link", icon: <Link2 size={16} />, run: onRevokePublicLink },
     { label: "Delete", icon: <Trash2 size={16} />, run: onDelete, danger: true },
   ].filter(action => action.run);
 

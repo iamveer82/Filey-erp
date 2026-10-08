@@ -158,6 +158,9 @@ try {
     +sql('scripts/fixtures/public-document-setup.sql')+'\n'+migration+'\n'+childMigration+'\n'
     +sql('supabase/customer-portal.sql')+'\n'+legacyPublicDoc+'\n'+sql('scripts/fixtures/public-document-baseline.sql')+'\n'
     +publicPrivacy+'\n'+publicPrivacy+'\n'+sql('scripts/fixtures/public-document-assertions.sql')).trim());
+  const publicLinks=sql('supabase/2026-10-08-public-link-isolation.sql');
+  console.log(run('psql',publicArgs,sql('scripts/fixtures/public-link-setup.sql')+'\n'+publicLinks+'\n'+publicLinks+'\n'
+    +sql('scripts/fixtures/public-link-assertions.sql')).trim());
   run('createdb', ['-h','127.0.0.1','-p',String(port),'-U','postgres','device_limits']);
   const deviceArgs=['-h','127.0.0.1','-p',String(port),'-U','postgres','-d','device_limits','-X','-q','-v','ON_ERROR_STOP=1'];
   const deviceMigration=sql('supabase/2026-09-28-cloud-device-limit.sql');

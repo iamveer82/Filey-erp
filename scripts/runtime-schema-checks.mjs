@@ -3,6 +3,33 @@ const compact = value => (value ?? '').replace(/::text\b/gi, '').replace(/[\s()]
 const sourceText = value => (value ?? '').replace(/--[^\r\n]*/g, '').trim().replace(/\s+/g, ' ');
 const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 
+export function publicLinkSchemaIssues(catalog, sources) {
+  const issues=[];
+  for(const table of ['invoice_docs','quotations','purchase_orders','payment_receipts']) {
+    if(!(catalog.columns??[]).some(c=>c.table===table&&c.column==='public_shared'&&c.type==='bool'&&c.nullable===false&&compact(c.default)==='false'))
+      issues.push(`Missing private-by-default public link column: ${table}`);
+    const trigger=(catalog.triggers??[]).find(t=>t.table===table&&t.name==='filey_public_link_guard');
+    if(!trigger||!['O','A'].includes(trigger.enabled)||trigger.type!==23||trigger.function!=='filey_public_link_guard'||trigger.condition!=null||trigger.columns?.length)
+      issues.push(`Missing public link copy/sync guard: ${table}`);
+  }
+  for(const [name,args,result,definer,authenticated,anon] of [
+    ['filey_public_link_guard','','trigger',false,false,false],
+    ['filey_set_public_document_link','text, bigint, boolean, text','uuid',true,true,false],
+    ['filey_public_document_fields','jsonb','jsonb',false,false,false],
+    ['filey_public_document_item','jsonb','jsonb',false,false,false],
+    ['filey_public_einvoice','jsonb','jsonb',false,false,false],
+    ['get_shared_doc','uuid','jsonb',true,true,true],
+    ['get_shared_invoice','uuid','jsonb',true,true,true],
+  ]) {
+    const found=(catalog.functions??[]).filter(fn=>fn.name===name),fn=found[0];
+    if(found.length!==1||compact(fn?.args)!==compact(args)||fn?.result!==result||fn?.definer!==definer
+      ||!fn?.config?.some(value=>compact(value)==='search_path=public,pg_temp')||fn?.authenticated!==authenticated||fn?.anon!==anon)
+      issues.push(`Unexpected public link function contract: ${name}`);
+    if(!sources.has(name)||sourceText(fn?.source)!==sourceText(sources.get(name))) issues.push(`Public link function drift: ${name}`);
+  }
+  return issues;
+}
+
 export function hostedDraftSchemaIssues(catalog, sources) {
   const issues=[];
   for(const [name,args,result,definer,service] of [

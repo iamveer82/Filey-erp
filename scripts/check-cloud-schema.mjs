@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { featureFunctionSources, featureSchemaIssues, workflowSchemaIssues, privacySchemaIssues, creditPromotionSchemaIssues, auditSchemaIssues, einvoiceSchemaIssues, hostedDraftSchemaIssues } from './runtime-schema-checks.mjs';
+import { featureFunctionSources, featureSchemaIssues, workflowSchemaIssues, privacySchemaIssues, creditPromotionSchemaIssues, auditSchemaIssues, einvoiceSchemaIssues, hostedDraftSchemaIssues, publicLinkSchemaIssues } from './runtime-schema-checks.mjs';
 
 const raw = readFileSync(process.argv[2], 'utf8');
 const catalog = JSON.parse(raw.slice(raw.indexOf('{'))).rows[0].catalog;
@@ -61,6 +61,7 @@ for (const issue of featureSchemaIssues(catalog, featureSources)) issues.add(iss
 const workflowSources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-07-document-save-performance.sql','2026-10-08-hosted-draft-parity.sql'].map(file=>text('supabase/'+file)));
 for(const issue of workflowSchemaIssues(catalog,workflowSources)) issues.add(issue);
 for(const issue of hostedDraftSchemaIssues(catalog,workflowSources)) issues.add(issue);
+for(const issue of publicLinkSchemaIssues(catalog,featureFunctionSources(text('supabase/2026-10-08-public-link-isolation.sql')))) issues.add(issue);
 for(const issue of auditSchemaIssues(catalog,featureFunctionSources(text('supabase/2026-10-08-audit-artwork-metadata.sql')))) issues.add(issue);
 for(const issue of einvoiceSchemaIssues(catalog,featureFunctionSources(text('supabase/2026-09-29-einvoice-identity.sql')))) issues.add(issue);
 const privacySources=featureFunctionSources(text('supabase/2026-10-04-scheduled-agent-privacy.sql'),text('supabase/2026-10-04-cloud-storage-privacy.sql'));

@@ -108,6 +108,12 @@ export function cleanRowForPush(row: Record<string, any>, uid: string, table?: s
   if (row.org_id && orgCache?.uid === uid && row.org_id !== orgCache.orgId)
     throw new Error("This record belongs to a different company. Switch to its original workspace before uploading.");
   const { user_id: _u, org_id: _o, ...rest } = row;
+  // Public consent and bearer tokens are managed only by the cloud link RPC.
+  // Device snapshots must not republish a clone or overwrite a later revoke.
+  if (table && ["invoice_docs", "quotations", "purchase_orders", "payment_receipts"].includes(table)) {
+    delete rest.public_shared;
+    delete rest.share_token;
+  }
   if ("owner" in row && (!table || ["user_files", "user_folders", "user_assets"].includes(table))) rest.owner = uid;
   if (typeof rest.storage_path === "string")
     rest.storage_path = rest.storage_path.replace(/^local-user\//, `${uid}/`);

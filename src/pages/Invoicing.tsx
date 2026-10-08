@@ -1557,6 +1557,15 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
                 </button>}
                 <RowActions
                   onView={() => openQuickView(d)}
+                  onRevokePublicLink={d.public_shared ? async () => {
+                    const scope = agentStorageScope();
+                    try {
+                      await billing.revokePublicLink(d.id);
+                      requireAgentStorageScope(scope ?? "signed-out");
+                      loadDocs();
+                      toast.success("Public link disabled. Team access is unchanged.");
+                    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+                  } : undefined}
                   onEdit={() => editInvoice(d.id)}
                   onShare={
                     !isPurchase && d.user_id === myId

@@ -9,10 +9,11 @@ const config = {
   from: "fixture@example.invalid",
   siteUrl: "https://example.invalid",
 };
-function fixture(count = 3) {
+function fixture(count = 3, sharing?: { shared?: boolean; public_shared?: unknown; share_token?: string }) {
   const calls: unknown[] = [];
+  const selected: string[] = [];
   const q = {
-    select: () => q,
+    select: (columns: string) => { selected.push(columns); return q; },
     eq: (...args: unknown[]) => {
       calls.push(args);
       return q;
@@ -34,12 +35,14 @@ function fixture(count = 3) {
           customer_email: "fixture@example.invalid",
           due_date: "2026-01-01",
           share_token:"fixture-token",
-          shared:i===0,
+          shared:i!==0,
+          public_shared:i===0,
+          ...sharing,
         })),
         error: null,
       }).then(resolve),
   };
-  return { client: { from: () => q, rpc: async () => ({ data:true,error:null }) } as unknown as SupabaseClient, calls };
+  return { client: { from: () => q, rpc: async () => ({ data:true,error:null }) } as unknown as SupabaseClient, calls, selected };
 }
 Deno.test(
   "reminder scope excludes purchase bills and credit notes; provider rejections and unknown acceptance are counted",
@@ -67,6 +70,7 @@ Deno.test(
       ["doc_type", "invoice"],
       "invoice_type_code.is.null,invoice_type_code.not.in.(381,81)",
     ]);
+    assertEquals(f.selected, ["id,number,customer_name,customer_email,due_date,share_token,public_shared"]);
     assertEquals(keys, [
       "filey-overdue/OWNER/ORG/1/2026-09-30",
       "filey-overdue/OWNER/ORG/2/2026-09-30",
@@ -74,6 +78,28 @@ Deno.test(
     ]);
   }
 );
+for (const test of [
+  { name: "owner-only document with an explicitly enabled public link", shared: false, public_shared: true, linked: true },
+  { name: "team and public document", shared: true, public_shared: true, linked: true },
+  { name: "team-only document", shared: true, public_shared: false, linked: false },
+  { name: "private document", shared: false, public_shared: false, linked: false },
+  { name: "legacy team flag without explicit public consent", shared: true, public_shared: undefined, linked: false },
+  { name: "malformed public consent", shared: true, public_shared: "true", linked: false },
+]) {
+  Deno.test(`reminder links respect ${test.name}`, async () => {
+    const f = fixture(1, test);
+    let sends = 0;
+    const result = await runReminders(f.client, "ORG", config, (_url, init) => {
+      sends++;
+      const body = JSON.parse(String(init?.body));
+      assertEquals(body.html.includes("/#/portal/fixture-token"), test.linked);
+      assertEquals(body.html.includes("View invoice online"), test.linked);
+      return Promise.resolve(new Response('{"id":"receipt"}'));
+    });
+    assertEquals(sends, 1);
+    assertEquals(result, { considered: 1, sent: 1, failed: 0 });
+  });
+}
 Deno.test(
   "retrying a daily reminder keeps the same provider key and timeout stays unconfirmed",
   async () => {

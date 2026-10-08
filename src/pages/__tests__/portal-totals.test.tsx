@@ -3,8 +3,9 @@
 // the round-off flag and the per-line discount held in item meta — each of
 // which moves the number.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { fmtDate } from "../../lib/format";
 
 const sharedDoc = {
   doc_type: "invoice",
@@ -48,6 +49,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => null }));
 import PortalView from "../PortalView";
 
 describe("public portal totals", () => {
+  afterEach(cleanup);
   beforeEach(() => {
     currentSharedDoc = structuredClone(sharedDoc);
     window.location.hash = "#/portal/tok-1";
@@ -62,6 +64,39 @@ describe("public portal totals", () => {
     expect(text).not.toContain("315.00");
     expect(container.querySelector("[data-invoice-transactions]")?.textContent)
       .toBe("Transaction details: Free Trade zone · Exports");
+  });
+
+  it.each(["draft", "sent", "overdue"])("does not claim a %s invoice was paid based on its URL", async status => {
+    currentSharedDoc = { ...sharedDoc, doc: { ...sharedDoc.doc, status } };
+    window.location.hash = "#/portal/tok-1?paid=1";
+    render(<PortalView />);
+    expect(await screen.findByText("Contact the seller to arrange payment for this invoice.")).toBeInTheDocument();
+    expect(screen.queryByText("Payment received - thank you!")).not.toBeInTheDocument();
+  });
+
+  it("confirms payment only when the saved invoice status is paid", async () => {
+    currentSharedDoc = { ...sharedDoc, doc: { ...sharedDoc.doc, status: "paid" } };
+    render(<PortalView />);
+    expect(await screen.findByText("Payment received - thank you!")).toBeInTheDocument();
+    expect(screen.queryByText("Contact the seller to arrange payment for this invoice.")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { type: "quotation", number: "QT-41", party: "Quote recipient", partyLabel: "Quote To", issuedLabel: "Quote Date", dueLabel: "Valid Until" },
+    { type: "purchase_order", number: "PO-42", party: "Supplier company", partyLabel: "Supplier", issuedLabel: "Order Date", dueLabel: "Expected" },
+  ])("renders the normalized $type public document without losing its recipient, dates or prices", async ({ type, number, party, partyLabel, issuedLabel, dueLabel }) => {
+    // get_shared_doc maps each document's native columns to this shared contract.
+    currentSharedDoc = { doc_type: type, doc: {
+      template: "minimal", number, status: "draft", currency: "AED", tax_rate: 0,
+      seller_name: "Our company", customer_name: party, customer_address: "Dubai, UAE",
+      customer_trn: "100123456700003", issue_date: "2026-10-08", due_date: "2026-10-22",
+    }, items: [{ description: "Oil pail", qty: 3, unit_price: 25, unit: "pcs" }] };
+    const { container } = render(<PortalView />);
+    await screen.findByText(party);
+    const paper = container.querySelector<HTMLElement>(".paper-texture")!;
+    for (const expected of [number, partyLabel, "Dubai, UAE", "100123456700003", issuedLabel, dueLabel,
+      fmtDate("2026-10-08"), fmtDate("2026-10-22"), "Oil pail", "75.00"]) expect(paper).toHaveTextContent(expected);
+    expect(screen.queryByText("Payment received - thank you!")).not.toBeInTheDocument();
   });
 
   it("preserves invoice identities, references, payment snapshot, tax categories and frozen FX through the public projection", async () => {

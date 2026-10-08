@@ -10,12 +10,13 @@ vi.mock("../supabase", () => ({
     const q = {
       select: () => q, single: () => q, maybeSingle: () => q, order: () => q, range: () => q, eq: () => q,
       update: () => { writing = true; return q; },
+      insert: () => { writing = true; return q; },
       then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => (writing ? cloud.write() : cloud.read()).then(resolve, reject),
     };
     return q;
   } }),
 }));
-import { billing, erp, setCacheOrg } from "../api";
+import { billing, erp, getCacheScope, setCacheOrg } from "../api";
 
 const result = (name: string) => ({ data: [{ id: 1, name }], error: null });
 beforeEach(() => {
@@ -74,6 +75,100 @@ it("takes fresh company presets for document creation without falling back to an
   expect(await billing.getCompany(true)).toMatchObject({ city: "Dubai", einvoice: { tin: "1001234567" } });
   cloud.read.mockRejectedValue(new Error("Current company unavailable"));
   await expect(billing.getCompany(true)).rejects.toThrow("Current company unavailable");
+});
+
+const companyProfile = {
+  name: "Alice private company", email: "alice-private@fixture.invalid", address: "Private seller address",
+  default_accent: "#222222", default_template: "minimal",
+};
+const companyCacheKey = "cache:org:user:alice:company_profile";
+const companyScopeChanges = [
+  { name: "another workspace", change: () => setCacheOrg("other-org", "alice") },
+  { name: "another account", change: () => setCacheOrg("org", "bob") },
+  { name: "a workspace switch and return", change: () => { setCacheOrg("other-org", "alice"); setCacheOrg("org", "alice"); } },
+  { name: "sign-out and sign-in to the same account", change: () => { setCacheOrg(null); setCacheOrg("org", "alice"); } },
+  { name: "local mode", change: () => localStorage.setItem("filey_data_mode", "local") },
+];
+
+it.each(["cloud", "local"])("saves new and existing company profiles within their original %s scope", async mode => {
+  localStorage.setItem("filey_data_mode", mode);
+  cloud.read.mockResolvedValueOnce({ data: null, error: null })
+    .mockResolvedValueOnce({ data: { id: 7 }, error: null });
+  cloud.write.mockResolvedValue({ data: [{ id: 7 }], error: null });
+  await billing.saveCompany(companyProfile);
+  expect(JSON.parse(localStorage.getItem(companyCacheKey)!)).toMatchObject({ v: companyProfile });
+  await billing.saveCompany({ ...companyProfile, name: "Updated company" });
+  expect(JSON.parse(localStorage.getItem(companyCacheKey)!)).toMatchObject({ v: { name: "Updated company" } });
+  expect(cloud.write).toHaveBeenCalledTimes(2);
+});
+
+it("does not start a company lookup when the workspace changes while waiting for the outbox", async () => {
+  const saving = billing.saveCompany(companyProfile);
+  const rejection = expect(saving).rejects.toThrow("workspace changed");
+  setCacheOrg("other-org", "bob");
+  await rejection;
+  expect(cloud.read).not.toHaveBeenCalled();
+  expect(cloud.write).not.toHaveBeenCalled();
+});
+
+it.each(companyScopeChanges)("does not write company details after a delayed lookup and $name", async ({ change }) => {
+  let release!: (value: unknown) => void;
+  cloud.read.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const saving = billing.saveCompany(companyProfile);
+  const rejection = expect(saving).rejects.toThrow("workspace changed");
+  await waitFor(() => expect(cloud.read).toHaveBeenCalledOnce());
+  change();
+  release({ data: { id: 7 }, error: null });
+  await rejection;
+  expect(cloud.write).not.toHaveBeenCalled();
+});
+
+it("does not insert a company profile after a delayed empty lookup changes from local to cloud", async () => {
+  localStorage.setItem("filey_data_mode", "local");
+  let release!: (value: unknown) => void;
+  cloud.read.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const saving = billing.saveCompany(companyProfile);
+  const rejection = expect(saving).rejects.toThrow("workspace changed");
+  await waitFor(() => expect(cloud.read).toHaveBeenCalledOnce());
+  localStorage.setItem("filey_data_mode", "cloud");
+  release({ data: null, error: null });
+  await rejection;
+  expect(cloud.write).not.toHaveBeenCalled();
+});
+
+it.each(companyScopeChanges)("does not publish a late company update after $name", async ({ change }) => {
+  cloud.read.mockResolvedValue({ data: { id: 7 }, error: null });
+  let release!: (value: unknown) => void;
+  cloud.write.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const saving = billing.saveCompany(companyProfile);
+  const rejection = expect(saving).rejects.toThrow("workspace changed");
+  await waitFor(() => expect(cloud.write).toHaveBeenCalledOnce());
+  change();
+  // A newly loaded profile in the destination must survive the old response,
+  // including when the destination is the original scope after A -> B -> A.
+  const current = JSON.stringify({ __t: Date.now(), v: { name: "Current company" } });
+  const destinationKey = `cache:${getCacheScope()}:company_profile`;
+  localStorage.setItem(destinationKey, current);
+  const events = vi.spyOn(window, "dispatchEvent");
+  release({ data: [{ id: 7 }], error: null });
+  await rejection;
+  expect(localStorage.getItem(destinationKey)).toBe(current);
+  if (destinationKey !== companyCacheKey) expect(localStorage.getItem(companyCacheKey)).toBeNull();
+  expect(events).not.toHaveBeenCalled();
+});
+
+it("does not publish a late inserted company after the account changes", async () => {
+  cloud.read.mockResolvedValue({ data: null, error: null });
+  let release!: (value: unknown) => void;
+  cloud.write.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const saving = billing.saveCompany(companyProfile);
+  const rejection = expect(saving).rejects.toThrow("workspace changed");
+  await waitFor(() => expect(cloud.write).toHaveBeenCalledOnce());
+  setCacheOrg("other-org", "bob");
+  release({ data: { id: 7 }, error: null });
+  await rejection;
+  expect(localStorage.getItem("cache:other-org:user:bob:company_profile")).toBeNull();
+  expect(localStorage.getItem(companyCacheKey)).toBeNull();
 });
 
 async function cacheOldInvoice() {

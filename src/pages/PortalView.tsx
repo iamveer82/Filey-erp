@@ -9,7 +9,7 @@ import { Spinner, EmptyState } from "../components/ui";
 /* Public, unauthenticated document viewer for shared links.
  * Route: #/portal/<share_token>
  * Reads through the SECURITY DEFINER get_shared_doc() RPC, which only returns
- * documents the owner has explicitly shared (shared = true).
+ * documents the owner has explicitly published (public_shared = true).
  * Invoice settlement is arranged directly with the seller. Filey's own plan
  * and AI-credit checkout does not collect payments for customer invoices. */
 
@@ -27,7 +27,6 @@ function tokenFromHash(): string {
 export default function PortalView() {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [shared, setShared] = useState<SharedDoc | null>(null);
-  const paid = typeof window !== "undefined" && window.location.hash.includes("paid=1");
 
   useEffect(() => {
     const token = tokenFromHash();
@@ -148,11 +147,12 @@ export default function PortalView() {
 
   const labels: DocViewLabels = labelsFor(shared.doc_type);
   const status = String(d.status || "draft");
+  const paid = status === "paid";
 
   return (
     <div className="min-h-screen bg-muted px-4 py-10">
       <div className="mx-auto max-w-3xl rounded-xl border border-border bg-card p-8 text-foreground">
-        {(paid || status === "paid") && (
+        {paid && (
           <div className="mb-4 rounded-xl bg-success/10 px-4 py-2.5 text-sm font-medium text-success">
             Payment received - thank you!
           </div>
@@ -163,7 +163,7 @@ export default function PortalView() {
           <DocView form={form} labels={labels} />
         </div>
 
-        {shared.doc_type === "invoice" && status !== "paid" && !paid && (
+        {shared.doc_type === "invoice" && !paid && (
           <div className="mt-6 rounded-xl border border-border bg-muted px-4 py-3 text-center text-sm text-muted-foreground">
             Contact the seller to arrange payment for this invoice.
           </div>

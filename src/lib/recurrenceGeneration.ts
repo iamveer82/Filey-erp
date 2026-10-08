@@ -69,7 +69,7 @@ export async function generateRecurringInvoice(id: number, expected: string, tod
       const lines = await client.from("invoice_doc_items").select("*").eq("invoice_id", header.data.id).order("position");
       if (lines.error) throw lines.error;
       if (lines.data.length > 500 || lines.data.some((line: Record<string, unknown>) => line.org_id && line.org_id !== org)) throw new Error("Review the recurring invoice's item ownership and size.");
-      const copied = omit(header.data, ["id", "user_id", "org_id", "created_at", "updated_at", "sync_revision", "shared", "shared_with", "share_token", "due_date", "quotation_id", "order_id", "items"]);
+      const copied = omit(header.data, ["id", "user_id", "org_id", "created_at", "updated_at", "sync_revision", "shared", "shared_with", "share_token", "public_shared", "due_date", "quotation_id", "order_id", "items"]);
       copied.org_id = org; copied.user_id = account?.split(":user:").slice(-1)[0];
       copied.number = number; copied.status = "draft"; copied.issue_date = today; copied.advance_applied = 0;
       if (copied.einvoice && typeof copied.einvoice === "object") copied.einvoice = { ...copied.einvoice, uuid: crypto.randomUUID() };

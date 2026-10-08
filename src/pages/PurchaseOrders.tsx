@@ -1,6 +1,6 @@
 import Step from "../components/DocumentStep";
 import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -59,6 +59,7 @@ import {
 } from "../lib/numberFormat";
 import { allocateDocumentNumber } from "../lib/documentNumbers";
 import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
+import { publicAppBase } from "../lib/documentMessage";
 import FitPreview from "../components/FitPreview";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import { downloadElementAsPdf, elementToPdfBytes } from "../lib/pdfTools";
@@ -392,12 +393,19 @@ export default function PurchaseOrders() {
   // Share one PO via WhatsApp / email / SMS, or copy its public portal link
   // (same real link as the bulk "Copy public link" action).
   const sendPo = async (kind: ShareKind, r: PoSummary) => {
+    const scope = agentStorageScope();
+    let linkEnabled = false;
     try {
       if (kind === "copyLink") {
+        const base = publicAppBase();
+        if (!base) throw new Error("Public PO links need a hosted cloud address.");
         const token = await pos.publicLink(r.id);
-        const url = `${location.origin}${location.pathname}#/portal/${token}`;
-        await navigator.clipboard.writeText(url);
+        requireAgentStorageScope(scope ?? "signed-out");
+        linkEnabled = true;
+        const url = `${base}#/portal/${encodeURIComponent(token)}`;
         loadRows();
+        await navigator.clipboard.writeText(url);
+        requireAgentStorageScope(scope ?? "signed-out");
         toast.success("Public PO link copied");
         return;
       }
@@ -433,7 +441,8 @@ export default function PurchaseOrders() {
         url: `Purchase Order ${doc.po_number}`,
       });
     } catch (e) {
-      toast.error(errMsg(e));
+      if (scope === agentStorageScope())
+        toast.error((linkEnabled ? "Public link enabled, but could not copy it: " : "") + errMsg(e));
     }
   };
 
@@ -567,14 +576,22 @@ export default function PurchaseOrders() {
           {
             label: "Copy public link",
             run: async (sel) => {
+              const scope = agentStorageScope();
+              let linkEnabled = false;
               try {
+                const base = publicAppBase();
+                if (!base) throw new Error("Public PO links need a hosted cloud address.");
                 const token = await pos.publicLink(sel[0].id);
-                const url = `${location.origin}${location.pathname}#/portal/${token}`;
-                await navigator.clipboard.writeText(url);
+                requireAgentStorageScope(scope ?? "signed-out");
+                linkEnabled = true;
+                const url = `${base}#/portal/${encodeURIComponent(token)}`;
                 loadRows();
+                await navigator.clipboard.writeText(url);
+                requireAgentStorageScope(scope ?? "signed-out");
                 toast.success("Public PO link copied");
               } catch (e) {
-                toast.error(errMsg(e));
+                if (scope === agentStorageScope())
+                  toast.error((linkEnabled ? "Public link enabled, but could not copy it: " : "") + errMsg(e));
               }
             },
           },
@@ -675,6 +692,15 @@ export default function PurchaseOrders() {
                 )}
                 <RowActions
                   onView={() => openQuickView(r)}
+                  onRevokePublicLink={r.public_shared ? async () => {
+                    const scope = agentStorageScope();
+                    try {
+                      await pos.revokePublicLink(r.id);
+                      requireAgentStorageScope(scope ?? "signed-out");
+                      loadRows();
+                      toast.success("Public link disabled. Team access is unchanged.");
+                    } catch (e) { if (scope === agentStorageScope()) toast.error(errMsg(e)); }
+                  } : undefined}
                   onEdit={() => editPo(r.id, setForm, company, toast)}
                   onCopy={() =>
                     duplicatePo(
@@ -832,6 +858,7 @@ function poDocToForm(
     }),
     customColumns: sanitizeCustomColumns(po.custom_columns || []),
     shared: po.shared,
+    public_shared: po.public_shared,
     share_token: po.share_token,
   };
 }
@@ -877,6 +904,7 @@ async function duplicatePo(
       po_number,
       order_date: today(),
       shared: false,
+      public_shared: false,
       share_token: undefined,
     });
     toast.success("Duplicated into a new draft PO.");
@@ -902,7 +930,7 @@ function Editor({
   docFmts,
 }: {
   form: Form;
-  setForm: (f: Form) => void;
+  setForm: Dispatch<SetStateAction<Form | null>>;
   rows: PoSummary[];
   company: CompanyProfile | null;
   onBack: () => void;
@@ -1082,6 +1110,7 @@ function Editor({
       status: "draft",
       po_number,
       shared: false,
+      public_shared: false,
       share_token: undefined,
     };
     setForm(next);
@@ -1201,15 +1230,28 @@ function Editor({
       toast.error("Save the PO before sharing a public link");
       return;
     }
+    const id = form.id, scope = agentStorageScope();
+    let linkEnabled = false, copied = false;
     try {
-      const token = await pos.publicLink(form.id);
-      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+      const base = publicAppBase();
+      if (!base) throw new Error("Public PO links need a hosted cloud address.");
+      const token = await pos.publicLink(id);
+      requireAgentStorageScope(scope ?? "signed-out");
+      linkEnabled = true;
+      setForm(current => current?.id === id ? { ...current, public_shared: true, share_token: token } : current);
+      const url = `${base}#/portal/${encodeURIComponent(token)}`;
       await navigator.clipboard.writeText(url);
-      setForm({ ...form, shared: true });
+      copied = true;
+      requireAgentStorageScope(scope ?? "signed-out");
       await onSaved();
       toast.success("Public link copied");
     } catch (e) {
-      toast.error(errMsg(e));
+      if (scope === agentStorageScope()) {
+        if (linkEnabled && !copied) {
+          onSaved();
+          toast.error("Public link enabled, but could not copy it: " + errMsg(e));
+        } else toast.error(errMsg(e));
+      }
     }
   };
 
@@ -1399,13 +1441,15 @@ function Editor({
             <ShareToggle
               shared={form.shared}
               onToggle={async (next) => {
+                const id = form.id!, scope = agentStorageScope();
                 try {
-                  await pos.shareDoc(form.id!, next);
-                  setForm({ ...form, shared: next });
+                  await pos.shareDoc(id, next);
+                  requireAgentStorageScope(scope ?? "signed-out");
+                  setForm(current => current?.id === id ? { ...current, shared: next } : current);
                   onSaved();
-                  toast.success(next ? "Shared with team." : "Set to private.");
+                  toast.success(next ? "Shared with team." : "Team sharing disabled. Public links are unchanged.");
                 } catch (e) {
-                  toast.error(errMsg(e));
+                  if (scope === agentStorageScope()) toast.error(errMsg(e));
                 }
               }}
             />
