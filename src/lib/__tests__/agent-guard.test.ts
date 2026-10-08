@@ -195,7 +195,21 @@ describe("run summary", () => {
   });
 
   it.each(["Retry the invoice save", "Continue the earlier save", "Please try again"])("allows an exact saved-request recovery when asked: %s", request => {
-    expect(createGuard(request).before("retry_invoice_save", { request_id: "request-1" })).toEqual({});
+    const g = createGuard(request);
+    g.after("list_pending_invoice_saves", {}, [{ request_id: "request-1", number: "INV-047" }]);
+    expect(g.before("retry_invoice_save", { request_id: "request-1" })).toEqual({});
+  });
+
+  it("requires a request identity from pending discovery or the actual failed save, never a guessed or unrelated result ID", () => {
+    const g = createGuard("Retry the invoice save");
+    expect(g.before("retry_invoice_save", { request_id: "guessed" }).short).toMatchObject({ error: expect.stringContaining("list_pending_invoice_saves") });
+    g.after("find_customers", {}, [{ request_id: "guessed" }]);
+    expect(g.before("retry_invoice_save", { request_id: "guessed" }).short).toBeDefined();
+    g.after("list_pending_invoice_saves", {}, [{ request_id: "actual-request", number: "INV-047" }]);
+    expect(g.before("retry_invoice_save", { request_id: "guessed" }).short).toBeDefined();
+    expect(g.before("retry_invoice_save", { request_id: "actual-request" })).toEqual({});
+    g.after("create_invoice_draft", { customer_name: "Acme" }, { error: "Timeout", save_outcome: "unconfirmed", save_request_id: "current-request" });
+    expect(g.before("retry_invoice_save", { request_id: "current-request" })).toEqual({});
   });
 
   it.each(["create_invoice_draft", "revise_invoice", "create_purchase_invoice_draft"])("blocks altered %s retries after an unconfirmed save while leaving verification available", name => {

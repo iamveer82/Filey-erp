@@ -3,6 +3,20 @@ const compact = value => (value ?? '').replace(/::text\b/gi, '').replace(/[\s()]
 const sourceText = value => (value ?? '').replace(/--[^\r\n]*/g, '').trim().replace(/\s+/g, ' ');
 const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 
+export function auditSchemaIssues(catalog, sources) {
+  const issues=[];
+  for(const [name,args,result,definer] of [['log_audit','','trigger',true],['filey_audit_snapshot','jsonb','jsonb',false]]) {
+    const found=(catalog.functions??[]).filter(fn=>fn.name===name),fn=found[0];
+    if(found.length!==1||compact(fn?.args)!==compact(args)||fn?.result!==result||fn?.definer!==definer
+      ||!fn?.config?.some(value=>compact(value)==='search_path=public'))
+      issues.push(`Unexpected audit function contract: ${name}`);
+    if(sourceText(fn?.source)!==sourceText(sources.get(name))) issues.push(`Audit function drift: ${name}`);
+    if(name==='filey_audit_snapshot'&&(fn?.authenticated!==false||fn?.anon!==false))
+      issues.push('Unexpected audit snapshot client access');
+  }
+  return issues;
+}
+
 // Effective grants and bucket flags are runtime metadata. Reading SQL source
 // alone cannot detect an old public bucket or managed default EXECUTE grant.
 export function privacySchemaIssues(catalog, sources = new Map()) {

@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {featureFunctionSources,workflowSchemaIssues} from './runtime-schema-checks.mjs';
+import {featureFunctionSources,workflowSchemaIssues,auditSchemaIssues} from './runtime-schema-checks.mjs';
 const sources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-07-document-save-performance.sql']
   .map(name=>readFileSync(new URL('../supabase/'+name,import.meta.url),'utf8')));
 const fields={
@@ -56,6 +56,23 @@ const fixture=()=>({
   ],
 });
 const check=c=>workflowSchemaIssues(c,sources);
+
+test('audit catalog detects stale source and exposed snapshot helper',()=>{
+  const auditSources=featureFunctionSources(readFileSync(new URL('../supabase/2026-10-08-audit-artwork-metadata.sql',import.meta.url),'utf8'));
+  const fixture=()=>({functions:[['log_audit','','trigger',true],['filey_audit_snapshot','jsonb','jsonb',false]]
+    .map(([name,args,result,definer])=>({name,args,result,definer,authenticated:false,anon:false,config:['search_path=public'],source:auditSources.get(name)}))});
+  assert.deepEqual(auditSchemaIssues(fixture(),auditSources),[]);
+  for(const fn of fixture().functions) {
+    const stale=fixture();stale.functions.find(item=>item.name===fn.name).source='select null';
+    assert(auditSchemaIssues(stale,auditSources).includes('Audit function drift: '+fn.name));
+    const wrong=fixture();wrong.functions.find(item=>item.name===fn.name).definer=!fn.definer;
+    assert(auditSchemaIssues(wrong,auditSources).includes('Unexpected audit function contract: '+fn.name));
+    const exporter=readFileSync(new URL('../supabase/verify-runtime-schema.sql',import.meta.url),'utf8');
+    assert(exporter.match(/'source',case when p\.proname in \(([\s\S]*?)\) then p\.prosrc end/)?.[1].includes("'"+fn.name+"'"));
+  }
+  const exposed=fixture();exposed.functions[1].authenticated=true;
+  assert(auditSchemaIssues(exposed,auditSources).includes('Unexpected audit snapshot client access'));
+});
 
 test('the full catalog CLI treats only an absent fresh-installer ledger as optional',t=>{
   const directory=mkdtempSync(join(tmpdir(),'filey-catalog-check-'));

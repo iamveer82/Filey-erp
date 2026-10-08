@@ -70,6 +70,36 @@ function mockInvoiceContext() {
 const item = { description: "Consulting", qty: 2, unit_price: 100 };
 
 describe("invoice instructions survive a tool call", () => {
+  it.each(["local", "cloud"] as const)("honors an explicit %s invoice number without reserving a replacement", async mode => {
+    const save = mockInvoiceContext();
+    vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
+    setDataMode(mode);
+    expect(await runTool("create_invoice_draft", {
+      customer_name: "Acme", invoice_number: "QA-NAV-20261008-A", items: [item],
+    })).toMatchObject({ ok: true, id: 81, number: "QA-NAV-20261008-A" });
+    expect(save).toHaveBeenCalledOnce();
+    expect(save.mock.calls[0][0]).toMatchObject({ number: "QA-NAV-20261008-A", items: [item] });
+    expect(documentNumbers.allocateDocumentNumber).not.toHaveBeenCalled();
+    expect(billing.listDocs).not.toHaveBeenCalled();
+  });
+
+  it("rejects blank, oversized and control-character invoice numbers before allocating or saving", async () => {
+    const save = mockInvoiceContext();
+    for (const invoice_number of ["", "   ", "INV\n1", "INV\u007f1", "x".repeat(161)])
+      expect(await runTool("create_invoice_draft", { customer_name: "Acme", invoice_number, items: [item] }))
+        .toMatchObject({ code: "invalid_arguments", retry_safe: true });
+    expect(save).not.toHaveBeenCalled();
+    expect(documentNumbers.allocateDocumentNumber).not.toHaveBeenCalled();
+  });
+
+  it("does not replace an explicitly requested number when the save reports a collision", async () => {
+    const save = mockInvoiceContext().mockRejectedValue({ code: "23505", message: "This document number is already in use. Choose another number." });
+    expect(await runTool("create_invoice_draft", { customer_name: "Acme", invoice_number: "QA-EXISTING", items: [item] }))
+      .toMatchObject({ error: expect.stringContaining("already in use"), invoice_number: "QA-EXISTING" });
+    expect(save).toHaveBeenCalledOnce();
+    expect(documentNumbers.allocateDocumentNumber).not.toHaveBeenCalled();
+  });
+
   it("saves requested dates, wording, discount, VAT and rounding with the returned record ID", async () => {
     const save = mockInvoiceContext();
     expect(await runTool("create_invoice_draft", {
@@ -149,6 +179,33 @@ describe("invoice save acknowledgement", () => {
   const exact = { customer_name: "Acme", items: [{ description: "RC drum", qty: 6, unit: "drum", unit_price: 0.2, custom: { liters: "1200" } }],
     custom_columns: [{ key: "liters", label: "T.Liters" }], price_by: "liters" };
 
+  it("discovers only pending invoice identities of the requested type without exposing document contents or writing", async () => {
+    const save = mockInvoiceContext();
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([
+      { requestId, active: false, input: { number: "INV-047", customer_name: "Acme", logo: "private-artwork", items: exact.items } as never },
+      { requestId: "purchase-request", active: true, input: { number: "PI-001", customer_name: "Supplier", doc_type: "purchase", notes: "private-notes", items: exact.items } as never },
+    ]);
+    setAgentMode("plan");
+    expect(await runTool("list_pending_invoice_saves", { query: "acme" })).toEqual([
+      { number: "INV-047", customer_name: "Acme", request_id: requestId, active: false, doc_type: "sales" },
+    ]);
+    expect(await runTool("list_pending_invoice_saves", { doc_type: "purchase" })).toEqual([
+      { number: "PI-001", customer_name: "Supplier", request_id: "purchase-request", active: true, doc_type: "purchase" },
+    ]);
+    expect(await runTool("list_pending_invoice_saves", { query: "absent" })).toEqual([]);
+    expect(save).not.toHaveBeenCalled();
+    expect(documentNumbers.allocateDocumentNumber).not.toHaveBeenCalled();
+  });
+
+  it("directs an unknown retry request to pending-save discovery instead of asking for an internal ID", async () => {
+    mockInvoiceContext();
+    const retry = vi.spyOn(billing, "retryInvoiceSave");
+    expect(await runTool("retry_invoice_save", { request_id: "12345678-1234-1234-1234-123456789abc" }, () => true))
+      .toMatchObject({ error: expect.stringContaining("Use list_pending_invoice_saves"), retry_safe: false });
+    expect(retry).not.toHaveBeenCalled();
+  });
+
   it.each(["local", "cloud"] as const)("keeps a %s invoice's original number across a later turn and rejects changed-argument retries", async mode => {
     const save = mockInvoiceContext();
     vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
@@ -188,6 +245,26 @@ describe("invoice save acknowledgement", () => {
     expect(read).toHaveBeenCalledExactlyOnceWith(requestId);
     expect(save).toHaveBeenCalledOnce();
     expect(documentNumbers.allocateDocumentNumber).toHaveBeenCalledOnce();
+  });
+
+  it("only recovers an explicitly numbered pending invoice when its number matches", async () => {
+    const save = mockInvoiceContext();
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    save.mockImplementationOnce(async input => {
+      vi.mocked(billing.pendingInvoiceSaves).mockResolvedValue([{ requestId, input, active: false }]);
+      throw { code: "57014", message: "canceling statement due to statement timeout" };
+    });
+    expect(await runTool("create_invoice_draft", { ...exact, invoice_number: "QA-ORIGINAL" }))
+      .toMatchObject({ save_outcome: "unconfirmed", save_failure: "timeout", invoice_number: "QA-ORIGINAL" });
+    const read = vi.spyOn(billing, "readPendingInvoiceSave").mockResolvedValue({ ...save.mock.calls[0][0], id: 81 } as never);
+    expect(await runTool("create_invoice_draft", { ...exact, invoice_number: "QA-OTHER" }))
+      .toMatchObject({ save_outcome: "unconfirmed", invoice_number: "QA-ORIGINAL", save_request_id: requestId });
+    expect(read).not.toHaveBeenCalled();
+    expect(await runTool("create_invoice_draft", { ...exact, invoice_number: "QA-ORIGINAL" }))
+      .toMatchObject({ ok: true, id: 81, number: "QA-ORIGINAL", verified_save_requests: [requestId] });
+    expect(read).toHaveBeenCalledExactlyOnceWith(requestId);
+    expect(save).toHaveBeenCalledOnce();
+    expect(documentNumbers.allocateDocumentNumber).not.toHaveBeenCalled();
   });
 
   it("never substitutes an identical pending edit of another record for this invoice", async () => {
@@ -250,7 +327,7 @@ describe("invoice save acknowledgement", () => {
     vi.spyOn(moduleAccess, "requireToolModuleAccess").mockResolvedValue();
     setDataMode(mode);
     const result = await runTool("create_invoice_draft", exact);
-    expect(result).toMatchObject({ save_outcome: "unconfirmed", retry_safe: false, invoice_number: expect.any(String) });
+    expect(result).toMatchObject({ save_outcome: "unconfirmed", save_failure: "timeout", retry_safe: false, invoice_number: expect.any(String) });
     expect(result).not.toHaveProperty("ok", true);
     expect(save).toHaveBeenCalledOnce();
     expect(save.mock.calls[0][0]).toMatchObject({ items: exact.items, custom_columns: exact.custom_columns });

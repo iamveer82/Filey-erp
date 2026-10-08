@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { setCacheOrg, tools } from "../api";
+import { billing, setCacheOrg, tools } from "../api";
 import { loadModuleAccess, requireToolModuleAccess } from "../moduleAccess";
 import { runTool } from "../aiTools";
 import { ModulesProvider, useModules } from "../modules";
@@ -32,6 +32,28 @@ it("rejects forbidden reads and native powers even in an authenticated agent con
   await expect(requireToolModuleAccess("financial_summary",{})).rejects.toThrow("accounting");
   await expect(requireToolModuleAccess("run_shell",{})).rejects.toThrow("administrator");
   await expect(requireToolModuleAccess("create_product",{})).resolves.toBeUndefined();
+});
+it("gates pending-save discovery by sales versus purchases and checks the exact retry target", async () => {
+  rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["purchase-invoices"] }, error: null });
+  await expect(requireToolModuleAccess("list_pending_invoice_saves", { doc_type: "purchase" })).resolves.toBeUndefined();
+  await expect(requireToolModuleAccess("list_pending_invoice_saves", {})).rejects.toThrow("invoicing");
+  await expect(requireToolModuleAccess("retry_invoice_save", {})).resolves.toBeUndefined();
+  const pending = vi.spyOn(billing, "pendingInvoiceSaves").mockResolvedValue([
+    { requestId: "12345678-1234-1234-1234-123456789abc", active: false, input: { number: "INV-047", customer_name: "Private buyer", items: [] } as never },
+  ]);
+  const retry = vi.spyOn(billing, "retryInvoiceSave");
+  try {
+    expect(await runTool("list_pending_invoice_saves", {})).toMatchObject({ error: expect.stringContaining("invoicing") });
+    expect(pending).not.toHaveBeenCalled();
+    expect(await runTool("retry_invoice_save", { request_id: "12345678-1234-1234-1234-123456789abc" }, () => true))
+      .toMatchObject({ error: expect.stringContaining("invoicing") });
+    expect(retry).not.toHaveBeenCalled();
+    rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["invoicing"] }, error: null });
+    await expect(requireToolModuleAccess("list_pending_invoice_saves", {})).resolves.toBeUndefined();
+    await expect(requireToolModuleAccess("list_pending_invoice_saves", { doc_type: "purchase" })).rejects.toThrow("purchase-invoices");
+    rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: [] }, error: null });
+    await expect(requireToolModuleAccess("retry_invoice_save", {})).rejects.toThrow("invoicing");
+  } finally { pending.mockRestore(); retry.mockRestore(); }
 });
 it("checks the destination module before AI navigation and keeps core pages accessible", async () => {
   const hash = window.location.hash;

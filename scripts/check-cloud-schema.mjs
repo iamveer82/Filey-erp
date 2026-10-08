@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-import { featureFunctionSources, featureSchemaIssues, workflowSchemaIssues, privacySchemaIssues, creditPromotionSchemaIssues } from './runtime-schema-checks.mjs';
+import { featureFunctionSources, featureSchemaIssues, workflowSchemaIssues, privacySchemaIssues, creditPromotionSchemaIssues, auditSchemaIssues } from './runtime-schema-checks.mjs';
 
 const raw = readFileSync(process.argv[2], 'utf8');
 const catalog = JSON.parse(raw.slice(raw.indexOf('{'))).rows[0].catalog;
@@ -60,6 +60,7 @@ const featureSources = featureFunctionSources(text('supabase/2026-10-03-letters.
 for (const issue of featureSchemaIssues(catalog, featureSources)) issues.add(issue);
 const workflowSources=featureFunctionSources(...['2026-10-04-atomic-document-save.sql','2026-10-04-document-number-authority.sql','2026-10-04-atomic-recurrence.sql','2026-10-04-atomic-business-workflows.sql','2026-10-04-atomic-lead-setup.sql','2026-10-04-stripe-invoice-total-parity.sql','2026-10-07-document-save-performance.sql'].map(file=>text('supabase/'+file)));
 for(const issue of workflowSchemaIssues(catalog,workflowSources)) issues.add(issue);
+for(const issue of auditSchemaIssues(catalog,featureFunctionSources(text('supabase/2026-10-08-audit-artwork-metadata.sql')))) issues.add(issue);
 const privacySources=featureFunctionSources(text('supabase/2026-10-04-scheduled-agent-privacy.sql'),text('supabase/2026-10-04-cloud-storage-privacy.sql'));
 for(const issue of privacySchemaIssues(catalog,privacySources)) issues.add(issue);
 for(const issue of creditPromotionSchemaIssues(catalog,featureFunctionSources(text('supabase/2026-10-04-ai-credit-test-promotion.sql')))) issues.add(issue);

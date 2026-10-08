@@ -54,7 +54,7 @@ export async function requireModuleAccess(id: string, admin = false): Promise<vo
 const toolModules: Record<string,string> = {
   find_customers:"customers",create_customer:"customers",find_products:"inventory",create_product:"inventory",
   find_suppliers:"suppliers",create_supplier:"suppliers",financial_summary:"accounting",
-  list_invoices:"invoicing",get_invoice:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",retry_invoice_save:"invoicing",
+  list_invoices:"invoicing",get_invoice:"invoicing",list_pending_invoice_saves:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",retry_invoice_save:"invoicing",
   create_quote:"quoting",list_templates:"invoicing",create_order:"orders",
   get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
   create_payment_receipt:"payment-receipts",list_payment_receipts:"payment-receipts",
@@ -96,8 +96,14 @@ export async function requireToolModuleAccess(name: string, args: Record<string,
     return; // admin rights are the gate for these; they belong to no module
   }
   const deny = (module: string) => { throw new Error(`Your workspace role does not have access to ${module}.`); };
-  if (name === "get_invoice" && args.doc_type === "purchase") {
+  if ((name === "get_invoice" || name === "list_pending_invoice_saves") && args.doc_type === "purchase") {
     if (!canUseModule(access, "purchase-invoices")) deny("purchase-invoices");
+    return;
+  }
+  if (name === "retry_invoice_save") {
+    // The tool resolves the durable request and checks its actual document
+    // module again before replaying; purchase-only roles must reach that check.
+    if (!canUseModule(access, "invoicing") && !canUseModule(access, "purchase-invoices")) deny("invoicing");
     return;
   }
   if (name === "link_records" || name === "find_links") {
