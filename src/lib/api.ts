@@ -713,19 +713,6 @@ async function outboxRemove(id: number): Promise<void> {
   }
 }
 
-/** True for a failure that repeating cannot fix: Postgres integrity-violation
- *  classes (23xxx — unique key taken, foreign key gone, NOT NULL) and
- *  PostgREST's no-rows. A row deleted on another device, or an id already
- *  claimed there, will read the same way on every retry.
- *
- *  Everything else is treated as temporary — offline, timeout, 5xx, an expired
- *  token — and left queued. Erring that way costs a retry; erring the other
- *  way discards a write the user made. */
-export function outboxOpIsDoomed(e: unknown): boolean {
-  const code = String((e as { code?: string } | null)?.code ?? "");
-  return /^23\d\d\d$/.test(code) || code === "PGRST116";
-}
-
 let flushing = false;
 export async function flushOutbox(): Promise<void> {
   if (isLocalMode()) return; // local mode writes are committed directly, no outbox
@@ -762,41 +749,27 @@ export async function flushOutbox(): Promise<void> {
       if (!op || typeof op !== "object" || op._workspace !== activeCacheOrg
         || !["insert", "update", "delete"].includes(op.k)) continue;
       try {
-        if (op.k === "insert") {
-          const { error } = await sb().from(op.t).insert(op.row);
-          if (error) throw error;
-        } else if (op.k === "update") {
-          const { error } = await sb()
-            .from(op.t)
-            .update(op.row)
-            .eq("id", op.id);
-          if (error) throw error;
-        } else {
-          const { error } = await sb().from(op.t).delete().eq("id", op.id);
-          if (error) throw error;
+        const table = sb().from(op.t);
+        const mutation = op.k === "insert" ? table.insert(op.row)
+          : op.k === "update" ? table.update(op.row).eq("id", op.id)
+          : table.delete().eq("id", op.id);
+        const { data, error } = await mutation.select("id");
+        if (error) throw error;
+        // RLS can filter every row without an error. Keep unconfirmed edits recoverable.
+        if (!Array.isArray(data) || data.length !== 1 || data[0]?.id == null
+          || (op.k !== "insert" && String(data[0].id) !== String(op.id))) {
+          throw new Error("Queued save was not confirmed");
         }
         await outboxRemove(entry.id);
-      } catch (e) {
-        // Order matters here — an insert must land before the update that
-        // follows it — so a temporary failure stops the whole replay and
-        // everything waits for the next reconnect.
-        if (!outboxOpIsDoomed(e)) break;
-        // But an op that can NEVER apply used to stop it the same way, and
-        // nothing ever cleared it: the queue jammed on that one entry, every
-        // offline write made afterwards piled up behind it, and none of them
-        // ever reached the cloud. No error surfaced anywhere. Drop the doomed
-        // op and keep draining — it was already lost, the ones behind it were
-        // not.
-        log.warn(
-          "outbox",
-          `dropping ${op.k} on ${op.t} — it cannot succeed`,
-          (e as { message?: string })?.message ?? e
-        );
-        await outboxRemove(entry.id);
+      } catch {
+        // Preserve both the failed edit and dependent operations for recovery.
+        log.warn("outbox", "Queued cloud save was not confirmed; remaining changes were retained.");
+        break;
       }
     }
   } finally {
     flushing = false;
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("filey:outbox-change"));
   }
 }
 

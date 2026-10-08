@@ -3,6 +3,25 @@ const compact = value => (value ?? '').replace(/::text\b/gi, '').replace(/[\s()]
 const sourceText = value => (value ?? '').replace(/--[^\r\n]*/g, '').trim().replace(/\s+/g, ' ');
 const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 
+export function hostedDraftSchemaIssues(catalog, sources) {
+  const issues=[];
+  for(const [name,args,result,definer,service] of [
+    ['filey_reserve_document_number_internal','text, text, integer, uuid, uuid, text','text',true,false],
+    ['filey_channel_party_identity','jsonb','jsonb',false,false],
+    ['filey_channel_create_draft','uuid, text, text, jsonb','jsonb',true,true],
+  ]) {
+    const found=(catalog.functions??[]).filter(fn=>fn.name===name),fn=found[0];
+    if(found.length!==1||compact(fn?.args)!==compact(args)||fn?.result!==result||fn?.definer!==definer
+      ||!fn?.config?.some(value=>compact(value)==='search_path=public,pg_temp'))
+      issues.push(`Unexpected hosted draft function contract: ${name}`);
+    if(fn?.authenticated!==false||fn?.anon!==false||fn?.service_role!==service)
+      issues.push(`Unexpected hosted draft function grants: ${name}`);
+    if(!sources.has(name)||sourceText(fn?.source)!==sourceText(sources.get(name)))
+      issues.push(`Hosted draft function drift: ${name}`);
+  }
+  return issues;
+}
+
 export function einvoiceSchemaIssues(catalog, sources) {
   const issues = [];
   for (const [table, column] of [['invoice_docs', 'einvoice'], ['company_profile', 'einvoice'],

@@ -1,6 +1,7 @@
 // Runnable check for the agent data tools:  deno test supabase/functions/channel-webhook/
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { boundedToolResult, runTool, TOOLS, WRITE_TOOLS } from "./tools.ts";
+import { RESERVED_ITEM_COLUMNS, DEFAULT_COLUMN_LABELS } from "../_shared/docItems.ts";
 
 // Minimal thenable query-builder stub. Records every .eq() so we can assert
 // org scoping; resolves to { data } when awaited.
@@ -66,6 +67,20 @@ Deno.test("unknown tool returns an error object, never throws", async () => {
   assertEquals(typeof out.error, "string");
 });
 
+Deno.test("hosted invoice reads and reminder proposals retain complete long numbers and reject overlong input", async () => {
+  for (const name of ["get_invoice_detail", "request_payment_reminder"]) {
+    for (const size of [80, 160]) {
+      const f = fakeClient([]), number = `INV-${"X".repeat(size - 4)}`;
+      await runTool(f.client, "ORG", name, { invoice_number: number }, "OWNER");
+      assertEquals(f.eqs.some(([column, value]) => column === "number" && value === number), true, name);
+    }
+    const f = fakeClient([]);
+    const result = await runTool(f.client, "ORG", name, { invoice_number: "X".repeat(161) }, "OWNER") as { error?: string };
+    assertEquals(typeof result.error, "string");
+    assertEquals(f.eqs.length, 0, "invalid number must not query a shortened identity");
+  }
+});
+
 // ---- draft-only write tools ----
 
 // Records every insert payload; select/single resolve with a fake id.
@@ -113,6 +128,78 @@ const WRITE_INPUTS: Record<string, unknown> = {
   add_product: { name: "New Product" },
   log_expense: { category: "fuel", amount: 120 },
 };
+
+Deno.test("hosted T.Liters draft preserves physical quantities, units, rates and custom columns", async () => {
+  const f = fakeWriteClient();
+  const input = { customer_name: "Fixture buyer", issue_date: "2026-09-23", due_date: "2026-10-01", notes: "Keep this\nexactly.", terms: "Delivery after payment.",
+    custom_columns: [{ key: "liters", label: "T.Liters" }], price_by: "liters",
+    items: [{ description: "H/O 68 PAIL 20L", qty: 50, unit: "L", unit_price: 0.20, custom: { liters: "1000" } },
+      { description: "15W40 PAIL 20L", qty: 15, unit: "L", unit_price: 4.10, custom: { liters: "300" } }] };
+  const result = await runTool(f.client, "ORG", "create_draft_invoice", input, "OWNER");
+  assertEquals((result as { created: string }).created, "draft");
+  assertEquals(f.rpcRequests, [{ p_owner: "OWNER", p_org: "ORG", p_kind: "invoice", p_input: input }]);
+});
+
+Deno.test("hosted invoice dates and tax precision validate before any allocation", async () => {
+  const f = fakeWriteClient();
+  for (const fields of [{ issue_date: "2026-02-31" }, { issue_date: "23/09/26" }, { issue_date: "" },
+    { due_date: "2026-13-01" }, { due_date: null }, { tax_rate: 5.1234 }, { tax_rate: 101 }, { notes: 123 }]) {
+    const result = await runTool(f.client, "ORG", "create_draft_invoice", { ...WRITE_INPUTS.create_draft_invoice as object, ...fields }, "OWNER") as { error?: string };
+    assertEquals(typeof result.error, "string", JSON.stringify(fields));
+  }
+  assertEquals(f.rpcRequests.length, 0);
+  const result = await runTool(f.client, "ORG", "create_draft_invoice", { ...WRITE_INPUTS.create_draft_invoice as object, due_date: "", notes: "", terms: "", tax_rate: 5.123 }, "OWNER") as { created?: string };
+  assertEquals(result.created, "draft");
+  assertEquals(f.rpcRequests.length, 1);
+});
+
+Deno.test("hosted definitive draft validation is rejected while unknown database failures remain uncertain", async () => {
+  for (const [code,message] of [["22023", "Every invoice line needs a numeric pricing multiplier"],
+    ["22023", "private_schema.secret internal failure"], ["57014", "statement timeout"]]) {
+    const client = { rpc: () => Promise.resolve({ data: null, error: { code, message } }) };
+    const result = await runTool(client, "ORG", "create_draft_invoice", WRITE_INPUTS.create_draft_invoice, "OWNER") as { code: string; error: string; save_outcome?: string; retry_safe: boolean };
+    assertEquals(result.code, code === "22023" ? "invalid_arguments" : "unconfirmed_write");
+    assertEquals(result.retry_safe, code === "22023");
+    assertEquals(result.error.includes("private_schema"), false);
+    if (code === "22023") assertEquals(result.save_outcome, "rejected");
+  }
+});
+
+Deno.test("hosted unsupported manual pricing stops before allocation without stripping values", async () => {
+  for (const extra of [{ amount: 123 }, { custom: { __manual_amount: "123", __calc_mode: "manual" } }, { itemFormula: { a: "liters" } }]) {
+    const f = fakeWriteClient();
+    const result = await runTool(f.client, "ORG", "create_draft_invoice", { customer_name: "Fixture buyer",
+      items: [{ description: "Item", qty: 50, unit_price: 0.2, ...extra }] }, "OWNER");
+    assertEquals((result as { code: string }).code, "unsupported_invoice_calculation");
+    assertEquals(f.rpcRequests.length, 0);
+  }
+});
+
+Deno.test("hosted custom pricing rejects malformed objects without weakening other tool allowlists", async () => {
+  const f = fakeWriteClient();
+  for (const input of [
+    { customer_name: "Fixture buyer", items: [{ description: "Item", unit_price: 1, custom: { liters: { nested: 3 } } }] },
+    { customer_name: "Fixture buyer", items: [{ description: "Item", unit_price: 1 }], status: "sent" },
+  ]) {
+    assertEquals(typeof (await runTool(f.client, "ORG", "create_draft_invoice", input, "OWNER") as { error: unknown }).error, "string");
+  }
+  assertEquals(f.rpcRequests.length, 0);
+});
+
+Deno.test("hosted custom columns reject every editor-reserved key and heading before allocation", async () => {
+  const f = fakeWriteClient();
+  for (const column of [
+    ...[...RESERVED_ITEM_COLUMNS].map(key => ({ key, label: "T.Liters" })),
+    ...[...DEFAULT_COLUMN_LABELS].flatMap(label => ["  ", "\t", "\u00a0\uFEFF"].map(space => ({ key: "liters", label: `${space}${label.toUpperCase()}${space}` }))),
+  ]) {
+    const result = await runTool(f.client, "ORG", "create_draft_invoice", {
+      customer_name: "Fixture buyer", custom_columns: [column], price_by: column.key,
+      items: [{ description: "Item", qty: 50, unit_price: 0.2, custom: { [column.key]: "1000" } }],
+    }, "OWNER") as { error?: string };
+    assertEquals(typeof result.error, "string", JSON.stringify(column));
+  }
+  assertEquals(f.rpcRequests.length, 0);
+});
 
 Deno.test("write tools pin user_id + org_id on every insert", async () => {
   for (const tool of WRITE_TOOLS) {

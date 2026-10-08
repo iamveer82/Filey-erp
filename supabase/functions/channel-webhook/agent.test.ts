@@ -8,7 +8,7 @@ type Row = Record<string, unknown>;
 const OWNER_ID = "00000000-0000-4000-8000-000000000001";
 function database() {
   const state = {
-    org: "personal-org", role: "owner", lostInsert: false,
+    org: "personal-org", role: "owner", lostInsert: false, draftError: "",
     confirmed: true, walletError: "", walletCalls: [] as Row[], reserved: new Set<string>(),
     inserts: [] as [string, Row][], rpcCalls: 0, afterWrite: () => {},
     rows: {} as Record<string, Row[]>, filters: [] as [string, string, unknown][],
@@ -50,6 +50,7 @@ function database() {
         return Promise.resolve({ data: { balance_micros: 1_000_000, reserved_micros: 0 }, error: null });
       }
       state.rpcCalls++;
+      if (state.draftError) return Promise.resolve({ data: null, error: { code: "22023", message: state.draftError } });
       state.afterWrite();
       return Promise.resolve({ data: { created: "draft", id: 42, number: "DEMO-42" }, error: null });
     },
@@ -83,6 +84,31 @@ const response = (toolCalls: unknown[] = [], text = "") => ({
   id: "fixture-completion", model: "deepseek-flash",
   usage: { prompt_tokens: 10, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   choices: [{ message: { role: "assistant", content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls, reasoning_content: "Private fixture reasoning" } : {}) } }],
+});
+
+Deno.test("hosted unsupported invoice calculation cannot be retried with flattened quantities", async () => {
+  const { client, state } = database();
+  await providerTest(async requests => {
+    const reply = await aiReply("Create a manual amount invoice", "Owner", client, state.org, OWNER_ID, "whatsapp", "971500000000", () => Promise.resolve(true));
+    assertStringIncludes(reply, "keep your quantities, rates and calculation fields unchanged");
+    assertEquals(state.rpcCalls, 0);
+    assertEquals(requests.length, 1);
+  }, () => response([
+    useTool("manual", "create_draft_invoice", { ...invoiceInput, items: [{ ...invoiceInput.items[0], custom: { __manual_amount: "12" } }] }),
+    useTool("flattened", "create_draft_invoice", invoiceInput),
+  ]));
+});
+
+Deno.test("hosted final answer keeps a safe actionable validation cause without inventing a saved draft", async () => {
+  const { client, state } = database();
+  state.draftError = "Multiple customers match this name. Choose the customer in Filey";
+  await providerTest(async () => {
+    const reply = await aiReply("Create a fixture invoice", "Owner", client, state.org, OWNER_ID, "whatsapp", "971500000000", () => Promise.resolve(true));
+    assertStringIncludes(reply, state.draftError);
+    assertStringIncludes(reply, "No draft was saved by this action");
+    assertEquals(reply.includes("DEMO-42"), false);
+    assertEquals(reply.includes("may already"), false);
+  }, (_request, round) => round === 0 ? response([useTool("one", "create_draft_invoice", invoiceInput)]) : response([], "Draft DEMO-42 is ready."));
 });
 
 Deno.test("hosted model loop executes repeated successful draft calls once across batches and rounds", async () => {

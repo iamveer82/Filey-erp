@@ -113,6 +113,7 @@ export async function aiReply(userText: string, name: string, client: any, orgId
 
   const receipts = new Map<string, Promise<unknown>>();
   let hadToolFailure = false;
+  const rejectedDraftFields = new Set<string>();
   const incomplete = async (message: string): Promise<string> => {
     if (!canQuery) return message;
     if (!(await accessActive())) return accessChanged;
@@ -180,10 +181,16 @@ export async function aiReply(userText: string, name: string, client: any, orgId
               (("error" in out && !!out.error) || ("ok" in out && out.ok === false) ||
                ("success" in out && out.success === false) || ("successful" in out && out.successful === false) ||
                ("isError" in out && out.isError === true))) hadToolFailure = true;
+          if (out && typeof out === "object" && "save_outcome" in out && out.save_outcome === "rejected" &&
+              "code" in out && out.code === "invalid_arguments" && "error" in out && typeof out.error === "string")
+            rejectedDraftFields.add(out.error);
           // A write may have committed before its reply was lost. Stop this
           // run before another block or round can repeat an uncertain save.
           if (out && typeof out === "object" && "code" in out && out.code === "unconfirmed_write") {
             return incomplete("That save was not confirmed. A record may already exist in Filey. Check Filey before retrying; I stopped this task to avoid saving it twice.");
+          }
+          if (out && typeof out === "object" && "code" in out && out.code === "unsupported_invoice_calculation") {
+            return incomplete("This hosted chat connection cannot preserve the requested invoice calculations. Open Filey AI in the app to keep your quantities, rates and calculation fields unchanged. I stopped before saving that invoice.");
           }
           results.push({
             role: "tool",
@@ -198,7 +205,8 @@ export async function aiReply(userText: string, name: string, client: any, orgId
       const text = message?.content;
       // A later model assurance cannot establish that a failed step recovered.
       // Use the saved receipts without repeating writes or spending another turn.
-      if (hadToolFailure) return incomplete("I couldn't verify completion of every requested step. Review the confirmed results in Filey before retrying.");
+      if (hadToolFailure) return incomplete(["I couldn't verify completion of every requested step. Review the confirmed results in Filey before retrying.",
+        ...[...rejectedDraftFields].slice(0, 3)].join("\n\n"));
       return typeof text === "string" && text.trim() ? text : incomplete("No final response was returned. Check the confirmed results before retrying.");
     }
     return incomplete("I couldn't finish that task. Check Filey for any saved records before continuing.");

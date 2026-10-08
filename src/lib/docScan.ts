@@ -7,7 +7,7 @@ import type { AiImage } from "./ai";
 
 
 // Cap pages sent to the model — invoices/receipts are rarely longer, and this
-// bounds payload size + token cost. Pages beyond this are ignored.
+// bounds payload size + token cost. Never silently omit invoice pages.
 const MAX_PDF_PAGES = 8;
 
 /** All pages of a PDF (or the single image) as model-ready images. */
@@ -43,20 +43,29 @@ function fileBase64(file: File): Promise<string> {
 
 async function pdfPagesImages(file: File): Promise<AiImage[]> {
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await safePdf.getDocument({ data }).promise;
-  const pages = Math.min(pdf.numPages, MAX_PDF_PAGES);
+  const task = safePdf.getDocument({ data });
   const out: AiImage[] = [];
-  for (let p = 1; p <= pages; p++) {
-    const page = await pdf.getPage(p);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas not available");
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-    const url = canvas.toDataURL("image/png");
-    out.push({ mediaType: "image/png", dataBase64: url.slice(url.indexOf(",") + 1) });
+  try {
+    const pdf = await task.promise;
+    if (pdf.numPages > MAX_PDF_PAGES) throw new Error(`This PDF has ${pdf.numPages} pages. Scan supports up to ${MAX_PDF_PAGES} pages; split the document before scanning so no pages are missed.`);
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const viewport = page.getViewport({ scale: 2 });
+      if (!Number.isFinite(viewport.width * viewport.height) || viewport.width <= 0 || viewport.height <= 0
+        || viewport.width * viewport.height > 16_000_000) throw new Error("This PDF page is too large to scan. Resize the page before scanning.");
+      const canvas = document.createElement("canvas");
+      try {
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Canvas not available");
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        const url = canvas.toDataURL("image/png");
+        out.push({ mediaType: "image/png", dataBase64: url.slice(url.indexOf(",") + 1) });
+      } finally { canvas.width = 0; canvas.height = 0; page.cleanup(); }
+    }
+    return out;
+  } finally {
+    await task.destroy();
   }
-  return out;
 }
