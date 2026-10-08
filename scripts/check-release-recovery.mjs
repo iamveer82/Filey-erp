@@ -66,24 +66,39 @@ const verifyJob = workflow.jobs["verify-release-assets"];
 assert.equal(verifyJob.needs, "build", "Sanitize only after every platform finishes merging latest.json");
 const protect = verifyJob.steps.find(step => step.name === "Protect legacy Linux updaters");
 const manifestGuard = protect.run.match(/node -e '([^']+)'/)[1];
-function sanitizeManifest(manifest, isDraft = true) {
+const releaseVersion = "3.0.23", releaseTag = `v${releaseVersion}`, repository = "iamveer82/Filey-erp";
+const nsis = `Filey.ERP_${releaseVersion}_x64-setup.exe`, msi = `Filey.ERP_${releaseVersion}_x64_en-US.msi`;
+const deb = `Filey.ERP_${releaseVersion}_amd64.deb`, rpm = `Filey.ERP-${releaseVersion}-1.x86_64.rpm`;
+const arm = "Filey.ERP_aarch64.app.tar.gz", intel = "Filey.ERP_x64.app.tar.gz";
+const platformAssets = {
+  "windows-x86_64": msi, "windows-x86_64-msi": msi, "windows-x86_64-nsis": nsis,
+  "linux-x86_64-deb": deb, "linux-x86_64-rpm": rpm,
+  "darwin-aarch64": arm, "darwin-aarch64-app": arm, "darwin-x86_64": intel, "darwin-x86_64-app": intel,
+};
+const packages = [...new Set(Object.values(platformAssets))];
+const assets = [...packages, ...packages.map(name => `${name}.sig`), `Filey.ERP_${releaseVersion}_aarch64.dmg`, `Filey.ERP_${releaseVersion}_x64.dmg`, "latest.json"]
+  .map(name => ({ name, state: "uploaded", size: 1024 }));
+const manifest = {
+  version: releaseVersion, notes: "Release notes", platforms: Object.fromEntries(Object.entries(platformAssets)
+    .map(([platform, name]) => [platform, { url: `https://github.com/${repository}/releases/download/${releaseTag}/${name}`, signature: `signature-${name}` }])),
+};
+manifest.platforms["linux-x86_64"] = { ...manifest.platforms["linux-x86_64-deb"] };
+function sanitizeManifest(manifest, isDraft = true, override = {}) {
   const files = new Map([
-    ["release.json", JSON.stringify({ isDraft })],
+    ["release.json", JSON.stringify({ isDraft, tagName: releaseTag, assets, ...override.release })],
     ["updater/latest.json", JSON.stringify(manifest)],
+    ...packages.map(name => [`updater/${name}.sig`, `signature-${name}\n`]),
+    ...Object.entries(override.files ?? {}),
   ]);
   runInNewContext(manifestGuard, {
-    require: () => ({ readFileSync: path => files.get(path), writeFileSync: (path, content) => files.set(path, content) }),
+    require: () => ({
+      readFileSync: path => { if (!files.has(path)) throw new Error(`ENOENT: ${path}`); return files.get(path); },
+      writeFileSync: (path, content) => files.set(path, content),
+    }),
+    process: { env: { TAG: releaseTag, GITHUB_REPOSITORY: repository, GITHUB_SERVER_URL: "https://github.com" } },
   });
   return { manifest: JSON.parse(files.get("updater/latest.json")), changed: files.has("updater/changed") };
 }
-const manifest = {
-  version: "3.0.10", notes: "Release notes", platforms: {
-    "linux-x86_64": { url: "https://example.com/filey.deb", signature: "deb-signature" },
-    "linux-x86_64-deb": { url: "https://example.com/filey.deb", signature: "deb-signature" },
-    "linux-x86_64-rpm": { url: "https://example.com/filey.rpm", signature: "rpm-signature" },
-    "darwin-aarch64": { url: "https://example.com/filey.app.tar.gz", signature: "mac-signature" },
-  },
-};
 const safe = sanitizeManifest(manifest);
 const expected = structuredClone(manifest);
 delete expected.platforms["linux-x86_64"];
@@ -91,6 +106,41 @@ assert.deepEqual(safe.manifest, expected, "Remove the AppImage fallback while pr
 assert.equal(safe.changed, true);
 assert.equal(sanitizeManifest(safe.manifest).changed, false, "Do not replace an unchanged manifest");
 assert.throws(() => sanitizeManifest(manifest, false), /Published release assets must not be replaced/);
+assert.throws(() => sanitizeManifest({ version: "3.0.22", platforms: {} }), /Updater version/, "A stale manifest must not pass even with every installer uploaded");
+assert.throws(() => sanitizeManifest({ ...manifest, platforms: {} }), /Missing or unsupported/);
+assert.throws(() => sanitizeManifest({ ...manifest, platforms: null }), /Invalid updater platforms/);
+assert.throws(() => sanitizeManifest(manifest, true, { release: { tagName: "v3.0.22" } }), /Release tag mismatch/);
+for (const platform of Object.keys(platformAssets)) {
+  const missing = structuredClone(manifest);
+  delete missing.platforms[platform];
+  assert.throws(() => sanitizeManifest(missing), /Missing or unsupported/, `Require ${platform}`);
+}
+assert.throws(() => sanitizeManifest({ ...manifest, platforms: { ...manifest.platforms, "windows-aarch64": manifest.platforms["windows-x86_64"] } }), /Missing or unsupported/);
+for (const replacement of [
+  "https://example.com/download.exe",
+  manifest.platforms["windows-x86_64-nsis"].url.replace(repository, "someone/another-repo"),
+  manifest.platforms["windows-x86_64-nsis"].url.replace(releaseTag, "v3.0.22"),
+  manifest.platforms["windows-x86_64-nsis"].url.replace(nsis, nsis.replace(releaseVersion, "3.0.22")),
+  manifest.platforms["windows-x86_64-msi"].url,
+]) {
+  const invalid = structuredClone(manifest);
+  invalid.platforms["windows-x86_64-nsis"].url = replacement;
+  assert.throws(() => sanitizeManifest(invalid), /Updater URL does not match/);
+}
+for (const signature of [undefined, "", "  ", "wrong-signature"]) {
+  const invalid = structuredClone(manifest);
+  invalid.platforms["darwin-x86_64-app"].signature = signature;
+  assert.throws(() => sanitizeManifest(invalid), /signature/);
+}
+for (const name of [intel, `${intel}.sig`, `Filey.ERP_${releaseVersion}_x64.dmg`]) {
+  assert.throws(() => sanitizeManifest(manifest, true, { release: { assets: assets.filter(asset => asset.name !== name) } }), /Missing or empty release asset/);
+  for (const change of [{ size: 0 }, { state: "starter" }])
+    assert.throws(() => sanitizeManifest(manifest, true, { release: { assets: assets.map(asset => asset.name === name ? { ...asset, ...change } : asset) } }), /Missing or empty release asset/);
+}
+for (const content of ["", "  \n", "different-signature"])
+  assert.throws(() => sanitizeManifest(manifest, true, { files: { [`updater/${intel}.sig`]: content } }), /signature mismatch/);
+assert.match(protect.run, /--json isDraft,tagName,assets/, "Verify metadata for the actual draft release");
+assert.match(protect.run, /--pattern '\*\.sig'/, "Compare the embedded signatures with uploaded sidecar files");
 assert.match(protect.run, /if \[ -f updater\/changed \]; then/, "Only changed drafts should be uploaded");
 assert.match(workflow.jobs.build.steps.find(step => step.name === "Upload installers as workflow artifacts").with.path, /\*\*\/\*\.app\.tar\.gz/);
 const bridgeBuild = workflow.jobs.build.steps.find(step => step.name === "Build WhatsApp bridge sidecar").run;
