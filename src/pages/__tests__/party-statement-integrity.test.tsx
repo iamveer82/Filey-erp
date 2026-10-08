@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   advances, billing, crm, erp, pos, quotes, receipts, suppliers,
@@ -9,6 +9,8 @@ import CustomerDetail from "../CustomerDetail";
 import SupplierDetail from "../SupplierDetail";
 import * as pdfTools from "../../lib/pdfTools";
 import * as salesJournal from "../../components/statements/buildSalesJournal";
+import * as rowActions from "../../components/RowActions";
+import * as dataMode from "../../lib/dataMode";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast, confirm: async () => false }) }));
@@ -41,13 +43,36 @@ beforeEach(() => {
   vi.spyOn(pos, "payments").mockResolvedValue([]);
   vi.spyOn(pdfTools, "downloadElementAsPdf").mockResolvedValue(true);
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
 function open(kind: "customer" | "supplier") {
   return render(<MemoryRouter initialEntries={["/party/1"]}><Routes>
     <Route path="/party/:id" element={kind === "customer" ? <CustomerDetail /> : <SupplierDetail />} />
   </Routes></MemoryRouter>);
 }
+
+it.each(["invoice", "quotation", "purchase order"] as const)("copies a hosted %s link from the party page", async kind => {
+  vi.stubEnv("VITE_PUBLIC_APP_URL", "https://app.gofiley.com/");
+  vi.spyOn(dataMode, "isLocalMode").mockReturnValue(false);
+  const share = vi.spyOn(rowActions, "shareVia").mockResolvedValue();
+  const publish = vi.spyOn(kind === "invoice" ? billing : kind === "quotation" ? quotes : pos, "publicLink")
+    .mockResolvedValue("public/token");
+  if (kind === "quotation") vi.mocked(quotes.listDocs).mockResolvedValue([{
+    id: 3, number: "QUOTE-TEST", customer_name: customer.name, currency: "USD", status: "sent", total: 100,
+    quote_date: "2026-09-01", template: "minimal", updated_at: "2026-09-01",
+  }]);
+  const view = open(kind === "purchase order" ? "supplier" : "customer");
+  const number = kind === "invoice" ? doc.number : kind === "quotation" ? "QUOTE-TEST" : po.po_number;
+  await waitFor(() => expect(view.getByRole("button", { name: "Download PDF" })).toBeEnabled());
+  const row = view.getAllByRole("row").find(element => element.textContent?.includes(number) && within(element).queryByRole("button", { name: "More actions" }));
+  expect(row).toBeDefined();
+  fireEvent.click(within(row!).getByRole("button", { name: "More actions" }));
+  fireEvent.click(await view.findByRole("menuitem", { name: "Copy link" }));
+  await waitFor(() => expect(share).toHaveBeenCalledWith("copyLink", expect.objectContaining({
+    url: "https://app.gofiley.com/#/portal/public%2Ftoken",
+  })));
+  expect(publish).toHaveBeenCalledExactlyOnceWith(kind === "invoice" ? doc.id : kind === "quotation" ? 3 : po.id);
+});
 
 for (const kind of ["customer", "supplier"] as const) {
   it(`${kind} statements block incomplete exports and retry missing payment data`, async () => {

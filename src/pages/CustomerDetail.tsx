@@ -60,6 +60,7 @@ import {
 import { aed, num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { storedLineAmount } from "../lib/docItems";
 import { sendShareEmail } from "../lib/email";
+import { invoicePublicLink, quotationPublicLink } from "../lib/documentMessage";
 import { useUI } from "../lib/ui";
 import StickyNotes from "../components/StickyNotes";
 import ActivityTimeline from "../components/ActivityTimeline";
@@ -599,8 +600,7 @@ export default function CustomerDetail() {
 
   const shareInvoice = async (kind: ShareKind, d: InvoiceDocSummary) => {
     try {
-      const token = await billing.publicLink(d.id);
-      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+      const url = await invoicePublicLink(d.id);
       const text = `Invoice ${d.number} - ${money(d.total, d.currency || "AED")}. View online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
@@ -617,7 +617,7 @@ export default function CustomerDetail() {
         url,
       });
       if (kind === "copyLink") toast.success("Public invoice link copied");
-      reload(); // publicLink flips the doc's shared flag
+      reload(); // Refresh the explicitly enabled public-link state.
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -625,8 +625,7 @@ export default function CustomerDetail() {
 
   const shareQuote = async (kind: ShareKind, q: QuotationSummary) => {
     try {
-      const token = await quotes.publicLink(q.id);
-      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+      const url = await quotationPublicLink(q.id);
       const text = `Quotation ${q.number} - ${money(q.total, q.currency || "AED")}. View online: ${url}`;
       if (kind === "email") {
         await sendShareEmail(customer?.email || "", `Quotation ${q.number}`, text);

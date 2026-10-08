@@ -98,23 +98,44 @@ reset role;reset request.jwt.claims;
 update public.profiles set org_id=(select org_id from public.org_members where user_id='c0000000-0000-4000-8000-000000000001') where id='c0000000-0000-4000-8000-000000000001';
 select 'PASS: DM recipient file sharing works; unrelated workspace admin cannot read DM/chat file; scheduled helper denies revoked role, removed membership and changed active workspace.';
 
-insert into public.invoice_docs(id,user_id,org_id,number,status,customer_name,shared,share_token)
- select 990100,id,org_id,'PRIVACY-1','draft','Synthetic public customer',true,'c4000000-0000-4000-8000-000000000001' from public.profiles where id='c0000000-0000-4000-8000-000000000001';
+insert into public.invoice_docs(id,user_id,org_id,number,status,customer_name,shared,public_shared,share_token)
+ select 990100,id,org_id,'PRIVACY-1','draft','Synthetic public customer',true,true,'c4000000-0000-4000-8000-000000000001' from public.profiles where id='c0000000-0000-4000-8000-000000000001';
 insert into public.invoice_doc_items(invoice_id,user_id,org_id,description,qty,unit_price,position)
  select 990100,id,org_id,'Intended public item',1,1,0 from public.profiles where id='c0000000-0000-4000-8000-000000000001';
 insert into public.invoice_doc_items(invoice_id,user_id,org_id,description,qty,unit_price,position)
  select 990100,owner_id,id::text,'Unrelated private organization item',1,999,1 from public.organizations where owner_id='c0000000-0000-4000-8000-000000000002';
+-- Insert/import cannot publish a document or preserve an inherited bearer link.
+do $$ begin
+  if (select public_shared or share_token='c4000000-0000-4000-8000-000000000001'::uuid from public.invoice_docs where id=990100) then raise exception 'Insert inherited public access';end if;
+end $$;
+select set_config('filey.test_private_token',(select share_token::text from public.invoice_docs where id=990100),false);
 set role anon;set request.jwt.claims='{"role":"anon"}';
 do $$ declare document jsonb;begin
   begin perform public.prune_tool_runs();raise exception 'Anon retention allowed';exception when insufficient_privilege then null;end;
   if exists(select 1 from storage.objects) or exists(select 1 from public.invoice_docs) then raise exception 'Anonymous table/private file read allowed';end if;
-  document:=public.get_shared_invoice('c4000000-0000-4000-8000-000000000001');
-  if document is null or document->'doc' ?| array['user_id','org_id','shared_with','share_token'] or jsonb_array_length(document->'items')<>1 then raise exception 'Token-scoped public document gate failed';end if;
+  if public.get_shared_invoice(current_setting('filey.test_private_token')::uuid) is not null then raise exception 'Team-only document became public';end if;
+  if public.get_shared_invoice('c4000000-0000-4000-8000-000000000001') is not null then raise exception 'Inherited token leaked document';end if;
+end $$;
+reset role;reset request.jwt.claims;
+set role authenticated;set request.jwt.claim.sub='c0000000-0000-4000-8000-000000000001';set request.jwt.claims='{"role":"authenticated","aal":"aal1"}';
+select set_config('filey.test_public_token',public.filey_set_public_document_link('invoice',990100,true,public.current_org())::text,false);
+-- Team visibility and explicit public-link access are independent.
+update public.invoice_docs set shared=false where id=990100;
+reset role;reset request.jwt.claim.sub;reset request.jwt.claims;
+set role anon;set request.jwt.claims='{"role":"anon"}';
+do $$ declare document jsonb;begin
+  document:=public.get_shared_invoice(current_setting('filey.test_public_token')::uuid);
+  if document is null or document->'doc' ?| array['user_id','org_id','shared','shared_with','public_shared','share_token'] or jsonb_array_length(document->'items')<>1 then raise exception 'Token-scoped public document gate failed';end if;
+  if document->'items'->0->>'description' is distinct from 'Intended public item' then raise exception 'Public document included another organization item';end if;
+  if public.get_shared_invoice(current_setting('filey.test_private_token')::uuid) is not null then raise exception 'Pre-enable token became public';end if;
   if public.get_shared_invoice('c4000000-0000-4000-8000-000000000002') is not null then raise exception 'Unknown token leaked document';end if;
 end $$;
 reset role;reset request.jwt.claims;
-update public.invoice_docs set shared=false where id=990100;
+set role authenticated;set request.jwt.claim.sub='c0000000-0000-4000-8000-000000000001';set request.jwt.claims='{"role":"authenticated","aal":"aal1"}';
+select public.filey_set_public_document_link('invoice',990100,false,public.current_org());
+update public.invoice_docs set shared=true where id=990100;
+reset role;reset request.jwt.claim.sub;reset request.jwt.claims;
 set role anon;set request.jwt.claims='{"role":"anon"}';
-do $$ begin if public.get_shared_invoice('c4000000-0000-4000-8000-000000000001') is not null then raise exception 'Revoked share remains public';end if;end $$;
+do $$ begin if public.get_shared_invoice(current_setting('filey.test_public_token')::uuid) is not null then raise exception 'Revoked share remains public';end if;end $$;
 reset role;reset request.jwt.claims;
-select 'PASS: anonymous storage/table/maintenance denied; deliberately shared token document works without membership/authority fields; unknown and revoked shares return no document.';
+select 'PASS: anonymous storage/table/maintenance denied; only an owner-enabled public link works without authority fields or foreign items; team-only, inherited, unknown and revoked links stay private.';

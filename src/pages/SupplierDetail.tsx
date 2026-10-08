@@ -43,6 +43,7 @@ import {
 import { num, fmtDate, errMsg, cn, money, localYmd } from "../lib/format";
 import { storedLineAmount } from "../lib/docItems";
 import { sendShareEmail } from "../lib/email";
+import { purchaseOrderPublicLink } from "../lib/documentMessage";
 import { useUI } from "../lib/ui";
 import ActivityTimeline from "../components/ActivityTimeline";
 import LinkedRecords from "../components/LinkedRecords";
@@ -439,8 +440,7 @@ export default function SupplierDetail() {
 
   const sharePo = async (kind: ShareKind, o: PoSummary) => {
     try {
-      const token = await pos.publicLink(o.id);
-      const url = `${location.origin}${location.pathname}#/portal/${token}`;
+      const url = await purchaseOrderPublicLink(o.id);
       const text = `Purchase order ${o.po_number} - ${money(o.total, o.currency || "AED")}. View online: ${url}`;
       // Email sends through Resend, not the OS mail client: a mailto never
       // opens anything in the desktop build, so the share silently did nothing.
@@ -457,7 +457,7 @@ export default function SupplierDetail() {
         url,
       });
       if (kind === "copyLink") toast.success("Public PO link copied");
-      reload(); // publicLink flips the doc's shared flag
+      reload(); // Refresh the explicitly enabled public-link state.
     } catch (e) {
       toast.error(errMsg(e));
     }

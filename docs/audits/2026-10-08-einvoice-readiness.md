@@ -51,3 +51,11 @@ Deployment order: apply `supabase/2026-10-08-hosted-draft-parity.sql` before the
 - Root dependency audit reported zero known vulnerabilities. Browser security tests blocked arbitrary scripts, inline event handlers, dynamic JavaScript and private request redirects.
 
 Apply `supabase/2026-10-08-public-link-isolation.sql` before the matching frontend and redeploy `overdue-reminders` with its updated shared helper. This is a permission repair; no real public links were enabled, messages sent or customer records created during testing.
+
+## Production verification after upgrades
+
+Both reviewed October 8 migrations were applied successfully. The live read-only catalog passes the current verifier with 93 tables, 1,212 columns, 136 inspected functions and no issues. The hosted draft/receipt files and reminder helper were deployed through the existing authenticated dashboard; source copied back after reload matched the reviewed files exactly. The production web bundle for PR #58 was verified independently of the preview deployment.
+
+The old cloud-privacy fixture expected team visibility to authorize anonymous access. It now explicitly enables and revokes public links through the authenticated owner RPC, and asserts that team-only sharing remains private. The complete isolated privacy/bootstrap regression passes, including repeated installation and tenant isolation. Local upgrade, queued-save and concurrency checks passed without opening the user's database.
+
+Navigation and temporary cloud-response recovery are covered; a hard reload, app closure or OS termination still cannot resume the entire agent automatically. No live model calls, payment transactions, external messages or accredited e-invoice submissions were used for verification.
