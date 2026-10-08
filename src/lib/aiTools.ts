@@ -210,6 +210,9 @@ async function saveAgentInvoice(input: InvoiceDocInput, assertCurrent: () => voi
     assertCurrent();
     return {
       error: errMsg(error), save_outcome: "unconfirmed" as const, retry_safe: false,
+      ...((error as { name?: string })?.name === "TimeoutError" ||
+        (error as { code?: string })?.code === "57014" && /statement timeout/i.test(errMsg(error))
+        ? { save_failure: "timeout" as const } : {}),
       invoice_number: input.number, ...(input.id ? { invoice_id: input.id } : {}),
       ...(pending || retryRequestId ? { save_request_id: pending?.requestId ?? retryRequestId } : {}),
       hint: "The invoice may already be saved. Read this exact invoice before any further write. Do not claim nothing was saved or that retrying cannot duplicate it. Keep the user's quantities, prices and custom calculation fields unchanged.",
@@ -223,6 +226,7 @@ async function pendingAgentInvoice(input: Partial<InvoiceDocInput>, assertCurren
   const pending = await billing.pendingInvoiceSaves();
   assertCurrent();
   const match = pending.find(save => (input.id ?? null) === (save.input.id ?? null) &&
+    (!input.number || input.number === save.input.number) &&
     (save.input.doc_type === "purchase") === (input.doc_type === "purchase") && invoiceSaveIntentMatches(input, save.input));
   const unresolved = match ?? pending.find(save => input.id
     ? save.input.id === input.id
@@ -1511,6 +1515,25 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_pending_invoice_saves",
+    description: "Find this account's unconfirmed invoice saves. Read-only: returns original numbers and request IDs for verification/retry, without invoice contents. Never guess an ID or ask the user for one. doc_type defaults to sales.",
+    parameters: { type: "object", properties: {
+      doc_type: { type: "string", enum: ["sales", "purchase"] },
+      query: { type: "string", maxLength: 200, description: "Optional invoice number or customer/supplier name." },
+    }, additionalProperties: false },
+    run: async (args, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      const docType = args.doc_type === "purchase" ? "purchase" : "sales";
+      const query = str(args.query).trim().toLowerCase();
+      const pending = await billing.pendingInvoiceSaves();
+      assertCurrent();
+      return pending.filter(save => (save.input.doc_type === "purchase" ? "purchase" : "sales") === docType)
+        .map(save => ({ number: str(save.input.number), customer_name: str(save.input.customer_name),
+          request_id: save.requestId, active: save.active, doc_type: docType }))
+        .filter(save => !query || save.number.toLowerCase().includes(query) || save.customer_name.toLowerCase().includes(query));
+    },
+  },
+  {
     name: "retry_invoice_save",
     description: "Only after the user explicitly asks to retry/continue an unconfirmed invoice save: recover that exact saved request ID. Reuses its original number, lines, prices and request receipt; accepts no replacement fields. Read get_invoice afterwards. Never use this to create another invoice.",
     sensitive: true,
@@ -1518,7 +1541,7 @@ export const TOOLS: ToolDef[] = [
     run: async (args, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
       const pending = (await billing.pendingInvoiceSaves()).find(save => save.requestId === args.request_id);
-      if (!pending) return { error: "This pending invoice request is unavailable. Read the existing invoice before attempting a new save.", retry_safe: false };
+      if (!pending) return { error: "This pending invoice request is unavailable. Use list_pending_invoice_saves to discover the original request and verify its invoice. Never guess a request ID or ask the user for one.", retry_safe: false };
       const originalTool = pending.input.doc_type === "purchase" ? "create_purchase_invoice_draft" : "create_invoice_draft";
       await requireToolModuleAccess(originalTool, {});
       if (!isToolAllowed(originalTool)) return { error: "The invoice capability is turned off. No retry was run.", retry_safe: false };
@@ -1531,17 +1554,18 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_invoice_draft",
     description:
-      "Create a numbered draft. Never guess customer, item, qty or rate. Preserve item codes; rate is per unit. For per litre/kg/hour: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. To repeat, get_invoice and retain lines/pricing/wording. Defaults: today's date, company VAT, zero discount. Correct with revise_invoice. Verify saved id with get_invoice(id:<id>).",
+      "Create a draft; never guess buyer, item, qty or rate. Preserve item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Edit with revise_invoice; verify with get_invoice(id:<id>).",
     parameters: {
       type: "object",
       properties: {
+        invoice_number: { type: "string", minLength: 1, maxLength: 160, description: "User-specified number; omit to auto-number." },
         customer_id: { type: "integer", minimum: 1, description: "Saved ID matching the customer name." },
         customer_name: {
           type: "string",
         },
         currency: { type: "string" },
         issue_date: { type: "string", description: "YYYY-MM-DD." },
-        due_date: { type: "string", description: "Optional YYYY-MM-DD payment deadline." },
+        due_date: { type: "string", description: "Payment deadline, YYYY-MM-DD." },
         notes: { type: "string", maxLength: 30000 },
         terms: { type: "string", maxLength: 30000 },
         discount: { type: "number", minimum: 0, maximum: 999999999999.99, description: "Discount amount, not percent." },
@@ -1584,7 +1608,7 @@ export const TOOLS: ToolDef[] = [
               custom: {
                 type: "object",
                 description:
-                  "Custom values by column key; preserve saved calculation metadata.",
+                  "Values by column key; retain calculation metadata.",
               },
             },
             required: ["description", "qty", "unit_price"],
@@ -1593,7 +1617,7 @@ export const TOOLS: ToolDef[] = [
         custom_columns: {
           type: "array",
           description:
-            "Custom columns; lowercase keys and visible labels.",
+            "Lowercase keys and visible labels.",
           items: {
             type: "object",
             properties: { key: { type: "string" }, label: { type: "string" } },
@@ -1612,6 +1636,9 @@ export const TOOLS: ToolDef[] = [
     run: async (args, signal) => {
       const assertCurrent = toolExecutionCheck(signal);
       if (!str(args.customer_name).trim()) throw documentInputError("Choose the customer name before saving an invoice.");
+      const rawNumber = str(args.invoice_number), requestedNumber = rawNumber.trim();
+      if (args.invoice_number !== undefined && (!requestedNumber || rawNumber.length > 160 || Array.from(rawNumber).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)))
+        throw documentInputError("Enter a valid invoice number before saving.");
       const issueDate = args.issue_date === undefined ? today() : documentDate(args.issue_date, "Invoice date");
       const dueDate = args.due_date === undefined ? undefined : documentDate(args.due_date, "Due date", true);
       args = await documentContext(args, "customer");
@@ -1629,7 +1656,7 @@ export const TOOLS: ToolDef[] = [
         : [];
       const priceBy = str(args.price_by).trim();
       const input: InvoiceDocInput = {
-        number: "",
+        number: requestedNumber,
         status: "draft",
         template:
           (str(args.template) ? resolveTemplate(str(args.template)) : undefined) ||
@@ -1687,7 +1714,7 @@ export const TOOLS: ToolDef[] = [
       const pending = await pendingAgentInvoice(input, assertCurrent);
       if (pending) return pending;
       // Allocate only after pending receipts and supplied calculations are checked.
-      input.number = await allocateDocumentNumber("invoice",
+      if (!input.number) input.number = await allocateDocumentNumber("invoice",
         ((await billing.listDocs("sales")) as { number: string }[]).map(d => d.number), await loadDocFormats());
       const saved = await saveAgentInvoice(input, assertCurrent);
       if ("error" in saved) return saved;

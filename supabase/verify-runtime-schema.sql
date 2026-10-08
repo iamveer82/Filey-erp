@@ -14,7 +14,7 @@ select jsonb_build_object(
      'filey_reserve_document_number','filey_document_numbers','filey_document_number_guard','filey_setting_number_guard',
      'filey_generate_recurring_invoice','filey_recurring_items_owned','filey_record_lead','filey_settle_stripe_checkout',
      'filey_workflow_children_owned','filey_workflow_totals',
-     'filey_save_document','filey_document_lines_replaceable',
+     'filey_save_document','filey_document_lines_replaceable','log_audit','filey_audit_snapshot',
      'filey_workflow_effects_owned','filey_workflow_receipt_reversible','filey_workflow_credit_available','filey_workflow_advance','filey_workflow_account_for_owner',
      'filey_workflow_guard','filey_workflow_account','filey_workflow_entry','filey_workflow_reverse','filey_workflow_stock','filey_workflow_unstock','filey_workflow_unpost','filey_workflow_post','filey_workflow_payment',
      'filey_business_workflow','filey_order_workflow','filey_journal_workflow','filey_advance_workflow','filey_stock_workflow',

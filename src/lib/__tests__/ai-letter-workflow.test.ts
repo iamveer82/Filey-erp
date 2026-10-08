@@ -47,6 +47,9 @@ describe("shared letter drafting instructions", () => {
     expect(prompt).toContain("Preserve explicit values such as a 0.20 rate");
     expect(prompt).toContain("Preserve requested custom columns and pricing multipliers such as T.Liters");
     expect(prompt).toContain("Ask only for missing required values or a real ambiguity");
+    expect(prompt).toContain("list_pending_invoice_saves");
+    expect(prompt).toContain("Absence from list_invoices does not prove that no pending save exists");
+    expect(prompt).toContain("Never guess internal IDs or ask the user for them");
   });
 
   it("uses the saved company context, draft tools and read-back result instead of sending the user to another page", () => {

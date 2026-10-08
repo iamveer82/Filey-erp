@@ -704,9 +704,12 @@ export async function* runAgentStream(
     : MAX_TOOL_ROUNDS;
   const guard = opts.runGuard ?? createGuard([...messages].reverse().find(message => message.role === "user")?.text ?? "");
   const unresolvedFailures = () => guard.unresolvedFailures();
-  const unconfirmedSaveMessage = () => unresolvedFailures().some(step => step.unconfirmedSave)
-    ? "The invoice save could not be confirmed. It may already exist. Check the invoice before trying again; keep your supplied prices, quantities and calculation fields unchanged."
-    : undefined;
+  const unconfirmedSaveMessage = () => {
+    const failed = unresolvedFailures().find(step => step.unconfirmedSave);
+    if (!failed) return undefined;
+    const number = failed.invoiceSave?.number;
+    return `${failed.invoiceSave?.timedOut ? "The invoice save timed out and could not be confirmed." : "The invoice save could not be confirmed."}${number ? ` Invoice number: ${JSON.stringify(number)}.` : ""} It may already exist. Check the invoice before trying again; keep your supplied prices, quantities and calculation fields unchanged.`;
+  };
   const budget = opts.budget ?? { requests: maxRounds, tools: 128 };
   const scope = agentStorageScope();
   const identity = getCacheIdentity();

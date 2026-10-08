@@ -32,6 +32,11 @@ try {
   const saveUpgrade=sql('supabase/2026-10-07-document-save-performance.sql');
   run('psql',args,saveUpgrade+'\n'+saveUpgrade);
   assert.equal(query(saveAuthority),beforeSaveAuthority,'Document save upgrade changed its owner, ACL, invoker authority or search path');
+  const auditAuthority="select jsonb_build_object('owner',proowner,'acl',proacl,'definer',prosecdef,'config',proconfig,'triggers',(select jsonb_agg(jsonb_build_object('oid',oid,'definition',pg_get_triggerdef(oid)) order by oid) from pg_trigger where tgfoid=p.oid)) from pg_proc p where oid='public.log_audit()'::regprocedure;";
+  const beforeAuditAuthority=query(auditAuthority);
+  const auditUpgrade=sql('supabase/2026-10-08-audit-artwork-metadata.sql');
+  run('psql',args,auditUpgrade+'\n'+auditUpgrade);
+  assert.equal(query(auditAuthority),beforeAuditAuthority,'Audit upgrade changed owner, ACL, definer authority, search path or triggers');
   const migration=sql('supabase/2026-10-04-atomic-business-workflows.sql');
   run('psql',args,migration+'\n'+migration);
   // A colliding privileged role is a migration failure, never an RLS bypass.
@@ -52,6 +57,7 @@ try {
   console.log('PASS: a nonsuperuser table-owning installer can assign the executor functions, and executor schema CREATE is revoked before commit.');
   console.log(run('psql',args,sql('scripts/fixtures/business-workflow-assertions.sql')).trim());
   console.log(run('psql',args,sql('scripts/fixtures/document-save-performance.sql')).trim());
+  console.log(run('psql',args,sql('scripts/fixtures/audit-artwork-metadata.sql')).trim());
   console.log(run('psql',args,sql('scripts/fixtures/business-advance-ownership.sql')).trim());
   // Reproduce the actual pre-fix gap only inside a rolled-back synthetic DB
   // transaction: all current authority gates remain, except the new net-pool

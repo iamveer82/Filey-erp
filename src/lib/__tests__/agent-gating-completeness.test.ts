@@ -32,6 +32,7 @@ const READ_ONLY: Record<string, string> = {
   find_leads: "search",
   find_suppliers: "search",
   list_invoices: "list",
+  list_pending_invoice_saves: "read-only scoped pending-save request IDs and invoice metadata; does not retry writes",
   get_invoice: "read-only saved invoice, lines and branding presence",
   list_deals: "list",
   crm_pipeline: "list",

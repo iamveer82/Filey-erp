@@ -54,6 +54,20 @@ async function run(replies: unknown[], opts: HarnessOpts = {}, cfg = config, use
 beforeEach(() => vi.mocked(runTool).mockReset().mockResolvedValue({ ok: true }));
 
 describe("advanced agent runtime", () => {
+  it.each([false, true])("explains a confirmed timeout using only the exact invoice number and safe status (autonomous=%s)", async autonomous => {
+    vi.mocked(runTool).mockResolvedValueOnce({ error: "canceling statement due to statement timeout at private_schema.audit_log_insert", save_outcome: "unconfirmed",
+      save_failure: "timeout", retry_safe: false, invoice_number: "QA-NAV-20261008-A" });
+    const result = await run([
+      turn([call("create_invoice_draft", { invoice_number: "QA-NAV-20261008-A", customer_name: "Acme", items: [{ qty: 1, unit_price: 10 }] })]),
+      autonomous ? turn([call("task_complete", { status: "blocked", summary: "Nothing was saved." })]) : turn([], "Nothing was saved."),
+    ], autonomous ? { finishToolName: "task_complete", extraTools: [finish] } : {});
+    expect(result.text).toContain("invoice save timed out and could not be confirmed");
+    expect(result.text).toContain('Invoice number: "QA-NAV-20261008-A"');
+    expect(result.text).toContain("may already exist");
+    expect(result.text).not.toMatch(/private_schema|audit_log|statement|Nothing was saved|create_invoice_draft/);
+    expect(runTool).toHaveBeenCalledOnce();
+  });
+
   it.each([false, true])("does not publish rollback claims or retry altered invoice data after a timeout (autonomous=%s)", async autonomous => {
     vi.mocked(runTool).mockResolvedValueOnce({ error: "Statement timeout", save_outcome: "unconfirmed", retry_safe: false, invoice_number: "INV-1" });
     const misleading = "Nothing was saved, so there is no duplicate risk. I removed T.Liters and increased the rate.";
@@ -100,6 +114,30 @@ describe("advanced agent runtime", () => {
     ], {}, config, "Please retry the earlier invoice save with the same details.");
     expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["create_invoice_draft", "retry_invoice_save", "get_invoice"]);
     expect(result.text).toBe("The original invoice is now saved and verified.");
+    expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
+  });
+
+  it("recovers a follow-up without a request ID in chat by discovering the stored pending identity", async () => {
+    const requestId = "12345678-1234-1234-1234-123456789abc";
+    vi.mocked(runTool)
+      .mockResolvedValueOnce([{ number: "INV-047", customer_name: "Acme", request_id: requestId, active: false, doc_type: "sales" }])
+      .mockResolvedValueOnce({ ok: true, id: 47, number: "INV-047", confirmed_save_request: requestId })
+      .mockResolvedValueOnce({ id: 47, number: "INV-047", total: 210 });
+    const result = await run([
+      turn([call("use_toolset", { name: "sales" })]),
+      turn([call("retry_invoice_save", { request_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" }, "guessed-retry")]),
+      turn([call("list_pending_invoice_saves", { query: "Acme" })]),
+      turn([call("retry_invoice_save", { request_id: requestId })]),
+      turn([call("get_invoice", { invoice_number: "INV-047" })]),
+      turn([], "The original invoice INV-047 is saved and verified at AED 210."),
+    ], {}, config, "Please retry my earlier Acme invoice with the same details.");
+    expect(vi.mocked(runTool).mock.calls.map(([name]) => name)).toEqual(["list_pending_invoice_saves", "retry_invoice_save", "get_invoice"]);
+    expect(result.requests[3].body.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", content: expect.stringContaining(requestId) }),
+    ]));
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "tool_result", id: "guessed-retry",
+      result: expect.objectContaining({ error: expect.stringContaining("list_pending_invoice_saves"), retry_safe: false }) }));
+    expect(result.text).toBe("The original invoice INV-047 is saved and verified at AED 210.");
     expect(result.events[result.events.length - 1]).toMatchObject({ type: "done", reason: "answered" });
   });
 

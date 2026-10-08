@@ -37,6 +37,7 @@ export interface Step {
   ok: boolean;
   invalidArguments?: boolean;
   unconfirmedSave?: boolean;
+  invoiceSave?: { number?: string; timedOut: boolean };
   /** Short human line for the run summary. */
   note: string;
 }
@@ -177,6 +178,14 @@ export function createGuard(userRequest = ""): AgentGuard {
           /\b(?:do not|don't|never|stop)\b[^.!?\n]*\b(?:retry|continue|try)\b/i.test(userRequest))) return {
         short: { error: "The user has not asked to retry the earlier invoice save. Verify it with get_invoice first.", retry_safe: false },
       };
+      if (name === "retry_invoice_save" && ![...seen].some(([key, result]) =>
+        key.startsWith("list_pending_invoice_saves:") && Array.isArray(result)
+          ? result.some(save => save?.request_id === args.request_id)
+          : INVOICE_WRITES.has(key.split(":")[0]) &&
+            (result as { save_outcome?: string; save_request_id?: string } | null)?.save_outcome === "unconfirmed" &&
+            (result as { save_request_id?: string }).save_request_id === args.request_id)) return {
+        short: { error: "Discover the original request with list_pending_invoice_saves from the sales toolset before retrying. Never guess a request ID or ask the user for one.", retry_safe: false },
+      };
       const unconfirmed = unresolvedFailures().filter(step => step.unconfirmedSave);
       const exactRetry = name === "retry_invoice_save" && unconfirmed.some(step =>
         (seen.get(keyOf(step.name, step.args)) as { save_request_id?: string } | undefined)?.save_request_id === args.request_id);
@@ -258,8 +267,11 @@ export function createGuard(userRequest = ""): AgentGuard {
       seen.set(k, result);
       const unconfirmedSave = failed && !validationRejected && INVOICE_WRITES.has(name) &&
         (result as { save_outcome?: string } | null)?.save_outcome === "unconfirmed";
+      const save = result as { invoice_number?: unknown; save_failure?: unknown } | null;
+      const number = typeof save?.invoice_number === "string" && save.invoice_number.length <= 160 &&
+        !Array.from(save.invoice_number).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ? save.invoice_number.trim() : undefined;
       log.push({ name, args, ok: !failed, ...(validationRejected ? { invalidArguments: true } : {}),
-        ...(unconfirmedSave ? { unconfirmedSave: true } : {}), note: shortNote(name, result) });
+        ...(unconfirmedSave ? { unconfirmedSave: true, invoiceSave: { number, timedOut: save?.save_failure === "timeout" } } : {}), note: shortNote(name, result) });
     },
     steps() {
       return [...log];

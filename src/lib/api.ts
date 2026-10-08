@@ -1092,14 +1092,20 @@ async function verifyPendingInvoiceSaves(doc: InvoiceDoc): Promise<string[]> {
       if (fingerprint !== entryKey.slice("invoice:save:".length, -(pending.request.length + 1))) continue;
     } else if (receipt.data.action !== "invoice:save" || JSON.stringify(canonicalWorkflow(receipt.data.payload)) !== JSON.stringify(canonicalWorkflow(payload))) continue;
     checkScope();
-    const removed = await workflowRegistry(key, checkScope, current => {
+    const reconciled = await workflowRegistry(key, checkScope, current => {
       const held = current[entryKey];
       if (held && !(held.activeUntil && held.activeUntil > Date.now()) && JSON.stringify(canonicalWorkflow(held.payload)) === JSON.stringify(canonicalWorkflow(payload))) {
         delete current[entryKey]; return true;
       }
       return false;
+    }).catch(() => {
+      // Exact fresh contents plus the matching committed receipt prove this
+      // save independently of whether local bookkeeping can be cleaned up.
+      checkScope();
+      console.warn("The saved invoice was verified, but its local recovery marker could not be cleared.");
+      return true;
     });
-    if (removed) verified.push(pending.request);
+    if (reconciled) verified.push(pending.request);
   }
   return verified;
 }
@@ -1128,6 +1134,8 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
   let pending: PendingWorkflow | undefined;
   let durableId = "";
   let replaying = false;
+  let freshRequest = false;
+  let dispatched = false;
   try {
     checkScope();
     pending = await workflowRegistry(storedKey, checkScope, rows => {
@@ -1140,6 +1148,9 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
         ? key.startsWith(`${kind}:${action}:`) && value.request === requestId
         : key.startsWith(prefix) && !(value.activeUntil && value.activeUntil > Date.now())));
       replaying = !!prior;
+      // Only an identity allocated here is provably new. An explicit request ID
+      // can refer to an older committed action even if its local marker is gone.
+      freshRequest = !prior && !requestId;
       const value: PendingWorkflow = prior?.[1] ?? { request: requestId || crypto.randomUUID(), payload: JSON.parse(JSON.stringify(payload)) };
       if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.request) || !value.payload || typeof value.payload !== "object")
         throw new Error("Pending saves could not be read. Reopen Filey before retrying.");
@@ -1158,6 +1169,7 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
     checkScope();
     let result: WorkflowResult;
     if (local) {
+      dispatched = true;
       result = await withLocalTransaction(async client => {
         checkScope();
         const receiptKey = `${scope}:${pending!.request}`;
@@ -1188,6 +1200,7 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
         await workflowRegistry(storedKey, checkScope, rows => { rows[durableId].preflightChecked = true; });
       }
       checkScope();
+      dispatched = true;
       const { data, error } = await sb().rpc(kind === "order" ? "filey_order_workflow" : kind === "journal" ? "filey_journal_workflow" : kind === "advance" ? "filey_advance_workflow" : kind === "stock" ? "filey_stock_workflow" : "filey_business_workflow", {
         ...(kind === "invoice" || kind === "po" ? { p_kind: kind } : {}), p_action: action, p_payload: pending.payload,
         p_request: pending.request, p_actor: capturedActor, p_org: capturedOrg,
@@ -1210,8 +1223,23 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       (["payment-add", "payment-remove"].includes(action) && !validId(result.payment_id)) ||
       (result.payment_id != null && (!validId(result.payment_id) || (payload.payment_id != null && Number(result.payment_id) !== Number(payload.payment_id)))))
       throw new Error("The action could not be confirmed. Reopen it and retry to recover the same receipt.");
-    await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; });
+    try { await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; }); }
+    catch {
+      // The validated server/native acknowledgement already confirms the save.
+      // A device bookkeeping failure must not turn that into a failed invoice
+      // or payment. Keep its exact marker for later receipt recovery instead.
+      checkScope();
+      console.warn("The action was saved, but its local recovery marker could not be cleared.");
+    }
     return { ...result, id: Number(result.id), ...(result.payment_id == null ? {} : { payment_id: Number(result.payment_id) }) };
+  } catch (error) {
+    if (freshRequest && !dispatched) {
+      // Quota/CAS/preflight persistence errors can occur before the first RPC.
+      // Nothing for this newly allocated identity could have been committed.
+      if (durableId) await workflowRegistry(storedKey, checkScope, rows => { delete rows[durableId]; }).catch(() => {});
+      throw markInvoiceOutcome(error, "rejected");
+    }
+    throw error;
   } finally {
     if (pending) await workflowRegistry(storedKey, checkScope, rows => {
       const row = rows[durableId]; if (row?.owner === workflowRenderer) { delete row.activeUntil; delete row.owner; }
