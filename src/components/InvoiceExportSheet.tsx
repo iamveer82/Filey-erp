@@ -11,8 +11,6 @@ import { StampSignatureLayer } from "./StampSignature";
 import type { BankInfo } from "./BankDetails";
 import { EMPTY_STAMP_SIG, type CompanyStampSig } from "./StampSignatureSettings";
 import { paginateItems, type DocItem } from "../lib/docItems";
-import { InvoiceElectronicDetailsPage, invoiceElectronicDetailPages } from "./InvoiceElectronicDetails";
-import type { DocViewForm } from "./DocView";
 
 /** A4 at 96 CSS dpi. The capture pipeline assumes these exact numbers. */
 export const A4_W = 794;
@@ -40,7 +38,6 @@ export default function InvoiceExportSheet({
   bank: BankInfo;
 }) {
   const pages = paginateItems(form.items);
-  const detailPages = invoiceElectronicDetailPages(form as unknown as DocViewForm);
   return (
     <>
       {pages.map((group, gi) => {
@@ -61,6 +58,7 @@ export default function InvoiceExportSheet({
             }}
           >
             <div
+              data-invoice-content="1027"
               style={{
                 position: "relative",
                 width: "100%",
@@ -100,10 +98,6 @@ export default function InvoiceExportSheet({
           </div>
         );
       })}
-      {detailPages.map((rows, index) => <div key={`electronic-${index}`} className="invoice-print" data-einvoice-details-sheet
-        style={{ width: A4_W, height: A4_H, background: "#fff", position: "relative", padding: 48, boxSizing: "border-box" }}>
-        <InvoiceElectronicDetailsPage rows={rows} pageNumber={index + 1} pageCount={detailPages.length} invoiceNumber={typeof form.number === "string" ? form.number : undefined} />
-      </div>)}
     </>
   );
 }

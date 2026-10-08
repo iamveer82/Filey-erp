@@ -148,11 +148,11 @@ describe("invoice editor actions", () => {
   it.each(["sales", "purchase"] as const)("uses optional %s party presets and clears the previous party's identity, tax and delivery details", async mode => {
     const identity = { identifier: "BUYER-NEW", tin: "1234567890" };
     vi.spyOn(crm, "customers").mockResolvedValue([
-      { id: 31, name: "Preset party", city: "Dubai", country_code: "AE", country_subdivision: "DU", custom_fields: { einvoice_identity: JSON.stringify(identity) } },
+      { id: 31, name: "Preset party", phone: "+971 50 123 4567", city: "Dubai", country_code: "AE", country_subdivision: "DU", custom_fields: { einvoice_identity: JSON.stringify(identity) } },
       { id: 32, name: "Blank party" },
     ] as Awaited<ReturnType<typeof crm.customers>>);
     vi.spyOn(suppliers, "list").mockResolvedValue([
-      { id: 31, name: "Preset party", created_at: "", custom_fields: { city: "Dubai", country_code: "AE", country_subdivision: "DU", einvoice_identity: JSON.stringify(identity) } },
+      { id: 31, name: "Preset party", phone: "+971 50 123 4567", created_at: "", custom_fields: { city: "Dubai", country_code: "AE", country_subdivision: "DU", einvoice_identity: JSON.stringify(identity) } },
       { id: 32, name: "Blank party", created_at: "" },
     ]);
     vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, customer_trn: "100000000000003", buyer_city: "Old city", buyer_country_code: "US", buyer_country_subdivision: "CA", einvoice: { buyer: { identifier: "OLD" }, seller: { tin: "5555555555" }, buyer_delivery_mode: "export-unregistered", delivery: { address: "Old delivery" } } });
@@ -167,9 +167,11 @@ describe("invoice editor actions", () => {
     await waitFor(() => expect(select).toBeEnabled());
     fireEvent.keyDown(select, { key: "ArrowDown" });
     fireEvent.click(await view.findByRole("option", { name: "Preset party" }));
+    expect(view.getByLabelText(`${mode === "purchase" ? "Supplier" : "Customer"} phone`)).toHaveValue("+971 50 123 4567");
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
     expect(save.mock.calls[0][0]).toMatchObject({ customer_name: "Preset party", customer_trn: "", buyer_city: "Dubai", buyer_country_code: "AE", buyer_country_subdivision: "DU", einvoice: { buyer: identity, seller: { tin: "5555555555" } } });
+    expect(save.mock.calls[0][0].einvoice?.buyer).toEqual({ ...identity, phone: "+971 50 123 4567" });
     expect(save.mock.calls[0][0].einvoice?.delivery).toBeUndefined();
     expect(save.mock.calls[0][0].einvoice?.buyer_delivery_mode).toBeUndefined();
     await waitFor(() => expect(select).toBeEnabled());
@@ -178,6 +180,7 @@ describe("invoice editor actions", () => {
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1][0]).toMatchObject({ customer_name: "Blank party", buyer_city: "", buyer_country_code: "", buyer_country_subdivision: "", einvoice: { buyer: {} } });
+    expect(save.mock.calls[1][0].einvoice?.buyer).toEqual({ phone: "" });
   });
 
   it.each(["sales", "purchase"] as const)("creates an optional %s identity preset from the invoice quick-add form", async mode => {
@@ -195,6 +198,7 @@ describe("invoice editor actions", () => {
     fireEvent.click(await view.findByRole("button", { name: `Add ${party}` }));
     const dialog = within(await view.findByRole("dialog"));
     fireEvent.change(dialog.getByRole("textbox", { name: "Company name" }), { target: { value: "Quick preset" } });
+    fireEvent.change(dialog.getByRole("textbox", { name: "Phone number" }), { target: { value: "+971 50 222 3344" } });
     fireEvent.click(dialog.getByText("Electronic invoicing details (optional)"));
     fireEvent.change(dialog.getByRole("textbox", { name: "City" }), { target: { value: "Sharjah" } });
     fireEvent.change(dialog.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "CUSTOM-ID" } });
@@ -202,12 +206,14 @@ describe("invoice editor actions", () => {
     await waitFor(() => expect(view.queryByRole("dialog")).not.toBeInTheDocument());
     const created = mode === "purchase" ? createSupplier.mock.calls[0][0] : createCustomer.mock.calls[0][0];
     expect(created.custom_fields?.einvoice_identity).toBe(JSON.stringify({ identifier: "CUSTOM-ID" }));
+    expect(created.phone).toBe("+971 50 222 3344");
+    expect(view.getByLabelText(`${mode === "purchase" ? "Supplier" : "Customer"} phone`)).toHaveValue("+971 50 222 3344");
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
-    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ customer_name: "Quick preset", buyer_city: "Sharjah", einvoice: expect.objectContaining({ buyer: { identifier: "CUSTOM-ID" } }) })));
+    await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ customer_name: "Quick preset", buyer_city: "Sharjah", einvoice: expect.objectContaining({ buyer: { identifier: "CUSTOM-ID", phone: "+971 50 222 3344" } }) })));
   });
 
-  it("shows the same electronic details continuation pages in the full invoice preview", async () => {
-    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, po_number: "PO-PREVIEW-OPTIONAL" });
+  it("shows entered invoice details and the frozen buyer phone within the original preview sheet", async () => {
+    vi.spyOn(billing, "getDoc").mockResolvedValue({ ...invoice, po_number: "PO-PREVIEW-OPTIONAL", einvoice: { buyer: { phone: "+971 50 333 4455", identifier: "BUYER-PREVIEW-ID" } } });
     const view = wrap(<Invoicing />);
     await view.findByText("INV-AUDIT");
     setCacheOrg("document-test-org", "document-test-user");
@@ -216,10 +222,14 @@ describe("invoice editor actions", () => {
     fireEvent.click(await view.findByRole("button", { name: "Preview" }));
     const preview = within(await view.findByRole("dialog"));
     expect(preview.queryByRole("heading", { name: "Electronic invoice details" })).not.toBeInTheDocument();
-    fireEvent.click(preview.getByRole("button", { name: "Next page" }));
-    expect(preview.getByRole("heading", { name: "Electronic invoice details" })).toBeVisible();
-    expect(preview.getByText("PO-PREVIEW-OPTIONAL")).toBeVisible();
-    expect(preview.getByText("Page 2 of 2")).toBeVisible();
+    expect(preview.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
+    expect(preview.getByText(/PO-PREVIEW-OPTIONAL/)).toBeVisible();
+    expect(preview.getByText("+971 50 333 4455")).toBeVisible();
+    expect(preview.getByText(/BUYER-PREVIEW-ID/)).toBeVisible();
+    expect(preview.getByText("Page 1 of 1")).toBeVisible();
+    const buyer = preview.getByText("+971 50 333 4455").closest('[data-invoice-party="buyer"]');
+    expect(buyer?.parentElement).toHaveTextContent("Example customer");
+    expect(buyer).toHaveTextContent("BUYER-PREVIEW-ID");
   });
 
   it("does not reserve numbers for opening, previewing, canceling or duplicating a draft", async () => {

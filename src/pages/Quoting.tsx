@@ -1026,6 +1026,7 @@ export default function Quoting() {
 
     const docViewForm = {
       ...form,
+      doc_type: "quotation",
       items: form.items.map(asDocViewItem),
       issue_date: form.quote_date,
       due_date: form.valid_until,

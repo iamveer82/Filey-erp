@@ -140,7 +140,6 @@ import {
 import { ResizablePanels } from "../components/ResizablePanels";
 import EInvoiceReview from "../components/EInvoiceReview";
 import EInvoicePartyFields from "../components/EInvoicePartyFields";
-import { invoiceElectronicDetailPages, InvoiceElectronicDetailsPage } from "../components/InvoiceElectronicDetails";
 import { validateEInvoice, buildInvoiceXml } from "../lib/einvoiceXml";
 import {
   INVOICE_TYPE_CODES,
@@ -1941,18 +1940,16 @@ function Editor({
   };
   // Group items into A4 pages, honoring per-item manual page breaks.
   const pages = paginateItems(form.items);
-  const electronicPages = useMemo(() => invoiceElectronicDetailPages(form), [form]);
   useEffect(() => {
     setPreviewPage(1);
-  }, [form.items.length, electronicPages.length]);
+  }, [form.items.length]);
 
-  const previewPages = pages.length + electronicPages.length;
+  const previewPages = pages.length;
   const curPageIdx = Math.min(previewPage, previewPages) - 1;
   const pageStartIndex = pages
     .slice(0, curPageIdx)
     .reduce((n, g) => n + g.length, 0);
   const isLastPreviewPage = curPageIdx === pages.length - 1;
-  const electronicPreview = curPageIdx >= pages.length;
   const [downloading, setDownloading] = useState(false);
   const [eInvoiceJump, setEInvoiceJump] = useState<string | null>(null);
   const supportsEInvoice = partyLabel !== "Supplier" && isUaeRegime(form.currency, form.tax_country_code);
@@ -1969,7 +1966,7 @@ function Editor({
         await saveBytes(`${saved.number}.pdf`, pdf.bytes, "application/pdf");
         return;
       }
-      const el = exportRef.current || invoiceRef.current;
+      const el = exportRef.current;
       if (!el) throw new Error("The invoice preview is not ready. Please try again.");
       await downloadElementAsPdf(el, form.number || "invoice");
     } catch (e) {
@@ -2225,7 +2222,7 @@ function Editor({
       buyer_city: details.city,
       buyer_country_subdivision: details.country_subdivision,
       buyer_country_code: countryCode || details.country_code,
-      einvoice: { ...form.einvoice, buyer: details.identity, buyer_delivery_mode: undefined, delivery: undefined },
+      einvoice: { ...form.einvoice, buyer: { ...details.identity, phone: supplier.phone || "" }, buyer_delivery_mode: undefined, delivery: undefined },
       advance_applied: 0,
     });
   };
@@ -2234,7 +2231,7 @@ function Editor({
     setForm({
       ...form,
       customer_id: c.id,
-      einvoice: { ...form.einvoice, buyer: readEInvoiceParty(c.custom_fields?.einvoice_identity), buyer_delivery_mode: undefined, delivery: undefined },
+      einvoice: { ...form.einvoice, buyer: { ...readEInvoiceParty(c.custom_fields?.einvoice_identity), phone: c.phone || "" }, buyer_delivery_mode: undefined, delivery: undefined },
       customer_name: c.company || c.name,
       customer_address: c.address ?? "",
       customer_email: c.email ?? "",
@@ -2269,13 +2266,12 @@ function Editor({
   const [viewPage, setViewPage] = useState(1);
   // Paginate for the full-screen "View" modal the same way as live preview/PDF.
   const viewPages = paginateItems(form.items);
-  const viewPageCount = viewPages.length + electronicPages.length;
+  const viewPageCount = viewPages.length;
   const viewPageIdx = Math.min(viewPage, viewPageCount) - 1;
   const viewPageStart = viewPages
     .slice(0, viewPageIdx)
     .reduce((n, g) => n + g.length, 0);
   const isLastViewPage = viewPageIdx === viewPages.length - 1;
-  const electronicViewPage = viewPageIdx >= viewPages.length;
 
   // Close view modal on Escape; reset to page 1 when reopening.
   useEffect(() => {
@@ -2641,8 +2637,14 @@ function Editor({
                     onChange={(e) => set("customer_address", e.target.value)}
                   />
                 </Field>
-                <Field label={`${partyLabel} Email / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
-                  <div className="grid grid-cols-2 gap-2">
+                <Field label={`${partyLabel} Contact / ${taxRegimeFor(form.currency, form.tax_country_code).trnLabel}`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input aria-label={`${partyLabel} phone`} type="tel"
+                      className="input"
+                      placeholder="Phone (optional)"
+                      value={typeof form.einvoice?.buyer?.phone === "string" ? form.einvoice.buyer.phone : ""}
+                      onChange={(e) => set("einvoice", { ...form.einvoice, buyer: { ...form.einvoice?.buyer, phone: e.target.value } })}
+                    />
                     <input aria-label={`${partyLabel} email`}
                       className="input"
                       placeholder="Email"
@@ -3704,17 +3706,17 @@ function Editor({
               </div>
             </div>
 
-            <FitPreview baseWidth={device === "desktop" || electronicPreview ? 794 : 420} zoom={zoom} padding={0}>
+            <FitPreview baseWidth={device === "desktop" ? 794 : 420} zoom={zoom} padding={0}>
               {/* ponytail: data-no-i18n + dir=ltr - invoice preview stays English
                   (text + layout) regardless of app language; PDF export clones
                   this subtree so the exemption carries into the captured pages. */}
               <div ref={invoiceRef} data-no-i18n dir="ltr">
                 <div
                   style={{
-                    width: device === "desktop" || electronicPreview ? 794 : 420,
-                    minHeight: device === "desktop" || electronicPreview ? 1123 : 594,
+                    width: device === "desktop" ? 794 : 420,
+                    minHeight: device === "desktop" ? 1123 : 594,
                     position: "relative",
-                    padding: device === "desktop" || electronicPreview ? 48 : 25,
+                    padding: device === "desktop" ? 48 : 25,
                     boxSizing: "border-box",
                     background: "#fff",
                   }}
@@ -3725,13 +3727,13 @@ function Editor({
                     style={{
                       position: "relative",
                       width: "100%",
-                      minHeight: device === "desktop" || electronicPreview ? 1027 : 498,
+                      minHeight: device === "desktop" ? 1027 : 498,
                     }}
                   >
                   {/* Stamp & Signature - draggable, watermark-style overlay.
                       Per-document copy (form.stamp/signature) seeded from the
                       company asset; falls back to the company asset itself. */}
-                  {!electronicPreview && <StampSignatureLayer
+                  <StampSignatureLayer
                     stamp={
                       form.show_stamp
                         ? form.stamp?.data
@@ -3756,15 +3758,15 @@ function Editor({
                         : companyStampSig.signature;
                       if (base) setForm({ ...form, signature: { ...base, x, y } });
                     }}
-                  />}
-                  {electronicPreview ? <InvoiceElectronicDetailsPage rows={electronicPages[curPageIdx - pages.length] || []} pageNumber={curPageIdx + 1} pageCount={previewPages} invoiceNumber={form.number} /> : <DocView
+                  />
+                  <DocView
                     bank={form.show_bank ? bank : undefined}
                     form={form}
                     pageItems={pages[curPageIdx] ?? []}
                     itemStartIndex={pageStartIndex}
                     showTotals={isLastPreviewPage}
                     showFooter={isLastPreviewPage}
-                  />}
+                  />
                   </div>
                 </div>
               </div>
@@ -3871,14 +3873,14 @@ function Editor({
                         if (base) setForm({ ...form, signature: { ...base, x, y } });
                       }}
                     />}
-                    {electronicViewPage ? <div style={{ padding: 48, background: "#fff" }}><InvoiceElectronicDetailsPage rows={electronicPages[viewPageIdx - viewPages.length] || []} pageNumber={viewPageIdx + 1} pageCount={viewPageCount} invoiceNumber={form.number} /></div> : <DocView
+                    <DocView
                       bank={form.show_bank ? bank : undefined}
                       form={form}
                       pageItems={viewPages[viewPageIdx] ?? []}
                       itemStartIndex={viewPageStart}
                       showTotals={isLastViewPage}
                       showFooter={isLastViewPage}
-                    />}
+                    />
                   </div>
             </FitPreview>
       </Modal>

@@ -4,8 +4,6 @@ import { supabase } from "../lib/supabase";
 import DocView, { type DocViewForm, type DocViewLabels } from "../components/DocView";
 import { splitItemMeta } from "../lib/docItems";
 import { Spinner, EmptyState } from "../components/ui";
-import { InvoiceElectronicDetailsPage, invoiceElectronicDetailPages } from "../components/InvoiceElectronicDetails";
-import FitPreview from "../components/FitPreview";
 
 
 /* Public, unauthenticated document viewer for shared links.
@@ -149,7 +147,6 @@ export default function PortalView() {
   };
 
   const labels: DocViewLabels = labelsFor(shared.doc_type);
-  const detailPages = invoiceElectronicDetailPages(form);
   const status = String(d.status || "draft");
 
   return (
@@ -165,13 +162,6 @@ export default function PortalView() {
         <div className="paper-texture rounded-xl border border-border p-8 shadow-sm min-h-[1123px]" data-no-i18n dir="ltr">
           <DocView form={form} labels={labels} />
         </div>
-        {detailPages.map((rows, index) => <div key={index} className="mt-4" data-no-i18n dir="ltr">
-          <FitPreview baseWidth={794} zoom={100} padding={0} zoomable>
-            <div style={{ width: 794, minHeight: 1123, padding: 48, boxSizing: "border-box", background: "#fff" }}>
-              <InvoiceElectronicDetailsPage rows={rows} pageNumber={index + 1} pageCount={detailPages.length} invoiceNumber={form.number} />
-            </div>
-          </FitPreview>
-        </div>)}
 
         {shared.doc_type === "invoice" && status !== "paid" && !paid && (
           <div className="mt-6 rounded-xl border border-border bg-muted px-4 py-3 text-center text-sm text-muted-foreground">

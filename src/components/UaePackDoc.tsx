@@ -22,6 +22,7 @@ import {
 import type { DocViewForm, DocViewItem, DocViewLabels } from "./DocView";
 import InvoiceLayoutFrame from "./InvoiceLayoutFrame";
 import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
+import { InvoicePartyDetails, InvoicePartyLocation, InvoiceLineDetails, InvoiceAdditionalDetails, supportsInvoiceDetails } from "./InvoiceElectronicDetails";
 import { BankDetailsBlock, type BankInfo } from "./BankDetails";
 
 /** Map a code to its human label (falls back to the raw code) — DocView pattern. */
@@ -556,6 +557,7 @@ export default function UaePackDoc({
   const lineRate = (it: DocViewItem) =>
     !it.tax_category || it.tax_category === "S" ? it.tax || form.tax_rate || 0 : 0;
 
+  const inlineDetails = supportsInvoiceDetails(form);
   const sellerEmirate = codeLabel(EMIRATES, normalizeEmirate(form.seller_country_subdivision));
   const buyerEmirate = codeLabel(EMIRATES, normalizeEmirate(form.buyer_country_subdivision));
   const sellerTin = partyTin(form.einvoice?.seller);
@@ -577,7 +579,7 @@ export default function UaePackDoc({
   if (form.date_of_supply) meta.push(["Date of Supply", fmtDate(form.date_of_supply)]);
   if (cfg.dueLabel && form.due_date)
     meta.push([labels?.dueLabel || cfg.dueLabel, fmtDate(form.due_date)]);
-  if (form.po_number) meta.push(["PO Reference", form.po_number]);
+  if (form.po_number) meta.push(["PO Reference", [form.po_number, form.po_date && fmtDate(form.po_date)].filter(Boolean).join(" · ")]);
   if (cfg.table === "voucher") meta.push([`Amount (${ccy})`, <b>{m(grandTotal)}</b>]);
   if (ccy !== "AED") meta.push(["Currency", ccy]);
   if (ccy !== "AED" && fxRate > 0)
@@ -591,19 +593,22 @@ export default function UaePackDoc({
   const boxCls = "invoice-party";
 
   const billToBox = (
-    <div className={boxCls}>
+    <div className={boxCls} data-invoice-party="buyer">
       <BoxTitle>{partyLabel}</BoxTitle>
       <p className="font-semibold">{form.customer_name}</p>
       {form.customer_address && (
         <p className="text-neutral-600 whitespace-pre-line">{form.customer_address}</p>
       )}
-      {(form.buyer_city || buyerEmirate || form.buyer_country_code) && (
+      <InvoicePartyLocation form={form} party="buyer" />
+      {!inlineDetails && (form.buyer_city || buyerEmirate || form.buyer_country_code) && (
         <p className="text-neutral-500">
           {[form.buyer_city, buyerEmirate, form.buyer_country_code].filter(Boolean).join(", ")}
         </p>
       )}
       {form.customer_trn && <p className="text-neutral-600">TRN: {form.customer_trn}</p>}
-      {buyerTin && <p className="text-neutral-500">TIN: {buyerTin}</p>}
+      {!inlineDetails && buyerTin && <p className="text-neutral-500">TIN: {buyerTin}</p>}
+      {(form.customer_phone || form.customer_email) && <p dir="auto">{[form.customer_phone, form.customer_email].filter(Boolean).join(" · ")}</p>}
+      <InvoicePartyDetails form={form} party="buyer" />
     </div>
   );
 
@@ -712,7 +717,7 @@ export default function UaePackDoc({
       case "idx":
         return itemStartIndex + i + 1;
       case "desc":
-        return it.description || "—";
+        return <>{it.description || "—"}<InvoiceLineDetails form={form} item={it} omitTaxAmounts={cols.includes("vat") && cols.includes("total") || cfg.columns === "margin"} /></>;
       case "qty":
         return it.qty;
       case "unit":
@@ -836,9 +841,33 @@ export default function UaePackDoc({
     </tr>
   );
 
+  const additionalOmit: ("supplyDate" | "purchaseOrder" | "originalInvoice" | "paymentAccount" | "exchangeRate")[] = [];
+  if (form.date_of_supply) additionalOmit.push("supplyDate");
+  if (form.po_number) additionalOmit.push("purchaseOrder");
+  if (cfg.box2 === "originalRef" && form.original_invoice_number) additionalOmit.push("originalInvoice");
+  if (bank && (form.einvoice?.payment_account_id || form.einvoice?.payment_account_name)) additionalOmit.push("paymentAccount");
+  if (ccy !== "AED" && fxRate > 0) additionalOmit.push("exchangeRate");
+  const sigLabels = cfg.sig || ["Authorised Signatory & Stamp", "Received By"];
+  const signatures = <div className="invoice-signatures grid grid-cols-2">
+    {sigLabels.map(s => <div key={s} className="border-t border-[#8fa2b5] pt-1.5 text-xs text-center text-[#5a7189]">{s}</div>)}
+  </div>;
+  const legalNote = <div className="invoice-legal pt-2 border-t border-[#e3e9f0]">
+    <p className="text-[10.8px] text-[#68798c]">{cfg.note}</p>
+    {freeWatermark && <p className="text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>}
+  </div>;
+  const inlineSummary = inlineDetails && showTotals && cfg.table !== "voucher";
+  const invoiceNotes = showFooter && <div className="invoice-summary-notes">
+    <InvoiceAdditionalDetails form={form} omit={additionalOmit} />
+    {!notesInSlot && form.notes && <p dir="auto" className="whitespace-pre-line text-xs text-neutral-500 mt-2">{form.notes}</p>}
+    {form.terms && <p className="text-xs text-neutral-500 mt-1">{form.terms}</p>}
+    {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
+    {inlineSummary && <><InvoiceTransactionSummary form={form} />{legalNote}</>}
+  </div>;
+
   const totalsBlock = showTotals && cfg.table !== "voucher" && (
     <>
       <div className="invoice-summary">
+        <div className="invoice-summary-details">
         {!noVat && (
           <div className="invoice-tax-breakdown">
             <BoxTitle>VAT Breakdown</BoxTitle>
@@ -866,7 +895,10 @@ export default function UaePackDoc({
             </table>
           </div>
         )}
-        <table className="invoice-totals border-collapse">
+        {invoiceNotes}
+        </div>
+        <div className="invoice-totals">
+        <table className="w-full border-collapse">
           <tbody>
             {isCredit && !isDebit ? (
               <>
@@ -920,14 +952,14 @@ export default function UaePackDoc({
             )}
           </tbody>
         </table>
-      </div>
       <p className="invoice-words">
         Amount in words: {amountInWords(grandTotal, ccy)}
       </p>
+        {inlineSummary && showFooter && signatures}
+        </div>
+      </div>
     </>
   );
-
-  const sigLabels = cfg.sig || ["Authorised Signatory & Stamp", "Received By"];
 
   return (
     <InvoiceLayoutFrame
@@ -938,21 +970,22 @@ export default function UaePackDoc({
           {logoSrc && (
             <img src={logoSrc} alt="logo" className="object-contain" style={{ height: 70 }} />
           )}
-          <div>
+          <div data-invoice-party="seller">
             <p className="invoice-seller-name">{form.seller_name}</p>
             {form.seller_address && (
               <p className="whitespace-pre-line">{form.seller_address}</p>
             )}
-            {(form.seller_city || sellerEmirate) && (
+            <InvoicePartyLocation form={form} party="seller" />
+            {!inlineDetails && (form.seller_city || sellerEmirate) && (
               <p>
                 {[form.seller_city, sellerEmirate].filter(Boolean).join(", ")}, United Arab
                 Emirates
               </p>
             )}
             {form.seller_trn && <p>TRN: {form.seller_trn}</p>}
-            {sellerTin && <p>TIN: {sellerTin}</p>}
-            {form.seller_email && <p>{form.seller_email}</p>}
-            {form.seller_phone && <p>{form.seller_phone}</p>}
+            {!inlineDetails && sellerTin && <p>TIN: {sellerTin}</p>}
+            {(form.seller_phone || form.seller_email) && <p dir="auto">{[form.seller_phone, form.seller_email].filter(Boolean).join(" · ")}</p>}
+            <InvoicePartyDetails form={form} party="seller" />
           </div>
         </div>
       }
@@ -988,28 +1021,8 @@ export default function UaePackDoc({
 
       {showFooter && (
         <>
-          <InvoiceTransactionSummary form={form} />
-          <div className="invoice-signatures grid grid-cols-2">
-            {sigLabels.map((s) => (
-              <div
-                key={s}
-                className="border-t border-[#8fa2b5] pt-1.5 text-xs text-center text-[#5a7189]"
-              >
-                {s}
-              </div>
-            ))}
-          </div>
-          <div className="invoice-legal pt-2 border-t border-[#e3e9f0]">
-            {!notesInSlot && form.notes && (
-              <p dir="auto" className="whitespace-pre-line text-xs text-neutral-500 mb-1">{form.notes}</p>
-            )}
-            {form.terms && <p className="text-xs text-neutral-400 mb-1">{form.terms}</p>}
-            <p className="text-[10.8px] text-[#68798c]">{cfg.note}</p>
-            {freeWatermark && (
-              <p className="text-[9px] text-neutral-400 mt-1">Made with Filey — the free plan</p>
-            )}
-          </div>
-          {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
+          {(!showTotals || cfg.table === "voucher") && invoiceNotes}
+          {!inlineSummary && <><InvoiceTransactionSummary form={form} />{signatures}{legalNote}</>}
         </>
       )}
     </InvoiceLayoutFrame>

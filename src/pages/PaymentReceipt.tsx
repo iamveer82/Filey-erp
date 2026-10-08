@@ -122,7 +122,7 @@ function blankForm(
 }
 
 const docViewForm = (form: Form | null): DocViewForm => {
-  if (!form) return { template: "receipt", accent: "#222222", currency: "AED", items: [] };
+  if (!form) return { doc_type: "receipt", template: "receipt", accent: "#222222", currency: "AED", items: [] };
   const notes = [
     form.notes,
     form.amount_words ? `Amount in words: ${form.amount_words}` : null,
@@ -132,6 +132,7 @@ const docViewForm = (form: Form | null): DocViewForm => {
     .filter(Boolean)
     .join("\n");
   return {
+    doc_type: "receipt",
     template: form.template || "receipt",
     accent: form.accent || "#222222",
     currency: form.currency || "AED",
