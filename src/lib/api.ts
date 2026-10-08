@@ -4358,7 +4358,10 @@ export const billing = {
       },
       [], ["invoice_docs", "invoice_doc_items", "invoice_payments"], true, fresh
     ),
-  getDoc: (docId: number, fresh = false) =>
+  // Full invoices feed editable forms, exports and agent writes. A stale list
+  // can refresh in place; a stale detail snapshot could overwrite remote edits.
+  // Local mode still reads its device store directly, without a network call.
+  getDoc: (docId: number, fresh = true) =>
     readCached<InvoiceDoc>(
       `invoice_doc:${docId}`,
       async () => {

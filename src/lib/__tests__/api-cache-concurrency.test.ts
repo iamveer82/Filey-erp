@@ -58,13 +58,50 @@ it("requires a fresh acknowledged product read for reconciliation and never fall
 it("never uses an invoice snapshot as proof of a save when a fresh reconciliation read fails", async () => {
   cloud.read.mockResolvedValueOnce({ data: { id: 7, number: "INV-7", status: "draft" }, error: null })
     .mockResolvedValueOnce({ data: [{ invoice_id: 7, description: "Oil", qty: 2, unit_price: 10 }], error: null });
-  expect((await billing.getDoc(7)).items).toHaveLength(1);
+  expect((await billing.getDoc(7, false)).items).toHaveLength(1);
   cloud.read.mockRejectedValue(new Error("Invoice connection lost"));
   await expect(billing.getDoc(7, true)).rejects.toThrow("Invoice connection lost");
   cloud.read.mockResolvedValue({ data: [], error: null });
   expect(await billing.listDocs("sales")).toEqual([]);
   cloud.read.mockRejectedValue(new Error("Invoice list connection lost"));
   await expect(billing.listDocs("sales", true)).rejects.toThrow("Invoice list connection lost");
+});
+
+async function cacheOldInvoice() {
+  cloud.read.mockResolvedValueOnce({ data: { id: 7, number: "INV-047", issue_date: "2026-10-08", status: "draft" }, error: null })
+    .mockResolvedValueOnce({ data: [{ invoice_id: 7, description: "Old invoice line", qty: 2, unit_price: 10 }], error: null });
+  await billing.getDoc(7, false);
+  expect((await billing.getDoc(7, false)).number).toBe("INV-047");
+  expect(cloud.read).toHaveBeenCalledTimes(2);
+}
+
+it("opens the latest invoice by default even when its cloud detail snapshot predates a remote edit", async () => {
+  await cacheOldInvoice();
+  cloud.read.mockResolvedValueOnce({ data: { id: 7, number: "INV-029", issue_date: "2026-09-23", status: "sent" }, error: null })
+    .mockResolvedValueOnce({ data: [{ invoice_id: 7, description: "Updated invoice line", qty: 3, unit_price: 20 }], error: null });
+  const invoice = await billing.getDoc(7);
+  expect(invoice).toMatchObject({ id: 7, number: "INV-029", issue_date: "2026-09-23", status: "sent", items: [
+    { description: "Updated invoice line", qty: 3, unit_price: 20 },
+  ] });
+  expect(cloud.read).toHaveBeenCalledTimes(4);
+});
+
+it("rejects a failed default invoice read instead of opening a stale editable snapshot", async () => {
+  await cacheOldInvoice();
+  cloud.read.mockRejectedValue(new Error("Latest invoice unavailable"));
+  await expect(billing.getDoc(7)).rejects.toThrow("Latest invoice unavailable");
+  expect(cloud.read).toHaveBeenCalledTimes(3);
+});
+
+it("keeps local invoice reads on their source even when cached reads are explicitly requested", async () => {
+  await cacheOldInvoice();
+  localStorage.setItem("filey_data_mode", "local");
+  for (const fresh of [undefined, false]) {
+    cloud.read.mockResolvedValueOnce({ data: { id: 7, number: "LOCAL-029", status: "draft" }, error: null })
+      .mockResolvedValueOnce({ data: [{ invoice_id: 7, description: "Local invoice line", qty: 4, unit_price: 5 }], error: null });
+    expect(await billing.getDoc(7, fresh)).toMatchObject({ number: "LOCAL-029", items: [{ description: "Local invoice line", qty: 4 }] });
+  }
+  expect(cloud.read).toHaveBeenCalledTimes(6);
 });
 
 it.each(["cloud", "local"])("rejects a fresh %s product read after an account switch without caching the old result", async mode => {
