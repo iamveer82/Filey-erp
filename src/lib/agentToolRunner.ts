@@ -24,9 +24,12 @@ export async function runToolWithAudit<T>(
   } catch (e) {
     const elapsed = Date.now() - started;
     result = { status: "error", error: String(e) };
-    await supabase!.from("agent_tool_calls").insert({
-      task_id: taskId, tool_name: toolName, input, output: { error: String(e) }, status: "error", elapsed_ms: elapsed,
-    }).catch(() => undefined);
+    try {
+      await supabase!.from("agent_tool_calls").insert({
+        task_id: taskId, tool_name: toolName, input, output: { error: String(e) }, status: "error", elapsed_ms: elapsed,
+      });
+    } catch {}
+
   }
   return result;
 }
