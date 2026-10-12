@@ -1,6 +1,6 @@
 {
-  "version": "2.3.14",
-  "notes": "A cleaner sign-in and sign-up screen. Recurring invoices now land on the correct date — month-end runs no longer slip and time zones no longer shift them a day. The assistant is also better at recalling what you have told it, so facts you saved earlier surface even when you word the question differently.",
+  "version": "3.0.24",
+  "notes": "Docs and auto-updater package version aligned to release v3.0.24.",
   "pub_date": "2026-07-26T00:33:05.399Z",
   "platforms": {
     "linux-x86_64": {

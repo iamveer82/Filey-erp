@@ -1,3 +1,11 @@
+## v3.0.24 — 2026-10-12
+
+Version alignment release for auto-updater and docs.
+
+- Update package, Cargo, Tauri, and latest.json version metadata to 3.0.24.
+
+---
+
 # Changelog
 
 ## v2.4.2 — 2026-08-06
