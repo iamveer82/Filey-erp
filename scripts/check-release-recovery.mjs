@@ -66,7 +66,7 @@ const verifyJob = workflow.jobs["verify-release-assets"];
 assert.equal(verifyJob.needs, "build", "Sanitize only after every platform finishes merging latest.json");
 const protect = verifyJob.steps.find(step => step.name === "Protect legacy Linux updaters");
 const manifestGuard = protect.run.match(/node -e '([^']+)'/)[1];
-const releaseVersion = "3.0.23", releaseTag = `v${releaseVersion}`, repository = "iamveer82/Filey-erp";
+const releaseVersion = "3.0.24", releaseTag = `v${releaseVersion}`, repository = "iamveer82/Filey-erp";
 const nsis = `Filey.ERP_${releaseVersion}_x64-setup.exe`, msi = `Filey.ERP_${releaseVersion}_x64_en-US.msi`;
 const deb = `Filey.ERP_${releaseVersion}_amd64.deb`, rpm = `Filey.ERP-${releaseVersion}-1.x86_64.rpm`;
 const arm = "Filey.ERP_aarch64.app.tar.gz", intel = "Filey.ERP_x64.app.tar.gz";
