@@ -97,6 +97,7 @@ import {
   type Chat,
   type ChatTurn,
 } from "../lib/aiChats";
+import { enqueueFinancialAssistantTurn } from "../lib/agentTaskService";
 import { cn } from "../lib/format";
 import { startDictation, speechRecognitionSupported } from "../lib/voice";
 import {
@@ -629,6 +630,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setChat(withUser);
     setBusy(true);
     setRunProgress(undefined);
+    void enqueueFinancialAssistantTurn(shownText).catch(() => {});
     setStreaming(auto ? "Planning…" : "");
     followUpEditedRef.current = false;
     const ctl = new AbortController();
