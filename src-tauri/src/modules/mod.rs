@@ -6,6 +6,7 @@ pub mod shortcut;
 pub mod storage;
 pub mod sync;
 pub mod wa_bridge;
+pub mod filey_agent;
 pub mod shell;
 pub mod computer_use;
 pub mod desktop_browser;

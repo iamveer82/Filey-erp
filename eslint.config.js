@@ -17,6 +17,7 @@ export default tseslint.config(
       ".claude", // workflow scripts, not part of the app
       "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
+      "agent", // Filey Agent (Hermes fork): own Python/TS toolchain + lint
       "src-tauri/target",
       "src-tauri/binaries", // generated sidecars and vendored native media packages
       "mobile/android/**/build/**",

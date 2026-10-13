@@ -3,6 +3,7 @@ import { MFA_REQUIRED, mfaAllowed } from "../_shared/mfa.ts";
 import { CORS_HEADERS, json, rateLimit } from "../_shared/rateLimit.ts";
 import { creditGateway } from "../_shared/ai-credit-gateway.ts";
 import { recoverFileyAICompletion } from "../_shared/ai-completion-recovery.ts";
+import { completionStream } from "../_shared/openai-compat.ts";
 import { creditPaymentsReady } from "../_shared/ai-credit-payments.ts";
 import { isAuthorizedZeroCreditOrder, publicTestPromotion } from "../_shared/ai-credit-promotion.ts";
 import {
@@ -96,6 +97,19 @@ export async function handleRequest(req: Request): Promise<Response> {
       }
     } catch {
       return json({ error: "Invalid JSON request." }, 400);
+    }
+    // OpenAI-compatible surface for the Filey Agent runtime (agent/): same verified user, wallet,
+    // model alias and request validation as in-app chat; the provider key never leaves here.
+    if (new URL(req.url).pathname.endsWith("/chat/completions")) {
+      const { stream, ...request } = body;
+      const result = await fileyAICompletion({
+        user,
+        wallet,
+        requestId: crypto.randomUUID(),
+        runId: UUID.test(req.headers.get("x-filey-run") ?? "") ? req.headers.get("x-filey-run")! : crypto.randomUUID(),
+        request: { ...request, model: FILEY_AI_MODEL.id },
+      });
+      return stream === true ? completionStream(result.completion) : json(result.completion);
     }
     const action = body.action;
     if (action === "limits") {

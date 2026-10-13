@@ -25,6 +25,7 @@ export default defineConfig({
     // supabase/ holds Deno edge functions + Deno tests (https: imports) — run
     // those with `deno test`, not vitest.
     // Worker path checks use Node's test runner, separately in CI.
-    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**"],
+    // agent/ is the Filey Agent (Hermes fork) with its own test runners.
+    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**", "agent/**"],
   },
 });

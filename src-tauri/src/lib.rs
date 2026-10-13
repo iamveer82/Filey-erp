@@ -92,6 +92,10 @@ pub fn run() {
                 modules::wa_bridge::wa_bridge_reply,
                 modules::wa_bridge::wa_bridge_send,
                 modules::wa_bridge::wa_bridge_send_file,
+                modules::filey_agent::filey_agent_start,
+                modules::filey_agent::filey_agent_send,
+                modules::filey_agent::filey_agent_stop,
+                modules::filey_agent::filey_agent_session,
                 // Owner-only shell execution (terminal / repo run)
                 modules::shell::shell_exec,
                 // Explicit, short-lived native computer control (Windows).
