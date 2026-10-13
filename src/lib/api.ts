@@ -1089,6 +1089,16 @@ async function verifyPendingInvoiceSaves(doc: InvoiceDoc): Promise<string[]> {
 /** A lost acknowledgement retains the same request and reviewed FX snapshot.
  * Independent active calls have distinct identities. Only an unconfirmed retry
  * reuses its receipt; callers can also supply an explicit request identity. */
+/** Back-off before each automatic re-send of an idempotent workflow request (tests shorten it). */
+export const workflowRetry = { delaysMs: [1500, 4000] };
+/** Failures where the database rolled back or never ran the call: statement/lock timeout,
+ *  serialization or deadlock abort, pool timeout, dropped connection, browser network error. */
+function transientWorkflowError(error: { code?: string; message?: string }): boolean {
+  const code = error.code ?? "";
+  return ["57014", "55P03", "40001", "40P01", "PGRST003"].includes(code) || /^08/.test(code) ||
+    (!code && /failed to fetch|load failed|networkerror|fetch failed|network request failed/i.test(error.message ?? ""));
+}
+
 async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "advance" | "stock", action: string,
   payload: Record<string, any>, localRun: (client: any, payload: Record<string, any>) => Promise<WorkflowResult>, requestId?: string,
   requested?: Record<string, any>, preflight?: () => Promise<void>): Promise<WorkflowResult> {
@@ -1178,10 +1188,20 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
       }
       checkScope();
       dispatched = true;
-      const { data, error } = await sb().rpc(kind === "order" ? "filey_order_workflow" : kind === "journal" ? "filey_journal_workflow" : kind === "advance" ? "filey_advance_workflow" : kind === "stock" ? "filey_stock_workflow" : "filey_business_workflow", {
-        ...(kind === "invoice" || kind === "po" ? { p_kind: kind } : {}), p_action: action, p_payload: pending.payload,
-        p_request: pending.request, p_actor: capturedActor, p_org: capturedOrg,
+      const send = () => sb().rpc(kind === "order" ? "filey_order_workflow" : kind === "journal" ? "filey_journal_workflow" : kind === "advance" ? "filey_advance_workflow" : kind === "stock" ? "filey_stock_workflow" : "filey_business_workflow", {
+        ...(kind === "invoice" || kind === "po" ? { p_kind: kind } : {}), p_action: action, p_payload: pending!.payload,
+        p_request: pending!.request, p_actor: capturedActor, p_org: capturedOrg,
       });
+      // The server returns the stored receipt for a committed request ID, so re-sending the same
+      // request is idempotent. Re-send only when the call rolled back or never ran: a starved
+      // database times out (57014) long before the 45 ms the save itself takes.
+      let { data, error } = await send();
+      for (const wait of workflowRetry.delaysMs) {
+        if (!error || !transientWorkflowError(error)) break;
+        await new Promise(resolve => setTimeout(resolve, wait));
+        checkScope();
+        ({ data, error } = await send());
+      }
       checkScope();
       if (error) {
         // A SQL rejection rolled back. Transport failures may arrive after a
@@ -1224,13 +1244,19 @@ async function businessWorkflow(kind: "invoice" | "po" | "order" | "journal" | "
   }
 }
 
+/** app_settings keys that hold whole document collections and have their own loaders
+ *  (lib/letters.ts, lib/packagingLists.ts); tools.settings() leaves them out. */
+const DOCUMENT_STORE_KEYS = ["letters", "packaging_lists"];
+
 // ---- generic Supabase helpers ----
 async function sList<T>(
   table: string,
   order?: { col: string; asc: boolean; nullsFirst?: boolean }[],
   select = "*",
   client: any = null,
-  limit = Infinity
+  limit = Infinity,
+  /** Cloud-only row filter (the local shim has no not/in); callers re-check rows locally. */
+  remoteFilter?: (q: any) => any
 ): Promise<T[]> {
   if (limit !== Infinity && (!Number.isInteger(limit) || limit < 0)) throw new Error("Invalid row limit.");
   const rows: T[] = [];
@@ -1238,6 +1264,7 @@ async function sList<T>(
   for (let offset = 0; offset < limit; offset += 500) {
     const take = Math.min(500, limit - offset);
     let q: any = (client ?? sb()).from(table).select(select);
+    if (remote && remoteFilter) q = remoteFilter(q);
     for (const o of order ?? []) {
       // Offline IDs are random. "Newest first" must sort by creation time;
       // keep id as the stable tie-breaker used by pagination.
@@ -2677,12 +2704,13 @@ export const tools = {
   settings: () =>
     readCached<Setting[]>(
       "tools_settings",
-      () =>
-        sList<Setting>(
-          "app_settings",
-          [{ col: "key", asc: true }],
-          "key,value"
-        ),
+      async () => {
+        const rows = await sList<Setting>("app_settings", [{ col: "key", asc: true }], "key,value", null, Infinity,
+          // Document stores with their own loaders carry page artwork (letters were 6.8 MB);
+          // pulling them on every settings read starved the cloud database.
+          q => q.not("key", "in", `(${DOCUMENT_STORE_KEYS.join(",")})`));
+        return rows.filter(row => !DOCUMENT_STORE_KEYS.includes(row.key));
+      },
       [], ["app_settings"]
     ),
   setSetting: (key: string, value: string) =>

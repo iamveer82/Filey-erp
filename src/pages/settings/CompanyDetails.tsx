@@ -8,6 +8,7 @@ import { companyCountry, companyPhoneHint, subdivisionLabel } from "../../lib/co
 import { taxRegimeFor, taxIdError, isUaeRegime } from "../../lib/taxRegimes";
 import { useUI } from "../../lib/ui";
 import { billing, CompanyProfile } from "../../lib/api";
+import { compactLogo } from "../../lib/imageCompact";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
@@ -162,9 +163,7 @@ export default function CompanyDetails() {
       toast.error("That logo is over 2MB. Pick a smaller image.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => set("logo", String(reader.result));
-    reader.readAsDataURL(file);
+    compactLogo(file).then(logo => set("logo", logo), () => toast.error("Could not read that image. Pick a PNG or JPG."));
   };
 
   const save = async () => {

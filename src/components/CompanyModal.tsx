@@ -21,6 +21,7 @@ import {
   DOC_TYPE_LABELS,
 } from "../lib/docPresets";
 import { SelectMenu } from "./ui-menu";
+import { compactLogo } from "../lib/imageCompact";
 
 /** The company-details dialog behind every document section's "Company"
  *  button. Invoicing, Quoting and Purchase Orders each carried their own copy
@@ -84,9 +85,7 @@ export default function CompanyModal({
 
   const onLogo = (file?: File) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setC({ ...c, logo: String(reader.result) });
-    reader.readAsDataURL(file);
+    void compactLogo(file).then(logo => setC(prev => ({ ...prev, logo })), () => {});
   };
 
   const save = async () => {

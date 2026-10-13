@@ -55,6 +55,7 @@ import { applyRoundOff, isCreditNote, r2 } from "./money";
 import { docTotals, splitItemMeta, storedLineAmount } from "./docItems";
 import { loadDocFormats } from "./numberFormat";
 import { allocateDocumentNumber } from "./documentNumbers";
+import { isLocalMode } from "./dataMode";
 import { readEInvoiceParty, type EInvoiceParty } from "./einvoice";
 import { companyInvoiceSeller } from "./invoiceSeller";
 import { customerPhoneE164 } from "./companyCountry";
@@ -229,6 +230,12 @@ async function saveAgentInvoice(input: InvoiceDocInput, assertCurrent: () => voi
       hint: "The invoice may already be saved. Read this exact invoice before any further write. Do not claim nothing was saved or that retrying cannot duplicate it. Keep the user's quantities, prices and custom calculation fields unchanged.",
     };
   }
+}
+
+/** Existing numbers only matter to the local allocator; the cloud reserves numbers server-side,
+ *  so fetching every document (with its items and payments) there was pure download weight. */
+async function localNumbers(list: () => Promise<unknown[]>): Promise<string[]> {
+  return isLocalMode() ? ((await list()) as { number: string }[]).map(d => d.number) : [];
 }
 
 /** Check durable receipts before allocating a new number, including after the
@@ -1736,7 +1743,7 @@ export const TOOLS: ToolDef[] = [
       if (pending) return pending;
       // Allocate only after pending receipts and supplied calculations are checked.
       if (!input.number) input.number = await allocateDocumentNumber("invoice",
-        ((await billing.listDocs("sales")) as { number: string }[]).map(d => d.number), await loadDocFormats());
+        await localNumbers(() => billing.listDocs("sales")), await loadDocFormats());
       const readiness = await invoiceReadiness(input);
       const saved = await saveAgentInvoice(input, assertCurrent);
       if ("error" in saved) return saved;
@@ -2590,7 +2597,7 @@ export const TOOLS: ToolDef[] = [
       // The user's quotation sequence (Settings → Document Numbering).
       const qtNo = await allocateDocumentNumber(
         "quote",
-        ((await quoteApi.listDocs()) as { number: string }[]).map((q) => q.number),
+        await localNumbers(() => quoteApi.listDocs()),
         await loadDocFormats()
       );
       const lineItems = items.map((it) => ({
@@ -3392,7 +3399,7 @@ export const TOOLS: ToolDef[] = [
       const pending = await pendingAgentInvoice(input, assertCurrent);
       if (pending) return pending;
       input.number = await allocateDocumentNumber("purchase_invoice",
-        ((await billing.listDocs("purchase")) as { number: string }[]).map(d => d.number), await loadDocFormats());
+        await localNumbers(() => billing.listDocs("purchase")), await loadDocFormats());
       const saved = await saveAgentInvoice(input, assertCurrent);
       if ("error" in saved) return saved;
       const unknownParty = await partyCheck("supplier", a.supplier_name);

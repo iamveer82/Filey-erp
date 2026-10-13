@@ -5,10 +5,11 @@ vi.mock("../realtime", () => ({ notifyDataChanged: cloud.changed }));
 vi.mock("../supabase", () => ({ isConfigured: true, supabase: null, sb: () => ({ rpc: cloud.rpc, from: cloud.from }) }));
 vi.mock("../exchange-rates", async original => ({ ...await original<typeof import("../exchange-rates")>(), getExchangeRates: async () => cloud.rates }));
 vi.mock("../license", async original => ({ ...await original<typeof import("../license")>(), checkFreeInvoiceCap: cloud.cap }));
-import { billing, erp, invoiceSaveIntentMatches, invoiceSaveOutcome, pos, setCacheOrg } from "../api";
+import { billing, erp, invoiceSaveIntentMatches, invoiceSaveOutcome, pos, setCacheOrg, workflowRetry } from "../api";
 import { localClient } from "../localdb";
 const actor = "00000000-0000-4000-8000-000000000001";
 beforeEach(() => {
+  workflowRetry.delaysMs = [0, 0];
   localStorage.clear(); localStorage.setItem("filey_data_mode", "cloud");
   setCacheOrg(null); setCacheOrg("workspace-a", actor);
   cloud.rpc.mockReset(); cloud.from.mockReset(); cloud.changed.mockClear(); cloud.cap.mockReset().mockResolvedValue(undefined); cloud.rates = { EUR: 4, AED: 1 };
@@ -161,11 +162,12 @@ it("does not treat a replay rejection as proof that the original unacknowledged 
   await expect(billing.saveDoc(recoveryInvoice())).rejects.toThrow("Response lost");
   const [pending] = await billing.pendingInvoiceSaves();
   for (const code of ["22023", "42501", "57014", "42883"]) {
-    cloud.rpc.mockResolvedValueOnce({ data: null, error: { code, message: "Replay failed before reading the old receipt" } });
+    cloud.rpc.mockResolvedValue({ data: null, error: { code, message: "Replay failed before reading the old receipt" } });
     const error = await billing.retryInvoiceSave(pending.requestId).catch(error => error);
     expect(invoiceSaveOutcome(error)).toBe("unconfirmed");
     expect(await billing.pendingInvoiceSaves()).toMatchObject([{ requestId: pending.requestId }]);
   }
+  cloud.rpc.mockReset();
   cloud.rpc.mockResolvedValueOnce({ data: { id: 7 }, error: null });
   expect(await billing.retryInvoiceSave(pending.requestId)).toBe(7);
   expect(new Set(cloud.rpc.mock.calls.map(([, args]) => args.p_request)).size).toBe(1);
@@ -179,9 +181,28 @@ it("distinguishes trusted preflight and first SQL rejection from an unconfirmed 
   cloud.rpc.mockResolvedValueOnce({ data: null, error: { code: "22023", message: "Invalid invoice" } });
   expect(invoiceSaveOutcome(await billing.saveDoc(recoveryInvoice()).catch(error => error))).toBe("rejected");
   expect(await billing.pendingInvoiceSaves()).toEqual([]);
-  cloud.rpc.mockResolvedValueOnce({ data: null, error: { code: "57014", message: "Statement timed out" } });
+  cloud.rpc.mockResolvedValue({ data: null, error: { code: "57014", message: "Statement timed out" } });
   expect(invoiceSaveOutcome(await billing.saveDoc(recoveryInvoice()).catch(error => error))).toBe("unconfirmed");
   expect(await billing.pendingInvoiceSaves()).toHaveLength(1);
+});
+
+it("re-sends a timed-out or network-dropped save with the same request until the database answers", async () => {
+  vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Fixture", country_code: "AE" } as never);
+  cloud.rpc
+    .mockResolvedValueOnce({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } })
+    .mockResolvedValueOnce({ data: null, error: { code: "", message: "TypeError: Load failed" } })
+    .mockResolvedValueOnce({ data: { id: 63 }, error: null });
+  expect(await billing.saveDoc(recoveryInvoice())).toBe(63);
+  expect(cloud.rpc).toHaveBeenCalledTimes(3);
+  expect(new Set(cloud.rpc.mock.calls.map(([, args]) => args.p_request)).size).toBe(1);
+  expect(await billing.pendingInvoiceSaves()).toEqual([]);
+});
+
+it("never re-sends a definite rejection", async () => {
+  vi.spyOn(billing, "getCompany").mockResolvedValue({ name: "Fixture", country_code: "AE" } as never);
+  cloud.rpc.mockResolvedValue({ data: null, error: { code: "42501", message: "Your account or workspace changed." } });
+  expect(invoiceSaveOutcome(await billing.saveDoc(recoveryInvoice()).catch(error => error))).toBe("rejected");
+  expect(cloud.rpc).toHaveBeenCalledTimes(1);
 });
 
 it("reconciles only an exact fresh invoice with its matching committed receipt, leaving missing or changed outcomes pending", async () => {
