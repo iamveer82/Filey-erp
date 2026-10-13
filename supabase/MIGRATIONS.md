@@ -26,6 +26,15 @@ legacy installations were refused without altering their saved data. Evidence:
 `output/bootstrap-complete-tests.log` and `output/bootstrap-catalog.json`.
 This is local evidence, not a live-project readback.
 
+## Agent core queue — pending, not applied
+
+`2026-10-12-agent-core.sql` (moved from `migrations/20261012-agent-core.sql`,
+which had no RLS) creates `agent_threads`, `agent_tasks`, `agent_events`,
+`agent_tool_calls` and `journal_events`. Every row is owner-only: tasks,
+threads and journal rows by `user_id`, events and tool calls through their
+thread/task owner. Anon is revoked; task idempotency keys are unique per user.
+Until it is applied, the chat's fire-and-forget enqueue fails silently.
+
 ## Atomic workflows and numbering — pending, not applied
 
 For an existing database with the documented historical dependencies already
