@@ -8,7 +8,7 @@ import { notifyDataChanged } from "../realtime";
 import { connectionSummary, integrationAllowed, integrationEntity } from "../../../supabase/functions/_shared/integration-access";
 
 const rpc = vi.hoisted(() => vi.fn());
-const query = vi.hoisted(() => ({select:vi.fn(),order:vi.fn(),range:vi.fn(),then:vi.fn()}));
+const query = vi.hoisted(() => ({select:vi.fn(),not:vi.fn(),order:vi.fn(),range:vi.fn(),then:vi.fn()}));
 vi.mock("../supabase",()=>({supabase:{rpc},isConfigured:true,sb:()=>({from:()=>query})}));
 vi.mock("../auth",()=>({useAuth:()=>({user:{id:"staff"}})}));
 function Consumer() { const access = useModules(); return <div>{access.loading ? "Loading" : access.error || (access.isEnabled("people") ? "People allowed" : "People blocked")}</div>; }
@@ -16,7 +16,7 @@ beforeEach(()=>{
   localStorage.clear(); localStorage.setItem("filey_data_mode","cloud");
   setCacheOrg("org","staff"); vi.clearAllMocks();
   rpc.mockResolvedValue({data:{allowed:true,admin:false,modules:["inventory"]},error:null});
-  for (const name of ["select","order","range"] as const) query[name].mockReturnValue(query);
+  for (const name of ["select","not","order","range"] as const) query[name].mockReturnValue(query);
   query.then.mockImplementation((resolve: (value:unknown)=>unknown)=>Promise.resolve(resolve({data:[],error:null})));
 });
 afterEach(()=>{cleanup();setCacheOrg(null);vi.unstubAllGlobals();});
