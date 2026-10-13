@@ -26,14 +26,20 @@ legacy installations were refused without altering their saved data. Evidence:
 `output/bootstrap-complete-tests.log` and `output/bootstrap-catalog.json`.
 This is local evidence, not a live-project readback.
 
-## Agent core queue — pending, not applied
+## Agent core queue — APPLIED 2026-10-13
 
 `2026-10-12-agent-core.sql` (moved from `migrations/20261012-agent-core.sql`,
 which had no RLS) creates `agent_threads`, `agent_tasks`, `agent_events`,
 `agent_tool_calls` and `journal_events`. Every row is owner-only: tasks,
 threads and journal rows by `user_id`, events and tool calls through their
 thread/task owner. Anon is revoked; task idempotency keys are unique per user.
-Until it is applied, the chat's fire-and-forget enqueue fails silently.
+
+Applied live via the management API on 13 October. Readback: all five tables
+have RLS and one policy each, anon gets 42501, and a rolled-back two-user test
+showed owner writes succeed while forged `user_id`, a foreign thread and a
+foreign event are refused and the other user sees zero rows.
+`check-cloud-schema.mjs` against the fresh catalog: **98 tables, 1,257
+columns, 136 functions, zero issues**.
 
 ## Atomic workflows and numbering — pending, not applied
 
