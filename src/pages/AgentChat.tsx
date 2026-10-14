@@ -57,7 +57,7 @@ import { skillsIndex } from "../lib/agentSkills";
 import { buildAiContext } from "../lib/aiContext";
 import { getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
 import { isToolAllowed } from "../lib/capabilities";
-import { fileyAgentEnabled, fileyAgentTurn } from "../lib/fileyAgent";
+import { fileyAgentEnabled, fileyAgentOrFallback, fileyAgentTurn } from "../lib/fileyAgent";
 import {
   aiAgentStream,
   aiAutonomousStream,
@@ -693,11 +693,14 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm };
       // Filey Agent keeps its own session history, memory and persona; business actions come
       // back here through runTool. Attachments reach its tools through this turn's slot.
+      const builtIn = () => auto
+        ? aiAutonomousStream(goalText, { ...options, history, images })
+        : aiAgentStream(messages, options);
       const stream = fileyAgentEnabled()
-        ? fileyAgentTurn(chat.id, goalText, { confirm: requestConfirm, isOwner: !!scope, turnId, signal: ctl.signal, agentId: chat.id })
-        : auto
-          ? aiAutonomousStream(goalText, { ...options, history, images })
-          : aiAgentStream(messages, options);
+        ? fileyAgentOrFallback(
+          fileyAgentTurn(chat.id, goalText, { confirm: requestConfirm, isOwner: !!scope, turnId, signal: ctl.signal, agentId: chat.id }),
+          builtIn)
+        : builtIn();
       try {
         for (;;) {
           const step = await stream.next();

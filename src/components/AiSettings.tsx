@@ -18,6 +18,47 @@ import MediaSettings from "./MediaSettings";
 import { SelectMenu } from "./ui-menu";
 import { getCacheScope } from "../lib/api";
 import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
+import { FILEY_AGENT_RUNTIME_KEY, connectFileyAgent } from "../lib/fileyAgent";
+import { Switch } from "./ui";
+
+/** Web and phone: chat turns run on the hosted Filey Agent (tools/agent-host). */
+function ComputerAgentSection() {
+  const [on, setOn] = useState(() => {
+    try { return localStorage.getItem(FILEY_AGENT_RUNTIME_KEY) === "filey-agent"; } catch { return false; }
+  });
+  const [status, setStatus] = useState("");
+  const [checking, setChecking] = useState(false);
+  const toggle = (next: boolean) => {
+    try {
+      if (next) localStorage.setItem(FILEY_AGENT_RUNTIME_KEY, "filey-agent");
+      else localStorage.removeItem(FILEY_AGENT_RUNTIME_KEY);
+    } catch { /* stays as it was */ }
+    setOn(next);
+    setStatus("");
+  };
+  const check = async () => {
+    setChecking(true);
+    setStatus("");
+    try {
+      await connectFileyAgent();
+      setStatus("Connected. Chat replies now come from the Filey Agent.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally { setChecking(false); }
+  };
+  return (
+    <SettingsSection title="Filey Agent (beta)" description="A stronger assistant that remembers your preferences and learns your routines. Replies stream back live and use your Coin. If it's offline, Filey AI answers instead.">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm">Use the Filey Agent</span>
+        <Switch checked={on} onChange={toggle} label="Use the Filey Agent" />
+      </div>
+      {on && <button type="button" className="btn-ghost rounded-full" disabled={checking} onClick={() => void check()}>
+        {checking ? "Checking…" : "Check connection"}
+      </button>}
+      {status && <p role="status" className="text-[13px] leading-relaxed text-muted-foreground">{status}</p>}
+    </SettingsSection>
+  );
+}
 
 /* Settings → AI Assistant. Provider metadata is separate from credentials. */
 
@@ -301,6 +342,7 @@ export default function AiSettings() {
       <SettingsSection title="AI payment method" description="Use your own key or optional Coin on Basic, Pro and Ultra. Coin is never spent automatically if your key fails.">
         <AiFundingControl />
       </SettingsSection>
+      {!desktop && <ComputerAgentSection />}
       <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5"><Sparkles size={13} />{local ? "On this device" : "Your provider"}</span>

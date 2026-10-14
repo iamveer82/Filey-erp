@@ -192,12 +192,68 @@ export async function desktopAgentTransport(): Promise<AgentTransport> {
   };
 }
 
-/** Opt-in while the agent runtime rolls out: Settings flips this per device. */
+/** Web and phone: the hosted Filey Agent (tools/agent-host/host.py behind a Cloudflare tunnel).
+ *  The first frame proves the Filey account; refreshed tokens follow so the model keeps billing
+ *  the user's own Coins. Each user gets their own agent there. */
+export const FILEY_AGENT_HOST_URL = "wss://agent.gofiley.com/ws";
+const HOST_CLOSED: Record<number, string> = {
+  4401: "This Filey account can't use the Filey Agent yet.",
+  4403: "This Filey account can't use the Filey Agent yet.",
+  4409: "The Filey Agent was opened in another window.",
+  4429: "The Filey Agent is busy right now. Try again in a few minutes.",
+};
+export async function hostAgentTransport(url = FILEY_AGENT_HOST_URL): Promise<AgentTransport> {
+  const { supabase } = await import("./supabase");
+  const session = supabase && (await supabase.auth.getSession()).data.session;
+  if (!supabase || !session) throw new Error("Sign in to your Filey account to use the Filey Agent.");
+  const auth = (method: string, s: { access_token: string; expires_at?: number }) =>
+    JSON.stringify({ jsonrpc: "2.0", method, params: { access_token: s.access_token, expires_at: s.expires_at ?? 0 } });
+  const subs = new Set<(line: string) => void>();
+  const early: string[] = [];
+  const deliver = (line: string) => subs.size ? subs.forEach(cb => cb(line)) : early.push(line);
+  const ws = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    ws.onopen = () => { ws.send(auth("filey.auth", session)); resolve(); };
+    ws.onerror = () => reject(new Error("The Filey Agent is offline right now."));
+  });
+  ws.onmessage = e => deliver(String(e.data));
+  const sub = supabase.auth.onAuthStateChange((_event, s) => {
+    if (s && ws.readyState === WebSocket.OPEN) ws.send(auth("filey.session", s));
+  });
+  // Cloudflare closes a WebSocket that is silent for 100 s mid-way through a long turn.
+  const ping = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ jsonrpc: "2.0", id: `ping${Date.now()}`, method: "gateway.ping" }));
+  }, 30_000);
+  let closed = "";
+  ws.onclose = e => {
+    clearInterval(ping);
+    sub.data.subscription.unsubscribe();
+    connection = undefined;
+    sessions.clear();
+    closed = HOST_CLOSED[e.code] ?? "The Filey Agent is offline right now.";
+    // End any turn waiting on events: the stream turns this into its error.
+    deliver(JSON.stringify({ jsonrpc: "2.0", method: "event", params: { type: "error", payload: { message: closed } } }));
+  };
+  return {
+    send: line => {
+      if (ws.readyState !== WebSocket.OPEN) throw new Error(closed || "The Filey Agent is offline right now.");
+      ws.send(line);
+    },
+    onLine: cb => {
+      subs.add(cb);
+      early.splice(0).forEach(cb);
+      return () => subs.delete(cb);
+    },
+  };
+}
+
+/** Opt-in while the agent runtime rolls out: Settings flips this per device. The desktop app
+ *  runs its own sidecar; the web and phone app reach the owner's computer through the host. */
 export const FILEY_AGENT_RUNTIME_KEY = "filey.agentRuntime";
+const desktop = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export function fileyAgentEnabled(): boolean {
   try {
-    return localStorage.getItem(FILEY_AGENT_RUNTIME_KEY) === "filey-agent"
-      && typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    return localStorage.getItem(FILEY_AGENT_RUNTIME_KEY) === "filey-agent";
   } catch {
     return false;
   }
@@ -206,9 +262,14 @@ export function fileyAgentEnabled(): boolean {
 let connection: Promise<FileyAgentClient> | undefined;
 const sessions = new Map<string, Promise<string>>();
 
+/** Connects (or reuses the connection) and waits until the agent is ready for turns. */
+export function connectFileyAgent(): Promise<FileyAgentClient> {
+  return connect();
+}
+
 function connect(): Promise<FileyAgentClient> {
   connection ??= (async () => {
-    const client = new FileyAgentClient(await desktopAgentTransport());
+    const client = new FileyAgentClient(await (desktop() ? desktopAgentTransport() : hostAgentTransport()));
     // A sidecar that was already running sent gateway.ready to an earlier page load.
     await Promise.race([client.ready, new Promise(r => setTimeout(r, 4000))
       .then(() => client.request("client.capabilities", { server_requests: true }))]);
@@ -228,6 +289,31 @@ export async function* fileyAgentTurn(chatId: string, text: string, ctx: AppRequ
     session.catch(() => sessions.delete(chatId));
   }
   return yield* fileyAgentStream(client, await session, text, ctx);
+}
+
+/** The Filey Agent turn, or the built-in chat when the agent can't start it (offline, busy, not
+ *  allowed). Only a failure before the agent's first event falls back: by then it has taken no
+ *  action, so the built-in chat can't repeat one. */
+export async function* fileyAgentOrFallback(
+  primary: AsyncGenerator<AgentEvent, string>,
+  fallback: () => AsyncGenerator<AgentEvent, string>,
+): AsyncGenerator<AgentEvent, string> {
+  let first: IteratorResult<AgentEvent, string>;
+  try {
+    first = await primary.next();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const note = (text: string) => `_${reason} Filey AI answered instead._\n\n${text}`;
+    const backup = fallback();
+    for (;;) {
+      const step = await backup.next();
+      if (step.done) return note(step.value);
+      yield step.value.type === "done" ? { ...step.value, text: note(step.value.text) } : step.value;
+    }
+  }
+  if (first.done) return first.value;
+  yield first.value;
+  return yield* primary;
 }
 
 const parse = (value: unknown) => {
