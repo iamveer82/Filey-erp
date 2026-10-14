@@ -26,6 +26,32 @@ legacy installations were refused without altering their saved data. Evidence:
 `output/bootstrap-complete-tests.log` and `output/bootstrap-catalog.json`.
 This is local evidence, not a live-project readback.
 
+## Sync change feed — APPLIED 2026-10-14
+
+`2026-10-14-sync-change-feed.sql` makes cloud load follow what changed instead
+of the size of the books. A trigger on each of the 45 synchronized tables appends
+one small row to `public.sync_changes` (table, id, operation, revision, owner).
+Devices call `filey_sync_changes(cursor)`: one tiny answer when nothing changed,
+otherwise only the changed ids and revisions, and they fetch only rows they do
+not already hold. `filey_sync_cursor()` gives the position to resume from after
+a complete copy. Cursors are `pg_snapshot_xmin`, so no committed change is skipped.
+
+Clients cannot read `sync_changes`. The feed runs as the caller and re-checks
+every changed row against the caller's RLS; rows the caller can no longer see are
+reported as removed. Deletions come from the log, to the owner and members of
+the row's organization (ids only). `filey_private.prune_sync_changes()` keeps 30
+days (pg_cron `filey-prune-sync-changes`, 03:17 daily); an older cursor is told
+to make one complete copy. Not in the fresh installer yet.
+
+Disposable test: `node scripts/test-schema-bootstrap-local.mjs --change-feed`
+(full installer, then the migration twice): own rows only, colleagues told only
+that a row is not theirs, sharing and unsharing reach them, deletions, device
+uploads through `sync_record`, other accounts kept out, log unreadable, prune
+and long gaps answered with a complete-copy request. Live readback: 45 triggers,
+authenticated may call the feed but not read the log or prune, anon refused,
+cron scheduled. A rolled-back live write as the owner account came back as
+exactly one feed entry.
+
 ## Filey Link — APPLIED 2026-10-14
 
 `2026-10-14-device-link.sql` adds two policies on `realtime.messages` so a

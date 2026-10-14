@@ -94,6 +94,57 @@ async function testRecurrence() {
   console.log('PASS: 8 simultaneous callers generate one recurring draft and advance one cycle; seven report no work.');
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/recurrence-after-parallel.sql')).trim());
 }
+async function testChangeFeed() {
+  const feed=sql('supabase/2026-10-14-sync-change-feed.sql');
+  run('psql',args('postgres'),feed+'\n'+feed);
+  const ids={owner:'c1000000-0000-4000-8000-000000000001',staff:'c1000000-0000-4000-8000-000000000002',other:'c1000000-0000-4000-8000-000000000003'};
+  run('psql',args('postgres'),`insert into auth.users(id,email,email_confirmed_at) values
+    ('${ids.owner}','feed-owner@feed.invalid',now()),('${ids.staff}','feed-staff@feed.invalid',now()),('${ids.other}','feed-other@feed.invalid',now());
+    insert into org_members(org_id,user_id,role) select org_id,'${ids.staff}','staff' from profiles where id='${ids.owner}';
+    update profiles set org_id=(select org_id from profiles where id='${ids.owner}') where id='${ids.staff}';`);
+  const as=who=>`set role authenticated;set request.jwt.claim.sub='${ids[who]}';set request.jwt.claims='{"role":"authenticated","aal":"aal1"}';`;
+  const cursor=who=>{
+    const at=JSON.parse(query('postgres',as(who)+'select public.filey_sync_cursor();'));
+    assert.equal(at.org,query('postgres',`select org_id from profiles where id='${ids[who]}';`),'Cursor did not name its workspace');
+    return at.cursor;
+  };
+  const changes=(who,since,limit=2000)=>JSON.parse(query('postgres',as(who)+`select public.filey_sync_changes('${since}',${limit});`));
+  const about=(result,id)=>result.changes.filter(c=>c.id===String(id));
+  const start={owner:cursor('owner'),staff:cursor('staff'),other:cursor('other')};
+  const invoice=Number(query('postgres',as('owner')+"insert into invoice_docs(number,status,customer_name) values('FEED-1','draft','Feed customer') returning id;"));
+  let mine=changes('owner',start.owner);
+  assert.deepEqual(about(mine,invoice),[{t:'invoice_docs',id:String(invoice),op:'u',rev:1}],'Owner did not see their own new row');
+  assert.deepEqual(about(changes('other',start.other),invoice),[],'Another account saw a row it does not own');
+  assert.deepEqual(about(changes('staff',start.staff),invoice),[{t:'invoice_docs',id:String(invoice),op:'d'}],
+    'A colleague who cannot read the row learned more than that it is not theirs');
+  assert.deepEqual(changes('owner',mine.cursor).changes,[],'An unchanged account was sent changes again');
+  run('psql',args('postgres'),as('owner')+`update invoice_docs set customer_name='Feed customer 2' where id=${invoice};`);
+  const updated=changes('owner',mine.cursor);
+  assert.deepEqual(updated.changes,[{t:'invoice_docs',id:String(invoice),op:'u',rev:2}],'Only the edited row should come back');
+  const staffBefore=cursor('staff');
+  run('psql',args('postgres'),as('owner')+`update invoice_docs set shared=true where id=${invoice};`);
+  const shared=changes('staff',staffBefore);
+  assert.deepEqual(about(shared,invoice),[{t:'invoice_docs',id:String(invoice),op:'u',rev:3}],'Sharing did not reach the colleague');
+  run('psql',args('postgres'),as('owner')+`update invoice_docs set shared=false where id=${invoice};`);
+  assert.deepEqual(about(changes('staff',shared.cursor),invoice),[{t:'invoice_docs',id:String(invoice),op:'d'}],'Unsharing did not remove it from the colleague');
+  const customer=990001;
+  run('psql',args('postgres'),as('owner')+`select public.sync_record('crm_customers','{"id":${customer},"name":"Feed RPC customer"}'::jsonb);`);
+  assert.deepEqual(about(changes('owner',updated.cursor),customer),[{t:'crm_customers',id:String(customer),op:'u',rev:1}],'A device upload was not logged');
+  run('psql',args('postgres'),as('other')+"insert into crm_customers(name) values('Other account customer');");
+  assert(!changes('owner',updated.cursor).changes.some(c=>c.t==='crm_customers'&&c.id!==String(customer)),'Another account\'s write reached this account');
+  const beforeDelete=cursor('owner');
+  run('psql',args('postgres'),as('owner')+`delete from invoice_docs where id=${invoice};`);
+  assert.deepEqual(about(changes('owner',beforeDelete),invoice),[{t:'invoice_docs',id:String(invoice),op:'d'}],'Deletion did not reach the owner');
+  assert.equal(changes('owner',start.owner,1).stale,true,'A long gap should ask for one complete copy');
+  assert.throws(()=>query('postgres',as('owner')+'select count(*) from public.sync_changes;'),error=>/permission denied/.test(error.stderr?.toString()||''));
+  assert.throws(()=>query('postgres',"set role anon;select public.filey_sync_changes('1');"),error=>/permission denied/.test(error.stderr?.toString()||''));
+  assert.throws(()=>query('postgres',as('owner')+"select filey_private.prune_sync_changes('0 seconds');"),error=>/permission denied/.test(error.stderr?.toString()||''));
+  assert.notEqual(query('postgres',"select filey_private.prune_sync_changes('0 seconds');"),'0','Prune removed nothing');
+  assert.equal(changes('owner',start.owner).stale,true,'A cursor older than the pruned log was answered from a partial log');
+  run('psql',args('postgres'),`delete from auth.users where id::text like 'c1000000-%';`);
+  console.log('PASS: change feed returns only changed rows the caller can read now, reports lost access and deletions, never repeats an unchanged account, logs device uploads, keeps other accounts out, hides the log table, and asks for one complete copy after pruning or a long gap.');
+}
+const changeFeedOnly=process.argv.includes('--change-feed');
 const snapshotSql=`select jsonb_object_agg(table_name,rows order by table_name) from (
   select c.relname table_name,(xpath('/table/row/rows/text()',query_to_xml(format('select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),''[]''::jsonb) as rows from public.%I t',c.relname),false,true,'')))[1]::text rows
   from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r') all_rows;`;
@@ -116,7 +167,9 @@ try {
   const supplierUpgrade=sql('supabase/2026-10-08-supplier-invoice-details.sql').replace(/^(?:begin;|commit;)\s*$/gmi,'');
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/supplier-invoice-details.sql').replace('-- APPLY SUPPLIER UPGRADE',()=>supplierUpgrade+'\n'+supplierUpgrade)).trim());
   console.log(run('psql',args('postgres'),sql('scripts/fixtures/bootstrap-workflows.sql')).trim());
-  if(removedMemberOnly) {
+  if(changeFeedOnly) {
+    await testChangeFeed();
+  } else if(removedMemberOnly) {
     await testRemovedMembership();
   } else if(recurrenceOnly) {
     await testRecurrence();

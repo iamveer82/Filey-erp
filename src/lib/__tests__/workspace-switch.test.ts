@@ -14,9 +14,11 @@ const state = vi.hoisted(() => ({
   syncStatus: { state: "idle" } as SyncStatus,
   beforeProfile: () => {},
   beforeVerification: () => {},
+  rpc: (_name: string): unknown => ({ data: null, error: { code: "PGRST202", message: "Could not find the function" } }),
 }));
 vi.mock("../supabase", () => ({
   supabase: {
+    rpc: async (name: string) => state.rpc(name),
     auth: {
       getSession: async () => ({
         data: { session: state.user ? { user: state.user } : null },
@@ -76,6 +78,7 @@ vi.mock("../migrate", () => ({
 import { switchWorkspace } from "../switchWorkspace";
 import { resolveSyncConflicts } from "../sync";
 import { getLocalCredential, isLocalSignedIn } from "../localAuth";
+import { readPosition, savePosition } from "../changeFeed";
 
 beforeEach(() => {
   localStorage.clear();
@@ -90,6 +93,25 @@ beforeEach(() => {
   state.syncCalls = state.copies = 0;
   state.beforeProfile = () => {};
   state.beforeVerification = () => {};
+  state.rpc = () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function" } });
+});
+
+it("turns cloud off from the computer's current copy without copying everything again", async () => {
+  localStorage.setItem("filey_local_workspace_owner", "owner");
+  await savePosition("owner", { cursor: "100", org: "org-1" });
+  state.rpc = name => name === "filey_sync_changes"
+    ? { data: { cursor: "150", org: "org-1", changes: [] }, error: null }
+    : ({ data: null, error: { code: "PGRST202", message: "Could not find the function" } });
+  await switchWorkspace("local");
+  expect(state.copies).toBe(0);
+  expect(localStorage.getItem("filey_data_mode")).toBe("local");
+  expect(await readPosition("owner")).toEqual({ cursor: "150", org: "org-1" });
+});
+
+it("makes one complete copy when the computer has no current copy", async () => {
+  await switchWorkspace("local");
+  expect(state.copies).toBe(1);
+  expect(localStorage.getItem("filey_data_mode")).toBe("local");
 });
 
 it("reconciles settings conflicts together with owner records from a retired workspace", async () => {

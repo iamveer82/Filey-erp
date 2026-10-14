@@ -1,5 +1,15 @@
-// Mixed mode: records stay on this device (works offline) and a copy follows to
-// the owner's Filey account in the background. Paid feature (Pro or Ultra).
+// Records stay on this device and follow to the Filey account in the background.
+// Mixed mode (local mode plus "Keep a copy in my Filey account") is Pro or Ultra;
+// cloud mode on the desktop keeps a download-only device copy the same way.
+//
+// Cloud load follows what changed, never the size of the books:
+// - uploads send only rows changed here: 15 s after a money or master record is
+//   saved (at most 20 s after the first unsent change), other edits within 2 min;
+// - downloads ask the change feed (changeFeed.ts) for rows changed elsewhere: at
+//   start, when the window comes back, when the cloud reports a change (cloud
+//   mode) or every few minutes while the window is open (mixed mode). One tiny
+//   request when nothing changed;
+// - a complete id check only for a first copy, after a long gap, and weekly.
 //
 // A connected session alone never authorizes an upload (cloudTransfer.ts). The
 // user's explicit "keep a copy" choice is stored with the account it was made
@@ -9,28 +19,38 @@ import { supabase } from "./supabase";
 import { isLocalMode } from "./dataMode";
 import { withCloudTransfer } from "./cloudTransfer";
 import { journalSnapshot } from "./localdb";
-import { isMigrating, resolveSyncConflicts, setMigrating, syncCycle } from "./sync";
+import { isMigrating, resolveSyncConflicts, setMigrating, syncCycle, syncNow } from "./sync";
 import { migrateCloudToLocal } from "./migrate";
 import { localWorkspaceOwner } from "./localAuth";
 import { cloudAccess, entitlement } from "./license";
+import { completeCopyDue, pullChanges, reconcile } from "./changeFeed";
 import { log } from "./log";
 
 const KEY = "filey_cloud_copy";
 export const CLOUD_COPY_EVENT = "filey:cloud-copy";
 
-/** Full pass: uploads pending changes and downloads other devices' changes. */
-export const CLOUD_COPY_INTERVAL_MS = 5 * 60_000;
-/** Money and master records upload seconds after a save, not at the next pass. */
+/** Money and master records upload soon after a save. */
 const MAJOR = new Set([
   "company_profile", "crm_customers", "suppliers", "products", "accounts",
   "invoice_docs", "invoice_doc_items", "invoice_payments", "quotations", "quotation_items",
   "purchase_orders", "purchase_order_items", "po_payments", "payment_receipts",
   "expenses", "transactions", "advances", "stock_movements", "payroll",
 ]);
-/** A bulk edit uploads at once too. */
+/** A bulk edit counts as major too. */
 const MAJOR_PENDING = 25;
-/** Coalesce a burst (invoice header + lines + payment) into one upload. */
-const SAVE_DEBOUNCE_MS = 3000;
+/** A major save waits this long for the rest of its burst (invoice, lines, payment)… */
+export const MAJOR_UPLOAD_MS = 15_000;
+/** …but never longer than this after the first unsent change. */
+export const MAJOR_UPLOAD_MAX_MS = 20_000;
+export const MINOR_UPLOAD_MS = 2 * 60_000;
+export const MINOR_UPLOAD_MAX_MS = 5 * 60_000;
+/** Mixed mode gets no push from the cloud; it asks this often while the window is open. */
+export const DOWNLOAD_CHECK_MS = 3 * 60_000;
+/** Coming back to the window asks again once the last check is this old. */
+const RETURN_CHECK_MS = 60_000;
+/** Cloud-mode change notices settle before the device copy asks for them. */
+const NOTICE_SETTLE_MS = 15_000;
+const NOTICE_MAX_MS = 20_000;
 
 /** The account that agreed to keep a cloud copy of this device's records. */
 export function cloudCopyOwner(): string | null {
@@ -58,16 +78,40 @@ async function consentedUid(): Promise<string | null> {
   return uid && uid === cloudCopyOwner() ? uid : null;
 }
 
-/** One background pass. Only records changed since the last pass are sent, in
- *  small batches; downloads fetch only rows whose revision moved. */
-export async function runCloudCopy(full: boolean): Promise<boolean> {
-  if (!supabase || !isLocalMode() || isMigrating()) return false;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
-  if (!full && !Object.keys((await journalSnapshot()).tables).length) return true;
+const offline = () => typeof navigator !== "undefined" && !navigator.onLine;
+
+/** Mixed mode: sends the rows changed on this device, and nothing else. */
+export async function uploadChanges(): Promise<boolean> {
+  if (!supabase || !isLocalMode() || isMigrating() || offline()) return false;
+  if (!Object.keys((await journalSnapshot()).tables).length) return true;
   const uid = await consentedUid();
   if (!uid || !(await cloudCopyAllowed())) return false;
   const client = supabase;
-  return withCloudTransfer(client, uid, transfer => syncCycle(client, { changesOnly: !full, transfer }));
+  return withCloudTransfer(client, uid, transfer => syncNow(client, { transfer }));
+}
+
+/** Mixed mode: brings in rows changed on the account's other devices. `complete`
+ *  forces the complete check (turning the copy on uploads everything once). */
+export async function downloadChanges(complete = false): Promise<boolean> {
+  if (!supabase || !isLocalMode() || isMigrating() || offline()) return false;
+  const uid = await consentedUid();
+  if (!uid || !(await cloudCopyAllowed())) return false;
+  const client = supabase;
+  return withCloudTransfer(client, uid, async transfer => {
+    const result = complete || completeCopyDue(uid) ? { status: "reconcile" as const } : await pullChanges(client, uid, { keepUnsent: true });
+    if (result.status === "busy") return false;
+    if (result.status === "applied") {
+      if (result.tables.length) window.dispatchEvent(new CustomEvent("filey:remote-update", { detail: { tables: result.tables } }));
+      return true;
+    }
+    return reconcile(client, uid, () => syncCycle(client, { transfer }));
+  });
+}
+
+/** "Sync now": this device's changes up, the account's changes down. */
+export async function runCloudCopy(complete = false): Promise<boolean> {
+  const sent = await uploadChanges();
+  return (await downloadChanges(complete)) && sent;
 }
 
 export async function resolveCloudCopyConflicts(keepLocal: boolean): Promise<boolean> {
@@ -78,9 +122,8 @@ export async function resolveCloudCopyConflicts(keepLocal: boolean): Promise<boo
 }
 
 /** Cloud mode on the desktop: keep this computer's copy of the account's records
- *  current, so turning cloud storage off (or losing the connection) starts from
- *  today's records, not the day cloud was turned on. Download only; unchanged
- *  rows and files already on disk are not fetched again. */
+ *  current, so turning cloud storage off (or losing the connection) continues
+ *  from today's records. Download only. */
 export function runDeviceCopy(): Promise<boolean> {
   deviceCopy ??= copyToDevice().finally(() => { deviceCopy = undefined; });
   return deviceCopy;
@@ -101,8 +144,7 @@ export function deviceCopyInFlight(): Promise<unknown> | undefined {
 }
 
 async function copyToDevice(): Promise<boolean> {
-  if (!("__TAURI_INTERNALS__" in window) || !supabase || isLocalMode() || isMigrating()) return false;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  if (!("__TAURI_INTERNALS__" in window) || !supabase || isLocalMode() || isMigrating() || offline()) return false;
   const { data } = await supabase.auth.getSession();
   const uid = data.session?.user.id;
   // Only books this computer already keeps for this account: a shared computer
@@ -110,9 +152,13 @@ async function copyToDevice(): Promise<boolean> {
   if (!uid || localWorkspaceOwner() !== uid) return false;
   // Unsent device edits would be replaced; the cloud switch uploads them first.
   if (Object.keys((await journalSnapshot()).tables).length) return false;
+  const client = supabase;
   setMigrating(true);
   try {
-    if ((await migrateCloudToLocal()).some(r => r.error)) return false;
+    const result = completeCopyDue(uid) ? { status: "reconcile" as const } : await pullChanges(client, uid, { keepUnsent: false });
+    const ok = result.status === "applied"
+      || (result.status === "reconcile" && await reconcile(client, uid, async () => !(await migrateCloudToLocal()).some(r => r.error)));
+    if (!ok) return false;
     try { localStorage.setItem(DEVICE_COPY_AT, new Date().toISOString()); } catch { /* shown as unknown */ }
     window.dispatchEvent(new Event(DEVICE_COPY_EVENT));
     return true;
@@ -121,11 +167,7 @@ async function copyToDevice(): Promise<boolean> {
   }
 }
 
-/** Cloud saves settle into the device copy this long after the last one. */
-const DEVICE_COPY_SETTLE_MS = 20_000;
-const DEVICE_COPY_INTERVAL_MS = 30 * 60_000;
-
-/** True when the pending changes should not wait for the next 5-minute pass. */
+/** True when the unsent changes are money or master records, or a bulk edit. */
 export function isMajorChange(tables: Record<string, { changed: unknown[]; deleted: unknown[]; all?: boolean }>): boolean {
   let pending = 0;
   for (const [table, entry] of Object.entries(tables)) {
@@ -135,66 +177,95 @@ export function isMajorChange(tables: Record<string, { changed: unknown[]; delet
   return pending >= MAJOR_PENDING;
 }
 
-/** Schedules passes for the life of the app; every pass no-ops unless this
- *  device is in local mode, online, signed in as the consenting paid account.
- *  ponytail: one global pass at a time; a save during a pass queues one more. */
+/** When the unsent changes should upload: `now` plus the quiet wait, capped from the first unsent change. */
+export function uploadDelay(major: boolean, now: number, firstUnsentAt: number): number {
+  const wait = major ? MAJOR_UPLOAD_MS : MINOR_UPLOAD_MS;
+  const cap = major ? MAJOR_UPLOAD_MAX_MS : MINOR_UPLOAD_MAX_MS;
+  return Math.max(0, Math.min(now + wait, firstUnsentAt + cap) - now);
+}
+
+/** Schedules uploads and downloads for the life of the app. Every pass no-ops
+ *  unless this device is online, in the right mode and (mixed mode) signed in
+ *  as the consenting paid account. ponytail: one upload and one download at a
+ *  time; a save during an upload queues one more. */
 export function startCloudCopy(): () => void {
   if (typeof window === "undefined") return () => {};
-  let busy = false;
-  let queued: boolean | null = null;
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  const run = (full: boolean) => {
-    if (busy) { queued = queued || full; return; }
-    busy = true;
-    void runCloudCopy(full)
-      .catch(error => log.warn("sync", "cloud copy pass failed", error instanceof Error ? error.message : String(error)))
-      .finally(() => {
-        busy = false;
-        const next = queued;
-        queued = null;
-        if (next !== null) run(next);
-      });
-  };
-  const onSave = () => {
-    if (!cloudCopyOwner()) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      void journalSnapshot().then(j => { if (isMajorChange(j.tables)) run(false); }).catch(() => {});
-    }, SAVE_DEBOUNCE_MS);
-  };
-  // A hidden window still uploads its own saves, but skips the download check:
-  // a minimised app polling 24/7 is what exhausted the free egress in July.
-  const tick = () => { if (cloudCopyOwner()) run(!document.hidden); };
-  const full = () => { if (cloudCopyOwner()) run(true); };
-  const interval = setInterval(tick, CLOUD_COPY_INTERVAL_MS);
-  const boot = setTimeout(full, 10_000);
-  window.addEventListener("filey:local-write", onSave);
-  window.addEventListener("online", full);
-  window.addEventListener(CLOUD_COPY_EVENT, full);
+  const desktop = "__TAURI_INTERNALS__" in window;
+  const warn = (what: string) => (error: unknown) =>
+    log.warn("sync", what, error instanceof Error ? error.message : String(error));
 
-  // Same hidden-window rule for the device copy in cloud mode.
-  let copyTimer: ReturnType<typeof setTimeout> | undefined;
-  const deviceCopy = (delay: number) => {
-    if (!("__TAURI_INTERNALS__" in window) || isLocalMode()) return;
-    clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => {
-      if (!document.hidden) void runDeviceCopy()
-        .catch(error => log.warn("sync", "device copy failed", error instanceof Error ? error.message : String(error)));
-    }, delay);
+  let uploading = false;
+  let uploadAgain = false;
+  let uploadTimer: ReturnType<typeof setTimeout> | undefined;
+  let firstUnsentAt = 0;
+  const upload = () => {
+    uploadTimer = undefined;
+    firstUnsentAt = 0;
+    if (uploading) { uploadAgain = true; return; }
+    uploading = true;
+    void uploadChanges().catch(warn("cloud copy upload failed")).finally(() => {
+      uploading = false;
+      if (uploadAgain) { uploadAgain = false; scheduleUpload(); }
+    });
   };
-  const settled = () => deviceCopy(DEVICE_COPY_SETTLE_MS);
-  const copyInterval = setInterval(() => deviceCopy(0), DEVICE_COPY_INTERVAL_MS);
-  deviceCopy(15_000);
-  window.addEventListener("filey:cloud-change", settled);
+  const scheduleUpload = () => {
+    if (!isLocalMode() || !cloudCopyOwner()) return;
+    void journalSnapshot().then(j => {
+      if (!Object.keys(j.tables).length) return;
+      const now = Date.now();
+      firstUnsentAt ||= now;
+      clearTimeout(uploadTimer);
+      uploadTimer = setTimeout(upload, uploadDelay(isMajorChange(j.tables), now, firstUnsentAt));
+    }).catch(() => {});
+  };
+
+  let downloading = false;
+  let lastCheck = 0;
+  const download = (complete = false) => {
+    if (downloading) return;
+    const work = isLocalMode()
+      ? cloudCopyOwner() ? downloadChanges(complete) : undefined
+      : desktop ? runDeviceCopy() : undefined;
+    if (!work) return;
+    downloading = true;
+    lastCheck = Date.now();
+    void work.catch(warn("cloud copy download failed")).finally(() => { downloading = false; });
+  };
+  // A minimised app polling 24/7 is what exhausted the free egress in July.
+  const returned = () => { if (!document.hidden && Date.now() - lastCheck > RETURN_CHECK_MS) download(); };
+  const timer = setInterval(() => { if (isLocalMode() && !document.hidden) download(); }, DOWNLOAD_CHECK_MS);
+
+  // Cloud mode: Realtime already reports changes for the open pages; let them settle.
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  let firstNoticeAt = 0;
+  const notice = () => {
+    if (isLocalMode() || !desktop) return;
+    const now = Date.now();
+    firstNoticeAt ||= now;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { firstNoticeAt = 0; download(); },
+      Math.max(0, Math.min(now + NOTICE_SETTLE_MS, firstNoticeAt + NOTICE_MAX_MS) - now));
+  };
+  const consent = () => download(true);
+  const reconnected = () => { scheduleUpload(); download(); };
+  const boot = setTimeout(() => { scheduleUpload(); download(); }, 10_000);
+
+  window.addEventListener("filey:local-write", scheduleUpload);
+  window.addEventListener("online", reconnected);
+  window.addEventListener(CLOUD_COPY_EVENT, consent);
+  window.addEventListener("filey:cloud-change", notice);
+  window.addEventListener("focus", returned);
+  document.addEventListener("visibilitychange", returned);
   return () => {
-    clearInterval(interval);
-    clearInterval(copyInterval);
     clearTimeout(boot);
-    clearTimeout(saveTimer);
-    clearTimeout(copyTimer);
-    window.removeEventListener("filey:local-write", onSave);
-    window.removeEventListener("online", full);
-    window.removeEventListener(CLOUD_COPY_EVENT, full);
-    window.removeEventListener("filey:cloud-change", settled);
+    clearTimeout(uploadTimer);
+    clearTimeout(noticeTimer);
+    clearInterval(timer);
+    window.removeEventListener("filey:local-write", scheduleUpload);
+    window.removeEventListener("online", reconnected);
+    window.removeEventListener(CLOUD_COPY_EVENT, consent);
+    window.removeEventListener("filey:cloud-change", notice);
+    window.removeEventListener("focus", returned);
+    document.removeEventListener("visibilitychange", returned);
   };
 }

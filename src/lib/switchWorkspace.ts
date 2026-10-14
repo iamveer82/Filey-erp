@@ -5,6 +5,7 @@ import { adoptLocalProfile, getLocalProfile, type Profile } from "./auth";
 import {
   assertLocalAccount,
   claimLocalWorkspace,
+  localWorkspaceOwner,
   rememberLocalIdentity,
   setLocalSignedIn,
 } from "./localAuth";
@@ -12,6 +13,7 @@ import { getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, s
 import { migrateCloudToLocal } from "./migrate";
 import { journalSnapshot } from "./localdb";
 import { withCloudTransfer } from "./cloudTransfer";
+import { cloudPosition, pullChanges, reconcile, savePosition } from "./changeFeed";
 
 let switching = false;
 
@@ -54,6 +56,8 @@ export async function switchWorkspace(
     let localProfile: Profile | null = null;
     if (target === "cloud") {
       onProgress?.("Saving your device changes to Filey Cloud…");
+      // The device copy in cloud mode resumes from here instead of copying everything again.
+      const position = await cloudPosition(supabase).catch(() => null);
       const synced = await withCloudTransfer(supabase, user.id, async transfer => {
         let synced = await syncCycle(supabase, { manual: true, transfer });
         const failures = getSyncStatus().failures;
@@ -68,6 +72,7 @@ export async function switchWorkspace(
         return synced;
       });
       if (!synced) throw new WorkspaceTransferError(getSyncStatus());
+      if (position) await savePosition(user.id, position).catch(() => {});
       setMigrating(true);
       locked = true;
     } else {
@@ -87,8 +92,11 @@ export async function switchWorkspace(
         );
       onProgress?.("Saving your latest cloud data and files on this device…");
       try {
-        const result = await migrateCloudToLocal(onProgress);
-        if (result.some(r => r.error)) throw new Error("Incomplete cloud copy");
+        // A computer that kept its copy current only fetches what changed since.
+        const caughtUp = localWorkspaceOwner() === user.id
+          && (await pullChanges(supabase, user.id, { keepUnsent: false })).status === "applied";
+        if (!caughtUp && !await reconcile(supabase, user.id, async () => !(await migrateCloudToLocal(onProgress)).some(r => r.error)))
+          throw new Error("Incomplete cloud copy");
       } catch (error) {
         console.warn("Workspace download failed", error);
         throw new Error("Couldn't finish saving your cloud data on this device. Filey Cloud is still open. Try again when connected.");

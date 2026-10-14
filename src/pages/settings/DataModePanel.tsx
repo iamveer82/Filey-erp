@@ -257,14 +257,14 @@ function CloudCopySection() {
     try {
       if (await confirm({
         title: "Keep a copy in your Filey account?",
-        message: `Your device records and files will be uploaded to ${email ?? "your Filey account"} now. After that, invoices, payments and other key records upload a few seconds after you save, and everything else every 5 minutes. Only changed records are sent. Everything stays on this device too.`,
+        message: `Your device records and files will be uploaded to ${email ?? "your Filey account"} now. After that, only what changes is sent: invoices, payments and other key records about 15 seconds after you save, other edits within 2 minutes. Everything stays on this device too.`,
         confirmLabel: "Upload and keep in sync",
       })) setCloudCopy(uid);
     } finally { setBusy(false); }
   };
   const syncNow = async () => {
     setBusy(true); setErr("");
-    try { await runCloudCopy(true); }
+    try { await runCloudCopy(); }
     catch (error) { setErr(error instanceof Error ? error.message : RETRY_MESSAGE); }
     finally { setBusy(false); }
   };
@@ -288,7 +288,7 @@ function CloudCopySection() {
                 {!uid
                   ? "Connect your Filey account below first."
                   : on
-                    ? "On. Key records upload seconds after you save; everything else every 5 minutes. Changes from your other devices arrive here too."
+                    ? "On. Only changed records are sent: key records about 15 seconds after you save, other edits within 2 minutes. Changes from your other devices arrive when you open Filey and every few minutes while it is open."
                     : "Off. Your records stay only on this device."}
               </p>
             </div>
