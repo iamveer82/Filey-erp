@@ -23,6 +23,9 @@ import {
   resolveCloudCopyConflicts,
   runCloudCopy,
   setCloudCopy,
+  DEVICE_COPY_EVENT,
+  deviceCopyAt,
+  deviceCopyInFlight,
 } from "../../lib/cloudCopy";
 import SyncConflictReview from "../../components/SyncConflictReview";
 import {
@@ -340,6 +343,12 @@ export default function DataModePanel() {
    *  mode the app user is the DEVICE account, so only Supabase can say whether
    *  there is an account to upload to. */
   const [cloudSession, setCloudSession] = useState<string | null>(null);
+  const [copiedAt, setCopiedAt] = useState(deviceCopyAt());
+  useEffect(() => {
+    const copied = () => setCopiedAt(deviceCopyAt());
+    window.addEventListener(DEVICE_COPY_EVENT, copied);
+    return () => window.removeEventListener(DEVICE_COPY_EVENT, copied);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -479,6 +488,14 @@ export default function DataModePanel() {
     const target: DataMode = next ? "cloud" : "local";
     if (target === mode || busy || transferPending.current) return;
     setRetryAction(target);
+    // A background refresh of this computer's copy finishes first; it is what makes the switch quick.
+    const copying = deviceCopyInFlight();
+    if (copying) {
+      transferPending.current = true;
+      setBusy(true);
+      setProgress("Finishing this computer's copy…");
+      try { await copying; } finally { transferPending.current = false; setBusy(false); setProgress(""); }
+    }
     if (isMigrating()) {
       setErr("Wait for the current transfer to finish before switching.");
       return;
@@ -575,7 +592,10 @@ export default function DataModePanel() {
                 <>
                   On. Your records live in {cloudSession || user?.email || "your Filey account"} and
                   follow you to every device you sign in to. Needs internet to make changes.
-                  {hasTauri && " This computer keeps an up-to-date copy too, so turning this off starts from your latest records."}
+                  {hasTauri && <>
+                    {" "}This computer keeps an up-to-date copy too{copiedAt ? ` (updated ${new Date(copiedAt).toLocaleString()})` : ""},
+                    so turning this off continues from your latest records.
+                  </>}
                 </>
               ) : (
                 <>

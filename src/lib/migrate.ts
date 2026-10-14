@@ -167,25 +167,33 @@ export async function migrateCloudToLocal(
   const uid = sess.session.user.id;
   assertLocalAccount(uid);
   const before = await journalSnapshot();
+  const cloud = new Map<string, Record<string, any>[]>();
   const staged = new Map<string, Record<string, any>[]>();
   const out: MigrateResult[] = [];
 
   // Read the complete source first. No record is replaced on a failed cloud read.
   // Reuse unchanged row bodies (including logos/stamps), while the manifest
   // still detects deletions. Files already on disk are not downloaded again.
+  onProgress?.("Checking what changed in your account…");
   const manifest = await pullManifest(supabase, PUSH_TABLES);
-  for (const t of TABLES) {
-    onProgress?.(`Reading ${t}…`);
-    staged.set(t, manifest[t] && !before.tables[t]
-      ? await pullIncremental(supabase, t, "sync_revision", manifest[t])
-      : await pullPaged(supabase, t, "*"));
-    out.push({ table: t, rows: staged.get(t)!.length });
+  const reads = await Promise.all(TABLES.map(async t => {
+    const rows = manifest[t] && !before.tables[t]
+      ? await pullIncremental(supabase!, t, "sync_revision", manifest[t])
+      : await pullPaged(supabase!, t, "*");
+    // A table the device already holds as-is is not rewritten: with a current
+    // device copy the switch writes only what changed. Unsent edits are always replaced.
+    return { t, rows, changed: !!before.tables[t] || !(await sameAsDevice(t, rows)) };
+  }));
+  for (const { t, rows, changed } of reads) {
+    cloud.set(t, rows);
+    if (changed) staged.set(t, rows);
+    out.push({ table: t, rows: rows.length });
   }
 
-  const cloudProfile = staged.get("profiles")?.find((row) => row.id === uid);
+  const cloudProfile = cloud.get("profiles")?.find((row) => row.id === uid);
   if (cloudProfile) assertLocalAccount(uid, cloudProfile.org_id ?? null);
-  const fileRows = staged.get("user_files") ?? [];
-  onProgress?.(`Downloading ${fileRows.length} files…`);
+  const fileRows = cloud.get("user_files") ?? [];
+  onProgress?.(staged.size ? "Saving your latest records on this computer…" : "Your records on this computer are up to date.");
   await pullFileBlobs(supabase, fileRows);
   if (fileRows.length) out.push({ table: "files (blobs)", rows: fileRows.length });
   if ((await journalVersion()) !== before.v)
@@ -198,7 +206,7 @@ export async function migrateCloudToLocal(
   assertWorkspaceCurrent();
 
   claimLocalWorkspace(uid);
-  await replaceWorkspaceSnapshot(staged, before.v);
+  if (staged.size) await replaceWorkspaceSnapshot(staged, before.v);
   // This marker is an optimization, not part of committing the data. If the
   // browser's preference storage is full, the next sync safely rechecks rows.
   try {
@@ -208,6 +216,20 @@ export async function migrateCloudToLocal(
   }
   // Cloud mode shows cloud records; refreshing every open page there would
   // only re-download them.
-  if (isLocalMode()) window.dispatchEvent(new Event("filey:remote-update"));
+  if (isLocalMode() && staged.size) window.dispatchEvent(new Event("filey:remote-update"));
   return out;
+}
+
+/** True when the device already holds exactly these rows at these revisions. */
+async function sameAsDevice(table: string, rows: Record<string, any>[]): Promise<boolean> {
+  const local = await loadColl(table);
+  if (local.length !== rows.length) return false;
+  const held = new Map(local.map(row => [String(row.id), row as Record<string, any>]));
+  return rows.every(row => {
+    const mine = held.get(String(row.id));
+    if (!mine) return false;
+    return row.sync_revision != null
+      ? mine.sync_revision === row.sync_revision
+      : JSON.stringify(mine) === JSON.stringify(row);
+  });
 }

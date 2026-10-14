@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const state = vi.hoisted(() => ({ failTable: "", pages: [] as number[], bodies: 0 }));
+const state = vi.hoisted(() => ({ failTable: "", pages: [] as number[], bodies: 0, changed: 0 }));
+const revision = (id: number) => id === state.changed ? 2 : 1;
 vi.mock("../supabase", () => ({
   supabase: {
     auth: { getSession: async () => ({ data: { session: { user: { id: "owner" } } } }) },
@@ -7,13 +8,13 @@ vi.mock("../supabase", () => ({
       if (args.p_tables.includes(state.failTable)) return {error: {message: "Read failed"}};
       if (args.p_tables.includes("products")) state.pages.push(args.p_offset);
       return {data: Object.fromEntries(args.p_tables.map(table => [table, table === "products"
-        ? Array.from({length: Math.max(0, Math.min(args.p_limit, 1205 - args.p_offset))}, (_, i) => ({id: args.p_offset + i + 1, sync_revision: 1})) : []])), error: null};
+        ? Array.from({length: Math.max(0, Math.min(args.p_limit, 1205 - args.p_offset))}, (_, i) => ({id: args.p_offset + i + 1, sync_revision: revision(args.p_offset + i + 1)})) : []])), error: null};
     },
     from: (table: string) => ({
       select: () => ({
         in: async (_key: string, ids: number[]) => {
           state.bodies += ids.length;
-          return {data: ids.map(id => ({id, name: "Cloud product", sync_revision: 1})), error: null};
+          return {data: ids.map(id => ({id, name: "Cloud product", sync_revision: revision(id)})), error: null};
         },
         order: () => ({
           range: async (from: number, to: number) => {
@@ -41,6 +42,7 @@ beforeEach(() => {
   state.failTable = "";
   state.pages = [];
   state.bodies = 0;
+  state.changed = 0;
 });
 it("copies all pages and retires the replaced local journal", async () => {
   await localClient.from("products").insert({ name: "Old local product" });
@@ -98,4 +100,18 @@ it("does not replace edits made while a cloud snapshot was downloading", async (
   await expect(replaceWorkspaceSnapshot(new Map([["products", []]]), before.v)).rejects.toThrow("Local records changed");
   expect(await loadColl("products")).toEqual([expect.objectContaining({name: "Just saved"})]);
   expect((await journalSnapshot()).tables.products).toBeTruthy();
+});
+
+it("writes nothing when this computer's copy is current, and only the changed table otherwise", async () => {
+  await migrateCloudToLocal();
+  const settled = (await journalSnapshot()).v;
+  state.bodies = 0;
+  await migrateCloudToLocal();
+  expect(state.bodies).toBe(0);
+  expect((await journalSnapshot()).v).toBe(settled);
+  state.changed = 5;
+  await migrateCloudToLocal();
+  expect(state.bodies).toBe(1);
+  expect((await journalSnapshot()).v).toBe(settled + 1);
+  expect((await loadColl("products")).find(p => p.id === 5)).toEqual(expect.objectContaining({ sync_revision: 2 }));
 });

@@ -87,7 +87,7 @@ export async function switchWorkspace(
         );
       onProgress?.("Saving your latest cloud data and files on this device…");
       try {
-        const result = await migrateCloudToLocal();
+        const result = await migrateCloudToLocal(onProgress);
         if (result.some(r => r.error)) throw new Error("Incomplete cloud copy");
       } catch (error) {
         console.warn("Workspace download failed", error);

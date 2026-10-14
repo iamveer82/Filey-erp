@@ -21,7 +21,7 @@ vi.mock("../license", () => ({
   cloudAccess: async () => ({ allowed: true, reason: "basic" }),
 }));
 
-import { isMajorChange, runCloudCopy, runDeviceCopy, setCloudCopy } from "../cloudCopy";
+import { deviceCopyAt, deviceCopyInFlight, isMajorChange, runCloudCopy, runDeviceCopy, setCloudCopy } from "../cloudCopy";
 
 const entry = (n: number) => ({ changed: Array.from({ length: n }, (_, i) => i), deleted: [] });
 
@@ -71,8 +71,14 @@ it("keeps the desktop copy current in cloud mode without overwriting unsent edit
   Object.defineProperty(window, "__TAURI_INTERNALS__", { value: {}, configurable: true });
   try {
     m.local = false;
-    expect(await runDeviceCopy()).toBe(true);
+    localStorage.removeItem("filey_device_copy_at");
+    const first = runDeviceCopy();
+    expect(runDeviceCopy()).toBe(first); // a second trigger joins the running copy
+    expect(deviceCopyInFlight()).toBeDefined();
+    expect(await first).toBe(true);
     expect(m.copy).toHaveBeenCalledOnce();
+    expect(deviceCopyAt()).not.toBeNull();
+    expect(deviceCopyInFlight()).toBeUndefined();
 
     m.copy.mockClear();
     m.journal.tables.invoice_docs = entry(1);

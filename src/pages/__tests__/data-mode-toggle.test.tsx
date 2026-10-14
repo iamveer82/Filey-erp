@@ -22,6 +22,9 @@ vi.mock("../../lib/cloudCopy", () => ({
   setCloudCopy: copy.set,
   runCloudCopy: vi.fn(async () => true),
   resolveCloudCopyConflicts: vi.fn(async () => true),
+  DEVICE_COPY_EVENT: "filey:device-copy",
+  deviceCopyAt: () => null,
+  deviceCopyInFlight: () => undefined,
 }));
 
 // vi.mock factories are hoisted, so the mode fixture has to be too.

@@ -81,7 +81,26 @@ export async function resolveCloudCopyConflicts(keepLocal: boolean): Promise<boo
  *  current, so turning cloud storage off (or losing the connection) starts from
  *  today's records, not the day cloud was turned on. Download only; unchanged
  *  rows and files already on disk are not fetched again. */
-export async function runDeviceCopy(): Promise<boolean> {
+export function runDeviceCopy(): Promise<boolean> {
+  deviceCopy ??= copyToDevice().finally(() => { deviceCopy = undefined; });
+  return deviceCopy;
+}
+
+let deviceCopy: Promise<boolean> | undefined;
+const DEVICE_COPY_AT = "filey_device_copy_at";
+export const DEVICE_COPY_EVENT = "filey:device-copy";
+
+/** When this computer last brought its copy of the account's records up to date. */
+export function deviceCopyAt(): string | null {
+  try { return localStorage.getItem(DEVICE_COPY_AT); } catch { return null; }
+}
+
+/** The background copy in progress, if any: the storage switch finishes it instead of refusing to start. */
+export function deviceCopyInFlight(): Promise<unknown> | undefined {
+  return deviceCopy?.catch(() => false);
+}
+
+async function copyToDevice(): Promise<boolean> {
   if (!("__TAURI_INTERNALS__" in window) || !supabase || isLocalMode() || isMigrating()) return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
   const { data } = await supabase.auth.getSession();
@@ -93,7 +112,10 @@ export async function runDeviceCopy(): Promise<boolean> {
   if (Object.keys((await journalSnapshot()).tables).length) return false;
   setMigrating(true);
   try {
-    return !(await migrateCloudToLocal()).some(r => r.error);
+    if ((await migrateCloudToLocal()).some(r => r.error)) return false;
+    try { localStorage.setItem(DEVICE_COPY_AT, new Date().toISOString()); } catch { /* shown as unknown */ }
+    window.dispatchEvent(new Event(DEVICE_COPY_EVENT));
+    return true;
   } finally {
     setMigrating(false);
   }
