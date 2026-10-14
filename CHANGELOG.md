@@ -1,3 +1,24 @@
+## v3.0.26 — 2026-10-14
+
+Filey Link and live updates connect, and support has an email address.
+
+### Fixes
+- **Filey Link connects.** The app's security settings blocked the live
+  connection that phones, browsers and the computer use to find each other,
+  so a phone always said "No computer is open". Pairing and running Filey AI
+  on the computer now work.
+- **Live updates arrive.** Changes made on another device appear without
+  waiting for the next check.
+- **No more "The operation is insecure."** The web "Filey Agent (beta)"
+  switch pointed at a service that was never switched on, so every reply
+  fell back with that note. The switch is gone; phones use Filey AI on your
+  computer through Filey Link.
+
+### Support
+- The Help Center shows support@gofiley.com.
+
+---
+
 ## v3.0.25 — 2026-10-14
 
 Sync now sends only what changed, phones can use Filey AI on your computer,
