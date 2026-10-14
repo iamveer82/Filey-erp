@@ -1,3 +1,47 @@
+## v3.0.25 — 2026-10-14
+
+Sync now sends only what changed, phones can use Filey AI on your computer,
+and older device workspaces can create documents again. 3.0.24 was never
+built, so this release also carries everything since 3.0.23.
+
+### Sync
+- **Only changes travel.** Each device asks the cloud what changed since its
+  last check and downloads just those records. A check with nothing new is
+  a few hundred bytes. The 5-minute and 30-minute whole-account checks are
+  gone; a complete check runs only for a first copy, after 30+ days away,
+  after switching workspace, or weekly as a safety net.
+- **Uploads follow the save.** Invoices, payments and other key records
+  upload about 15 seconds after saving (never more than 20); other edits
+  within 2 minutes.
+- **Automatic cloud copy (Pro and Ultra).** Work on this device and keep a
+  copy in your Filey account, synced in the background.
+- **Cloud mode keeps a copy on the computer.** The desktop app saves cloud
+  changes on the device as they happen, so turning cloud storage off continues
+  from the latest records almost instantly.
+
+### Filey AI
+- **Filey Link.** Pair a phone or browser with your computer once in
+  Settings → AI Assistant → Linked devices (the same 6-digit code shows on
+  both screens). While the computer is open, Filey AI tasks from the phone
+  run on it, with its records and WhatsApp; otherwise they run where you are.
+- **Three moving dots** show while Filey AI works, instead of "Working…".
+- Filey AI still answers when the Filey Agent can't start a turn.
+- MCP drafts reuse saved presets and document numbering.
+
+### Fixes
+- Older device workspaces can create documents again (they stopped at
+  "Select your workspace before creating a document").
+- Cloud invoice saves from the web agent no longer time out: logos are
+  shrunk on upload and a dropped save is retried safely.
+
+Update through Filey's normal updater; local data is preserved. Self-hosted
+cloud deployments apply `supabase/2026-10-12-agent-core.sql`,
+`supabase/2026-10-14-device-link.sql` and
+`supabase/2026-10-14-sync-change-feed.sql` after earlier migrations; fresh
+schema setup includes them.
+
+---
+
 ## v3.0.24 — 2026-10-12
 
 Version alignment release for auto-updater and docs.
