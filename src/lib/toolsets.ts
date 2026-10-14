@@ -57,7 +57,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: ["get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
   },
   video: {
-    about: "Create brand/product videos from a brief or attached photo with the configured media provider. Video generation uses the user's own fal key; the user approves generation in the chat card. Track persistent jobs",
+    about: "Brand/product videos from a brief or photo (user's fal key, approved in chat); track jobs",
     tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],
   },
   service: {
@@ -66,7 +66,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   sales: {
     about:
-      "Pending invoice recovery, appearance, logos, saved stamps/signatures, templates, sending, payments, recurring billing, orders and receipts",
+      "Invoice branding (logo, bank details, stamp, signature on/off), templates, pending save recovery, sending, PDFs, payments, recurring billing, orders and receipts",
     tools: [
       "list_pending_invoice_saves",
       "retry_invoice_save",
@@ -94,7 +94,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   links: {
     about:
-      "How records connect — which quote became an invoice, what a customer generated. Read links or join two records up",
+      "Record links: which quote became an invoice, what a customer generated; read or join records",
     tools: ["find_links", "link_records"],
   },
   inventory: {

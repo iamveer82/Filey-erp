@@ -2,7 +2,7 @@
  * does a desktop answering a linked phone (linkedAgent.ts): the same prompt, the
  * same tools, the same approvals on both paths. */
 import { aiAgentStream, aiAutonomousStream, buildSystemPrompt, getPersona, type AiImage, type AiMessage } from "./ai";
-import { memoryDigest } from "./aiMemory";
+import { AGENT_HABITS, memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import { buildAiContext } from "./aiContext";
 import { fileyAgentEnabled, fileyAgentOrFallback, fileyAgentTurn } from "./fileyAgent";
@@ -42,7 +42,7 @@ export function runAgentTurn(input: AgentTurnInput, options: AgentTurnOptions): 
       return yield* aiAutonomousStream(input.goalText, { ...options, history: input.history, images: input.images });
     const brief = await buildAiContext(undefined, options.signal).catch(() => "");
     options.signal.throwIfAborted();
-    const system = buildSystemPrompt(AGENT_SYSTEM, getPersona(),
+    const system = buildSystemPrompt(`${AGENT_SYSTEM}\n\n${AGENT_HABITS}`, getPersona(),
       [memoryDigest(12, input.goalText), skillsIndex(), brief].filter(Boolean).join("\n\n"));
     return yield* aiAgentStream([
       { role: "system", text: system },

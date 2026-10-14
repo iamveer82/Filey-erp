@@ -33,7 +33,7 @@ vi.mock("../ai", () => ({
   buildSystemPrompt: (s: string) => s,
   getPersona: () => ({}),
 }));
-vi.mock("../aiMemory", () => ({ memoryDigest: () => "" }));
+vi.mock("../aiMemory", () => ({ AGENT_HABITS: "", memoryDigest: () => "" }));
 vi.mock("../agentSkills", () => ({ skillsIndex: () => "" }));
 vi.mock("../aiTools", () => ({ approvalArgs: (_name: string, args: unknown) => args, setTurnFiles: mocks.setFiles, endTurn: mocks.endTurn }));
 vi.mock("../aiContext", () => ({ buildAiContext: async () => "" }));

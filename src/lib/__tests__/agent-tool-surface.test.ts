@@ -36,7 +36,13 @@ describe("what the model is offered", () => {
     // The whole point: 89 near-neighbours is past where a model picks well.
     expect(offered.length).toBeLessThan(TOOLS.length / 2);
     expect(offered).toContain("create_invoice_draft");
-    expect(offered).toContain("list_toolsets");
+    expect(offered).toContain("use_toolset");
+  });
+
+  it("names every domain up front, so hidden tools are never mistaken for missing ones", () => {
+    const use = offeredTools({ isOwner: true } as Parameters<typeof offeredTools>[0], new Set()).find(t => t.name === "use_toolset");
+    expect(use?.description).toMatch(/sales: Invoice branding \(logo, bank details, stamp, signature/);
+    expect(use?.description).toMatch(/Never call an action unavailable or blocked/);
   });
 
   it("keeps specialist tools back until asked for", () => {

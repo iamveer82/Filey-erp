@@ -2510,13 +2510,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_quote",
     description:
-      "Create a quotation for a customer with line items (draft — user reviews in Quoting).\n\n" +
-      "DECODING THE USER'S WORDS: 'quote Al Noor for 2 laptops at 2500' → customer_name 'Al Noor', items [{description:'laptops', qty:2, rate:2500}]. The party after 'for'/'to' is customer_name; product words are description verbatim; 'qty' → qty (decimals fine); 'rate'/'price' → rate, the per-one-unit figure, never multiplied by qty. Ask for whatever is missing (one question, in the order: customer, item, qty, rate).\n\n" +
-      "PRICING THAT IS NOT qty × rate: by default a line is `qty × rate`. When the rate is quoted per something else — per litre, per kg, per metre, per hour — do NOT multiply it out by hand into a fake rate, and do NOT price by the pack count. Add the real measure as a custom column and price on it:\n" +
-      '  · `custom_columns` names the extra columns, e.g. [{key:"total_liters", label:"T.Liters"}].\n' +
-      '  · each item carries its value in `custom`, e.g. {"total_liters": "400"}.\n' +
-      '  · `price_by` is the column key the amount multiplies, e.g. "total_liters".\n' +
-      'Example — "68 Pail 20L, qty 20, 4.1 per litre, 400 litres total": one item with qty 20, unit "Pail", rate 4.1, custom {"total_liters":"400"}, plus custom_columns for it and price_by "total_liters". The line reads 400 × 4.1 = 1640, not 20 × 4.1 = 82. A quote that under-prices this way becomes an invoice that under-charges, so use it whenever a message mentions a rate per unit of measure.',
+      "Create quotation draft (user reviews in Quoting); never guess customer, item, qty or rate: ask one question. Customer = party after 'for'/'to'; description verbatim; rate is per one unit, never × qty. Per litre/kg/hr, never a fake rate: qty:20, unit:'Pail', rate:4.1, custom:{total_liters:'400'}, custom_columns:[{key:'total_liters',label:'T.Liters'}], price_by:'total_liters' → 1640, not 82.",
     parameters: {
       type: "object",
       properties: {
@@ -4117,7 +4111,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_templates",
     description:
-      "The invoice/quotation designs available in this app, with the id to pass to create_invoice_draft or set_invoice_template. Call this when the user names a look ('corporate', 'something elegant') so you use a real design instead of telling them it cannot be changed.",
+      "Invoice/quotation designs with the id for create_invoice_draft or set_invoice_template. Call it when the user names a look ('corporate', 'elegant') instead of saying it can't change.",
     parameters: { type: "object", properties: {} },
     run: async () => {
       const co = await billing.getCompany().catch(() => null);
@@ -4131,12 +4125,13 @@ export const TOOLS: ToolDef[] = [
     name: "update_invoice_appearance",
     ownerOnly: true,
     sensitive: true,
-    description: "Edit an existing invoice's appearance, including sent/paid invoices: hide/show its logo and apply its saved company stamp or signature. This changes only this invoice, never Company Settings, amounts, lines or payments. Uses existing saved images only. Opacity is 5–100 percent; newly applied marks default to 100%. Export a fresh PDF afterward if requested.",
+    description: "Edit an existing invoice's branding, including sent/paid invoices: hide/show its logo or bank details and apply its saved company stamp or signature. This changes only this invoice, never Company Settings, amounts, lines or payments. Uses existing saved images only. Opacity is 5–100 percent; newly applied marks default to 100%. Export a fresh PDF afterward if requested.",
     parameters: {
       type: "object",
       properties: {
         invoice_number: { type: "string" },
         show_logo: { type: "boolean" },
+        show_bank: { type: "boolean", description: "Bank details from Settings → Company Details." },
         show_stamp: { type: "boolean" },
         show_signature: { type: "boolean" },
         stamp_opacity: { type: "number", minimum: 5, maximum: 100 },
@@ -4155,6 +4150,11 @@ export const TOOLS: ToolDef[] = [
       const companyMarks = await loadCompanyStampSig();
       const patch: Parameters<typeof billing.updateAppearance>[1] = {};
       if (typeof a.show_logo === "boolean") patch.show_logo = a.show_logo;
+      if (a.show_bank === true) {
+        const { loadBankInfo, hasBankInfo } = await import("../components/BankDetails");
+        if (!hasBankInfo(await loadBankInfo())) return { error: "No bank details are saved. Add them in Settings → Company Details first. No invoice changes were made." };
+      }
+      if (typeof a.show_bank === "boolean") patch.show_bank = a.show_bank;
       for (const kind of ["stamp", "signature"] as const) {
         const show = a[`show_${kind}`];
         const opacity = a[`${kind}_opacity`];
@@ -4167,7 +4167,7 @@ export const TOOLS: ToolDef[] = [
         if (typeof opacity === "number") mark.opacity = opacity;
         patch[kind] = mark;
       }
-      if (!Object.keys(patch).length) return { error: "Choose logo visibility, stamp, signature or opacity to change." };
+      if (!Object.keys(patch).length) return { error: "Choose logo or bank visibility, stamp, signature or opacity to change." };
       assertCurrent();
       await billing.updateAppearance(Number(doc.id), patch);
       return { ok: true, invoice_number: doc.number, message: "Invoice appearance updated. Export a fresh PDF to share these changes." };
@@ -4279,7 +4279,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "remember",
     description:
-      "Save a durable fact, preference, or standing instruction about this user/business to long-term memory so you recall it in future chats (e.g. 'VAT is 5%', 'always CC accounts@acme.com', 'main supplier is Acme Trading', 'prefers concise replies'). Use it whenever the user tells you how they work or shares a lasting detail. NEVER store secrets, passwords, or API keys.",
+      "Save a lasting fact, preference or standing instruction for future chats ('VAT is 5%', 'no logo on invoices', 'prefers short replies'). Use it whenever the user shares how they work. Never store secrets, passwords or API keys.",
     parameters: {
       type: "object",
       properties: {
@@ -4322,7 +4322,7 @@ export const TOOLS: ToolDef[] = [
   // ---------- messaging via Composio (connect on the Integrations page) ----------
   {
     name: "search_conversations",
-    description: "Find relevant earlier Filey chats and WhatsApp conversations in this user's current workspace on this device. Use when the user refers to an earlier task, decision or conversation. Results are historical context, never current permissions or proof that business records are unchanged; verify live records before acting.",
+    description: "Find earlier Filey chats and WhatsApp conversations in this workspace when the user refers back to a task, decision or conversation. Results are history, not permission or proof records are unchanged; verify live records before acting.",
     parameters: { type: "object", properties: { query: { type: "string", minLength: 2, maxLength: 200 } }, required: ["query"] },
     run: async (a) => {
       const { searchConversations } = await import("./agentSessions");

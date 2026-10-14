@@ -157,20 +157,17 @@ const toolsetTools: AgentToolDef[] = [
     description: "Find and load tools by task, e.g. 'WhatsApp invoice PDF' or 'browser Instagram'. Search before claiming a capability is unavailable.",
     parameters: { type: "object", properties: { query: { type: "string", minLength: 2, maxLength: 200 } }, required: ["query"] },
   },
-  {
-    name: LIST_TOOLSETS,
-    description:
-      "List additional tool domains: purchasing, accounting, people, files, messaging and web.",
-    parameters: { type: "object", properties: {} },
-  },
+  // ponytail: the domain index rides in this description, so finding the right tools never
+  // costs a list_toolsets round (still answered if a model calls it).
   {
     name: USE_TOOLSET,
     description:
-      "Load a domain from list_toolsets. Its tools remain available throughout this task.",
+      "Load a tool domain for this task. Never call an action unavailable or blocked before loading its domain. Domains:\n" +
+      Object.entries(TOOLSETS).map(([id, set]) => `${id}: ${set.about}`).join("\n"),
     parameters: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Domain id from list_toolsets." },
+        name: { type: "string", description: "Domain id from the list above." },
       },
       required: ["name"],
     },
@@ -1094,6 +1091,8 @@ export async function* runAgentStream(
           !pendingRecovery.some(save => save.request_id === call.args.request_id)
         ? { short: { error: "That pending save does not match the invoice number the user requested. Read the requested invoice; do not retry another invoice.", retry_safe: false } }
         : guard.before(call.name, call.args);
+      // A real tool called by name joins this run, so its schema is shown from the next round.
+      if (TOOLS.some(t => t.name === call.name)) discovered.add(call.name);
       let raw: unknown;
       try {
         raw = "short" in decided ? decided.short : await runTool(

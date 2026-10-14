@@ -4585,9 +4585,9 @@ export const billing = {
     }).catch(error => { if (preparing) markInvoiceOutcome(error, "rejected"); throw error; });
   },
   // Appearance edits must not replace lines or reverse/repost stock and payments.
-  updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature">>) =>
+  updateAppearance: (docId: number, patch: Partial<Pick<InvoiceDoc, "template" | "show_logo" | "show_stamp" | "show_signature" | "stamp" | "signature"> & { show_bank?: boolean }>) =>
     online(async () => {
-      const allowed = ["template", "show_logo", "show_stamp", "show_signature", "stamp", "signature"];
+      const allowed = ["template", "show_logo", "show_stamp", "show_signature", "show_bank", "stamp", "signature"];
       const fields = Object.fromEntries(Object.entries(patch).filter(([key, value]) => allowed.includes(key) && value !== undefined));
       if (!Object.keys(fields).length) throw new Error("Choose an appearance change first.");
       await sUpdate("invoice_docs", docId, fields);

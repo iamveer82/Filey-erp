@@ -20,7 +20,7 @@ vi.mock("../log", async original => ({ ...await original<typeof import("../log")
 vi.mock("../reactPdf", () => ({ reactToPdfBytes: vi.fn() }));
 vi.mock("../../components/InvoiceExportSheet", () => ({ default: () => null }));
 vi.mock("../../components/StampSignatureSettings", () => ({ loadCompanyStampSig: async () => ({}), durableStampSig: (value: unknown) => value, EMPTY_STAMP_SIG: {} }));
-vi.mock("../../components/BankDetails", () => ({ loadBankInfo: async () => ({}), EMPTY_BANK: {} }));
+vi.mock("../../components/BankDetails", () => ({ loadBankInfo: vi.fn(async () => ({})), hasBankInfo: (b?: Record<string, unknown>) => !!b && Object.values(b).some(v => String(v ?? "").trim()), EMPTY_BANK: {} }));
 vi.mock("../agentFiles", () => ({ deliverFile: vi.fn() }));
 vi.mock("../desktopBrowser", () => ({ desktopBrowserSupported: () => true, desktopBrowserCommand: vi.fn(), getBrowserPanelState: vi.fn(() => ({ paused: false })) }));
 vi.mock("../computerUse", () => ({ runComputerUse: vi.fn(async () => ({ windows: [] })) }));
@@ -383,4 +383,15 @@ it("lets the owner hide branding and apply saved marks at full opacity without r
   vi.mocked(billing.getDoc).mockResolvedValue(document());
   expect(await call("update_invoice_appearance", args)).toMatchObject({ error: expect.stringMatching(/No saved stamp/) });
   expect(update).not.toHaveBeenCalled();
+});
+
+it("shows bank details on an invoice only when the company has saved them", async () => {
+  const { loadBankInfo } = await import("../../components/BankDetails");
+  vi.mocked(billing.getDoc).mockResolvedValue(document());
+  const update = vi.spyOn(billing, "updateAppearance").mockResolvedValue();
+  expect(await call("update_invoice_appearance", { invoice_number: "INV-12", show_bank: true })).toMatchObject({ error: expect.stringMatching(/No bank details/) });
+  expect(update).not.toHaveBeenCalled();
+  vi.mocked(loadBankInfo).mockResolvedValueOnce({ bank_name: "Emirates NBD", iban: "AE07 0331 2345 6789 0123 456" } as never);
+  expect(await call("update_invoice_appearance", { invoice_number: "INV-12", show_bank: true, show_logo: false })).toMatchObject({ ok: true });
+  expect(update).toHaveBeenCalledWith(12, { show_bank: true, show_logo: false });
 });
