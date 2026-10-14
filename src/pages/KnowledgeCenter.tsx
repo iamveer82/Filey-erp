@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { ArrowUpRight, BookOpen, Download, Play, Search } from "lucide-react";
+import { ArrowUpRight, BookOpen, Download, Mail, Play, Search } from "lucide-react";
 import { PageHeader } from "../components/ui";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { isLocalMode } from "../lib/dataMode";
@@ -63,10 +63,18 @@ export default function KnowledgeCenter() {
             : "Practical guides for your connected Filey workspace."
         }
         action={
-          <Link className="btn-secondary" to={help ? "/docs" : "/help"}>
-            {help ? "Browse documentation" : "Get help"}
-            <ArrowUpRight size={14} />
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {help && (
+              <a className="btn-secondary" href="mailto:support@gofiley.com">
+                <Mail size={14} />
+                support@gofiley.com
+              </a>
+            )}
+            <Link className="btn-secondary" to={help ? "/docs" : "/help"}>
+              {help ? "Browse documentation" : "Get help"}
+              <ArrowUpRight size={14} />
+            </Link>
+          </div>
         }
       />
       <div className="grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)]">
