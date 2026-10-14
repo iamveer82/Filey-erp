@@ -53,6 +53,14 @@ describe("document number reservations", () => {
     state.org = "other"; state.account = "other:user:00000000-0000-4000-8000-000000000001";
     expect(await allocateDocumentNumber("letter", [], { letter: "LTR-{001}" })).toBe("LTR-001");
   });
+  it("numbers documents in an older device workspace that has no company", async () => {
+    state.org = null as unknown as string; state.account = "default:user:00000000-0000-4000-8000-000000000001";
+    await localClient.from("invoice_docs").insert({ number: "INV-0007" });
+    expect(await allocateDocumentNumber("invoice", [], { invoice: "INV-{0001}" })).toBe("INV-0008");
+    expect(await allocateDocumentNumber("invoice", [], { invoice: "INV-{0001}" })).toBe("INV-0009");
+    state.local = false;
+    await expect(allocateDocumentNumber("invoice")).rejects.toThrow("Select your workspace");
+  });
   it("pins cloud request identity and stops a response after workspace switch", async () => {
     state.local = false;
     expect(await allocateDocumentNumber("invoice", [], { invoice: "INV-{0001}" }, request)).toBe("CLOUD-0001");

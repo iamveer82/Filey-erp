@@ -29,7 +29,11 @@ export async function allocateDocumentNumber(
   requestId = crypto.randomUUID(),
 ): Promise<string> {
   const scope = requireAgentStorageScope();
-  const account = getCacheScope(), org = getCacheOrg();
+  const account = getCacheScope();
+  // Device workspaces made before companies existed carry the "default" label, which getCacheOrg
+  // hides because no cloud company has it. A device has one owner, so the label still keeps its
+  // numbering separate; refusing it stopped those users from creating any document (v3.0.11+).
+  const org = isLocalMode() ? account?.slice(0, account.lastIndexOf(":user:")) || null : getCacheOrg();
   const actor = account?.slice(account.lastIndexOf(":user:") + 6);
   const spec = DOC_NUMBER_KINDS.find(item => item.kind === kind);
   if (!spec || !account || !org) throw new Error("Select your workspace before creating a document.");

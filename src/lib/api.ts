@@ -4020,7 +4020,9 @@ const PO_DONE = (status: unknown) =>
 // Untagged historic device rows already live in the selected account partition.
 // Explicit organization tags must match before taking part in a private pool.
 function localRowInCurrentOrg(row: Record<string, any>): boolean {
-  return row.org_id == null || row.org_id === getCacheOrg();
+  // The device's own label, "default" included: older device copies were tagged with it.
+  const scope = getCacheScope();
+  return row.org_id == null || row.org_id === (scope ? scope.slice(0, scope.lastIndexOf(":user:")) : getCacheOrg());
 }
 function localRowOwnedByActor(row: Record<string, any>, actor = getCacheScope()?.split(":user:").slice(-1)[0]): boolean {
   return localRowInCurrentOrg(row) && (row.user_id == null || row.user_id === actor);
