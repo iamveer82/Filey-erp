@@ -15,7 +15,16 @@ import {
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
-import { setMigrating, isMigrating } from "../../lib/sync";
+import { setMigrating, isMigrating, getSyncStatus, syncStatusMessage, type SyncStatus } from "../../lib/sync";
+import {
+  CLOUD_COPY_EVENT,
+  cloudCopyAllowed,
+  cloudCopyOwner,
+  resolveCloudCopyConflicts,
+  runCloudCopy,
+  setCloudCopy,
+} from "../../lib/cloudCopy";
+import SyncConflictReview from "../../components/SyncConflictReview";
 import {
   hasTauri,
   pickFolder,
@@ -95,6 +104,7 @@ function AccountConnectionCard() {
   };
 
   const disconnect = async () => {
+    setCloudCopy(null);
     await cloudSignOut();
     setConnected(null);
   };
@@ -195,6 +205,114 @@ function AccountConnectionCard() {
             </button>
           )}
         </div>
+      )}
+    </SettingsSection>
+  );
+}
+
+// Mixed mode (Pro/Ultra): records stay on this device and a copy follows to the
+// account, so turning the cloud off later never loses anything.
+function CloudCopySection() {
+  const { confirm } = useUI();
+  const [uid, setUid] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [owner, setOwner] = useState(cloudCopyOwner());
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const checkPlan = () => void cloudCopyAllowed().then(ok => { if (active) setAllowed(ok); });
+    const onStatus = () => setStatus(getSyncStatus());
+    const onCopy = () => setOwner(cloudCopyOwner());
+    checkPlan();
+    window.addEventListener("filey:entitlement", checkPlan);
+    window.addEventListener("filey:sync-status", onStatus);
+    window.addEventListener(CLOUD_COPY_EVENT, onCopy);
+    const sub = supabase?.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setUid(session?.user.id ?? null);
+      setEmail(session?.user.email ?? null);
+    });
+    return () => {
+      active = false;
+      sub?.data.subscription.unsubscribe();
+      window.removeEventListener("filey:entitlement", checkPlan);
+      window.removeEventListener("filey:sync-status", onStatus);
+      window.removeEventListener(CLOUD_COPY_EVENT, onCopy);
+    };
+  }, []);
+
+  const on = !!uid && owner === uid;
+  const toggle = async (next: boolean) => {
+    setErr("");
+    if (!next) return setCloudCopy(null);
+    if (!uid || busy) return;
+    setBusy(true);
+    try {
+      if (await confirm({
+        title: "Keep a copy in your Filey account?",
+        message: `Your device records and files will be uploaded to ${email ?? "your Filey account"} now. After that, invoices, payments and other key records upload a few seconds after you save, and everything else every 5 minutes. Only changed records are sent. Everything stays on this device too.`,
+        confirmLabel: "Upload and keep in sync",
+      })) setCloudCopy(uid);
+    } finally { setBusy(false); }
+  };
+  const syncNow = async () => {
+    setBusy(true); setErr("");
+    try { await runCloudCopy(true); }
+    catch (error) { setErr(error instanceof Error ? error.message : RETRY_MESSAGE); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <SettingsSection
+      title="Automatic cloud copy"
+      description="Work on this device, offline or online, and keep a copy in your Filey account. Pro and Ultra."
+    >
+      {allowed === false ? (
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <p>Available on Pro and Ultra. Offline mode on this device stays free.</p>
+          <a className="btn-ghost" href="#/settings?section=billing">See plans</a>
+        </div>
+      ) : allowed && (
+        <>
+          <div className="flex items-start gap-3 rounded-xl border border-border p-4">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">Keep a copy in my Filey account</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {!uid
+                  ? "Connect your Filey account below first."
+                  : on
+                    ? "On. Key records upload seconds after you save; everything else every 5 minutes. Changes from your other devices arrive here too."
+                    : "Off. Your records stay only on this device."}
+              </p>
+            </div>
+            <Switch
+              checked={on}
+              busy={busy}
+              disabled={!uid}
+              onChange={(next) => void toggle(next)}
+              label="Keep a copy in my Filey account"
+              className="mt-1"
+            />
+          </div>
+          {on && (
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+              <p role="status" className="text-muted-foreground">
+                {status.state === "syncing" ? "Syncing…"
+                  : status.state === "error" ? syncStatusMessage(status)
+                  : status.at ? `Last synced ${new Date(status.at).toLocaleString()}` : "Waiting for the first sync."}
+              </p>
+              <button className="btn-ghost" disabled={busy || status.state === "syncing"} onClick={() => void syncNow()}>
+                Sync now
+              </button>
+            </div>
+          )}
+          {on && <SyncConflictReview resolve={resolveCloudCopyConflicts} />}
+          {err && <p role="alert" className="text-sm text-danger">{err}</p>}
+        </>
       )}
     </SettingsSection>
   );
@@ -457,6 +575,7 @@ export default function DataModePanel() {
                 <>
                   On. Your records live in {cloudSession || user?.email || "your Filey account"} and
                   follow you to every device you sign in to. Needs internet to make changes.
+                  {hasTauri && " This computer keeps an up-to-date copy too, so turning this off starts from your latest records."}
                 </>
               ) : (
                 <>
@@ -512,6 +631,7 @@ export default function DataModePanel() {
           </div>
         )}
       </SettingsSection>
+      {mode === "local" && cloudConfigured && <CloudCopySection />}
       {mode === "local" && cloudConfigured && <AccountConnectionCard />}
 
       {hasTauri && (

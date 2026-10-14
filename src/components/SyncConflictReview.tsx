@@ -3,7 +3,10 @@ import { Cloud, HardDrive } from "lucide-react";
 import { FileySpinner } from "./FileySpinner";
 import { getSyncStatus, syncStatusMessage, listSyncConflicts, resolveSyncConflicts } from "../lib/sync";
 
-export default function SyncConflictReview() {
+export default function SyncConflictReview({ resolve: resolveWith = resolveSyncConflicts }: {
+  /** Supplies the upload permit for the caller's sync mode. */
+  resolve?: (keepLocal: boolean) => Promise<boolean>;
+} = {}) {
   const [count, setCount] = useState(0);
   const [syncing, setSyncing] = useState(getSyncStatus().state === "syncing");
   const [busy, setBusy] = useState(false);
@@ -28,7 +31,7 @@ export default function SyncConflictReview() {
   const resolve = async (keepLocal: boolean) => {
     setBusy(true); setError("");
     try {
-      const complete = await resolveSyncConflicts(keepLocal);
+      const complete = await resolveWith(keepLocal);
       if (!complete) setError(syncStatusMessage(getSyncStatus()));
       setCount((await listSyncConflicts()).length);
     } catch {

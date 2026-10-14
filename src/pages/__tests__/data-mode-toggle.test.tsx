@@ -12,6 +12,16 @@ const cloud = vi.hoisted(() => ({
   pendingWrites: vi.fn(async () => [] as { id: number; op: string }[]),
   flushOutbox: vi.fn(async () => {}),
   reload: false,
+  authEvents: false,
+}));
+const copy = vi.hoisted(() => ({ allowed: false, owner: null as string | null, set: vi.fn() }));
+vi.mock("../../lib/cloudCopy", () => ({
+  CLOUD_COPY_EVENT: "filey:cloud-copy",
+  cloudCopyAllowed: async () => copy.allowed,
+  cloudCopyOwner: () => copy.owner,
+  setCloudCopy: copy.set,
+  runCloudCopy: vi.fn(async () => true),
+  resolveCloudCopyConflicts: vi.fn(async () => true),
 }));
 
 // vi.mock factories are hoisted, so the mode fixture has to be too.
@@ -31,7 +41,10 @@ vi.mock("../../lib/supabase", async (importOriginal) => ({
   supabase: {
     auth: {
       getSession: async () => ({ data: { session: cloud.session ? { user: { email: cloud.session } } : null }, error: null }),
-      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+      onAuthStateChange: (cb: (event: string, session: unknown) => void) => {
+        if (cloud.authEvents) cb("INITIAL_SESSION", cloud.session ? { user: { id: "owner-id", email: cloud.session } } : null);
+        return { data: { subscription: { unsubscribe: () => {} } } };
+      },
     },
   },
 }));
@@ -111,6 +124,10 @@ beforeEach(() => {
   cloud.flushOutbox.mockReset().mockResolvedValue();
   confirm.mockClear().mockResolvedValue(true);
   cloud.reload = false;
+  cloud.authEvents = false;
+  copy.allowed = false;
+  copy.owner = null;
+  copy.set.mockClear();
   vi.stubGlobal("location", { ...window.location, reload: () => { cloud.reload = true; } });
 });
 
@@ -276,6 +293,24 @@ it("requires cloud storage consent even when the device has no current records",
   expect(confirm).toHaveBeenCalledTimes(1);
   expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
   await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", expect.any(Function)));
+});
+
+it("shows the plan gate instead of the cloud copy switch on Basic", async () => {
+  render(<DataModePanel />);
+  expect(await screen.findByText(/Available on Pro and Ultra/)).toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: /keep a copy/i })).toBeNull();
+});
+
+it("asks before the first cloud copy upload and stores consent for that account only", async () => {
+  copy.allowed = true;
+  cloud.authEvents = true;
+  render(<DataModePanel />);
+  const keep = await screen.findByRole("switch", { name: /keep a copy/i });
+  await waitFor(() => expect(keep).toBeEnabled());
+  await act(async () => { fireEvent.click(keep); });
+  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: "Upload and keep in sync" }));
+  expect(copy.set).toHaveBeenCalledWith("owner-id");
+  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
 });
 
 it("keeps the switch still while a transfer is running", async () => {

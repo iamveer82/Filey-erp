@@ -21,7 +21,7 @@ import {
 
 import { assertLocalAccount, claimLocalWorkspace } from "./localAuth";
 import { pendingProfile, syncProfile } from "./profileSync";
-import { assertWorkspaceCurrent } from "./dataMode";
+import { assertWorkspaceCurrent, isLocalMode } from "./dataMode";
 import { checkCloudTransfer, assertCloudTransfer, type CloudTransferPermit } from "./cloudTransfer";
 
 // Every table the app reads. Over-copying cloud-only tables (organizations,
@@ -206,6 +206,8 @@ export async function migrateCloudToLocal(
   } catch (error) {
     console.warn("Could not save the cloud-copy marker", error);
   }
-  window.dispatchEvent(new Event("filey:remote-update"));
+  // Cloud mode shows cloud records; refreshing every open page there would
+  // only re-download them.
+  if (isLocalMode()) window.dispatchEvent(new Event("filey:remote-update"));
   return out;
 }

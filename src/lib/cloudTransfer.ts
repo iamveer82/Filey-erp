@@ -34,7 +34,8 @@ export async function checkCloudTransfer(permit: CloudTransferPermit | undefined
     throw new Error("Your cloud account changed during transfer. Your remaining records stay on this device.");
 }
 
-/** Used by the confirmed local-to-cloud workspace switch; always revoked on exit. */
+/** Used by the confirmed local-to-cloud workspace switch and by each pass of the
+ *  paid cloud copy the account explicitly turned on (cloudCopy.ts); always revoked on exit. */
 export async function withCloudTransfer<T>(client: SupabaseClient, uid: string, transfer: (permit: CloudTransferPermit) => Promise<T>): Promise<T> {
   assertWorkspaceCurrent();
   if (!isLocalMode()) throw new Error(LOCAL_TRANSFER_REQUIRED);

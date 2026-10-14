@@ -21,6 +21,7 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import { installExtensionBannerGuard } from "./lib/extension-guard";
 import { startAutoSync } from "./lib/sync";
+import { startCloudCopy } from "./lib/cloudCopy";
 import { seedDefaultSkills } from "./lib/defaultSkills";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./lib/agentStorage";
 import { quarantineLegacyCredentials } from "./lib/credentialStore";
@@ -38,6 +39,8 @@ installExtensionBannerGuard();
 if (!isNativeApp() && !window.location.hash.startsWith("#/reset-password")) initMonitoring();
 const stopAutoSync = startAutoSync();
 import.meta.hot?.dispose(stopAutoSync);
+const stopCloudCopy = startCloudCopy();
+import.meta.hot?.dispose(stopCloudCopy);
 // These services need the native sidecar. Web sign-in must not download their
 // agent runtime; desktop still starts them once without blocking rendering.
 if ("__TAURI_INTERNALS__" in window) {
