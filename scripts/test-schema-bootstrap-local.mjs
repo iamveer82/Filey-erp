@@ -147,7 +147,7 @@ async function testChangeFeed() {
 const changeFeedOnly=process.argv.includes('--change-feed');
 const snapshotSql=`select jsonb_object_agg(table_name,rows order by table_name) from (
   select c.relname table_name,(xpath('/table/row/rows/text()',query_to_xml(format('select coalesce(jsonb_agg(to_jsonb(t) order by to_jsonb(t)::text),''[]''::jsonb) as rows from public.%I t',c.relname),false,true,'')))[1]::text rows
-  from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r') all_rows;`;
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname<>'sync_changes') all_rows;`;
 let started=false;
 try {
   execFileSync(process.execPath,[join(root,'scripts/build-schema-bootstrap.mjs')],{cwd:root,stdio:'inherit',windowsHide:true});
@@ -255,6 +255,7 @@ try {
   assert.equal(query('bootstrap_partial_legacy',"select number from public.invoice_docs;"),'PARTIAL-LEGACY-KEEP');
   assert.equal(query('bootstrap_partial_legacy',"select to_regclass('public.profiles') is null and to_regclass('public.filey_bootstrap_migrations') is null;"),'t');
   console.log('PASS: an untracked partial legacy installation without profiles is also refused without changing saved invoices.');
+  await testChangeFeed();
   execFileSync(process.execPath,[join(root,'scripts/check-cloud-schema.mjs'),catalogPath],{cwd:root,stdio:'inherit',windowsHide:true});
   console.log('PASS: fresh catalog matches all current checked-out application RPC/column/RLS/Realtime requirements.');
   }

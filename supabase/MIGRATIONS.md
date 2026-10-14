@@ -41,7 +41,7 @@ every changed row against the caller's RLS; rows the caller can no longer see ar
 reported as removed. Deletions come from the log, to the owner and members of
 the row's organization (ids only). `filey_private.prune_sync_changes()` keeps 30
 days (pg_cron `filey-prune-sync-changes`, 03:17 daily); an older cursor is told
-to make one complete copy. Not in the fresh installer yet.
+to make one complete copy. Included in the fresh installer (21st current upgrade).
 
 Disposable test: `node scripts/test-schema-bootstrap-local.mjs --change-feed`
 (full installer, then the migration twice): own rows only, colleagues told only
