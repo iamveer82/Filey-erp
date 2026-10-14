@@ -20,6 +20,7 @@ import { getCacheScope } from "../lib/api";
 import { CREDENTIAL_EVENT, flushCredentials, hasCredential, quarantineLegacyCredentials } from "../lib/credentialStore";
 import { FILEY_AGENT_RUNTIME_KEY, connectFileyAgent } from "../lib/fileyAgent";
 import { Switch } from "./ui";
+import { LinkedDevicesSection } from "./LinkedDevices";
 
 /** Web and phone: chat turns run on the hosted Filey Agent (tools/agent-host). */
 function ComputerAgentSection() {
@@ -342,6 +343,7 @@ export default function AiSettings() {
       <SettingsSection title="AI payment method" description="Use your own key or optional Coin on Basic, Pro and Ultra. Coin is never spent automatically if your key fails.">
         <AiFundingControl />
       </SettingsSection>
+      <LinkedDevicesSection />
       {!desktop && <ComputerAgentSection />}
       <SettingsSection title="AI provider" description="Choose where Filey AI runs. Connect your own provider or use a model on this device.">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

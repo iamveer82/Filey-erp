@@ -44,7 +44,8 @@ import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, selec
 import { enableComputerUse, disableComputerUse } from "../lib/computerUse";
 import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, writeAgentStorage } from "../lib/agentStorage";
 import { botExpressionFor, botStateFor } from "../lib/botMood";
-import { GitBranch, Globe } from "lucide-react";
+import { GitBranch, Globe, Laptop } from "lucide-react";
+import { useDeviceLink } from "../components/LinkedDevices";
 import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
 import { openFolder, saveBytes } from "../lib/localPaths";
@@ -53,23 +54,19 @@ import { ErrorBanner, Modal } from "../components/ui";
 import AutomationsDrawer from "../components/AutomationsDrawer";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
-import { skillsIndex } from "../lib/agentSkills";
 import { buildAiContext } from "../lib/aiContext";
 import { getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
 import { isToolAllowed } from "../lib/capabilities";
-import { fileyAgentEnabled, fileyAgentOrFallback, fileyAgentTurn } from "../lib/fileyAgent";
+import { runAgentTurn } from "../lib/agentTurn";
+import { linkedAgentTurn, preferLinked } from "../lib/linkedAgent";
+import { linkedHost } from "../lib/deviceLink";
 import {
-  aiAgentStream,
-  aiAutonomousStream,
   aiReady,
   AiError,
-  buildSystemPrompt,
-  getPersona,
   type AiMessage,
   type AiImage,
 } from "../lib/ai";
 import {
-  memoryDigest,
   listMemories,
   deleteMemory,
   clearMemories,
@@ -112,9 +109,6 @@ import "./AgentChat.css";
 /* Filey's conversation workspace. Conversational mode runs
  * the standard tool-calling agent; the "Autonomous" toggle hands a goal to
  * aiAutonomous (plan → act → verify → finish) and streams the steps live. */
-
-const SYSTEM =
-  "You are Filey, the user's AI business agent with full control of their ERP app via tools — you can read AND modify: stats, customers, products, invoices, quotes, orders, purchase orders, expenses, attendance, files, and navigation. You have long-term memory: use `remember` to save durable facts/preferences and `recall` to look them up. When asked to do something, execute the tool and confirm in one short line. Money/outbound actions require user approval. Never invent data — look it up. Be concise and practical.";
 
 /** Width both halves of the conversation share — messages and the composer sit
  *  on one measure so long replies don't stretch wider than where you type. */
@@ -322,6 +316,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   useAiFunding();
   const ready = aiReady();
   const modelConfig = getActiveAiConfig();
+  useDeviceLink();
+  const linkedLabel = linkedHost()?.label;
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
   const [effort, setEffort] = useState<AiEffort>(() => {
     const saved = readAgentStorage("filey.agent.effort");
@@ -668,39 +664,19 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       }
       ctl.signal.throwIfAborted();
       let reply = "";
-      const brief = await buildAiContext(undefined, ctl.signal).catch(() => "");
-      ctl.signal.throwIfAborted();
       const history: AiMessage[] = chat.turns
         .slice(-TURN_CAP)
         .map((t) => ({ role: t.role, text: t.text }));
-      const messages: AiMessage[] = [
-        {
-          role: "system",
-          text: buildSystemPrompt(
-            SYSTEM,
-            getPersona(),
-            [memoryDigest(12, goalText), skillsIndex(), brief]
-              .filter(Boolean)
-              .join("\n\n")
-          ),
-        },
-        ...history,
-        { role: "user", text: goalText, images },
-      ];
       // Trusted interactive user; organization permissions remain enforced by the data API.
       const selectedEffort = modelConfig.billing === "credits" ? reasoningEnabled ? managedEffort : "auto" : aiEffortLevels(modelConfig).includes(effort) ? effort : "auto";
       const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort,
         ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm };
-      // Filey Agent keeps its own session history, memory and persona; business actions come
-      // back here through runTool. Attachments reach its tools through this turn's slot.
-      const builtIn = () => auto
-        ? aiAutonomousStream(goalText, { ...options, history, images })
-        : aiAgentStream(messages, options);
-      const stream = fileyAgentEnabled()
-        ? fileyAgentOrFallback(
-          fileyAgentTurn(chat.id, goalText, { confirm: requestConfirm, isOwner: !!scope, turnId, signal: ctl.signal, agentId: chat.id }),
-          builtIn)
-        : builtIn();
+      const here = () => runAgentTurn({ chatId: chat.id, goalText, history, images, auto }, options);
+      // A connected computer that is open runs the turn with its own engine and tools.
+      // ponytail: attachments stay here; send them over the link if phones need it.
+      const stream = linkedHost() && !attached.length
+        ? preferLinked(() => linkedAgentTurn({ chatId: chat.id, goalText, history, auto }, { confirm: requestConfirm, signal: ctl.signal }), here)
+        : here();
       try {
         for (;;) {
           const step = await stream.next();
@@ -1279,6 +1255,11 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                   if (saved !== next) setErr("Could not save the access mode. Your previous selection is unchanged.");
                 }} />}
                 <div className="filey-composer-models">
+                {active && linkedLabel && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground" title="Filey AI runs on your connected computer while it is open">
+                    <Laptop size={13} aria-hidden="true" />{linkedLabel}
+                  </span>
+                )}
                 {active && <AiFundingControl disabled={busy} compact />}
                 {active && <AgentEffortControl config={modelConfig} value={modelConfig.billing === "credits" ? managedEffort : effort} disabled={busy} onChange={changeEffort}
                   reasoningEnabled={reasoningEnabled} onReasoningChange={changeReasoning} />}

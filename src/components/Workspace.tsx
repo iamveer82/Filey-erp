@@ -15,6 +15,7 @@ import { Toaster } from "./Toaster";
 import WorkspaceDataProvider from "./WorkspaceDataProvider";
 import { workspaceQueryScope } from "../lib/workspaceQueries";
 import PersistentAgentChat from "./PersistentAgentChat";
+import { DeviceLinkHost } from "./LinkedDevices";
 
 const CustomerDetail = lazy(() => import("../pages/CustomerDetail"));
 const SupplierDetail = lazy(() => import("../pages/SupplierDetail"));
@@ -96,6 +97,7 @@ export default function Workspace() {
       <Notifier />
       <UpdateNotice />
       <AgentScheduler />
+      <DeviceLinkHost />
       {/* Opens wherever a plan limit is hit, so the way out is on the screen
           the person is already looking at. */}
       <UpgradeDialog />

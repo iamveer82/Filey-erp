@@ -18,7 +18,7 @@
  * a test can run the whole loop against a stub without a network.
  */
 
-import { TOOLS, runTool, isRemoteAgentRun, isToolArgumentRejection, type ConfirmFn } from "./aiTools";
+import { TOOLS, runTool, isRemoteAgentRun, isLinkedAgentRun, isToolArgumentRejection, type ConfirmFn } from "./aiTools";
 import { createGuard, coachResult, toolFailure } from "./agentGuard";
 import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
@@ -226,6 +226,7 @@ export function offeredTools(
     if (t.ownerOnly && !opts.isOwner) return false;
     if (!isToolAllowed(t.name)) return false;
     if (isRemoteAgentRun(opts.agentId) && (["computer_use", "browser"].includes(t.name) || t.name === "workspace_browser" && !isToolAllowed("agent_computer"))) return false;
+    if (t.name === "run_shell" && isLinkedAgentRun(opts.agentId)) return false;
     return gateFor(t.name, t.sensitive) !== "block";
   });
 

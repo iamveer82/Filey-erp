@@ -8,7 +8,7 @@ import { agentStorageScope } from "../agentStorage";
 vi.mock("../aiTools", () => ({ TOOLS: [
   { name: "list_pending_invoice_saves", description: "Read pending saves", parameters: { type: "object" } },
   { name: "retry_invoice_save", sensitive: true, description: "Retry the exact save", parameters: { type: "object" } },
-], runTool: vi.fn(), isToolArgumentRejection: () => false, isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram):/.test(id ?? "") }));
+], runTool: vi.fn(), isToolArgumentRejection: () => false, isRemoteAgentRun: (id?: string) => /^(whatsapp|telegram|link):/.test(id ?? ""), isLinkedAgentRun: (id?: string) => /^link:/.test(id ?? "") }));
 vi.mock("../capabilities", () => ({ isToolAllowed: () => true }));
 vi.mock("../agentMode", () => ({ gateFor: () => "run" }));
 vi.mock("../agentStorage", () => ({ agentStorageScope: vi.fn(() => "local:test"), AGENT_STORAGE_EVENT: "filey:agent-storage" }));

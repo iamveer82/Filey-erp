@@ -26,6 +26,25 @@ legacy installations were refused without altering their saved data. Evidence:
 `output/bootstrap-complete-tests.log` and `output/bootstrap-catalog.json`.
 This is local evidence, not a live-project readback.
 
+## Filey Link — APPLIED 2026-10-14
+
+`2026-10-14-device-link.sql` adds two policies on `realtime.messages` so a
+signed-in account can join only its own private topic `filey-link:<uid>`
+(broadcast + presence). Devices of one account see each other there; a phone or
+browser paired with the desktop (device key approved at the computer) runs Filey
+AI on it. Not in the fresh installer (needs the realtime schema).
+
+Applied live via the management API on 14 October. Readback: exactly these two
+policies on `realtime.messages`, both for `authenticated`. A rolled-back proof
+showed an account can write and read its own topic, is refused (42501) on
+another account's topic and cannot see its own rows there, and anon is refused.
+
+Realtime had created no `realtime.messages` partitions since 29 August, so the
+first private join failed with `MissingPartition`. Realtime then created the
+13–17 October partitions itself and the next join was authorized normally. The
+app retries a failed join with backoff (15 s doubling to 5 min), which covers
+the next missing day the same way.
+
 ## Agent core queue — APPLIED 2026-10-13
 
 `2026-10-12-agent-core.sql` (moved from `migrations/20261012-agent-core.sql`,

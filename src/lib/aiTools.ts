@@ -77,6 +77,7 @@ import {
   overLimit as overSocialLimit,
 } from "./zernio";
 import { listDealContacts, setDealContact, removeDealContact } from "./dealContacts";
+import { viaDesktopOr } from "./linkedAgent";
 
 import {
   CRM_OBJECTS,
@@ -1994,10 +1995,8 @@ export const TOOLS: ToolDef[] = [
       const { hasDesktop, bridgeState } = await import("./waBridge");
       current();
       if (!hasDesktop)
-        return {
-          error:
-            "PDF sending requires the installed desktop app. Use prepare_invoice_whatsapp for an unsent browser draft.",
-        };
+        return viaDesktopOr("send_invoice_whatsapp", a, signal,
+          "PDF sending requires the installed desktop app. Use prepare_invoice_whatsapp for an unsent browser draft.");
       const state = await bridgeState();
       current();
       if (state.state !== "connected")
@@ -5392,7 +5391,7 @@ export const TOOLS: ToolDef[] = [
       const identity = getCacheIdentity();
       const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const { hasDesktop, bridgeState, sendWa } = await import("./waBridge");
-      if (!hasDesktop) return { error: "WhatsApp runs in the desktop app only." };
+      if (!hasDesktop) return viaDesktopOr("send_whatsapp", a, signal, "WhatsApp runs in the desktop app only.");
       const digits = str(a.to).replace(/\D/g, "");
       const text = str(a.text);
       if (!digits) return { error: "No recipient number." };
@@ -5457,7 +5456,7 @@ export const TOOLS: ToolDef[] = [
       const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
       const { hasDesktop, bridgeState, sendWaFile } = await import("./waBridge");
       if (!hasDesktop)
-        return { error: "Sending files over WhatsApp runs in the desktop app only." };
+        return viaDesktopOr("send_whatsapp_file", a, signal, "Sending files over WhatsApp runs in the desktop app only.");
       const want = str(a.file).toLowerCase().trim();
       if (!want) return { error: "Which file? Give its name (or part of it)." };
 
@@ -5652,7 +5651,9 @@ const LETTER_CONTENT_KEYS = new Set([
   "title", "recipient_name", "recipient_address", "salutation", "body", "closing",
   "signatory_name", "signatory_title", "text", "label", "value",
 ]);
-export const isRemoteAgentRun = (agentId?: string): boolean => /^(whatsapp|telegram):/.test(agentId ?? "");
+export const isRemoteAgentRun = (agentId?: string): boolean => /^(whatsapp|telegram|link):/.test(agentId ?? "");
+/** A turn a paired phone or browser started on this computer (linkedAgent.ts). */
+export const isLinkedAgentRun = (agentId?: string): boolean => /^link:/.test(agentId ?? "");
 export function redactArgs(
   name: string,
   args: Record<string, unknown>
@@ -5744,6 +5745,8 @@ export async function runTool(
   catch (error) { return { error: errMsg(error) }; }
   const browserAction = ["computer_use", "workspace_browser", "agent_computer"].includes(name) && !(name === "agent_computer" && args.action === "stop");
   const remote = isRemoteAgentRun(agentId);
+  if (name === "run_shell" && isLinkedAgentRun(agentId))
+    return { error: "Shell commands start only on the computer itself, not from a linked phone or browser.", retry_safe: false };
   if ((name === "computer_use" || name === "browser") && (remote || name === "computer_use" && !computerSession))
     return { error: "Computer access starts automatically for tasks in Filey AI. Remote and scheduled tasks cannot control this computer." };
   if (name === "workspace_browser" && remote && !isToolAllowed("agent_computer"))
