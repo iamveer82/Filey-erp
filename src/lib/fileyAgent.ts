@@ -252,6 +252,9 @@ export async function hostAgentTransport(url = FILEY_AGENT_HOST_URL): Promise<Ag
 export const FILEY_AGENT_RUNTIME_KEY = "filey.agentRuntime";
 const desktop = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export function fileyAgentEnabled(): boolean {
+  // ponytail: web and phone off — agent.gofiley.com was never deployed, so the host transport
+  // only ever failed. Filey Link runs their turns on the computer instead. Re-open once a host exists.
+  if (!desktop()) return false;
   try {
     return localStorage.getItem(FILEY_AGENT_RUNTIME_KEY) === "filey-agent";
   } catch {
