@@ -7,13 +7,12 @@ export default function AgentRunProgress({
   run?: ChatTurn["run"];
   pending?: boolean;
 }) {
-  if (!run) return null;
-  if (pending && !run.plan.length && !run.actions.length) return null;
+  // While the task runs, the message's three dots say so; no status words.
+  if (!run || pending) return null;
   const incomplete = ["blocked", "exhausted", "error", "stopped"].includes(run.outcome ?? "")
     || run.plan.some(step => step.status !== "completed");
   const waiting = run.actions.some(action => action.status === "waiting");
-  const text = pending ? "Working…"
-    : run.outcome === "stopped" ? "Task stopped. Send a follow-up to continue."
+  const text = run.outcome === "stopped" ? "Task stopped. Send a follow-up to continue."
     : incomplete ? "Task incomplete. Send a follow-up to continue."
     : waiting ? "Check the media card for its status."
     : "";

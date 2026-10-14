@@ -96,7 +96,7 @@ it("keeps one running request and its original chat/files when navigating away a
   disable.mockClear();
   fireEvent.click(screen.getByRole("button", { name: "Customers section" }));
   expect(screen.getByRole("heading", { name: "Customers section fixture" })).toBeInTheDocument();
-  expect(screen.getByRole("complementary", { name: "Filey AI task" })).toHaveTextContent("continuing your task");
+  expect(within(screen.getByRole("complementary", { name: "Filey AI task" })).getByRole("status", { name: "Thinking" })).toBeInTheDocument();
   expect(run.signal().aborted).toBe(false);
   expect(disable).not.toHaveBeenCalled();
   expect(screen.queryByRole("textbox", { name: "Message Filey AI" })).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ it("finishes one real local invoice with its exact custom pricing after navigati
   expect((await localClient.from("invoice_docs").select("*")).data).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Customers section" }));
   expect(screen.getByRole("heading", { name: "Customers section fixture" })).toBeInTheDocument();
-  expect(screen.getByRole("complementary", { name: "Filey AI task" })).toHaveTextContent("continuing your task");
+  expect(within(screen.getByRole("complementary", { name: "Filey AI task" })).getByRole("status", { name: "Thinking" })).toBeInTheDocument();
   expect(signal.aborted).toBe(false);
   await act(async () => { finishCommit.resolve(); });
   await waitFor(() => expect(loadChats().find(chat => chat.id === chatId)?.turns).toHaveLength(2));

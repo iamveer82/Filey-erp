@@ -940,7 +940,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 <h1 className="truncate text-sm font-semibold leading-tight text-foreground" title={chat.title || "Filey AI"}>
                   {empty ? "New chat" : chat.title || "Conversation"}
                 </h1>
-                {(empty || busy) && <p role={busy ? "status" : undefined} className="mt-1 truncate text-xs text-muted-foreground">{busy ? pendingConfirm ? "Waiting for your approval" : "Working on your request…" : "How can I help you today?"}</p>}
+                {busy && !pendingConfirm ? <ThinkingDots className="mt-1" />
+                  : (empty || busy) && <p role={busy ? "status" : undefined} className="mt-1 truncate text-xs text-muted-foreground">{busy ? "Waiting for your approval" : "How can I help you today?"}</p>}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -1499,16 +1500,10 @@ function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: bo
         >
           {/* Markdown, not raw text: the model writes **bold**, bullets and
               fenced code, and every one of those used to show as punctuation. */}
-          {turn.text ? (
-            <Markdown text={turn.text} />
-          ) : (
-            // Nothing streamed yet: the three dots stand in for words, matching
-            // the thought trail the bot's face is wearing at that same moment.
-            active ? <ThinkingDots className="text-muted-foreground" /> : null
-          )}
-          {pending && turn.text && (
-            <span className="ml-1 inline-block motion-safe:animate-pulse">▍</span>
-          )}
+          {turn.text && <Markdown text={turn.text} />}
+          {/* While Filey works, the three dots stand in for status words,
+              matching the thought trail the bot's face is wearing. */}
+          {pending && active && <ThinkingDots className="text-muted-foreground" />}
         </div>
         <AgentRunProgress run={turn.run} pending={pending} />
         {!pending && needsCoin(turn.text) && <Link to="/settings?section=credits" className="btn-ghost mt-2"><CoinMark />Add Coin</Link>}

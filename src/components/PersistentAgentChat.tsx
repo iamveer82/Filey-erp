@@ -6,6 +6,7 @@ import { useModules } from "../lib/modules";
 import type { AgentChatStatus } from "../pages/AgentChat";
 import ErrorBoundary from "./ErrorBoundary";
 import FileyLoader from "./FileyLoader";
+import ThinkingDots from "./ThinkingDots";
 
 const AgentChat = lazy(() => import("../pages/AgentChat"));
 
@@ -34,8 +35,8 @@ function AgentSession() {
     <>
       {!active && (status?.busy || status?.approvalPending) && (
         <aside aria-label="Filey AI task" className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 text-sm sm:mx-6">
-          <p role="status" className="min-w-0 text-muted-foreground">
-            {status.approvalPending ? "Filey AI needs your approval." : "Filey AI is continuing your task."}
+          <p role="status" className="flex min-w-0 items-center gap-2 text-muted-foreground">
+            {status.approvalPending ? "Filey AI needs your approval." : <>Filey AI <ThinkingDots /></>}
           </p>
           <div className="flex shrink-0 items-center gap-2">
             <Link className="btn-ghost" to="/agent">Return to chat</Link>

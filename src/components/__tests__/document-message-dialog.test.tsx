@@ -26,6 +26,7 @@ vi.mock("../../lib/documentMessage", async (original) => ({
   ...await original<typeof import("../../lib/documentMessage")>(), openMessageDraft: vi.fn(async () => ({})), prepareWhatsAppDocument: vi.fn(),
 }));
 vi.mock("../../lib/api", () => ({ billing: {} }));
+vi.mock("../ThinkingDots", () => ({ default: () => <span role="status" aria-label="Thinking" /> }));
 const file = new File(["%PDF-invoice"], "Invoice-123.pdf", { type: "application/pdf" });
 Object.defineProperty(file, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF-invoice").buffer });
 const props = { title: "Invoice 123", phone: "+971501234567", message: "Your invoice", channel: "whatsapp" as const, loadPdf: async () => file, onClose: vi.fn() };
@@ -189,7 +190,8 @@ it("lets the user stop the computer task and reports it without a sent claim", a
   await waitFor(() => expect(send).toBeEnabled());
   fireEvent.click(send);
   await waitFor(() => expect(sendWhatsAppWithComputer).toHaveBeenCalledOnce());
+  expect(screen.getByRole("status", { name: "Thinking" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Filey AI stopped.");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Filey AI stopped."));
   expect(screen.getByRole("button", { name: "Send with Filey AI" })).toBeEnabled();
 });

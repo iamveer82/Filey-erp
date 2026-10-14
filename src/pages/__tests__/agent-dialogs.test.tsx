@@ -542,7 +542,8 @@ it("keeps action receipts without tool traces in chat and passes results to foll
     target: { value: "Review invoices" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-  expect(await screen.findByRole("status", { name: "Task progress" })).toHaveTextContent("Working…");
+  expect((await screen.findAllByRole("status", { name: "Thinking" })).length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Working/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
   for (const technical of ["list_invoices", "list invoices", "private-argument", "private-result"])
     expect(screen.queryByText(new RegExp(technical))).not.toBeInTheDocument();

@@ -46,6 +46,7 @@ vi.mock("../../lib/displayCurrency", async () => {
 vi.mock("../WorkspaceNavigation", () => ({ default: () => null }));
 vi.mock("../BrowserPanel", () => ({ default: () => null }));
 vi.mock("../AnimatedThemeToggler", () => ({ default: () => null }));
+vi.mock("../ThinkingDots", () => ({ default: () => <span role="status" aria-label="Thinking" /> }));
 vi.mock("../../pages/AgentChat", async () => {
   const { useEffect, useState } = await import("react");
   return { default: function AgentFixture({ active, onStatusChange }: { active: boolean; onStatusChange: (value: unknown) => void }) {
@@ -107,7 +108,8 @@ it("mounts AI only on its first visit and retains its draft/task while section a
   fireEvent.change(draft, { target: { value: "Keep my draft" } });
   fireEvent.click(screen.getByRole("button", { name: "Start generated task" }));
   fireEvent.click(screen.getByRole("button", { name: "Open customers section" }));
-  expect(screen.getByRole("status")).toHaveTextContent("Filey AI is continuing your task.");
+  expect(screen.getByRole("complementary", { name: "Filey AI task" })).toHaveTextContent("Filey AI");
+  expect(screen.getByRole("status", { name: "Thinking" })).toBeInTheDocument();
   expect(screen.queryByRole("textbox", { name: "Generated draft" })).not.toBeInTheDocument();
   const hiddenChat = container.querySelector('[aria-hidden="true"][inert]')!;
   expect(hiddenChat).toHaveAttribute("hidden");

@@ -2,6 +2,7 @@ import { FileySpinner as Loader2 } from "./FileySpinner";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Download, FileText, Link2, MessageCircle, Send, Share2, Sparkles, Square } from "lucide-react";
 import { Modal, ErrorBanner } from "./ui";
+import ThinkingDots from "./ThinkingDots";
 import { cn, errMsg } from "../lib/format";
 import { bridgeState, hasDesktop, onBridgeState } from "../lib/waBridge";
 import { internationalPhone, openMessageDraft, prepareWhatsAppDocument, saveDocumentPdf, type MessageChannel } from "../lib/documentMessage";
@@ -225,8 +226,7 @@ export default function DocumentMessageDialog({ documentKey, documentVersion, ti
                   if (mounted.current) setComputerRunning(false);
                 }
               })}>
-              {computerRunning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              {computerRunning ? "Filey AI is working…" : computerAttempted ? "Check the send in WhatsApp" : "Send with Filey AI"}
+              {computerRunning ? <ThinkingDots /> : <><Sparkles size={14} />{computerAttempted ? "Check the send in WhatsApp" : "Send with Filey AI"}</>}
             </button>
             {computerRunning && <button type="button" className="btn-ghost" onClick={() => computerAbort.current?.abort()}><Square size={14} /> Stop</button>}
             {!computerRunning && <a className="btn-ghost" href="#/settings?section=ai" onClick={onClose}>AI settings</a>}
