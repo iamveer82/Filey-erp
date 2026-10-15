@@ -236,6 +236,8 @@ export function offeredTools(
     core.add("computer_use");
     core.add("agent_computer");
   }
+  // "Send me that invoice again" is the commonest chat request; it must not wait on a domain load.
+  if (isRemoteAgentRun(opts.agentId)) core.add("export_invoice_pdf");
   const chosen = visible.filter((t) => core.has(t.name) || inOpenSets.has(t.name) || discovered.has(t.name));
 
   return [

@@ -120,7 +120,7 @@ it("attaches an owner's document to a unique turn and returns its generated PDF 
   expect(turn).toMatch(/^whatsapp-/);
   expect(mocks.setFiles).toHaveBeenCalledWith(turn, [expect.objectContaining({ name: "input.pdf", type: "application/pdf", size: 12 })], undefined);
   expect(mocks.sendFile).toHaveBeenCalledExactlyOnceWith("900000000001@lid", { path: "C:/Exports/invoice.pdf", filename: "invoice.pdf" }, "session-one");
-  expect(mocks.reply).toHaveBeenCalledWith("pdf", expect.stringContaining("invoice.pdf: accepted by WhatsApp"), "session-one");
+  expect(mocks.reply).toHaveBeenCalledWith("pdf", expect.stringContaining("Sent invoice.pdf."), "session-one");
   expect(mocks.log).toHaveBeenCalledWith(expect.objectContaining({ document: expect.objectContaining({ outcome: "accepted", key: "accepted-file-id" }) }), state.scope);
   expect(mocks.agent.mock.calls[0][1].signal.aborted).toBe(true);
 });
@@ -131,7 +131,7 @@ it("reports an uncertain file send without retrying or logging a success", async
   send("file-failure", "Export my report");
   await answered("file-failure");
   expect(mocks.sendFile).toHaveBeenCalledOnce();
-  expect(mocks.reply).toHaveBeenCalledWith("file-failure", expect.stringContaining("delivery was not confirmed"), "session-one");
+  expect(mocks.reply).toHaveBeenCalledWith("file-failure", expect.stringContaining("I couldn't confirm report.pdf went through"), "session-one");
   expect(mocks.log.mock.calls.some(([entry]) => entry.document?.outcome === "accepted")).toBe(false);
 });
 

@@ -415,25 +415,25 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
     for (const file of outputs) {
       if (scope !== agentStorageScope() || epoch !== generation || opts.signal?.aborted) break;
       if (!file.path) {
-        deliveries.push(`${file.name}: ${file.mediaJobId || file.videoJobId ? "open Filey AI to review the media job" : "no saved file available to attach"}.`);
+        deliveries.push(file.mediaJobId || file.videoJobId ? `${file.name} is waiting for you in Filey AI.` : `I couldn't attach ${file.name} here.`);
         continue;
       }
       if (seen.has(file.path)) continue;
       seen.add(file.path);
       if (file.whatsappRecipients?.includes(recipient)) continue;
-      if (Date.now() >= deadline - 10_000) { deliveries.push(`${file.name}: not sent; this task reached its time limit.`); continue; }
+      if (Date.now() >= deadline - 10_000) { deliveries.push(`I ran out of time before sending ${file.name}. Ask again and I'll send it.`); continue; }
       try {
         const accepted = await sendWaFile(recipient, { path: file.path, filename: file.name }, m.bridgeSession);
         if (!accepted) throw new Error("No message ID was returned");
         (file.whatsappRecipients ??= []).push(recipient);
-        deliveries.push(`${file.name}: accepted by WhatsApp.`);
+        deliveries.push(`Sent ${file.name}.`);
         if (scope === agentStorageScope() && epoch === generation)
           waLogAdd({ dir: "out", from: m.from, text: `[File] ${file.name}`, document: { key: accepted, filename: file.name, channel: "whatsapp", outcome: "accepted" } }, scope);
       } catch {
-        deliveries.push(`${file.name}: delivery was not confirmed. Check this chat before retrying; your local file is preserved.`);
+        deliveries.push(`I couldn't confirm ${file.name} went through. Check this chat before asking again; the file is still saved.`);
       }
     }
-    const text = reply + (deliveries.length ? `\n\n*FILES*\n${deliveries.join("\n")}` : "");
+    const text = reply + (deliveries.length ? `\n\n${deliveries.join("\n")}` : "");
     if (!(await answer(text))) return;
     result.delivered(text);
 

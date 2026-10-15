@@ -45,6 +45,11 @@ describe("what the model is offered", () => {
     expect(use?.description).toMatch(/Never call an action unavailable or blocked/);
   });
 
+  it("lets a chat channel resend an invoice PDF without loading a domain first", () => {
+    expect(names([], { agentId: "whatsapp:971500000001" })).toContain("export_invoice_pdf");
+    expect(names()).not.toContain("export_invoice_pdf");
+  });
+
   it("keeps specialist tools back until asked for", () => {
     expect(names()).not.toContain("run_payroll");
     expect(names(["people"])).toContain("run_payroll");
