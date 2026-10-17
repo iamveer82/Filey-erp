@@ -11,20 +11,46 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 // FTA requires on a foreign-currency invoice, so a stale one is a wrong number
 // on a tax document. Serve the fallback, but come back for the real rate soon.
 const FALLBACK_TTL_MS = 5 * 60 * 1000;
-const AED_TO_USD = 3.6725; // UAE Dirham is pegged to USD
+export const AED_TO_USD = 3.6725; // UAE Dirham is pegged to USD
+
+/** Currencies no free rate service quotes (the new Syrian pound). The business enters its own
+ *  rate; it fills the gap and never overrides a live one. Documents still freeze their own rate.
+ *  ponytail: kept per device, move to app settings if teams need one shared rate. */
+export const MANUAL_RATE_CURRENCIES = ["SYP"];
+const MANUAL_KEY = "filey:manual-fx";
+export function manualRates(): Rates {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MANUAL_KEY) || "{}");
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+}
+/** AED per 1 unit of `currency`; null clears it. */
+export function setManualRate(currency: string, aedPerUnit: number | null): void {
+  const next = manualRates();
+  if (aedPerUnit && aedPerUnit > 0 && Number.isFinite(aedPerUnit)) next[currency] = aedPerUnit;
+  else delete next[currency];
+  try {
+    localStorage.setItem(MANUAL_KEY, JSON.stringify(next));
+  } catch {
+    /* private mode: the rate lasts for this session's documents only */
+  }
+}
+const withManual = (live: Rates): Rates => ({ ...manualRates(), ...live });
 
 export type Rates = Record<string, number>;
 
 /** Get live exchange rates (AED base). Returns cached if fresh, fetches if stale. */
 export async function getExchangeRates(): Promise<Rates> {
   const cached = loadCached();
-  if (cached && Object.keys(cached).length > 0) return cached;
-  return fetchFresh();
+  if (cached && Object.keys(cached).length > 0) return withManual(cached);
+  return withManual(await fetchFresh());
 }
 
 /** Force-refresh rates from API. */
 export async function refreshRates(): Promise<Rates> {
-  return fetchFresh();
+  return withManual(await fetchFresh());
 }
 
 function loadCached(): Rates | null {

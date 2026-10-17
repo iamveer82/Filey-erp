@@ -41,6 +41,7 @@ export const CURRENCIES: { code: string; name: string }[] = [
   { code: "GBP", name: "British Pound" },
   { code: "INR", name: "Indian Rupee" },
   { code: "SAR", name: "Saudi Riyal" },
+  { code: "SYP", name: "Syrian Pound" },
   { code: "CZK", name: "Czech Koruna" },
   { code: "DKK", name: "Danish Krone" },
   { code: "HUF", name: "Hungarian Forint" },

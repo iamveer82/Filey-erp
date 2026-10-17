@@ -31,6 +31,7 @@ Presets were checked on 6 September 2026. They are editable suggestions; they do
 - [GST Council September 2025 decisions](https://www.gstcouncil.gov.in/sites/default/files/2025-09/press_release_press_information_bureau_0.pdf) and [December 2025 newsletter](https://gstcouncil.gov.in/sites/default/files/2026-01/monthly_newsletter_december_2025_1_0.pdf): current broad rate suggestions include 5%, 18% and 40%, with special product rules. Old 12%/28% values remain editable for historical records; saved values are never migrated to new rates.
 - [GSTN format guidance](https://selfservice.gstsystem.in/FAQDetails.aspx?ID=430): 15-character alphanumeric GSTIN; the app does not verify its checksum or live registration status.
 - [ZATCA VAT guidance](https://zatca.gov.sa/en/HelpCenter/guidelines/Documents/Amendments-to-the-Implementing-Regulation-of-%28VAT%29.PDF): Saudi standard preset 15%.
+- Syria (reviewed 2026-10-17): no VAT. The consumer spending fee applies until the end of 2026, then the sales tax ([Enab Baladi, May 2026](https://english.enabbaladi.net/archives/2026/05/syria-to-revoke-licenses-over-tax-corruption/)); the draft sets 5% on most goods and services, higher tiers on selected items, 0% on exports and exemptions for basics ([Syrian Observer](https://syrianobserver.com/syrian-actors/syria-to-introduce-new-tax-system-in-early-2026.html), [WelatTV](https://www.welattv.com/en/node/17932)). Rates depend on the item, so Filey suggests 0/5/10/15% and sets no default. The pound was redenominated (100 old = 1 new) on 1 January 2026 and keeps code SYP ([SANA](https://sana.sy/en/economic/2286201/)); no free rate service quotes it, so the business enters its own rate.
 
 ## Deployment and data separation
 
@@ -84,6 +85,7 @@ support, not certification or complete ERP parity.
 | India | Country snapshots; INR and other supported document currencies | GSTIN format, editable tax | AED ledger; no localized statutory payroll | No split GST, place-of-supply engine, IRN, e-way bill or returns |
 | EU member countries | Individual country selection; EUR and other document currencies | VAT identifier labels, editable line tax | AED ledger; no national payroll | No VIES, OSS/IOSS or national e-invoice/filing gateways |
 | Saudi Arabia | SAR and other supported document currencies | Editable tax and identifiers | AED ledger; no localized statutory payroll | No verified gateway submission or filing |
+| Syria | SYP (new pound, 2026) and other supported document currencies; enter your own SYP rate in Company Details | Sales tax with 0/5/10/15% suggestions, no default rate; tax number | AED ledger; no localized statutory payroll | No e-invoice gateway or filing |
 | Other countries | General documents and supported currencies | Manual tax and identifiers | AED ledger; generic people/pay records | Country validation and filings require separate implementation |
 
 Arabic text fields in document templates use automatic text direction; the form

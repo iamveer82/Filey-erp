@@ -402,12 +402,72 @@ const UNECE: Record<string, string> = {
   hour: "HUR",
   day: "DAY",
   box: "XBX",
+  piece: "H87",
+  nos: "H87",
+  no: "H87",
+  each: "EA",
+  kgs: "KGM",
+  gram: "GRM",
+  litre: "LTR",
+  liter: "LTR",
+  lt: "LTR",
+  ml: "MLT",
+  gallon: "GLL",
+  gal: "GLL",
+  ton: "TNE",
+  tonne: "TNE",
+  mt: "TNE",
+  meter: "MTR",
+  metre: "MTR",
+  cm: "CMT",
+  mm: "MMT",
+  sqm: "MTK",
+  m2: "MTK",
+  cbm: "MTQ",
+  m3: "MTQ",
+  hrs: "HUR",
+  min: "MIN",
+  week: "WEE",
+  month: "MON",
+  year: "ANN",
+  pail: "XPL",
+  drum: "XDR",
+  carton: "XCT",
+  ctn: "XCT",
+  bottle: "XBO",
+  btl: "XBO",
+  can: "XCA",
+  tin: "XTN",
+  bag: "XBG",
+  sack: "XSA",
+  pack: "XPK",
+  packet: "XPK",
+  pkt: "XPK",
+  jar: "XJR",
+  jerrycan: "XJC",
+  barrel: "XBA",
+  bucket: "XBJ",
+  case: "XCS",
+  pallet: "XPX",
+  roll: "XRO",
+  bundle: "XBE",
+  set: "SET",
+  pair: "PR",
+  dozen: "DZN",
+  dz: "DZN",
+  trip: "C62",
+  job: "C62",
+  lot: "C62",
 };
 export const unitCode = (u?: string | null): string => {
   if (!u?.trim()) return "C62";
   const value = u.trim();
+  const word = value.toLowerCase().replace(/\.$/, "");
+  // Everyday words win over lookalike codes: "KGS" means kilograms here, not kilogram per second.
+  if (UNECE[word]) return UNECE[word];
   if (codes.units.includes(value.toUpperCase())) return value.toUpperCase();
-  return UNECE[value.toLowerCase()] || "";
+  // Plurals: "pails", "boxes", "litres".
+  return UNECE[word.replace(/e?s$/, "")] || UNECE[word.replace(/s$/, "")] || "";
 };
 
 function partyXml(

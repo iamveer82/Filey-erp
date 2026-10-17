@@ -1,5 +1,5 @@
 import { readEInvoiceParty } from "../lib/einvoice";
-import { companyInvoiceSeller, fillMissingInvoiceSeller, syncInvoiceSellerPreset } from "../lib/invoiceSeller";
+import { autofillEInvoice, companyInvoiceSeller, fillMissingInvoiceSeller, syncInvoiceSellerPreset } from "../lib/invoiceSeller";
 import { supplierInvoiceDetails } from "../lib/supplierInvoiceDetails";
 import InvoiceImportModal from "../components/InvoiceImportModal";
 import { invoiceMessageVersion } from "../lib/messageOutbox";
@@ -2144,6 +2144,22 @@ function Editor({
       .then(setCompanyStampSig)
       .catch(() => {});
   }, []);
+  // Opening the e-invoice check fills what Filey already knows (seller, own TRN, bank transfer)
+  // instead of flagging it. Drafts only; nothing typed on the invoice is replaced.
+  const bankId = bank.iban || bank.account_number;
+  useEffect(() => {
+    if (editorTab !== "einvoice" || form.status !== "draft") return;
+    const snapshot = form, scope = agentStorageScope();
+    let live = true;
+    void billing.getCompany(true).catch(() => null).then((company) => {
+      if (!live || latestForm.current !== snapshot || scope !== agentStorageScope()) return;
+      const next = autofillEInvoice(snapshot, company, bankId ? { id: bankId, name: bank.account_name } : null);
+      if (next !== snapshot) setForm(next);
+    });
+    return () => { live = false; };
+    // Once per opening of the tab (and when the bank account loads), not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorTab, bankId]);
   useEffect(() => {
     let active = true;
     const scope = agentStorageScope();

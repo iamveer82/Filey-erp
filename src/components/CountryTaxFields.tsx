@@ -4,6 +4,34 @@ import type { CompanyProfile } from "../lib/api";
 import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
 import { changeCompanyCountry } from "../lib/companyCountry";
 import { CURRENCIES } from "../lib/format";
+import { AED_TO_USD, MANUAL_RATE_CURRENCIES, manualRates, setManualRate } from "../lib/exchange-rates";
+import { initDisplayCurrency } from "../lib/displayCurrency";
+
+/** A currency no rate service quotes gets the business's own rate, entered per US dollar. */
+function ManualRate({ currency }: { currency: string }) {
+  const saved = manualRates()[currency];
+  return (
+    <Field label={`${currency} per 1 US dollar`}>
+      <input
+        aria-label={`${currency} per 1 US dollar`}
+        type="number"
+        min="0"
+        step="any"
+        className="input"
+        defaultValue={saved ? +(AED_TO_USD / saved).toFixed(4) : ""}
+        onChange={(e) => {
+          const perUsd = Number(e.target.value);
+          setManualRate(currency, perUsd > 0 ? AED_TO_USD / perUsd : null);
+          void initDisplayCurrency(currency);
+        }}
+      />
+      <p className="mt-1 text-xs text-brand-500">
+        No rate service publishes this currency. Enter today's rate, for example from the
+        central bank. New documents start from it; saved documents keep their own rate.
+      </p>
+    </Field>
+  );
+}
 
 /** Shared by document company dialogs and the full settings page. */
 export default function CountryTaxFields({
@@ -42,6 +70,7 @@ export default function CountryTaxFields({
           options={CURRENCIES.map(({ code, name }) => ({ value: code, label: `${code} — ${name}` }))}
         />
       </Field>
+      {MANUAL_RATE_CURRENCIES.includes(c.currency || "") && <ManualRate currency={c.currency!} />}
       <div className="flex items-end gap-2">
         <div className="flex-1">
           <Field label={`Default ${regime.taxLabel} rate (%)`}>

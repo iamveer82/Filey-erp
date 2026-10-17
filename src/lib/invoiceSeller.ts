@@ -1,5 +1,5 @@
 import type { CompanyProfile, InvoiceDoc } from "./api";
-import { partyTin, readEInvoiceParty, type EInvoiceParty } from "./einvoice";
+import { isCreditNote, partyTin, readEInvoiceParty, type EInvoiceParty } from "./einvoice";
 
 const SELLER_FIELDS = ["seller_name", "seller_address", "seller_trn", "seller_email", "seller_phone", "seller_city",
   "seller_country_subdivision", "seller_legal_id", "seller_legal_id_type", "tax_country_code"] as const;
@@ -71,4 +71,23 @@ export function syncInvoiceSellerPreset<T extends SellerDocument>(doc: T, previo
   if (doc.logo === previous.logo) next.logo = company.logo;
   if (doc.tax_rate === previous.default_tax_rate) next.tax_rate = company.default_tax_rate;
   return { ...next, einvoice: { ...doc.einvoice, seller } };
+}
+
+/** What the e-invoice check would otherwise flag although Filey already knows it: the seller from
+ *  the company profile, the seller's own TRN (the source of its TIN / e-invoicing address), and
+ *  payment by bank transfer to the saved account. Drafts only; values already on the invoice stay.
+ *  A VAT-group member edits the pre-filled own TRN in the review; the check never infers it. */
+export function autofillEInvoice<T extends SellerDocument & { payment_means_code?: string; invoice_type_code?: string }>(
+  doc: T, company: CompanyProfile | null, bank: { id: string; name?: string } | null,
+): T {
+  if (doc.status !== "draft") return doc;
+  let next = company && invoiceSellerMatchesCompany(doc, company) ? fillMissingInvoiceSeller(doc, company) : doc;
+  const seller = next.einvoice?.seller ?? {};
+  const trn = text(next.seller_trn).replace(/\s/g, "");
+  if (!partyTin(seller) && !text(seller.endpoint_id).trim() && /^1\d{14}$/.test(trn))
+    next = { ...next, einvoice: { ...next.einvoice, seller: { ...seller, corporate_trn: trn } } };
+  if (bank?.id && !next.payment_means_code && !isCreditNote(next.invoice_type_code)) next = { ...next, payment_means_code: "30" };
+  if (bank?.id && next.payment_means_code === "30" && !text(next.einvoice?.payment_account_id).trim())
+    next = { ...next, einvoice: { ...next.einvoice, payment_account_id: bank.id, payment_account_name: text(next.einvoice?.payment_account_name).trim() || bank.name } };
+  return JSON.stringify(next) === JSON.stringify(doc) ? doc : next;
 }

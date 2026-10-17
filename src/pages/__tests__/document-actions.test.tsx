@@ -194,7 +194,7 @@ describe("invoice editor actions", () => {
     }
   });
 
-  it("fills an older draft from fresh seller presets while retaining manual values and its buyer snapshot", async () => {
+  it("fills an older draft from fresh seller presets when the e-invoice check opens, keeping manual values and its buyer snapshot", async () => {
     vi.mocked(billing.getCompany).mockImplementation(async fresh => ({ ...company, ...(fresh ? {
       city: "Dubai", country_subdivision: "DXB", address: "Preset address", legal_id: "TL-PRESET", legal_id_type: "TL",
       einvoice: { tin: "1001234567", legal_authority: "Dubai Economy" },
@@ -209,8 +209,7 @@ describe("invoice editor actions", () => {
     fireEvent.click(await view.findByRole("button", { name: "Check E-invoice" }));
     const review = within(await view.findByRole("region", { name: "E-invoice details" }));
     fireEvent.mouseDown(review.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
-    expect(review.getByRole("textbox", { name: "Seller city" })).toHaveValue("");
-    fireEvent.click(review.getByRole("button", { name: "Fill missing seller details" }));
+    // No button press: what the company profile already says is filled in when the check opens.
     await waitFor(() => expect(review.getByRole("textbox", { name: "Seller city" })).toHaveValue("Dubai"));
     expect(review.getByRole("textbox", { name: "Seller street address" })).toHaveValue("Manual address");
     expect(review.getByRole("textbox", { name: "Electronic invoicing TIN" })).toHaveValue("1001234567");

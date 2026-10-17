@@ -85,6 +85,18 @@ const REGIMES: Record<string, TaxRegime> = {
     rates: [0, 15],
     authority: "ZATCA",
   },
+  // Syria has no VAT. The consumer spending fee applies through 2026, then the sales tax:
+  // 5% on most goods and services, higher tiers on selected items, exports 0%, basics exempt.
+  // Rates depend on the item, so there is no default: the business sets its own.
+  SY: {
+    id: "sy-sales-tax",
+    country: "Syria",
+    currency: "SYP",
+    taxLabel: "Sales tax",
+    trnLabel: "Tax No.",
+    rates: [0, 5, 10, 15],
+    authority: "General Commission for Taxes and Fees",
+  },
 };
 const names = new Intl.DisplayNames(["en"], { type: "region" });
 export const COUNTRY_OPTIONS = [
@@ -92,6 +104,7 @@ export const COUNTRY_OPTIONS = [
   "IN",
   ...EU_COUNTRIES,
   "SA",
+  "SY",
   "GB",
   "US",
   "CA",
@@ -109,7 +122,7 @@ export const COUNTRY_OPTIONS = [
   .map((code) => ({ value: code, label: names.of(code) || code }))
   .sort((a, b) => a.label.localeCompare(b.label));
 const supported = new Set(COUNTRY_OPTIONS.map((c) => c.value));
-const LEGACY_COUNTRY: Record<string, string> = { AED: "AE", INR: "IN", SAR: "SA" };
+const LEGACY_COUNTRY: Record<string, string> = { AED: "AE", INR: "IN", SAR: "SA", SYP: "SY" };
 export function taxRegimeFor(
   currency?: string | null,
   countryCode?: string | null

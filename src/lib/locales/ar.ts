@@ -175,6 +175,12 @@ const ar: Record<string, string> = {
   Price: "السعر",
   Tax: "الضريبة",
   VAT: "ضريبة القيمة المضافة",
+  // Syria
+  "Sales tax": "ضريبة المبيعات",
+  "Tax No.": "الرقم الضريبي",
+  Governorate: "المحافظة",
+  "Syrian Pound": "الليرة السورية",
+  "SYP per 1 US dollar": "ليرة سورية مقابل 1 دولار أمريكي",
   Number: "الرقم",
   Reference: "المرجع",
   Created: "تاريخ الإنشاء",
