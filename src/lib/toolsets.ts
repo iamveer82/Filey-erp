@@ -58,7 +58,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   cards: {
     about: "Interactive answers in chat: cards (calculators, comparisons, planners, diagrams, 3D), charts, tables, KPIs, choices, design-card templates, photos",
-    tools: ["show_ui", "show_view", "card_templates", "find_image"],
+    tools: ["show_ui", "show_openui", "card_templates", "find_image"],
   },
   video: {
     about: "Brand/product videos from a brief or photo (user's fal key, approved in chat); track jobs",

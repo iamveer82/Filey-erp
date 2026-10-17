@@ -5847,7 +5847,7 @@ export const TOOLS: ToolDef[] = [
     // card from this call's arguments in the sandboxed card origin (src-tauri/src/modules/genui.*).
     name: "show_ui",
     description:
-      "Answer with an interactive card in the chat when using it beats reading it: to understand (an explorable model or diagram), compare (criteria, trade-offs, assumptions) or make a tool (working inputs, calculation, outputs, reset). Facts, writing and short advice stay text; a plain table, chart, KPIs, steps or a quick choice is show_view (Filey's own charts: vertical bars, stacked bars, interactive donut, half radial), and charts inside a card are vertical bars or donuts in the --chart-n colours; for a saved design see card_templates. " +
+      "Answer with an interactive card in the chat when using it beats reading it: to understand (an explorable model or diagram), compare (criteria, trade-offs, assumptions) or make a tool (working inputs, calculation, outputs, reset). Facts, writing and short advice stay text; a plain table, chart, KPIs, steps or a quick choice is show_openui, and charts inside a card are vertical bars or donuts in the --chart-n colours; for a saved design see card_templates. " +
       "Arguments in this order: title, initialHeight (px estimate), placeholderMessages (2-4 short progress lines), css (widget styles only), html (body markup, readable before code runs; no <style>), jsFunctions (named function declarations), jsExpressions (short statements calling them). " +
       "Built in: CSS vars --color-background-primary|secondary|tertiary, --color-text-primary|secondary|tertiary, -info/-danger/-success/-warning variants of each, --color-border-tertiary, --color-accent/--color-accent-text, --border-radius-md|lg; styled buttons (button.primary), inputs, sliders, tables; classes .card .row .grid .stat .muted .credit; SVG classes .box .node .arr .leader, text .t .ts .th, ramps .c-blue .c-teal .c-green .c-amber .c-red .c-purple .c-coral .c-pink .c-gray. Design in colour, not greys: --chart-1..--chart-8 (indigo, emerald, amber, pink, cyan, violet, orange, lime) for series, highlights and accents; .stat tiles tint themselves; .pill with .tone-1..8 for badges; .gradient-text for a headline; button.primary is the brand gradient. Dark mode is automatic: never hard-code text or background colors. The chat frames the card under its title: don't wrap it in another box. Import map: three, gsap, d3, chart.js (inside an async function: const { Chart } = await import('chart.js/auto')). " +
       "No network, storage or parent access: put the data in the code. Use only data from Filey tools or the user, and label examples as examples inside the card. Pictures: images [{name, source}] with source 'media:<job_id>' (from generate_image), 'file:<My Files image name>' or a find_image image_url, shown by <img data-filey-image=\"name\">; credit find_image photos in a .credit line. A clearly labeled button may call filey.send(text) with the chosen values (never on load, timers or typing); links: filey.openLink(url). Every control must work: validate inputs (no NaN or Infinity), state units, formulas and assumptions, work narrow and by keyboard. Then reply in one or two lines; don't repeat the card.",
@@ -5878,33 +5878,26 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: "show_view",
+    name: "show_openui",
     description:
-      "Show a native widget in the chat, drawn by Filey: view 'bar' (vertical bars: labels + series [{name, values}], stacked: true for parts of one total) | 'line' | 'area' (labels + series), 'pie' (interactive donut: labels + values), 'radial' (half ring splitting one total in 2-4 parts: labels + values, center = words under the total), 'table' (columns + rows), 'stats' (items [{label, value, change, tone good|bad|neutral}]), 'steps' (items [{title, detail, status done|doing|todo}]), 'choices' (question + options; a click sends that option to you). Use for exact numbers, simple charts, plans and quick decisions (drawn in Filey's colour palette); show_ui for anything custom or interactive. Data must come from Filey tools or the user; unit labels the values.",
+      "Show the answer as UI in the Filey chat (OpenUI): cards, tables, bar/line/area/pie charts, steps, tags, tabs, follow-up buttons. Write an OpenUI Lang program per the OPENUI guide; an empty program returns the guide. Use real figures from Filey tools or the user only.",
     parameters: {
       type: "object",
-      properties: {
-        view: { type: "string", enum: ["bar", "line", "area", "pie", "radial", "table", "stats", "steps", "choices"] },
-        stacked: { type: "boolean" },
-        center: { type: "string" },
-        title: { type: "string" },
-        labels: { type: "array", items: { type: "string" } },
-        series: { type: "array", items: { type: "object", properties: { name: { type: "string" }, values: { type: "array", items: { type: "number" } } }, required: ["name", "values"] } },
-        values: { type: "array", items: { type: "number" } },
-        unit: { type: "string" },
-        columns: { type: "array", items: { type: "string" } },
-        rows: { type: "array", items: { type: "array", items: {} } },
-        items: { type: "array", items: { type: "object" } },
-        question: { type: "string" },
-        options: { type: "array", items: { type: "string" } },
-      },
-      required: ["view"],
+      properties: { program: { type: "string", description: "OpenUI Lang, starting root = Card([...])" } },
+      required: ["program"],
     },
     run: async (a) => {
-      if (/^(whatsapp|telegram)-/.test(activeTurnId)) return { error: "Widgets show in the Filey AI chat in the app. Answer in text here." };
-      const { viewFromArgs } = await import("./genUi");
-      const view = viewFromArgs(a);
-      return typeof view === "string" ? { error: view } : { ok: true, shown: true };
+      if (/^(whatsapp|telegram)-/.test(activeTurnId)) return { error: "Cards show in the Filey AI chat in the app. Answer in text here." };
+      const program = str(a.program).trim();
+      if (!program) return { guide: (await import("./openuiGuide")).OPENUI_GUIDE };
+      const { openUiFromArgs } = await import("./genUi");
+      const spec = openUiFromArgs({ program });
+      if (typeof spec === "string") return { error: spec };
+      const { openUiProblems } = await import("./openuiLib");
+      const problems = openUiProblems(program);
+      return problems.length
+        ? { error: "The card was not shown. Fix these and call show_openui again with the whole program.", problems }
+        : { ok: true, shown: true, note: "Shown in the chat. Still reply with one or two plain sentences." };
     },
   },
   {

@@ -54,7 +54,13 @@ export interface GenUiViewSpec {
   options?: string[];
 }
 
-export type GenUiItem = GenUiCardSpec | GenUiViewSpec;
+/** An OpenUI Lang answer (show_openui), drawn by OpenUiRender.tsx with OpenUI's chat library. */
+export interface GenUiOpenUiSpec {
+  kind: "openui";
+  program: string;
+}
+
+export type GenUiItem = GenUiCardSpec | GenUiViewSpec | GenUiOpenUiSpec;
 
 const text = (v: unknown, max = 200_000) => (typeof v === "string" ? v.slice(0, max) : undefined);
 const texts = (v: unknown, max = 200, each = 2_000) =>
@@ -84,6 +90,19 @@ export function cardFromArgs(a: Record<string, unknown>): GenUiCardSpec | string
   const size = [card.css, card.html, card.jsFunctions, card.js, ...(card.jsExpressions ?? [])].reduce((n, s) => n + (s?.length ?? 0), 0);
   if (size > 160_000) return "Keep the card under 160 KB: less markup, data computed in code.";
   return card;
+}
+
+/** A show_openui call's arguments as an OpenUI answer, or why not. */
+export function openUiFromArgs(a: Record<string, unknown>): GenUiOpenUiSpec | string {
+  const program = text(a.program, 60_001)?.trim();
+  if (!program) return "Give the OpenUI Lang program.";
+  if (program.length > 60_000) return "Keep the program under 60 KB.";
+  return { kind: "openui", program };
+}
+
+/** Any saved or streamed card entry, or why not. */
+export function uiItemFromArgs(a: Record<string, unknown>): GenUiItem | string {
+  return a.kind === "openui" ? openUiFromArgs(a) : a.kind === "view" ? viewFromArgs(a) : cardFromArgs(a);
 }
 
 /** A show_view call's arguments as a native widget, or why not. */

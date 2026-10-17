@@ -272,14 +272,14 @@ describe("the tool surface stays small", () => {
     expect(model.firstOffered().length).toBeLessThan(TOOLS.length / 2);
     expect(model.firstToolBytes()).toBeLessThan(15_000);
     // A greeting pays for no widget schema...
-    expect(model.firstOffered()).not.toContain("show_view");
+    expect(model.firstOffered()).not.toContain("show_openui");
   });
 
   it("brings a chart along for questions about figures", async () => {
     const model = scriptModel([says("Up 12%.")]);
     await run("how are my sales this month");
     // ...a question about figures can chart its answer unasked.
-    expect(model.firstOffered()).toContain("show_view");
+    expect(model.firstOffered()).toContain("show_openui");
     expect(model.firstOffered()).not.toContain("show_ui");
     expect(model.firstToolBytes()).toBeLessThan(17_000);
     // Everyday work needs no unlocking.
@@ -287,6 +287,32 @@ describe("the tool surface stays small", () => {
     // Specialist work does.
     expect(model.firstOffered()).not.toContain("run_payroll");
     expect(model.firstOffered()).toContain("use_toolset");
+  });
+
+  it("brings the OpenUI guide only when a request may want a card, never on a WhatsApp turn", async () => {
+    const system = (model: ReturnType<typeof scriptModel>) =>
+      JSON.stringify((model.requests[0]?.body?.messages as { role: string }[] | undefined)?.filter((m) => m.role === "system"));
+    let model = scriptModel([says("Up 12%.")]);
+    await run("how are my sales this month");
+    expect(system(model)).toContain("OPENUI —");
+    model = scriptModel([says("hello")]);
+    await run("hello");
+    expect(system(model)).not.toContain("OPENUI —");
+    model = scriptModel([says("Up 12%.")]);
+    await run("how are my sales this month", { turnId: "whatsapp-1" });
+    expect(system(model)).not.toContain("OPENUI —");
+  });
+
+  it("checks an OpenUI card before showing it and says what to fix", async () => {
+    scriptModel([
+      calls("show_openui", { program: 'root = Card([h, x])\nh = CardHeader("Sales")' }),
+      calls("show_openui", { program: 'root = Card([h])\nh = CardHeader("Sales")' }),
+      says("Sales are up."),
+    ]);
+    const { events } = await run("show my sales as a chart");
+    const results = events.flatMap((e) => (e.type === "tool_result" && e.name === "show_openui" ? [e.result] : []));
+    expect(results[0]).toMatchObject({ problems: ["Used but never defined: x."] });
+    expect(results[1]).toMatchObject({ ok: true, shown: true });
   });
 
   it("offers Word up front only for document requests", async () => {

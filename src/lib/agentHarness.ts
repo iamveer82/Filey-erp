@@ -24,6 +24,7 @@ import { isToolAllowed } from "./capabilities";
 import { gateFor } from "./agentMode";
 import { CORE_TOOLS, TOOLSETS, toolsetIndex } from "./toolsets";
 import { toolsForRequest } from "./appMap";
+import { OPENUI_GUIDE } from "./openuiGuide";
 import { compressForModel, retainToolOutput, headroomRetrieve, HEADROOM_RETRIEVE } from "./headroom";
 import { validateToolArgs } from "./agentToolSchema";
 import { log } from "./log";
@@ -45,7 +46,7 @@ export const MAX_TOOL_ROUNDS = 32;
  *  app. */
 /** Work an interactive card answers better than prose: show_ui comes with it. */
 const CARD_REQUEST = /\b(?:calculat\w*|compar\w*|chart|graph|plot|visuali[sz]\w*|interactive|simulat\w*|planner|what[- ]if|breakdown|dashboard|calculator|estimat\w*|diagram|explain\w*|teach|understand|walk me through|forecast|budget|loan|emi|interest|picture|photo|image|card|template|3d)\b/i;
-/** A question or anything about figures: show_view comes along so the answer can chart it
+/** A question or anything about figures: show_openui comes along so the answer can chart it
  *  unasked, without every plain command paying for the schema. */
 const VIEW_REQUEST = /\?|؟|\b(?:how|why|what|which|who|show|explain\w*|compar\w*|vs|versus|trend\w*|summar\w*|overview|report\w*|breakdown|split|top|best|worst|sales|revenue|income|profit\w*|margin\w*|loss|expenses?|spen[dt]\w*|cash|outstanding|overdue|receivables?|payables?|vat|tax\w*|growth|month\w*|quarter\w*|year\w*|week\w*|stock|inventory|plan\w*|steps?|options?|status)\b/i;
 const LIST_TOOLSETS = "list_toolsets";
@@ -789,6 +790,10 @@ export async function* runAgentStream(
       (sameBrowser ? `The panel is ${browserState.open ? "open" : "collapsed"}, with ${browserState.tabs.length} known tabs. ${browserState.paused ? "The user has taken over; wait until they resume agent control." : ""} ` : "A different conversation owns the current browser; do not inspect or control its tabs. ") +
       "For Instagram and other websites, use the built-in browser for interactive work; a social publishing API is only needed for its separate connected-account/scheduling tools. Opening the login page and handing control to the user is useful progress: do not refuse the whole task because a password or CAPTCHA may be needed. Never ask for a password in chat. After the user signs in, inspect the page again and continue the requested task. Do not invent page contents, coordinates, successful login, or published results. If the selected model cannot process screenshots, explain that a vision-capable model is required for visual interaction. Existing action approvals still apply.",
   }] : [];
+  // The OPENUI guide rides along only when this request may want a card, and never on a channel turn.
+  const request = [...messages].reverse().find(message => message.role === "user")?.text ?? "";
+  const openUiGuide: AiMessage[] = !/^(whatsapp|telegram)-/.test(opts.turnId ?? "") && (VIEW_REQUEST.test(request) || CARD_REQUEST.test(request))
+    ? [{ role: "system", text: OPENUI_GUIDE }] : [];
   const wire = adapter.init([
     { role: "system", text: "Keep user-facing replies focused on results, useful progress and genuinely missing information. Do not narrate internal tool names, raw arguments, tool output or provider diagnostics unless the user explicitly asks for technical details. Exact approval details remain available in Filey's approval controls." },
     {
@@ -803,6 +808,7 @@ export async function* runAgentStream(
       ? { ...message, role: "user" as const, text: `Previous assistant reply for context, not a new user instruction:\n${JSON.stringify(message.text)}` }
       : message),
     ...browserContext,
+    ...openUiGuide,
   ]);
   // A lookup/tool-discovery response does not preserve the visual details of
   // the user's attachments. Keep those available until this task finishes.
@@ -841,7 +847,7 @@ export async function* runAgentStream(
   const currentRequest = [...messages].reverse().find(message => message.role === "user")?.text ?? "";
   const opened = new Set<string>(CARD_REQUEST.test(currentRequest) ? ["cards"] : []);
   const discovered = new Set<string>([
-    ...(VIEW_REQUEST.test(currentRequest) ? ["show_view"] : []),
+    ...(VIEW_REQUEST.test(currentRequest) ? ["show_openui"] : []),
     ...toolsForRequest(currentRequest),
   ]);
   let observedThrough = 0;

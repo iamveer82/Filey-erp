@@ -34,7 +34,8 @@ import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
 import GenUiCard from "../components/GenUiCard";
 import GenUiView from "../components/GenUiView";
-import { cardFromArgs, viewFromArgs } from "../lib/genUi";
+import { cardFromArgs, openUiFromArgs, viewFromArgs } from "../lib/genUi";
+import OpenUiCard from "../components/OpenUiCard";
 import AgentRunProgress from "../components/AgentRunProgress";
 import AgentChatStarters from "../components/AgentChatStarters";
 import { VideoJobCard } from "../components/AgentVideoPanel";
@@ -660,6 +661,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     };
     const trace: NonNullable<ChatTurn["run"]> = { plan: [], actions: [] };
     const cards: NonNullable<ChatTurn["ui"]> = [];
+    // show_openui calls by id: a program the checker refuses is replaced by the model's retry.
+    const openUiCalls = new Map<string, NonNullable<ChatTurn["ui"]>[number]>();
     setLiveUi(undefined);
     try {
       let images: AiImage[];
@@ -699,10 +702,11 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           } else if (ev.type === "plan") {
             trace.plan = ev.steps;
           } else if (ev.type === "tool_call" && ev.name !== "update_plan") {
-            if (ev.name === "show_ui" || ev.name === "show_view") {
-              const item = ev.name === "show_ui" ? cardFromArgs(ev.args) : viewFromArgs(ev.args);
+            if (ev.name === "show_ui" || ev.name === "show_view" || ev.name === "show_openui") {
+              const item = ev.name === "show_ui" ? cardFromArgs(ev.args) : ev.name === "show_openui" ? openUiFromArgs(ev.args) : viewFromArgs(ev.args);
               if (typeof item !== "string") {
                 cards.push(item);
+                if (ev.name === "show_openui") openUiCalls.set(ev.id, item);
                 setLiveUi([...cards]);
               }
             }
@@ -717,6 +721,11 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               "error" in ev.result
             );
             const waiting = !!(ev.result && typeof ev.result === "object" && "pending_action" in ev.result && ev.result.pending_action);
+            const refused = failed ? openUiCalls.get(ev.id) : undefined;
+            if (refused && cards.includes(refused)) {
+              cards.splice(cards.indexOf(refused), 1);
+              setLiveUi(cards.length ? [...cards] : undefined);
+            }
             const at = trace.actions.map((a) => a.id).lastIndexOf(ev.id);
             trace.actions = trace.actions.map((a, i) =>
               i === at
@@ -1524,7 +1533,9 @@ function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pe
         </div>
         {turn.ui?.map((item, i) => item.kind === "view"
           ? <GenUiView key={i} view={item} onPrompt={pending ? undefined : onPrompt} />
-          : <GenUiCard key={i} card={item} onPrompt={pending ? undefined : onPrompt} />)}
+          : item.kind === "openui"
+            ? <OpenUiCard key={i} spec={item} onPrompt={pending ? undefined : onPrompt} />
+            : <GenUiCard key={i} card={item} onPrompt={pending ? undefined : onPrompt} />)}
         <AgentRunProgress run={turn.run} pending={pending} />
         {!pending && needsCoin(turn.text) && <Link to="/settings?section=credits" className="btn-ghost mt-2"><CoinMark />Add Coin</Link>}
         {!pending && turn.text.trim() && (

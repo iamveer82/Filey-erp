@@ -72,7 +72,7 @@ const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browse
  *  by name rather than inferred — an unplaced tool is refused below, and
  *  module-access-coverage.test.ts fails the build instead of the user. */
 const MODULE_FREE = new Set([
-  "get_stats","current_time","show_ui","show_view","card_templates","find_image",
+  "get_stats","current_time","show_ui","show_openui","card_templates","find_image",
   "remember","recall","search_conversations",
   "list_skills","use_skill","run_skill_script","learn_skill","import_skill",
   "list_toolsets","use_toolset",

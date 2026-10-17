@@ -2,7 +2,7 @@
  * rolling memory (last TURN_CAP turns). Persisted in this browser only. */
 
 import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, requireAgentStorageScope, writeAgentStorage } from "./agentStorage";
-import { cardFromArgs, viewFromArgs, type GenUiItem } from "./genUi";
+import { uiItemFromArgs, type GenUiItem } from "./genUi";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -10,7 +10,7 @@ export interface ChatTurn {
   /** Files the agent produced on this turn, kept with the message that made
    *  them so they stay reachable instead of vanishing at the next question. */
   files?: { name: string; path?: string; url?: string; videoJobId?: string; mediaJobId?: string }[];
-  /** Interactive cards (show_ui) and native widgets (show_view) the agent showed, in order. */
+  /** Interactive cards (show_ui), OpenUI answers (show_openui) and older native widgets, in order. */
   ui?: GenUiItem[];
   run?: {
     plan: { step: string; status: "pending" | "in_progress" | "completed" | "blocked" }[];
@@ -132,7 +132,7 @@ function savedUi(value: unknown): ChatTurn["ui"] {
   if (!Array.isArray(value)) return;
   const items = value.flatMap(entry => {
     if (!isRecord(entry)) return [];
-    const item = entry.kind === "view" ? viewFromArgs(entry) : cardFromArgs(entry);
+    const item = uiItemFromArgs(entry);
     return typeof item === "string" ? [] : [item];
   }).slice(0, 12);
   return items.length ? items : undefined;

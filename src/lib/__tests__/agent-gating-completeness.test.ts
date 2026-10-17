@@ -21,7 +21,7 @@ const READ_ONLY: Record<string, string> = {
   list_work_items: "read-only projects and support tickets",
   get_stats: "dashboard numbers",
   show_ui: "draws a card in the chat; its code runs sandboxed on its own origin with no network or app access",
-  show_view: "draws a chart, table or list in the chat from the given values",
+  show_openui: "draws an OpenUI card in the chat from the given program; a card cannot run tools",
   financial_summary: "read-only balances",
   vat_return: "computed report",
   financial_statements: "computed report",
