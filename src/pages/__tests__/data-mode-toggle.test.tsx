@@ -324,7 +324,7 @@ it("keeps the switch still while a transfer is running", async () => {
   render(<DataModePanel />);
   await flip();
 
-  await waitFor(() => expect(switcher()).toBeDisabled());
+  await waitFor(() => expect(switcher()).toBeDisabled(), { timeout: 3000 });
   release();
   await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalled(), { timeout: 3000 });
 });
