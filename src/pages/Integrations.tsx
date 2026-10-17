@@ -366,7 +366,7 @@ export default function Integrations() {
       {
         key: "reach",
         name: "Web research",
-        desc: "Read public pages without a key; add your Jina key for web search.",
+        desc: "Read public pages and search the web without a key; add a Jina key for unlimited search.",
         category: "AI",
         icon: <Globe className="h-5 w-5" />,
         to: "/integrations/web-research",

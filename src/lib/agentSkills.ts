@@ -5,6 +5,7 @@
  */
 
 import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+import { bundledSkillsIndex } from "./bundledSkills";
 
 export interface Skill {
   id: string;
@@ -86,12 +87,12 @@ export function findSkill(name: string): Skill | undefined {
   );
 }
 
-/** Short index of enabled skills for the system prompt. "" when none. */
+/** Short index of enabled and pre-installed skills for the system prompt. */
 export function skillsIndex(): string {
   const on = loadSkills().filter((s) => s.enabled);
-  if (!on.length) return "";
   return [
     "AVAILABLE SKILLS — reusable procedures you can follow. Call the `use_skill` tool with the skill name to load its full instructions when the task matches:",
     ...on.map((s) => `- ${s.name}: ${s.description}`),
+    ...bundledSkillsIndex(),
   ].join("\n");
 }

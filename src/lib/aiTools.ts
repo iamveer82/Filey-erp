@@ -34,6 +34,7 @@ import { getExchangeRates } from "./exchange-rates";
 import { addMemory, searchMemories } from "./aiMemory";
 import { composioExecute } from "./composio";
 import { addSkill, findSkill, loadSkills } from "./agentSkills";
+import { BUNDLED_PACKS, bundledSkill, bundledSkillFile, isBundledSkill, skillScriptJob } from "./bundledSkills";
 import { saveSecret, recallSecret, listSecrets, secretSubstitutions } from "./secretStore";
 import { addReminder, listReminders, removeReminder } from "./reminders";
 import { reportMoney } from "./reportMoney";
@@ -4691,7 +4692,7 @@ export const TOOLS: ToolDef[] = [
   // ---------- messaging via Composio (connect on the Integrations page) ----------
   {
     name: "search_conversations",
-    description: "Find earlier Filey chats and WhatsApp conversations in this workspace when the user refers back to a task, decision or conversation. Results are history, not permission or proof records are unchanged; verify live records before acting.",
+    description: "Find earlier Filey chats and WhatsApp conversations when the user refers back to a task or decision. Results are history, not permission; verify live records before acting.",
     parameters: { type: "object", properties: { query: { type: "string", minLength: 2, maxLength: 200 } }, required: ["query"] },
     run: async (a) => {
       const { searchConversations } = await import("./agentSessions");
@@ -4859,29 +4860,74 @@ export const TOOLS: ToolDef[] = [
   {
     name: "list_skills",
     description:
-      "List the user's saved skills (reusable procedures/workflows) with their descriptions.",
+      "List saved skills and pre-installed skill packs.",
     parameters: { type: "object", properties: {} },
     run: async () => {
       const on = loadSkills().filter((s) => s.enabled);
-      return { skills: on.map((s) => ({ name: s.name, description: s.description })) };
+      return {
+        skills: on.map((s) => ({ name: s.name, description: s.description })),
+        pre_installed: BUNDLED_PACKS.map((p) => ({ name: p.name, description: p.description })),
+      };
     },
   },
   {
     name: "use_skill",
     description:
-      "Load the full instructions for a saved skill by name, then follow them for the current task.",
+      "Load a skill's instructions by name and follow them. A pack lists its skills; file reads a skill's data file.",
     parameters: {
       type: "object",
-      properties: { name: { type: "string" } },
+      properties: { name: { type: "string" }, file: { type: "string" } },
       required: ["name"],
     },
     run: async (a) => {
+      // The owner's own skill wins over a pre-installed one of the same name.
+      const own = loadSkills().some((s) => s.enabled && s.name.trim().toLowerCase() === str(a.name).trim().toLowerCase());
+      if (!own && isBundledSkill(str(a.name))) {
+        if (!a.file) return await bundledSkill(str(a.name));
+        const text = await bundledSkillFile(str(a.name), str(a.file));
+        return text == null ? { error: `${str(a.name)} has no file "${str(a.file)}".` } : { name: str(a.name), file: str(a.file), content: text };
+      }
       const s = findSkill(str(a.name));
       if (!s)
         return {
           error: `No skill named "${str(a.name)}". Use list_skills to see what's available.`,
         };
       return { name: s.name, instructions: s.instructions };
+    },
+  },
+  {
+    name: "run_skill_script",
+    description:
+      "Run a pre-installed skill's helper script (its `python3 x.py ...` lines): hook scoring, caption and title linting, humanizer check, chapters, retention. Sandboxed, offline. Pass input text as files and name them in args.",
+    parameters: {
+      type: "object",
+      properties: {
+        skill: { type: "string", description: "Skill name, e.g. yt-script" },
+        script: { type: "string", description: "Script file, e.g. hookscore.py" },
+        args: { type: "array", items: { type: "string" }, description: 'Arguments, e.g. ["hooks.txt"] or ["--hook", "one line"]' },
+        files: { type: "object", description: 'Input files, name → text, e.g. {"hooks.txt": "..."}' },
+        stdin: { type: "string", description: "Text for a script reading '-'" },
+      },
+      required: ["skill", "script"],
+    },
+    run: async (a, signal) => {
+      const inputs = a.files && typeof a.files === "object" && !Array.isArray(a.files) ? (a.files as Record<string, unknown>) : {};
+      const job = await skillScriptJob(
+        str(a.skill).trim(),
+        str(a.script).trim(),
+        Array.isArray(a.args) ? a.args.map(String) : [],
+        Object.fromEntries(Object.entries(inputs).map(([name, text]) => [name, String(text ?? "")])),
+        a.stdin == null ? undefined : String(a.stdin),
+      );
+      const { runSkillScriptJob } = await import("./skillScripts");
+      const r = await runSkillScriptJob(job, signal);
+      const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}\n… (${text.length - max} more characters)` : text);
+      return {
+        exit_code: r.exit_code,
+        stdout: cut(r.stdout, 12_000),
+        ...(r.stderr.trim() ? { stderr: cut(r.stderr, 4_000) } : {}),
+        ...(Object.keys(r.files).length ? { files: Object.fromEntries(Object.entries(r.files).map(([n, t]) => [n, cut(t, 8_000)])) } : {}),
+      };
     },
   },
   {

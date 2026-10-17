@@ -1196,6 +1196,8 @@ export async function* runAgentStream(
         : guard.before(call.name, call.args);
       // A real tool called by name joins this run, so its schema is shown from the next round.
       if (TOOLS.some(t => t.name === call.name)) discovered.add(call.name);
+      // A loaded skill may say "run hookscore.py"; its runner comes with it.
+      if (call.name === "use_skill") discovered.add("run_skill_script");
       let raw: unknown;
       try {
         raw = "short" in decided ? decided.short : await runTool(

@@ -275,10 +275,48 @@ export async function searchWeb(
     throw new ReachError("Web access is off. Turn it on in Integrations → Web research.");
   const q = query.trim();
   if (!q) throw new ReachError("Search needs a query.");
-  if (!cfg.apiKey.trim())
-    throw new ReachError("Web search requires your own Jina API key. Add it in Integrations → Web research. Reading a known public URL still works without a key, within Jina's limits.");
+  if (!cfg.apiKey.trim()) {
+    const hits = await exaFreeSearch(q, opts.limit ?? 5, opts.signal);
+    return { hits, text: hits.map((h) => `${h.title}\n${h.url}\n${h.snippet}`).join("\n\n") };
+  }
   const body = await jinaText(`https://s.jina.ai/${encodeURIComponent(q)}`, headers(cfg), opts.signal);
   return { hits: parseHits(body).slice(0, opts.limit ?? 5), text: clip(body).text };
+}
+
+/** Without a Jina key: Exa's free hosted search, the zero-config route Agent-Reach uses. No key,
+ *  limited per network, so a used-up allowance says how to get unlimited search. */
+async function exaFreeSearch(query: string, limit: number, signal?: AbortSignal): Promise<ReachHit[]> {
+  const res = await aiFetch("https://mcp.exa.ai/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name: "web_search_exa", arguments: { query, numResults: Math.min(10, Math.max(1, limit)) } } }),
+    signal,
+  }, { retries: 0 });
+  return parseExaHits(await res.text()).slice(0, limit);
+}
+
+/** Exa answers as JSON or one server-sent event; the results are JSON or `Title:`/`URL:` blocks. */
+export function parseExaHits(raw: string): ReachHit[] {
+  const json = raw.split(/\r?\n/).find((line) => line.startsWith("data:"))?.slice(5) ?? raw;
+  let message: { result?: { _meta?: Record<string, unknown>; content?: { text?: string }[]; isError?: boolean }; error?: { message?: string } };
+  try { message = JSON.parse(json); } catch { throw new ReachError("Free web search returned something unreadable. Try again, or add a Jina key in Integrations → Web research."); }
+  if (message.result?._meta?.["ai.exa/rateLimited"])
+    throw new ReachError("Free web search is used up on this network for now. Add a Jina API key in Integrations → Web research for unlimited search; reading a known URL still works.");
+  const text = (message.result?.content ?? []).map((c) => c.text ?? "").join("\n");
+  if (message.error || message.result?.isError) throw new ReachError(`Free web search failed: ${message.error?.message ?? text.slice(0, 200)}`);
+  try {
+    const parsed = JSON.parse(text) as { results?: { title?: string; url?: string; text?: string; summary?: string; highlights?: string[] }[] };
+    return (parsed.results ?? []).filter((r) => r.url).map((r) => ({
+      title: (r.title ?? "").trim(), url: r.url!.trim(),
+      snippet: (r.summary || r.highlights?.join(" ") || r.text || "").replace(/\s+/g, " ").trim().slice(0, 300),
+    }));
+  } catch {
+    return [...text.matchAll(/^Title:\s*(.*)\r?\n(?:[\s\S]*?)^URL:\s*(\S+)([\s\S]*?)(?=^Title:|$(?![\s\S]))/gm)].map(([, title, url, rest]) => ({
+      title: title.trim(), url: url.trim(),
+      snippet: (rest.match(/^(?:Text|Summary|Highlights):\s*([\s\S]*)/m)?.[1] ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+    }));
+  }
 }
 
 /** s.jina.ai returns numbered blocks of `[n] Title: …` / `[n] URL Source: …` /

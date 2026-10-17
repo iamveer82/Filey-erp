@@ -64,6 +64,7 @@ const READ_ONLY: Record<string, string> = {
   list_connected_apps: "list",
   list_skills: "list",
   use_skill: "loads instructions into context; changes nothing",
+  run_skill_script: "runs a bundled skill's own script in offline sandboxed Python on text the agent passes; changes nothing",
   http_fetch: "network READ; secrets substituted, never stored",
   current_time: "clock",
   list_reminders: "list",

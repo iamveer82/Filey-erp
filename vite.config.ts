@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { AI_DEV_ORIGINS } from "./src/lib/aiEndpoint";
 
 // @ts-expect-error process is a nodejs global
@@ -32,6 +32,16 @@ export default defineConfig(async ({ command }) => ({
     name: "filey-desktop-only-office",
     apply: "build" as const,
     closeBundle() { if (!desktopBuild) for (const app of ["wordcraft", "gridcraft", "pdfcraft"]) rmSync(`dist/${app}`, { recursive: true, force: true }); },
+  }, {
+    // Pre-installed agent skills run their Python helpers in Pyodide (skillScripts.worker.ts), whose
+    // runtime is served from /pyodide/ and only downloaded the first time a script runs.
+    name: "filey-pyodide-runtime",
+    // config, not buildStart: the dev server lists public/ before buildStart runs.
+    config() {
+      mkdirSync("public/pyodide", { recursive: true });
+      for (const file of ["pyodide.asm.mjs", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"])
+        copyFileSync(`node_modules/pyodide/${file}`, `public/pyodide/${file}`);
+    },
   }],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

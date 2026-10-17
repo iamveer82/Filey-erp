@@ -14,6 +14,8 @@ dist-ssr
 public/wordcraft/
 public/gridcraft/
 public/pdfcraft/
+# Pyodide runtime for pre-installed skill scripts, copied from node_modules by vite.config.ts
+public/pyodide/
 *.local
 
 # Local environment / secrets

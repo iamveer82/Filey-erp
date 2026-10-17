@@ -32,7 +32,10 @@ describe("readUrl guards", () => {
     expect(getReachConfig()).toEqual({ enabled: true, apiKey: "" });
     await readUrl("https://example.com");
     expect(aiFetch.mock.calls[0][1].headers.authorization).toBeUndefined();
-    await expect(searchWeb("suppliers")).rejects.toThrow(/Jina API key/);
+    // Bob has no key: his search goes to Exa's free search, carrying nobody's Jina key.
+    await expect(searchWeb("suppliers")).rejects.toThrow(/unreadable/);
+    expect(aiFetch.mock.calls[1][0]).toBe("https://mcp.exa.ai/mcp");
+    expect(JSON.stringify(aiFetch.mock.calls[1][1])).not.toMatch(/private|authorization/i);
     expect(localStorage.getItem("filey_reach_config")).toContain("private legacy key");
     identity.scope = null;
     expect(() => setReachConfig({ apiKey: "Anonymous key" })).toThrow(/Sign in/);
@@ -79,12 +82,17 @@ describe("readUrl guards", () => {
 });
 
 describe("Jina search access and request lifecycle", () => {
-  it("explains Search's own-key requirement before making a request", async () => {
+  it("searches without a key through Exa's free search, and says how to get more when it runs out", async () => {
+    const exa = (result: object) => textRes(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result })}\n\n`);
     for (const apiKey of ["", "   "]) {
       setReachConfig({ apiKey });
-      await expect(searchWeb("public steel suppliers")).rejects.toThrow(/Jina API key.*Integrations.*Web research/);
+      aiFetch.mockResolvedValueOnce(exa({ content: [{ type: "text", text: "Title: Steel Co\nURL: https://steel.example\nText: Bolts" }] }));
+      await expect(searchWeb("public steel suppliers")).resolves.toMatchObject({ hits: [{ url: "https://steel.example" }] });
     }
-    expect(aiFetch).not.toHaveBeenCalled();
+    expect(aiFetch.mock.calls.every(([url, init]) => url === "https://mcp.exa.ai/mcp" && !init.headers.authorization)).toBe(true);
+    aiFetch.mockResolvedValueOnce(exa({ _meta: { "ai.exa/rateLimited": true }, content: [{ type: "text", text: "limit" }] }));
+    await expect(searchWeb("more")).rejects.toThrow(/Jina API key.*Integrations.*Web research/);
+    aiFetch.mockReset().mockResolvedValue(textRes("Title: Example\n\nHello world"));
     await expect(readUrl("https://example.com")).resolves.toMatchObject({ title: "Example" });
     expect(aiFetch.mock.calls[0][1].headers.authorization).toBeUndefined();
   });

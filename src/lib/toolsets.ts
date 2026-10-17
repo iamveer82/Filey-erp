@@ -221,6 +221,10 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     about: "Reminders and follow-ups",
     tools: ["add_reminder", "list_reminders", "cancel_reminder", "remind_me"],
   },
+  skills: {
+    about: "Helper scripts of the pre-installed Instagram, YouTube and LinkedIn skills",
+    tools: ["run_skill_script"],
+  },
   system: {
     about: "Secrets, saved procedures and the machine itself",
     tools: [

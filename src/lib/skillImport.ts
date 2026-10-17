@@ -63,10 +63,25 @@ function frontmatter(md: string): { meta: Record<string, string>; body: string }
   const m = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { meta: {}, body: md };
   const meta: Record<string, string> = {};
+  let block: { key: string; lines: string[]; folded: boolean } | null = null;
+  const close = () => {
+    if (block) meta[block.key] = block.lines.join(block.folded ? " " : "\n").trim();
+    block = null;
+  };
   for (const line of m[1].split(/\r?\n/)) {
+    // `description: >-` (or `|`) continues on the indented lines below it.
+    if (block && (/^\s+\S/.test(line) || !line.trim())) {
+      block.lines.push(line.trim());
+      continue;
+    }
+    close();
     const kv = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
-    if (kv) meta[kv[1].toLowerCase()] = kv[2].trim().replace(/^["']|["']$/g, "");
+    if (!kv) continue;
+    const value = kv[2].trim();
+    if (/^[>|][-+]?$/.test(value)) block = { key: kv[1].toLowerCase(), lines: [], folded: value.startsWith(">") };
+    else meta[kv[1].toLowerCase()] = value.replace(/^["']|["']$/g, "");
   }
+  close();
   return { meta, body: m[2] };
 }
 

@@ -144,7 +144,7 @@ export default function IntegrationConnect() {
             </span>
           </label>
 
-          <Field label="Jina API key (required for search)">
+          <Field label="Jina API key (optional, unlimited search)">
             <input
               className="input"
               type="password"

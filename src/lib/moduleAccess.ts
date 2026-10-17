@@ -74,7 +74,7 @@ const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browse
 const MODULE_FREE = new Set([
   "get_stats","current_time","show_ui","show_view","card_templates","find_image",
   "remember","recall","search_conversations",
-  "list_skills","use_skill","learn_skill","import_skill",
+  "list_skills","use_skill","run_skill_script","learn_skill","import_skill",
   "list_toolsets","use_toolset",
   "generate_image","work_service",
   // Personal AI-credit wallet; no business records or organization funds.

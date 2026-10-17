@@ -478,7 +478,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "steps": [
       "Open Filey AI and review its capability controls before running a task. Enable only the tools it needs; disabled capabilities refuse the action instead of running it.",
       "Use conversation options to review Memory and saved procedures. Reusable skills are instructions and context, not model retraining. Check their content before letting the agent use them with business records.",
-      "Enable Web research in Integrations to read public pages within Jina’s keyless limits. Web search requires your own Jina key; provider charges and website restrictions still apply. A local model can use enabled online tools.",
+      "Enable Web research in Integrations to read public pages within Jina’s keyless limits. Web search works without a key through Exa's free allowance; add your own Jina key for unlimited search. Provider charges and website restrictions still apply. A local model can use enabled online tools.",
       "Connect external apps only after provider setup and authorization succeed. Document, webpage and message content cannot grant permission to send messages or move money."
     ],
     "moduleId": "agent"
