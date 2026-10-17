@@ -19,7 +19,7 @@ Deno.test("billing rejects malformed and oversized action/webhook requests befor
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
     DODO_PRODUCT_CLOUD: "pdt_cloud",
-    FILEY_AI_DEEPSEEK_KEY: "fixture-model-key",
+    FILEY_AI_GLM_KEY: "fixture-model-key",
     DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
   })[name];
   let calls = 0;
@@ -87,7 +87,7 @@ Deno.test("billing redacts provider/database failures and binds credit checkout 
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
     DODO_PRODUCT_CLOUD: "pdt_cloud",
-    FILEY_AI_DEEPSEEK_KEY: "fixture-model-key",
+    FILEY_AI_GLM_KEY: "fixture-model-key",
     DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
   })[name];
   let failure: "provider" | "database" | "none" = "provider";
@@ -222,7 +222,7 @@ Deno.test("billing's real SDK route saves and resumes one selected-customer prom
     cents: 500, expires_at: new Date(Date.now() + 3_600_000).toISOString() };
   Deno.env.get = (name) => ({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
     DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "fixture-webhook-key",
-    FILEY_AI_DEEPSEEK_KEY: "fixture-model-key", DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
+    FILEY_AI_GLM_KEY: "fixture-model-key", DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
     FILEY_AI_TEST_PROMOTION: JSON.stringify(promotion) })[name];
   let saved: Record<string, unknown> | null = null, checkouts = 0, providerReads = 0;
   billingFetchFixture = (async (input: RequestInfo | URL, init?: RequestInit) => {

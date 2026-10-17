@@ -20,7 +20,7 @@ import { appCheckoutReturn } from "../_shared/checkout-return.ts";
 //   DODO_PAYMENTS_API_KEY, DODO_PAYMENTS_WEBHOOK_KEY,
 //   DODO_PAYMENTS_ENVIRONMENT (test_mode | live_mode — defaults to test_mode),
 //   DODO_PRODUCT_FREEDOM (product id of the Freedom licence),
-//   DODO_PRODUCT_CLOUD (product id of the $5/month Cloud subscription),
+//   DODO_PRODUCT_CLOUD (product id of the 36 AED/month Pro subscription),
 //   LICENSE_SIGNING_KEY, SITE_URL.
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected by the platform.
 //
@@ -35,6 +35,7 @@ import { mfaAllowed, MFA_REQUIRED } from "../_shared/mfa.ts";
 import { rateLimit, logAction } from "../_shared/rateLimit.ts";
 import {
   licenseActivate,
+  trialActivate,
   licenseDeactivate,
   licenseStatus,
   grantLicense,
@@ -49,8 +50,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const API_KEY = Deno.env.get("DODO_PAYMENTS_API_KEY") ?? "";
 const WEBHOOK_KEY = Deno.env.get("DODO_PAYMENTS_WEBHOOK_KEY") ?? "";
-const PRODUCT_FREEDOM = Deno.env.get("DODO_PRODUCT_FREEDOM") ?? "";
-const PRODUCT_CLOUD = Deno.env.get("DODO_PRODUCT_CLOUD") ?? "";
+// "current,retired,…": the first id is sold, every id is recognised by the webhook.
+const productIds = (name: string) => (Deno.env.get(name) ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const FREEDOM_IDS = productIds("DODO_PRODUCT_FREEDOM");
+const CLOUD_IDS = productIds("DODO_PRODUCT_CLOUD");
+const PRODUCT_FREEDOM = FREEDOM_IDS[0] ?? "";
+const PRODUCT_CLOUD = CLOUD_IDS[0] ?? "";
 const SITE_URL = Deno.env.get("SITE_URL") ?? "";
 /** The org plan value a live Cloud subscription sets. Any value other than
  *  "free" already lifts the server-side invoice cap and reads as paid in
@@ -180,13 +185,17 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (action === "license_deactivate")
       return reply(await licenseDeactivate(supa, user.id, String(payload.fingerprint ?? "")));
 
+    // Basic: the 14-day trial on this device (signed, verified offline by the app).
+    if (action === "trial_start")
+      return reply(await trialActivate(supa, user, String(payload.fingerprint ?? "")));
+
     if (action === "checkout") {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
       if (!PRODUCT_FREEDOM) return json({ error: "Freedom product not configured" }, 503);
       const already = await licenseStatus(supa, user.id);
       if (already.status !== 200) return reply(already);
       if (already.body.licensed)
-        return json({ error: "This account already owns Ultra." }, 409);
+        return json({ error: "This account already owns Freedom." }, 409);
 
       // SECURITY: the redirect target comes from SITE_URL, never the caller's
       // Origin header — otherwise the checkout doubles as an open redirect.
@@ -214,7 +223,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       const owned = await licenseStatus(supa, String(org.owner_id));
       if (owned.status !== 200) return reply(owned);
       if (owned.body.licensed)
-        return json({ error: "This workspace already includes cloud access through Ultra." }, 409);
+        return json({ error: "This workspace already includes cloud access through Freedom." }, 409);
 
       const base = SITE_URL || "";
       const session = await dodo.checkoutSessions.create({
@@ -422,9 +431,9 @@ async function handleWebhook(req: Request): Promise<Response> {
   // own that plan, so this path only handles the one-time licence. buyerOf
   // also recognises purchases from Dodo's storefront and payment links, which
   // carry none of our metadata.
-  const buyer = buyerOf(data as DodoPurchase, PRODUCT_FREEDOM, "freedom_license");
+  const buyer = buyerOf(data as DodoPurchase, FREEDOM_IDS, "freedom_license");
   if (!buyer || !data.payment_id)
-    return json({ received: true, ignored: "not an Ultra licence purchase" });
+    return json({ received: true, ignored: "not a Freedom licence purchase" });
 
   try {
     // No account attached (the website, the storefront): park it against the
@@ -451,7 +460,7 @@ async function handleSubscription(payload: unknown, timestamp: string): Promise<
   if (!id || !Number.isFinite(Date.parse(timestamp)))
     return json({ error: "Subscription event lacks an id or timestamp." }, 400);
   const data = await dodo.subscriptions.retrieve(id);
-  const buyer = buyerOf(data as DodoPurchase, PRODUCT_CLOUD, "cloud_subscription");
+  const buyer = buyerOf(data as DodoPurchase, CLOUD_IDS, "cloud_subscription");
   if (!buyer) return json({ received: true, ignored: "unrelated product" });
   const patch = planPatchFor(data.status, data.next_billing_date, CLOUD_PLAN);
   const { data: outcome, error } = await admin().rpc("filey_apply_dodo_subscription", {

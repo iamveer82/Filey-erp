@@ -10,6 +10,7 @@ import OverdueReminder from "./OverdueReminder";
 import Notifier from "./Notifier";
 import UpdateNotice from "./UpdateNotice";
 import UpgradeDialog from "./UpgradeDialog";
+import TrialBanner from "./TrialBanner";
 import AgentScheduler from "./AgentScheduler";
 import { Toaster } from "./Toaster";
 import WorkspaceDataProvider from "./WorkspaceDataProvider";
@@ -25,6 +26,14 @@ const ModernOverview = lazy(() => import("../pages/ModernOverview"));
 const KnowledgeCenter = lazy(() => import("../pages/KnowledgeCenter"));
 const IntegrationConnect = lazy(() => import("../pages/IntegrationConnect"));
 const ExpenseEntry = lazy(() => import("../pages/ExpenseEntry"));
+const PersistentOfficeWork = lazy(() => import("../pages/OfficeWork"));
+
+/** Letters moved into Office work; old links and the agent's letter links still land there. */
+function LegacyLetters() {
+  const query = new URLSearchParams(useLocation().search);
+  query.set("tab", "letters");
+  return <Navigate to={`/office?${query}`} replace />;
+}
 
 function Splash() {
   return <FileyLoader />;
@@ -61,13 +70,16 @@ function AppRoutes() {
             <Route
               key={m.id}
               path={m.to}
-              element={isEnabled(m.id) ? m.id === "agent" ? null : <Page /> : <ModuleDisabled name={m.label} />}
+              element={isEnabled(m.id) ? m.id === "agent" || m.id === "letters" ? null : <Page /> : <ModuleDisabled name={m.label} />}
             />
           );
         })}
         <Route path="/help" element={<KnowledgeCenter />} />
         <Route path="/docs" element={<KnowledgeCenter />} />
+        <Route path="/letters" element={<LegacyLetters />} />
         <Route path="/my-files" element={<Navigate to="/files" replace />} />
+        {/* The PDF toolkit became the PDF app in Office work. */}
+        <Route path="/tools/*" element={<Navigate to="/office?tab=pdf" replace />} />
         <Route path="/purchase/new" element={isEnabled("purchase") ? <ExpenseEntry key="new-expense" /> : <ModuleDisabled name="Purchase" />} />
         <Route path="/purchase/:id" element={isEnabled("purchase") ? <ExpenseEntry key={location.pathname} /> : <ModuleDisabled name="Purchase" />} />
         {/* declared after the module routes so /integrations itself still
@@ -89,7 +101,7 @@ export default function Workspace() {
   return (
     <WorkspaceDataProvider key={workspaceQueryScope()}>
     <ModulesProvider>
-      <Layout persistentContent={<PersistentAgentChat />}>
+      <Layout persistentContent={<><PersistentAgentChat /><Suspense fallback={null}><PersistentOfficeWork /></Suspense></>}>
         <AppRoutes />
       </Layout>
       <CommandPalette />
@@ -101,6 +113,7 @@ export default function Workspace() {
       {/* Opens wherever a plan limit is hit, so the way out is on the screen
           the person is already looking at. */}
       <UpgradeDialog />
+      <TrialBanner />
       <Toaster />
     </ModulesProvider>
     </WorkspaceDataProvider>

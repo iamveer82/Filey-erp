@@ -25,57 +25,55 @@ export interface PlanCard {
   features: string[];
 }
 
-/* Display names: Basic (id "free"), Pro (id "cloud"), Ultra (id "lite"). The
- * ids are what the database, the webhook and licence tokens store, so they
- * never follow a rename. */
+/* Display names: Basic (id "free", the 14-day trial), Pro (id "cloud"), Freedom (id "lite").
+ * The ids are what the database, the webhook and licence tokens store, so they never follow
+ * a rename. Prices are what Dodo charges: Pro 36 AED a month, Freedom 999 AED once. */
 export const PLANS: PlanCard[] = [
   {
     id: "free",
     kind: "subscription",
     name: "Basic",
-    price: "$0",
-    blurb: "Unlimited local invoices and the full local app, free. Verify your account once, then work offline.",
+    price: "Free",
+    period: " for 14 days",
+    blurb: "Try all of Filey free for 14 days on your computer. No card needed.",
     features: [
-      "Core ERP & CRM, all modules",
-      "Unlimited local documents, invoices and edits",
-      "Local PDFs without Filey branding",
-      "Optional cloud storage: 5 new cloud invoices per month",
-      "Local storage and backups on this device",
-      "“Made with Filey” on free cloud documents",
-      "Bring-your-own AI key",
+      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets and PDF",
+      "Your data saved on your computer",
+      "$1 of Filey AI to try the agent",
+      "Keep everything you made when you get Freedom",
     ],
   },
   {
     id: "cloud",
     kind: "subscription",
     name: "Pro",
-    price: "$5",
+    price: "36 AED",
     period: " / month",
-    blurb: "Your workspace everywhere, on every device you use.",
+    blurb: "Your workspace in the cloud, on every device you use.",
     features: [
-      `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} registered devices`,
+      `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} devices`,
       "Filey on the web at app.gofiley.com",
-      "Unlimited cloud invoices — no monthly cap",
       "Team members share one workspace",
       "Backed up off your machine",
+      "Every app, unlimited invoices",
       "Cancel any time from Billing",
     ],
   },
   {
-    // id stays "lite" — issued licence tokens key off it.
+    // id stays "lite": issued licence tokens key off it.
     id: "lite",
     kind: "license",
-    name: "Ultra",
-    price: "$100",
+    name: "Freedom",
+    price: "999 AED",
     period: " one-time",
     recommended: true,
-    blurb: "Lifetime cloud benefits for your Filey account, paid once.",
+    blurb: "Filey on your computer for life. Pay once, own it.",
     features: [
-      "Unlimited cloud invoices, no monthly cap",
-      "Lifetime paid cloud and web access",
-      "2 paid-license activation slots; free local installs are not limited",
-      "Cloud PDFs without Filey branding",
-      "Filey on the web at app.gofiley.com",
+      "Lifetime use of Filey, every app",
+      "Regular updates and support",
+      "Your data stays on your computer",
+      "On 2 computers, and move it to a new PC any time",
+      "No monthly bill",
     ],
   },
   {
@@ -97,7 +95,7 @@ export const PLANS: PlanCard[] = [
  * Display-card mapping does not change their resolveTier() entitlements. */
 
 /** Map an org's stored plan value onto its display card. A plan that is no
- *  longer sold has no card of its own, so it shows as Ultra — the closest
+ *  longer sold has no card of its own, so it shows as Freedom — the closest
  *  thing still on the menu, and never a downgrade in what it implies. */
 export function planCardFor(orgPlan: string | null | undefined): PlanCard {
   if (orgPlan === "pro" || orgPlan === "business")

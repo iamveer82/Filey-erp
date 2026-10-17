@@ -62,7 +62,8 @@ const COMMANDS: { label: string; to: string; keywords: string }[] = [
     keywords: "create purchase expense spend",
   },
   { label: "Go to Reports", to: "/reports", keywords: "reports analytics" },
-  { label: "Open Tools", to: "/tools", keywords: "pdf tools utilities" },
+  { label: "Open PDF editor", to: "/office?tab=pdf", keywords: "pdf tools edit sign annotate merge" },
+  { label: "Open Sheets", to: "/office?tab=sheet", keywords: "excel spreadsheet workbook xlsx" },
   { label: "Settings", to: "/settings", keywords: "settings company account" },
 ];
 
@@ -94,7 +95,7 @@ export default function Layout({ children, persistentContent }: { children: Reac
   const { pathname } = useLocation();
   const { profile, profileRefreshError, reloadProfile } = useAuth();
   const { modules, enabledModules, isEnabled, loading: modulesLoading, error: modulesError, refreshError, retry } = useModules();
-  const persistentAgentVisible = !!persistentContent && pathname === "/agent" && !modulesLoading && !modulesError && isEnabled("agent");
+  const persistentAgentVisible = !!persistentContent && !modulesLoading && !modulesError && (pathname === "/agent" && isEnabled("agent") || pathname === "/office" && isEnabled("letters"));
   const navModules = enabledModules();
   const name = profile?.name || "User";
   const { t } = useLang();

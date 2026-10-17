@@ -60,15 +60,15 @@ it("checks the destination module before AI navigation and keeps core pages acce
   try {
     window.location.hash = "#/overview";
     rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["tools"] }, error: null });
-    await expect(runTool("open_page", { page: "letters" })).resolves.toEqual({ error: expect.stringContaining("letters") });
+    await expect(runTool("open_page", { page: "office" })).resolves.toEqual({ error: expect.stringContaining("letters") });
     expect(window.location.hash).toBe("#/overview");
     await expect(requireToolModuleAccess("open_page", { page: "/overview" })).resolves.toBeUndefined();
     await expect(requireToolModuleAccess("open_page", { page: "settings" })).resolves.toBeUndefined();
     rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["letters"] }, error: null });
-    await expect(runTool("open_page", { page: "letters" })).resolves.toEqual({ ok: true, message: "Opened letters." });
-    expect(window.location.hash).toBe("#/letters");
+    await expect(runTool("open_page", { page: "office" })).resolves.toEqual({ ok: true, message: "Opened office." });
+    expect(window.location.hash).toBe("#/office");
     rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: [] }, error: null });
-    await expect(requireToolModuleAccess("open_page", { page: "letters" })).rejects.toThrow("letters");
+    await expect(requireToolModuleAccess("open_page", { page: "office" })).rejects.toThrow("letters");
   } finally { window.location.hash = hash; }
 });
 it("rejects a membership response from a previous workspace",async()=>{

@@ -397,6 +397,10 @@ export const FILE_FOLDERS: { key: string; label: string; route?: string }[] = [
   { key: "lpo", label: "Purchase Orders", route: "/purchase-orders" },
   { key: "expense-receipt", label: "Expense Receipts", route: "/purchase" },
   { key: "declaration", label: "Declaration Letters", route: "/declaration" },
+  { key: "word", label: "Word documents" }, // saved from Word in Office work
+  { key: "sheet", label: "Spreadsheets" }, // saved from Sheets in Office work
+  { key: "pdf", label: "PDFs" }, // saved from PDF in Office work
+  { key: "card", label: "Interactive cards" }, // saved from Filey AI chat
 ];
 
 /** The folder key a file belongs to ("other" when its tool isn't a doc type). */

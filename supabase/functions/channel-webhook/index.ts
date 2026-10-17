@@ -12,7 +12,7 @@
 //    authenticate the caller with per-provider secrets instead — see below.)
 //
 //   Required secrets (supabase secrets set KEY=value):
-//     FILEY_AI_DEEPSEEK_KEY     hosted Filey AI's server-only model key
+//     FILEY_AI_GLM_KEY          hosted Filey AI's server-only model key (Z.ai API)
 //     OWNER_USER_ID             auth.users.id this install belongs to (for logging)
 //     WHATSAPP_APP_SECRET       Meta App Secret — REQUIRED for WhatsApp
 //                               traffic (fail-closed: without it every POST

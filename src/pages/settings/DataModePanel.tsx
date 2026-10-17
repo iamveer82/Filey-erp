@@ -213,7 +213,7 @@ function AccountConnectionCard() {
   );
 }
 
-// Mixed mode (Pro/Ultra): records stay on this device and a copy follows to the
+// Mixed mode (Pro/Freedom): records stay on this device and a copy follows to the
 // account, so turning the cloud off later never loses anything.
 function CloudCopySection() {
   const { confirm } = useUI();
@@ -272,11 +272,11 @@ function CloudCopySection() {
   return (
     <SettingsSection
       title="Automatic cloud copy"
-      description="Work on this device, offline or online, and keep a copy in your Filey account. Pro and Ultra."
+      description="Work on this device, offline or online, and keep a copy in your Filey account. Pro and Freedom."
     >
       {allowed === false ? (
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <p>Available on Pro and Ultra. Offline mode on this device stays free.</p>
+          <p>Available on Pro and Freedom.</p>
           <a className="btn-ghost" href="#/settings?section=billing">See plans</a>
         </div>
       ) : allowed && (

@@ -47,3 +47,8 @@ base64 = "0.22"
 sha2 = "0.10"
 # Desktop dir resolution for the first-run shortcut prompt (Windows).
 dirs = "6"
+
+# The compact Windows print dialog (ICoreWebView2_16::ShowPrintUI); versions match tauri's own.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"

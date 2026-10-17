@@ -79,6 +79,47 @@ export function overviewDeltas(
 /** All values are reporting copies in AED. Invoice payments and standalone
  * receipt documents stay separate: adding them could count the same payment
  * twice. An invoice balance cannot tell us when money arrived. */
+export type TrendRow = ReturnType<typeof overviewTrend>[number] & { span?: string };
+
+/** Invoices issued on or after `fromYmd`: how much has been collected and how much is still open. */
+export function collectionSplit(invoices: InvoiceDocSummary[], fromYmd: string): { collected: number; outstanding: number } {
+  let collected = 0, outstanding = 0;
+  for (const invoice of invoices) {
+    if (!isPostedStatus(invoice.status) || (invoice.issue_date ?? "").slice(0, 10) < fromYmd) continue;
+    const total = Number(invoice.total) || 0;
+    const paid = invoice.status === "paid" ? total : Math.min(total, Math.max(0, Number(invoice.paid) || 0));
+    collected += paid;
+    outstanding += invoice.status === "paid" ? 0 : invoice.balance != null ? Math.max(0, Number(invoice.balance) || 0) : total - paid;
+  }
+  return { collected, outstanding };
+}
+
+/** Percent change of `key` between the two halves of a series twice the period long; null without a base. */
+export function periodChange(rows: TrendRow[], key: "invoiced" | "received" | "invoicePayments" | "expenses"): number | null {
+  const half = Math.floor(rows.length / 2);
+  const before = rows.slice(0, half).reduce((n, row) => n + row[key], 0);
+  const now = rows.slice(half).reduce((n, row) => n + row[key], 0);
+  return before > 0 ? ((now - before) / before) * 100 : null;
+}
+
+/** Daily rows grouped so bars stay readable at any range: one bar per day up
+ *  to two weeks, per week up to about four months, per month beyond. Buckets
+ *  end today, so the newest bar is always a whole period; `span` names it. */
+export function bucketTrend(rows: TrendRow[]): TrendRow[] {
+  const size = rows.length <= 14 ? 1 : rows.length <= 120 ? 7 : 30;
+  if (size === 1) return rows.map(row => ({ ...row, span: row.d }));
+  const out: TrendRow[] = [];
+  for (let end = rows.length; end > 0; end -= size) {
+    const chunk = rows.slice(Math.max(0, end - size), end);
+    const sum = (key: "invoiced" | "received" | "invoicePayments" | "expenses") => chunk.reduce((n, row) => n + row[key], 0);
+    out.unshift({
+      date: chunk[0].date, d: chunk[0].d, span: `${chunk[0].d} – ${chunk[chunk.length - 1].d}`,
+      invoiced: sum("invoiced"), received: sum("received"), invoicePayments: sum("invoicePayments"), expenses: sum("expenses"),
+    });
+  }
+  return out;
+}
+
 export function overviewTrend(
   invoices: InvoiceDocSummary[],
   receipts: ReceiptSummary[],

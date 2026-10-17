@@ -21,14 +21,14 @@ function navPages(): string[] {
 }
 
 describe("agent navigation", () => {
-  it("advertises the accepted pages in its schema and opens the registered Letters route", async () => {
+  it("advertises the accepted pages in its schema and opens the registered Office work route", async () => {
     const tool = TOOLS.find((t) => t.name === "open_page")!;
     expect(tool.parameters).toMatchObject({ properties: { page: { enum: navPages() } } });
-    expect(validateToolArgs(tool.parameters, { page: "letters" })).toBeNull();
+    expect(validateToolArgs(tool.parameters, { page: "office" })).toBeNull();
     expect(validateToolArgs(tool.parameters, { page: "unknown-section" })).toBeTruthy();
     const hash = window.location.hash;
     try {
-      await expect(tool.run({ page: "letters" })).resolves.toEqual({ ok: true, message: "Opened letters." });
+      await expect(tool.run({ page: "office" })).resolves.toEqual({ ok: true, message: "Opened office." });
       expect(window.location.hash).toBe(`#${MODULES.find((module) => module.id === "letters")!.to}`);
     } finally { window.location.hash = hash; }
   });

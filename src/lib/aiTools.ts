@@ -857,11 +857,154 @@ const NAV_PAGES = [
   "email-templates",
   "marketing",
   "files",
-  "letters",
+  "office",
   "integrations",
   "settings",
-  "tools",
 ];
+
+type OfficeReq = { method: string; params?: unknown };
+/** What differs between Office work's apps for the agent: how a blank file starts, how the
+ *  document comes to the front, which method lists commands, and how a save is made
+ *  (`bytes`: the reply carries the file; otherwise the app hands it to a save capture). */
+const OFFICE_TOOL: Record<"word" | "sheet" | "pdf", { label: string; fresh?: OfficeReq; show?: OfficeReq; commands: string; saves: RegExp; exts: string; save: (name: string) => OfficeReq; bytes?: boolean }> = {
+  word: {
+    label: "Word",
+    fresh: { method: "engine.execute", params: { command: "file.new", params: { template: "blank" } } },
+    // A Word tab starts on File › Home; the page itself is where the user watches the work.
+    show: { method: "engine.execute", params: { command: "ui.backstage", params: { value: false } } },
+    commands: "engine.commands",
+    exts: ".docx, .pdf, .odt, .rtf, .md, .html or .txt",
+    saves: /\.(docx|pdf|odt|rtf|md|html|txt)$/i,
+    save: name => ({ method: "engine.execute", params: { command: /\.pdf$/i.test(name) ? "file.exportPdf" : "file.saveAs", params: { path: name } } }),
+  },
+  sheet: {
+    label: "Sheets",
+    fresh: { method: "engine.execute", params: { command: "file.new", params: {} } },
+    commands: "engine.commands",
+    exts: ".xlsx, .csv, .tsv, .html, .json or .pdf",
+    saves: /\.(xlsx|csv|tsv|html|json|pdf)$/i,
+    // Without a path both come back as base64 rather than a download.
+    save: name => ({ method: "engine.execute", params: /\.pdf$/i.test(name) ? { command: "file.exportPdf", params: {} } : { command: "file.saveBytes", params: { format: name.split(".").pop()!.toLowerCase() } } }),
+    bytes: true,
+  },
+  pdf: {
+    label: "PDF",
+    commands: "ui.commands",
+    exts: ".pdf",
+    saves: /\.pdf$/i,
+    save: () => ({ method: "ui.command", params: { id: "file.save" } }),
+  },
+};
+
+async function runOfficeTool(app: keyof typeof OFFICE_TOOL, a: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  const tid = activeTurnId;
+  const spec = OFFICE_TOOL[app];
+  if (!(typeof window !== "undefined" && "__TAURI_INTERNALS__" in window))
+    return { error: `${spec.label} runs in the Filey desktop app. On the web it is coming soon.` };
+  const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
+  const { officeWindow, officeControl, captureNextSave, openInOffice, keepInMyFiles } = await import("./officeWord");
+  const action = str(a.action);
+  if (!["new", "open", "run", "save"].includes(action)) return { error: 'action must be "new", "open", "run" or "save".' };
+
+  // The file is found before a tab opens, so a miss leaves no empty tab behind.
+  if (action === "open") {
+    const want = str(a.file).toLowerCase().trim();
+    if (!want) return { error: "Which file? Give the attachment or My Files name." };
+    let file: { name: string; bytes: Uint8Array } | undefined;
+    const attached = turnFiles(tid).find(f => f.name.toLowerCase() === want) ?? turnFiles(tid).find(f => f.name.toLowerCase().includes(want));
+    if (attached) file = { name: attached.name, bytes: new Uint8Array(await attached.arrayBuffer()) };
+    else {
+      const { listFiles, fileBytes } = await import("./files");
+      const matches = (await listFiles()).filter(f => f.name.toLowerCase().includes(want));
+      if (matches.length > 1 && !matches.some(f => f.name.toLowerCase() === want)) return { error: "Several files match. Give the exact name." };
+      const hit = matches.find(f => f.name.toLowerCase() === want) ?? matches[0];
+      const bytes = hit && await fileBytes(hit);
+      if (hit && bytes) file = { name: hit.name, bytes };
+    }
+    assertCurrent();
+    if (!file) return { error: `No attachment or My Files file matches "${str(a.file)}".` };
+    await openInOffice(app, file.name, file.bytes, signal);
+    return { ok: true, message: `${file.name} is open in ${spec.label}.`, hint: app === "pdf" ? "Read it with ui.state before editing." : "Read it with document.inspect before editing." };
+  }
+
+  const win = await officeWindow(app, action === "new", signal);
+  assertCurrent();
+  const show = () => spec.show ? officeControl(win, spec.show.method, spec.show.params) : Promise.resolve(null);
+  if (action === "new") {
+    if (spec.fresh) {
+      const made = await officeControl(win, spec.fresh.method, spec.fresh.params);
+      if (!made.ok) return { error: made.error || `${spec.label} could not start a new file.` };
+      await show();
+    }
+    return { ok: true, message: app === "pdf" ? "A new PDF tab is open in Office work; open a file into it." : `A new ${spec.label} file is open in Office work.` };
+  }
+
+  if (action === "run") {
+    const requests = Array.isArray(a.requests) ? (a.requests as { method?: unknown; params?: unknown }[]) : [];
+    if (!requests.length) return { error: "Give at least one request." };
+    await show();
+    const results: unknown[] = [];
+    for (const [i, r] of requests.entries()) {
+      signal?.throwIfAborted();
+      const method = str(r.method);
+      const reply = await officeControl(win, method, r.params ?? {});
+      // A command search needs only ids and their params; labels and menu paths triple the size.
+      if (reply.ok && method === spec.commands) {
+        const list = (Array.isArray(reply.result) ? reply.result : (reply.result as { commands?: unknown[] })?.commands ?? []) as { id?: string; label?: string; menu?: string; params?: string; enabled?: boolean }[];
+        // PDF lists every command at once; the search narrows it here.
+        const want = app === "pdf" ? str((r.params as { search?: unknown } | undefined)?.search).toLowerCase() : "";
+        reply.result = list.filter(c => !want || `${c.id} ${c.label} ${c.menu}`.toLowerCase().includes(want))
+          .slice(0, 40).map(c => `${c.id}${c.params ? ` ${c.params}` : app === "pdf" && c.label ? ` (${c.label})` : ""}${c.enabled === false ? " (disabled now)" : ""}`);
+      }
+      // ponytail: per-result cap keeps a long document from flooding the context.
+      const text = JSON.stringify(reply.ok ? reply.result ?? "ok" : { error: reply.error });
+      results.push(text.length > 4000 ? `${text.slice(0, 4000)}… (truncated; narrow the search or inspect less)` : JSON.parse(text));
+      if (!reply.ok) return { ok: false, failed_step: i + 1, results, hint: `Steps after the failed one did not run. Fix it, or check ${spec.commands} for the right id and params.` };
+    }
+    return { ok: true, results };
+  }
+
+  // save
+  const name = str(a.name).trim().replace(/[\\/:*?"<>|]+/g, "-");
+  if (!spec.saves.test(name)) return { error: `Give a file name ending in ${spec.exts}.` };
+  const call = spec.save(name);
+  let bytes: Uint8Array;
+  if (spec.bytes) {
+    const reply = await officeControl(win, call.method, call.params);
+    const b64 = (reply.result as { base64?: string } | undefined)?.base64;
+    if (!reply.ok || !b64) return { error: reply.error || `${spec.label} could not save the file.` };
+    bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    keepInMyFiles(name, bytes, app);
+  } else {
+    const capture = captureNextSave(win);
+    const reply = await officeControl(win, call.method, call.params);
+    if (!reply.ok) { capture.cancel(); return { error: reply.error || `${spec.label} could not save the file.` }; }
+    bytes = (await capture.file).bytes;
+    if (app === "pdf") keepInMyFiles(name, bytes, app);
+  }
+  assertCurrent();
+  const { deliverFile } = await import("./agentFiles");
+  const saved = await deliverFile({ name, bytes });
+  assertCurrent();
+  if (!saved.path && !saved.url) return { error: "The file could not be saved. Check the export folder in Settings." };
+  pushTurnOutput(tid, { ...saved, documentKey: `${app}:${name.toLowerCase()}` });
+  return { ok: true, file: saved.name, bytes: bytes.length };
+}
+
+const OFFICE_TOOL_PARAMS = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["new", "open", "run", "save"] },
+    requests: {
+      type: "array",
+      maxItems: 60,
+      items: { type: "object", properties: { method: { type: "string" }, params: { type: "object" } }, required: ["method"] },
+    },
+    file: { type: "string", description: "open: attachment or My Files name" },
+    name: { type: "string", description: "save: file name with extension" },
+  },
+  required: ["action"],
+};
 
 export const TOOLS: ToolDef[] = [
   {
@@ -1581,13 +1724,61 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "set_invoice_preset",
+    description:
+      "Save this workspace's invoice preset, applied to every new invoice draft from then on. Use when the user says 'always add…'. columns: extra columns ({key, label, per_unit}); per_unit means value = qty × size of one unit ('always T.Liters = qty × liters' → {key:'liters', label:'T.Liters', per_unit:true}). price_by: the column the rate is per ('rate per T.Liters' → 'liters'). unit_sizes: size of one unit for items whose name doesn't say it ({'virgin drum': 200}); sizes in names like 'RC Pail 20L' are read automatically. clear: true removes the preset.",
+    parameters: {
+      type: "object",
+      properties: {
+        columns: {
+          type: "array",
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" }, per_unit: { type: "boolean" } },
+            required: ["key", "label"],
+          },
+        },
+        price_by: { type: "string", description: "Column key; empty for qty × rate." },
+        unit_sizes: { type: "object", description: "Item name → size of one unit." },
+        clear: { type: "boolean" },
+      },
+    },
+    run: async (a) => {
+      const { loadInvoicePreset, saveInvoicePreset, describeInvoicePreset } = await import("./invoicePresets");
+      if (a.clear === true) {
+        await saveInvoicePreset(null);
+        return { ok: true, message: "Invoice preset removed. New invoices use qty × rate with no extra columns." };
+      }
+      const current = (await loadInvoicePreset()) ?? { columns: [] };
+      const columns = Array.isArray(a.columns)
+        ? (a.columns as Record<string, unknown>[]).flatMap(c => {
+            const key = str(c.key).trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_"), label = str(c.label).trim() || key;
+            return key ? [{ key, label, ...(c.per_unit === true ? { per_unit: true } : {}) }] : [];
+          })
+        : current.columns;
+      const priceBy = a.price_by === undefined ? current.price_by : str(a.price_by).trim().toLowerCase();
+      if (priceBy && !columns.some(c => c.key === priceBy)) return { error: `price_by "${priceBy}" is not one of the preset's columns.` };
+      const sizes = { ...current.unit_sizes };
+      if (a.unit_sizes && typeof a.unit_sizes === "object")
+        for (const [name, size] of Object.entries(a.unit_sizes as Record<string, unknown>)) {
+          const value = Number(size);
+          if (!name.trim() || !Number.isFinite(value) || value <= 0) return { error: `Unit size for "${name}" must be a positive number.` };
+          sizes[name.trim().toLowerCase()] = value;
+        }
+      const preset = { columns, ...(priceBy ? { price_by: priceBy } : {}), ...(Object.keys(sizes).length ? { unit_sizes: sizes } : {}) };
+      await saveInvoicePreset(preset);
+      return { ok: true, preset, message: `Saved. ${describeInvoicePreset(preset)}` };
+    },
+  },
+  {
     name: "create_invoice_draft",
     description:
       "Create draft; never guess buyer, item, qty or rate. Keep item codes. Per litre/kg/hr: qty:20, unit:'Pail', unit_price:4.1, custom:{liters:'400'}, custom_columns:[{key:'liters',label:'T.Liters'}], price_by:'liters' → 1640. Repeat: get_invoice, retain lines/pricing/wording. Defaults: today, company VAT, no discount. Reuses e-invoice identities; review gaps before XML. Edit with revise_invoice; verify with get_invoice(invoice_number:'id:<id>').",
     parameters: {
       type: "object",
       properties: {
-        invoice_number: { type: "string", minLength: 1, maxLength: 160, description: "User-specified number; omit to auto-number." },
+        invoice_number: { type: "string", minLength: 1, maxLength: 160, description: "Only one the user gave; else omit." },
         customer_id: { type: "integer", minimum: 1, description: "Saved ID matching the customer name." },
         customer_name: {
           type: "string",
@@ -1739,7 +1930,17 @@ export const TOOLS: ToolDef[] = [
         // indistinguishable from a hand-made one.
         ...(priceBy ? { unit_price_formula: { a: priceBy, b: "unit_price" } } : {}),
       };
-      const pricing = documentPricing(input.items, cols, priceBy, input.discount, input.tax_rate, input.round_off);
+      // The workspace's invoice preset: its columns, per-unit columns worked out (T.Liters =
+      // qty × litres in one unit) and the column the rate is per.
+      const { loadInvoicePreset, applyInvoicePreset } = await import("./invoicePresets");
+      const preset = applyInvoicePreset(await loadInvoicePreset().catch(() => null), cols, priceBy, input.items);
+      if (preset.missing.length)
+        return { error: `The invoice preset needs the size of one unit for: ${[...new Set(preset.missing)].join("; ")}.`,
+          hint: "Ask the user (e.g. how many litres in one drum), save it with set_invoice_preset unit_sizes, then create the draft again. Never guess a size." };
+      input.items = preset.items;
+      if (preset.cols.length) input.custom_columns = preset.cols;
+      if (preset.priceBy) input.unit_price_formula = { a: preset.priceBy, b: "unit_price" };
+      const pricing = documentPricing(input.items, preset.cols, preset.priceBy, input.discount, input.tax_rate, input.round_off);
       const pending = await pendingAgentInvoice(input, assertCurrent);
       if (pending) return pending;
       // Allocate only after pending receipts and supplied calculations are checked.
@@ -1760,7 +1961,7 @@ export const TOOLS: ToolDef[] = [
         currency: input.currency,
         ...(unknownParty ?? {}),
         ...pricing,
-        priced_by: priceBy || "qty × unit price",
+        priced_by: preset.priceBy || "qty × unit price",
         ...readiness,
         message: "Draft invoice created — open Invoicing to review/send.",
       };
@@ -3702,6 +3903,174 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_packing_lists",
+    description:
+      "Packing lists (Packaging List section), newest first: number, recipient, issue and dispatch dates, status, packages and gross weight. Use it for 'what did we pack for X' or to find a list before sending it.",
+    parameters: { type: "object", properties: { recipient: { type: "string" }, limit: { type: "number" } } },
+    run: async (a) => {
+      const { loadPackagingLists, packagingTotals } = await import("./packagingLists");
+      const q = lc(a.recipient);
+      const rows = (await loadPackagingLists())
+        .filter(r => !q || lc(r.form.recipient_name).includes(q))
+        .sort((x, y) => y.updated_at.localeCompare(x.updated_at))
+        .slice(0, Math.min(numOf(a.limit) || 20, 100))
+        .map(r => {
+          const t = packagingTotals(r.form.items);
+          return { number: r.form.number, recipient: r.form.recipient_name, issue_date: r.form.issue_date, dispatch_date: r.form.dispatch_date || null,
+            status: r.form.status, lines: r.form.items.length, packages: t.packages, gross_weight: t.gross, weight_unit: r.form.weight_unit, invoice: r.form.invoice_reference || null };
+        });
+      return { count: rows.length, packing_lists: rows };
+    },
+  },
+  {
+    name: "create_packing_list",
+    description:
+      "Create a packing list (packaging list) for a shipment in the Packaging List section: who it goes to and the lines with quantities, packages and weights. No prices. Saved as a draft to review, print or send there.\n\n" +
+      "DECODING THE USER'S WORDS: 'packing list for Rennox: 48 pails RC 20L on 4 pallets, 21 kg each, invoice INV-031' → recipient_name 'Rennox', invoice_reference 'INV-031', items [{description:'RC 20L', qty:48, unit:'pail', package_type:'pallet', package_count:4, gross_weight:21}]. Weights are per item; Filey multiplies by qty. Leave dates out unless the user gives one.",
+    parameters: {
+      type: "object",
+      properties: {
+        recipient_name: { type: "string", description: "Who the shipment goes to." },
+        recipient_address: { type: "string" },
+        shipping_address: { type: "string" },
+        invoice_reference: { type: "string" },
+        order_reference: { type: "string" },
+        dispatch_date: { type: "string", description: "YYYY-MM-DD, only if the user gave it." },
+        carrier: { type: "string" },
+        tracking_number: { type: "string" },
+        notes: { type: "string" },
+        weight_unit: { type: "string", enum: ["kg", "lb"] },
+        items: {
+          type: "array",
+          maxItems: 200,
+          items: {
+            type: "object",
+            properties: {
+              description: { type: "string" },
+              qty: { type: "number" },
+              unit: { type: "string", description: "pcs, pail, drum, box, kg…" },
+              package_type: { type: "string", description: "pallet, carton, crate…" },
+              package_count: { type: "number" },
+              net_weight: { type: "number", description: "Per item." },
+              gross_weight: { type: "number", description: "Per item." },
+            },
+            required: ["description"],
+          },
+        },
+      },
+      required: ["recipient_name", "items"],
+    },
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      const { blankPackagingForm, loadPackagingLists, savePackagingList, validatePackagingForm } = await import("./packagingLists");
+      const weight = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+      const items = (Array.isArray(a.items) ? (a.items as Record<string, unknown>[]) : []).flatMap(i => {
+        const description = str(i?.description).trim();
+        if (!description) return [];
+        const qty = typeof i.qty === "number" && Number.isFinite(i.qty) && i.qty > 0 ? i.qty : 1;
+        const count = typeof i.package_count === "number" && Number.isInteger(i.package_count) && i.package_count >= 0 ? i.package_count : null;
+        return [{ id: crypto.randomUUID(), description, qty, unit: str(i.unit).trim() || "pcs", package_type: str(i.package_type).trim(), package_count: count,
+          net_weight: weight(i.net_weight), gross_weight: weight(i.gross_weight) }];
+      });
+      if (!items.length) return { error: "Give at least one line with a description." };
+      const [records, formats, co] = await Promise.all([loadPackagingLists(), loadDocFormats(), billing.getCompany()]);
+      const number = await allocateDocumentNumber("packaging_list", records.map(r => r.form.number), formats);
+      const form = {
+        ...blankPackagingForm(number),
+        company_name: co?.name || "", company_address: co?.address || "", company_trn: co?.trn || "", company_phone: co?.phone || "", company_email: co?.email || "", company_logo: co?.logo || "",
+        recipient_name: str(a.recipient_name).trim(), recipient_address: str(a.recipient_address).trim(), shipping_address: str(a.shipping_address).trim(),
+        invoice_reference: str(a.invoice_reference).trim(), order_reference: str(a.order_reference).trim(),
+        dispatch_date: a.dispatch_date ? documentDate(a.dispatch_date, "Dispatch date") : "",
+        carrier: str(a.carrier).trim(), tracking_number: str(a.tracking_number).trim(), notes: str(a.notes),
+        weight_unit: a.weight_unit === "lb" ? "lb" as const : "kg" as const,
+        show_packages: items.some(i => i.package_count !== null), show_net_weight: items.some(i => i.net_weight !== null),
+        items,
+      };
+      validatePackagingForm(form);
+      assertCurrent();
+      await savePackagingList(form);
+      return { ok: true, number, lines: items.length, message: `Packing list ${number} saved as a draft. Open Packaging List to review, print or send it.` };
+    },
+  },
+  {
+    name: "list_declaration_letters",
+    description: "VAT supply declaration letters (Declaration Letter section), newest first: reference, date, recipient, LPO, quantity and amount.",
+    parameters: { type: "object", properties: { recipient: { type: "string" }, limit: { type: "number" } } },
+    run: async (a) => {
+      const { listDeclarations } = await import("./declarations");
+      const q = lc(a.recipient);
+      const rows = (await listDeclarations())
+        .filter(d => !q || lc(d.recipient_name).includes(q))
+        .slice(0, Math.min(numOf(a.limit) || 20, 100))
+        .map(d => ({ ref: d.ref, date: d.date, recipient: d.recipient_name, lpo: d.lpo_ref, qty: d.qty, unit: d.unit, amount: d.amount, currency: d.currency ?? "AED" }));
+      return { count: rows.length, declaration_letters: rows };
+    },
+  },
+  {
+    name: "create_declaration_letter",
+    description:
+      "Create a UAE VAT supply declaration letter (Declaration Letter section): the standard FTA wording (Decree-Law 8 of 2017, Art. 48) with the company's TRN, addressed to the supplier, for an LPO, quantity and amount. Saved as a draft to review, print or send there.\n\n" +
+      "DECODING THE USER'S WORDS: 'declaration letter to Bapco for LPO 2231, 20 MT, AED 52,000' → recipient_name 'Bapco', lpo_ref '2231', qty '20', unit 'MT', amount '52000'. Leave the date out unless the user gives one.",
+    parameters: {
+      type: "object",
+      properties: {
+        recipient_name: { type: "string", description: "The supplier the letter is addressed to." },
+        recipient_location: { type: "string" },
+        recipient_trn: { type: "string" },
+        lpo_ref: { type: "string" },
+        qty: { type: "string" },
+        unit: { type: "string", description: "MT, L, drums… default MT." },
+        amount: { type: "string" },
+        date: { type: "string", description: "YYYY-MM-DD, only if the user gave it." },
+      },
+      required: ["recipient_name"],
+    },
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal);
+      const { blankDecl, listDeclarations, newId, upsertDeclaration } = await import("./declarations");
+      const [co, list, formats] = await Promise.all([billing.getCompany(), listDeclarations(), loadDocFormats()]);
+      const ref = await allocateDocumentNumber("declaration_letter", list.map(d => d.ref || ""), formats);
+      const amount = str(a.amount).replace(/[^\d.]/g, "");
+      const letter = {
+        ...blankDecl(co), ref, id: newId(), updated_at: new Date().toISOString(),
+        ...(a.date ? { date: documentDate(a.date, "Letter date") } : {}),
+        recipient_name: str(a.recipient_name).trim(), recipient_location: str(a.recipient_location).trim(), recipient_trn: str(a.recipient_trn).trim(),
+        lpo_ref: str(a.lpo_ref).trim(), qty: str(a.qty).trim(), unit: str(a.unit).trim() || "MT", amount,
+      };
+      if (!letter.recipient_name) return { error: "Who is the declaration addressed to?" };
+      assertCurrent();
+      await upsertDeclaration(letter);
+      return { ok: true, ref, message: `Declaration letter ${ref} saved. Open Declaration Letter to review, print or send it.` };
+    },
+  },
+  {
+    name: "list_quotes",
+    description: "Quotations (Quoting section), newest first: number, customer, date, valid until, status and total in its own currency.",
+    parameters: { type: "object", properties: { customer: { type: "string" }, status: { type: "string" }, limit: { type: "number" } } },
+    run: async (a) => {
+      const { quotes } = await import("./api");
+      const q = lc(a.customer), want = lc(a.status);
+      const rows = (await quotes.listDocs())
+        .filter(d => (!q || lc(d.customer_name).includes(q)) && (!want || lc(d.status) === want))
+        .slice(0, Math.min(numOf(a.limit) || 20, 100))
+        .map(d => ({ number: d.number, customer: d.customer_name, date: d.quote_date ?? null, valid_until: d.valid_until ?? null, status: d.status, total: d.total, currency: d.currency || "AED" }));
+      return { count: rows.length, quotes: rows };
+    },
+  },
+  {
+    name: "list_orders",
+    description: "Sales orders (Orders section), newest first: number, customer, status and total.",
+    parameters: { type: "object", properties: { customer: { type: "string" }, status: { type: "string" }, limit: { type: "number" } } },
+    run: async (a) => {
+      const q = lc(a.customer), want = lc(a.status);
+      const rows = (await erp.orders())
+        .filter(o => (!q || lc(o.customer_name).includes(q)) && (!want || lc(o.status) === want))
+        .slice(0, Math.min(numOf(a.limit) || 20, 100))
+        .map(o => ({ number: o.order_number, customer: o.customer_name, status: o.status, total: o.total, created: o.created_at?.slice(0, 10) ?? null }));
+      return { count: rows.length, orders: rows };
+    },
+  },
+  {
     name: "list_payroll",
     description:
       "Payroll runs, newest first — who was paid, for which period, and whether it has been marked paid. Filter by period (e.g. 2026-07) or employee name.",
@@ -5426,6 +5795,152 @@ export const TOOLS: ToolDef[] = [
       pushTurnOutput(tid, { ...saved, documentKey: `invoice:${summary.id}` });
       return { ok: true, file: saved.name, message: "PDF exported. Customer delivery and invoice status are unchanged." };
     },
+  },
+  {
+    // Generative UI after OpenIntelligentUI (CopilotKit, MIT). The chat (AgentChat) draws the
+    // card from this call's arguments in the sandboxed card origin (src-tauri/src/modules/genui.*).
+    name: "show_ui",
+    description:
+      "Answer with an interactive card in the chat when using it beats reading it: to understand (an explorable model or diagram), compare (criteria, trade-offs, assumptions) or make a tool (working inputs, calculation, outputs, reset). Facts, writing and short advice stay text; a plain table, chart, KPIs, steps or a quick choice is show_view (Filey's own charts: vertical bars, stacked bars, interactive donut, half radial), and charts inside a card are vertical bars or donuts in the --chart-n colours; for a saved design see card_templates. " +
+      "Arguments in this order: title, initialHeight (px estimate), placeholderMessages (2-4 short progress lines), css (widget styles only), html (body markup, readable before code runs; no <style>), jsFunctions (named function declarations), jsExpressions (short statements calling them). " +
+      "Built in: CSS vars --color-background-primary|secondary|tertiary, --color-text-primary|secondary|tertiary, -info/-danger/-success/-warning variants of each, --color-border-tertiary, --color-accent/--color-accent-text, --border-radius-md|lg; styled buttons (button.primary), inputs, sliders, tables; classes .card .row .grid .stat .muted .credit; SVG classes .box .node .arr .leader, text .t .ts .th, ramps .c-blue .c-teal .c-green .c-amber .c-red .c-purple .c-coral .c-pink .c-gray. Design in colour, not greys: --chart-1..--chart-8 (indigo, emerald, amber, pink, cyan, violet, orange, lime) for series, highlights and accents; .stat tiles tint themselves; .pill with .tone-1..8 for badges; .gradient-text for a headline; button.primary is the brand gradient. Dark mode is automatic: never hard-code text or background colors. The chat frames the card under its title: don't wrap it in another box. Import map: three, gsap, d3, chart.js (inside an async function: const { Chart } = await import('chart.js/auto')). " +
+      "No network, storage or parent access: put the data in the code. Use only data from Filey tools or the user, and label examples as examples inside the card. Pictures: images [{name, source}] with source 'media:<job_id>' (from generate_image), 'file:<My Files image name>' or a find_image image_url, shown by <img data-filey-image=\"name\">; credit find_image photos in a .credit line. A clearly labeled button may call filey.send(text) with the chosen values (never on load, timers or typing); links: filey.openLink(url). Every control must work: validate inputs (no NaN or Infinity), state units, formulas and assumptions, work narrow and by keyboard. Then reply in one or two lines; don't repeat the card.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        initialHeight: { type: "number" },
+        placeholderMessages: { type: "array", items: { type: "string" }, maxItems: 4 },
+        css: { type: "string" },
+        html: { type: "string" },
+        jsFunctions: { type: "string" },
+        jsExpressions: { type: "array", items: { type: "string" } },
+        images: {
+          type: "array",
+          maxItems: 12,
+          items: { type: "object", properties: { name: { type: "string" }, source: { type: "string" } }, required: ["name", "source"] },
+        },
+      },
+      required: ["title", "html"],
+    },
+    run: async (a) => {
+      if (/^(whatsapp|telegram)-/.test(activeTurnId)) return { error: "Cards show in the Filey AI chat in the app. Answer in text here." };
+      const { cardFromArgs } = await import("./genUi");
+      const card = cardFromArgs(a);
+      if (typeof card === "string") return { error: card };
+      return { ok: true, shown: true, note: "The card is on screen. Don't rebuild it unless the user asks for a change." };
+    },
+  },
+  {
+    name: "show_view",
+    description:
+      "Show a native widget in the chat, drawn by Filey: view 'bar' (vertical bars: labels + series [{name, values}], stacked: true for parts of one total) | 'line' | 'area' (labels + series), 'pie' (interactive donut: labels + values), 'radial' (half ring splitting one total in 2-4 parts: labels + values, center = words under the total), 'table' (columns + rows), 'stats' (items [{label, value, change, tone good|bad|neutral}]), 'steps' (items [{title, detail, status done|doing|todo}]), 'choices' (question + options; a click sends that option to you). Use for exact numbers, simple charts, plans and quick decisions (drawn in Filey's colour palette); show_ui for anything custom or interactive. Data must come from Filey tools or the user; unit labels the values.",
+    parameters: {
+      type: "object",
+      properties: {
+        view: { type: "string", enum: ["bar", "line", "area", "pie", "radial", "table", "stats", "steps", "choices"] },
+        stacked: { type: "boolean" },
+        center: { type: "string" },
+        title: { type: "string" },
+        labels: { type: "array", items: { type: "string" } },
+        series: { type: "array", items: { type: "object", properties: { name: { type: "string" }, values: { type: "array", items: { type: "number" } } }, required: ["name", "values"] } },
+        values: { type: "array", items: { type: "number" } },
+        unit: { type: "string" },
+        columns: { type: "array", items: { type: "string" } },
+        rows: { type: "array", items: { type: "array", items: {} } },
+        items: { type: "array", items: { type: "object" } },
+        question: { type: "string" },
+        options: { type: "array", items: { type: "string" } },
+      },
+      required: ["view"],
+    },
+    run: async (a) => {
+      if (/^(whatsapp|telegram)-/.test(activeTurnId)) return { error: "Widgets show in the Filey AI chat in the app. Answer in text here." };
+      const { viewFromArgs } = await import("./genUi");
+      const view = viewFromArgs(a);
+      return typeof view === "string" ? { error: view } : { ok: true, shown: true };
+    },
+  },
+  {
+    name: "card_templates",
+    description:
+      "The user's design-card templates (OpenIntelligentUI's template library) plus built-ins (Invoice card, KPI dashboard, Price comparison). action 'list': names, what each shows and the data it needs. 'get': a template's css/html/jsFunctions/jsExpressions; change only the data, then call show_ui. 'save' (name, description, data, css, html, jsFunctions, jsExpressions): keep a card the user liked. 'delete' (name).",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["list", "get", "save", "delete"] },
+        name: { type: "string" },
+        description: { type: "string" },
+        data: { type: "string", description: "save: the data to fill in when reusing it" },
+        css: { type: "string" },
+        html: { type: "string" },
+        jsFunctions: { type: "string" },
+        jsExpressions: { type: "array", items: { type: "string" } },
+      },
+      required: ["action"],
+    },
+    run: async (a, signal) => {
+      const assertCurrent = toolExecutionCheck(signal, "Workspace changed");
+      const genUi = await import("./genUi");
+      const action = str(a.action);
+      if (action === "list")
+        return { templates: (await genUi.listCardTemplates()).map(t => ({ name: t.name, description: t.description, data: t.data, built_in: !!t.builtIn })) };
+      const name = str(a.name).trim();
+      if (!name) return { error: "Give the template's name." };
+      if (action === "get") {
+        const t = await genUi.findCardTemplate(name);
+        return t ? { name: t.name, data: t.data, ...t.card, hint: "Fill in the user's data, keep the design, then call show_ui." } : { error: `No template named "${name}". List them first.` };
+      }
+      if (action === "delete") {
+        const removed = await genUi.deleteCardTemplate(name);
+        assertCurrent();
+        return removed ? { ok: true, deleted: name } : { error: `No saved template named "${name}" (built-ins can't be deleted).` };
+      }
+      if (action === "save") {
+        const card = genUi.cardFromArgs({ ...a, title: name });
+        if (typeof card === "string") return { error: card };
+        await genUi.saveCardTemplate({ name, description: str(a.description) || name, data: str(a.data) || undefined,
+          card: { css: card.css, html: card.html, jsFunctions: card.jsFunctions, jsExpressions: card.jsExpressions, initialHeight: card.initialHeight } });
+        assertCurrent();
+        return { ok: true, saved: name };
+      }
+      return { error: 'action must be "list", "get", "save" or "delete".' };
+    },
+  },
+  {
+    name: "find_image",
+    description:
+      "A reusable photo of a real subject (a city, landmark, product category, animal, building, historic figure) from its Wikipedia article on Wikimedia Commons, with artist and licence. Use image_url as a show_ui image source or <img src>, and show the credit under it. For a picture of something that doesn't exist yet (a product mock-up, an illustration), use generate_image.",
+    parameters: { type: "object", properties: { subject: { type: "string" } }, required: ["subject"] },
+    run: async (a, signal) => {
+      const { findCommonsPhoto } = await import("./genUi");
+      try {
+        return await findCommonsPhoto(str(a.subject), signal);
+      } catch (e) {
+        return { error: errMsg(e), hint: "Try the subject's exact Wikipedia title, or generate_image for an illustration." };
+      }
+    },
+  },
+  {
+    name: "word",
+    description:
+      'Word (WordCraft) in Office work, desktop app: write and format real documents while the user watches. action "new" or "open" (`file`: a chat attachment or My Files name) starts one; later calls use the open document. action "run" sends `requests`, WordCraft control calls run in order: {"method":"engine.commands","params":{"search":"table"}} finds command ids and their params; {"method":"engine.execute","params":{"command":"text.insert","params":{"text":"Hello"}}} runs any of its 632 commands (select.all, format.bold, format.set, para.set, styles.apply {"style":"Heading 1"}, insert.table {"rows":2,"cols":3}, insert.pageBreak, edit.undo…); {"method":"document.inspect"} reads it back. Batch many steps per call. action "save" exports `name` (.docx, .pdf, .odt, .rtf, .md, .html or .txt), keeps it in My Files (listed in Office work) and returns the file to this chat.',
+    parameters: OFFICE_TOOL_PARAMS,
+    run: (a, signal) => runOfficeTool("word", a, signal),
+  },
+  {
+    name: "sheet",
+    description:
+      'Sheets (GridCraft, an Excel-style spreadsheet) in Office work, desktop app: build and edit real workbooks while the user watches. action "new" or "open" (`file`: a chat attachment or My Files name: .xlsx, .xls, .ods, .csv) starts one; later calls use the open workbook. action "run" sends `requests`, control calls run in order: {"method":"engine.commands","params":{"search":"chart"}} finds command ids and their params; {"method":"engine.execute","params":{"command":"cell.set","params":{"cell":"B2","input":"=SUM(B3:B9)"}}} runs any command (cell.set, selection.set, home.bold, home.fillColor, insert.table, insert.chart, data.sortAscending, sheet.rename, edit.undo…); {"method":"sheet.read","params":{"range":"A1:D20"}}, {"method":"cell.get","params":{"cell":"B2"}} and {"method":"document.inspect"} read it back. Batch many steps per call. action "save" exports `name` (.xlsx, .csv, .tsv, .html, .json or .pdf), keeps it in My Files (listed in Office work) and returns the file to this chat.',
+    parameters: OFFICE_TOOL_PARAMS,
+    run: (a, signal) => runOfficeTool("sheet", a, signal),
+  },
+  {
+    name: "pdf",
+    description:
+      'PDF (PdfCraft, a full PDF editor) in Office work, desktop app: read, annotate, edit text and images, fill and sign forms, organize pages, redact and export while the user watches. action "open" (`file`: a chat attachment or My Files name) shows a PDF; later calls use it. action "run" sends `requests`, UI control calls run in order: {"method":"ui.state"} (open documents, page, zoom, mode, panels, dialog); {"method":"ui.commands","params":{"search":"rotate"}} finds command ids; {"method":"ui.command","params":{"id":"…"}} runs one as its menu would; {"method":"ui.set","params":{"key":"page","value":"3"}} and keys zoom, mode (read|edit|convert|sign), select ("1,4-6"); {"method":"ui.inspect","params":{"query":"Rotate"}} lists widgets, then ui.click {"label":…} or {"id":…}, ui.type {"text":…}, ui.key {"key":"Enter"} work dialogs and fields like a person. For whole-file jobs (merge, split, compress, watermark, convert) run_file_tool is faster. action "save" saves the open PDF as `name` (.pdf), keeps it in My Files and returns it to this chat.',
+    parameters: OFFICE_TOOL_PARAMS,
+    run: (a, signal) => runOfficeTool("pdf", a, signal),
   },
   {
     name: "send_whatsapp_file",

@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { isLocalMode, assertWorkspaceCurrent } from "./dataMode";
-import { localClient } from "./localdb";
+import { localClient, writeLockFor, refuseLockedWrite } from "./localdb";
 import { localWorkspaceOwner, isLocalSignedIn } from "./localAuth";
 import { sessionFetch } from "./cloudSession";
 import { isNativeApp } from "./nativePlatform";
@@ -79,7 +79,35 @@ export function sb(): SupabaseClient {
         "(in .env locally, or your host's environment variables in production)."
     );
   }
-  return supabase;
+  return writeLockFor("*") ? lockedCloud(supabase) : supabase;
+}
+
+const WRITES = new Set(["insert", "update", "upsert", "delete"]);
+/** The cloud client once a Basic trial has ended: reads work, table writes get the same refusal
+ *  as on the device. A refused write still chains (`.insert().select().single()`) and resolves.
+ *  ponytail: client-side only and rpc writes pass; enforce in RLS if trials get abused. */
+export function lockedCloud(client: SupabaseClient): SupabaseClient {
+  return new Proxy(client, {
+    get(target, key, receiver) {
+      if (key !== "from") return Reflect.get(target, key, receiver);
+      return (table: string) => new Proxy(target.from(table), {
+        get(builder, op, r) {
+          const message = typeof op === "string" && WRITES.has(op) ? writeLockFor(table) : null;
+          if (message) return () => refusedChain(refuseLockedWrite(message));
+          const value = Reflect.get(builder, op, r);
+          return typeof value === "function" ? value.bind(builder) : value;
+        },
+      });
+    },
+  });
+}
+function refusedChain(result: unknown): unknown {
+  const chain: unknown = new Proxy(() => chain, {
+    get: (_t, key) => key === "then"
+      ? (ok?: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise.resolve(result).then(ok, bad)
+      : () => chain,
+  });
+  return chain;
 }
 
 // Retries are opt-in for reads or operations with a provider idempotency key.

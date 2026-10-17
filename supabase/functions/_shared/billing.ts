@@ -77,16 +77,19 @@ export interface DodoPurchase {
  *  Checkouts this app creates carry metadata saying what they are and whose
  *  they are. Dodo's own storefront and payment links carry none — so without
  *  this fallback a customer who paid there got nothing. For those, the product
- *  id says what was bought and the email Dodo collected says who bought it. */
+ *  id says what was bought and the email Dodo collected says who bought it.
+ *  A plan can have several ids: the one on sale now and retired ones whose
+ *  subscriptions still send renewals and expiries. */
 export function buyerOf(
   data: DodoPurchase,
-  product: string,
+  product: string | string[],
   type: "freedom_license" | "cloud_subscription"
 ): { userId?: string; orgId?: string; email?: string } | null {
   const meta = data.metadata ?? {};
+  const ids = [product].flat().filter(Boolean);
   const bought =
-    data.product_id === product || (data.product_cart ?? []).some((i) => i.product_id === product);
-  if (!product || !bought || (meta.type && meta.type !== type)) return null;
+    ids.includes(data.product_id ?? "") || (data.product_cart ?? []).some((i) => ids.includes(i.product_id ?? ""));
+  if (!bought || (meta.type && meta.type !== type)) return null;
   const email = data.customer?.email || meta.email || undefined;
   return meta.type ? { userId: meta.user_id, orgId: meta.org_id, email } : { email };
 }

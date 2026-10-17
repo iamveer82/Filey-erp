@@ -15,15 +15,15 @@ const body = {
 };
 function completion() {
   return {
-    id: "fixture-completion", model: "deepseek-flash",
+    id: "fixture-completion", model: "glm-5.3-flash",
     choices: [{ finish_reason: "stop", message: { role: "assistant", content: "Synthetic answer", reasoning_content: "Synthetic reasoning" } }],
-    usage: { prompt_tokens: 100, completion_tokens: 20, prompt_cache_hit_tokens: 20, prompt_cache_miss_tokens: 80, total_tokens: 120 },
+    usage: { prompt_tokens: 100, completion_tokens: 20, prompt_tokens_details: { cached_tokens: 20 }, total_tokens: 120 },
     api_key: "private-provider-detail", provider: "private-provider-detail",
   };
 }
 function environment() {
   const fetch = globalThis.fetch, get = Deno.env.get;
-  Deno.env.get = (name: string) => name === "FILEY_AI_DEEPSEEK_KEY" ? "fixture-key" : undefined;
+  Deno.env.get = (name: string) => name === "FILEY_AI_GLM_KEY" ? "fixture-key" : undefined;
   globalThis.fetch = () => { throw new Error("Unexpected provider call"); };
   return () => { globalThis.fetch = fetch; Deno.env.get = get; };
 }
@@ -56,7 +56,7 @@ Deno.test("recovery validates identity and request boundaries before database or
     for (const patch of [
       { request_id: body.request_id + "\n" }, { run_id: "invalid" }, { org_id: "" },
       { org_id: "a".repeat(201) }, { org_id: "workspace\n" }, { funding: "free" },
-      { recoverable: false }, { request: { ...body.request, model: "deepseek-flash" } },
+      { recoverable: false }, { request: { ...body.request, model: "glm-5.3-flash" } },
       { request: undefined }, { action: "settle" },
     ]) {
       let failure: unknown;
@@ -109,7 +109,7 @@ Deno.test("async recovery dispatches once, persists only a hash/result, and retr
     await Promise.all(background);
     const response = await recoverFileyAICompletion(user, { ...body, action: "completion_status" }, fixture.rpc);
     const cached = response.completion as ReturnType<typeof completion>;
-    assert(response.state === "complete" && response.charged_micros === 41);
+    assert(response.state === "complete" && response.charged_micros === 38);
     assert(cached.model === "filey-ai" && cached.choices[0].message.content === "Synthetic answer");
     assert(!JSON.stringify(response).includes("private-provider-detail") && !JSON.stringify(response).includes("fixture-key"));
     assert(fixture.calls.filter(call => call.action === "settle").length === 1);
@@ -157,7 +157,7 @@ Deno.test("lost settlement acknowledgement recovers the committed reply without 
   globalThis.fetch = async () => { providerCalls++; return Response.json(completion()); };
   try {
     const response = await recoverFileyAICompletion(user, body, fixture.rpc);
-    assert(response.state === "complete" && response.charged_micros === 41 && providerCalls === 1);
+    assert(response.state === "complete" && response.charged_micros === 38 && providerCalls === 1);
     assert(fixture.calls.filter(call => call.action === "settle").length === 1);
     assert(fixture.calls.some(call => call.action === "fail"), "Uncertain settlement cleanup was not exercised");
     const retry = await recoverFileyAICompletion(user, body, fixture.rpc);

@@ -1,17 +1,9 @@
-import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
-import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import { aed, chartAmount, cn } from "../../lib/format";
+import { aed, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useFinancials } from "./useReportsData";
 import { isUaeRegime, taxRegimeFor } from "../../lib/taxRegimes";
+import { BarSeriesChart } from "../../components/modernCharts";
 
 export default function FinancialTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
@@ -167,30 +159,15 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
-              <ChartFrame height={280}>
-                <BarChart
-                  data={expenseByCategory}
-                  margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    {...cs.axisProps}
-                  />
-                  <YAxis
-                    {...cs.axisProps}
-                    tickFormatter={(v) => chartAmount(Number(v))}
-                  />
-                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                  <Bar
-                    isAnimationActive={false}
-                    dataKey="value"
-                    name="Expense"
-                    fill={c.accent}
-                    radius={[6, 6, 0, 0]}
-                   maxBarSize={32} />
-                </BarChart>
-              </ChartFrame>
+              <BarSeriesChart
+                data={expenseByCategory}
+                xKey="name"
+                height={280}
+                xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
+                valueFormatter={(v) => aed(v)}
+                barColors={c.series}
+                series={[{ key: "value", label: "Expense", color: c.series[0] }]}
+              />
             </div>
           )}
         </div>

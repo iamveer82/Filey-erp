@@ -1,20 +1,10 @@
 import { SelectMenu } from "./ui-menu";
-import { ChartTooltip, ChartTooltipContent } from "./ui/chart";
 import { toast } from "./Toaster";
-import { ChartFrame } from "./charts";
 import { useState } from "react";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  } from "recharts";
 import { recordInsights } from "../lib/recordInsights";
 import { ChartPanel, useChartStyle } from "./charts";
 import { downloadCsv } from "../lib/csv";
+import { BarSeriesChart } from "./modernCharts";
 
 /** Reports supplies the selected section's active-workspace records. */
 export default function RecordInsights<T>({
@@ -67,34 +57,14 @@ export default function RecordInsights<T>({
                 role="img"
                 aria-label={`${title}. Exact values are in the chart data table below.`}
               >
-                <ChartFrame height={208}>
-                  <BarChart
-                    data={distribution}
-                    layout="vertical"
-                    margin={{ left: 0, right: 24, top: 4, bottom: 0 }}
-                  >
-                    <CartesianGrid stroke={cs.c.grid} horizontal={false} />
-                    <XAxis type="number" allowDecimals={false} {...cs.axisProps} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={115}
-                      {...cs.axisProps}
-                      tickFormatter={(s: string) =>
-                        s.length > 18 ? `${s.slice(0, 16)}…` : s
-                      }
-                    />
-                    <ChartTooltip content={<ChartTooltipContent />} cursor={cs.cursor} />
-                    <Bar
-                      dataKey="count"
-                      name="Records"
-                      fill={cs.c.accent}
-                      radius={[0, 3, 3, 0]}
-                      maxBarSize={22}
-                      isAnimationActive={false}
-                    />
-                  </BarChart>
-                </ChartFrame>
+                <BarSeriesChart
+                  data={distribution}
+                  xKey="name"
+                  height={208}
+                  xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
+                  barColors={cs.c.series}
+                  series={[{ key: "count", label: "Records", color: cs.c.series[0] }]}
+                />
               </div>
             </ChartPanel>
             {date && (
@@ -119,26 +89,12 @@ export default function RecordInsights<T>({
                   role="img"
                   aria-label={`${dateLabel}. Exact monthly counts are in the chart data table below.`}
                 >
-                  <ChartFrame height={208}>
-                    <LineChart
-                      data={trend}
-                      margin={{ left: -18, right: 12, top: 8, bottom: 0 }}
-                    >
-                      <CartesianGrid stroke={cs.c.grid} vertical={false} />
-                      <XAxis dataKey="name" {...cs.axisProps} minTickGap={24} />
-                      <YAxis allowDecimals={false} {...cs.axisProps} />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Line
-                        dataKey="count"
-                        name="Records"
-                        type="linear"
-                        stroke={cs.c.accent}
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                        isAnimationActive={false}
-                      />
-                    </LineChart>
-                  </ChartFrame>
+                  <BarSeriesChart
+                    data={trend}
+                    xKey="name"
+                    height={208}
+                    series={[{ key: "count", label: "Records", color: cs.c.series[1] }]}
+                  />
                 </div>
               </ChartPanel>
             )}

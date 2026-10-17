@@ -2,6 +2,7 @@
  * rolling memory (last TURN_CAP turns). Persisted in this browser only. */
 
 import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, requireAgentStorageScope, writeAgentStorage } from "./agentStorage";
+import { cardFromArgs, viewFromArgs, type GenUiItem } from "./genUi";
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -9,6 +10,8 @@ export interface ChatTurn {
   /** Files the agent produced on this turn, kept with the message that made
    *  them so they stay reachable instead of vanishing at the next question. */
   files?: { name: string; path?: string; url?: string; videoJobId?: string; mediaJobId?: string }[];
+  /** Interactive cards (show_ui) and native widgets (show_view) the agent showed, in order. */
+  ui?: GenUiItem[];
   run?: {
     plan: { step: string; status: "pending" | "in_progress" | "completed" | "blocked" }[];
     actions: {
@@ -124,6 +127,17 @@ function savedRun(value: unknown): ChatTurn["run"] {
   return { plan, actions, ...(typeof value.outcome === "string" ? { outcome: value.outcome } : {}) };
 }
 
+/** Cards and widgets stay with their reply, re-checked the way the chat checked them live. */
+function savedUi(value: unknown): ChatTurn["ui"] {
+  if (!Array.isArray(value)) return;
+  const items = value.flatMap(entry => {
+    if (!isRecord(entry)) return [];
+    const item = entry.kind === "view" ? viewFromArgs(entry) : cardFromArgs(entry);
+    return typeof item === "string" ? [] : [item];
+  }).slice(0, 12);
+  return items.length ? items : undefined;
+}
+
 function parseChats(value: unknown): { chats: Chat[]; damaged: boolean } {
   if (!Array.isArray(value)) return { chats: [], damaged: true };
   const chats: Chat[] = [];
@@ -143,9 +157,9 @@ function parseChats(value: unknown): { chats: Chat[]; damaged: boolean } {
         damaged = true;
         continue;
       }
-      const run = savedRun(turn.run);
+      const run = savedRun(turn.run), ui = savedUi(turn.ui);
       turns.push({ role: turn.role, text: turn.text,
-        ...(turn.files !== undefined ? { files: savedFiles(turn.files) } : {}), ...(run ? { run } : {}) });
+        ...(turn.files !== undefined ? { files: savedFiles(turn.files) } : {}), ...(run ? { run } : {}), ...(ui ? { ui } : {}) });
     }
     const customTitle = typeof entry.customTitle === "string" ? entry.customTitle.trim().slice(0, 120).trim() : "";
     chats.push({ id: entry.id, title: customTitle || entry.title.trim() || deriveTitle(turns),

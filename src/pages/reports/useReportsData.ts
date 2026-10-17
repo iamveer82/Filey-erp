@@ -199,9 +199,18 @@ export function useDeltas(
   return useMemo(() => overviewDeltas(invoices, receiptList, customers, orders), [invoices, receiptList, customers, orders]);
 }
 
-/** Same seven-day invoice/payment/receipt series as the Overview. */
+/** The Overview's invoice/payment/receipt series over the shortest recent
+ *  window (7, 30 or 90 days) that has activity, so the chart shows current
+ *  figures instead of an empty week. */
 export function useTrend(invoices: InvoiceDocSummary[], receiptList: ReceiptSummary[], invoicePayments: InvoicePayment[] = []) {
-  return useMemo(() => overviewTrend(invoices, receiptList, [], 7, new Date(), invoicePayments), [invoices, receiptList, invoicePayments]);
+  return useMemo(() => {
+    const now = new Date();
+    for (const days of [7, 30]) {
+      const trend = overviewTrend(invoices, receiptList, [], days, now, invoicePayments);
+      if (trend.some(t => t.invoiced || t.invoicePayments || t.received)) return { trend, days };
+    }
+    return { trend: overviewTrend(invoices, receiptList, [], 90, now, invoicePayments), days: 90 };
+  }, [invoices, receiptList, invoicePayments]);
 }
 
 /** Inventory value by category uses acquisition cost. */
@@ -224,9 +233,7 @@ export function useCategoryBars(products: Product[]) {
 /** Invoice status distribution with status-colored slices. */
 export function useStatusPie(
   invoices: InvoiceDocSummary[],
-  accent: string,
-  primary: string,
-  tertiary: string
+  colors: { series: string[]; good: string; bad: string; tertiary: string }
 ) {
   return useMemo(() => {
     const s = new Map<string, number>();
@@ -234,18 +241,22 @@ export function useStatusPie(
       const key = i.status || "draft";
       s.set(key, (s.get(key) ?? 0) + 1);
     }
+    // Colour carries the meaning: paid green, overdue red, partly paid amber, open blue.
     const colorFor = (status: string): string => {
       switch (status) {
         case "paid":
-          return accent;
+          return colors.good;
         case "overdue":
-          return "#10b981";
+          return colors.bad;
+        case "partial":
+        case "partially_paid":
+          return "#f59e0b";
         case "draft":
-          return tertiary;
+          return colors.tertiary;
         case "cancelled":
-          return "#f43f5e";
+          return "#64748b";
         default:
-          return primary;
+          return colors.series[1] ?? colors.series[0];
       }
     };
     return Array.from(s.entries()).map(([name, value]) => ({
@@ -253,7 +264,7 @@ export function useStatusPie(
       value,
       color: colorFor(name),
     }));
-  }, [invoices, accent, primary, tertiary]);
+  }, [invoices, colors]);
 }
 
 /** Derived financial computations. */

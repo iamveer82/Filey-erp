@@ -51,47 +51,43 @@ it("shows unlimited local usage from the first render without fetching a monthly
   expect(mode.count).not.toHaveBeenCalled();
 });
 
-it("explains verified setup, free unlimited local documents and separate cloud usage on startup", () => {
+it("offers the 14-day trial on this device and Pro for the cloud on startup", () => {
   render(<SetupNotice />);
   const localChoice = screen.getByRole("button", { name: /Use on this device/ });
-  expect(localChoice).toHaveTextContent("Create and verify your free account online once");
-  expect(localChoice).toHaveTextContent("The full local ERP and CRM is free");
-  expect(localChoice).toHaveTextContent("Unlimited local documents, invoices and edits");
-  expect(localChoice).toHaveTextContent("Local PDFs without Filey branding");
-  expect(localChoice).toHaveTextContent("Optional paid cloud upgrades");
-  expect(localChoice).not.toHaveTextContent(/5 invoices|5 new invoices|five invoices/i);
-  expect(screen.getByRole("button", { name: /Use Filey Cloud/ })).toHaveTextContent("5 new cloud invoices a month");
+  expect(localChoice).toHaveTextContent("14-day free trial");
+  expect(localChoice).toHaveTextContent("try every app for 14 days on this device");
+  expect(localChoice).toHaveTextContent("$1 of Filey AI to try the agent");
+  expect(localChoice).toHaveTextContent("Then Freedom: 999 AED once, yours for life");
+  expect(screen.getByRole("button", { name: /Use Filey Cloud/ })).toHaveTextContent("Pro · 36 AED / month");
 });
 
-it("offers paid cloud benefits without selling exclusive offline use", async () => {
+it("offers the trial, Freedom for life and Pro in the cloud at their real prices", async () => {
   mode.local = true;
   window.history.replaceState(null, "", "/#/settings?section=billing");
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
-  await waitFor(() => expect(screen.getByRole("button", { name: "Get Ultra - $100" })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Get Freedom - 999 AED" })).toBeEnabled());
   const plans = within(screen.getByRole("region", { name: "Available plans" }));
-  expect(plans.getByText("$0")).toBeInTheDocument();
-  expect(plans.getByText("$5")).toBeInTheDocument();
-  expect(plans.getByText("$100")).toBeInTheDocument();
-  expect(plans.getByText("Local PDFs without Filey branding")).toBeInTheDocument();
-  expect(plans.getByText("“Made with Filey” on free cloud documents")).toBeInTheDocument();
-  expect(plans.getByText("Lifetime cloud benefits for your Filey account, paid once.")).toBeInTheDocument();
-  expect(plans.getByText("2 paid-license activation slots; free local installs are not limited")).toBeInTheDocument();
-  expect(plans.queryByText(/Works fully offline|Own it outright/)).toBeNull();
+  expect(plans.getByText("Free")).toBeInTheDocument();
+  expect(plans.getByText("36 AED")).toBeInTheDocument();
+  expect(plans.getByText("999 AED")).toBeInTheDocument();
+  expect(plans.getByText("Filey on your computer for life. Pay once, own it.")).toBeInTheDocument();
+  expect(plans.getByText("Regular updates and support")).toBeInTheDocument();
+  expect(plans.getByText("On 2 computers, and move it to a new PC any time")).toBeInTheDocument();
 });
 
-it("shows account-owned Ultra without a local activation token or a second purchase button", async () => {
+it("shows account-owned Freedom without a local activation token or a second purchase button", async () => {
   window.history.replaceState(null, "", "/#/settings?section=billing");
   vi.mocked(licensePurchased).mockResolvedValue(true);
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
-  await waitFor(() => expect(screen.queryByRole("button", { name: /Get Ultra/ })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("button", { name: /Get Freedom/ })).toBeNull());
   expect(screen.getByRole("link", { name: "Open Coin wallet" })).toHaveAttribute("href", "#/settings?section=credits");
 });
 
-it("activates an Ultra return without waiting for a Pro subscription", async () => {
+it("activates a Freedom return without waiting for a Pro subscription", async () => {
   window.history.replaceState(null, "", "/#/settings?section=billing&checkout=success&plan=ultra");
   vi.mocked(claimPurchasedLicense).mockResolvedValue({ valid: true });
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
-  await screen.findByText("Ultra is active on this device.");
+  await screen.findByText("Freedom is active on this device.");
   expect(claimPurchasedLicense).toHaveBeenCalledTimes(1);
   expect(awaitCloudPlan).not.toHaveBeenCalled();
 });
@@ -126,7 +122,7 @@ it("re-enables billing controls when the desktop portal opens in another browser
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
   fireEvent.click(await screen.findByRole("button", { name: "Manage billing" }));
   expect(screen.getByRole("button", { name: "Opening…" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /Get Ultra/ })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Get Freedom/ })).toBeDisabled();
   opened("browser");
   await waitFor(() => expect(screen.getByRole("button", { name: "Manage billing" })).toBeEnabled());
   expect(openBillingPortal).toHaveBeenCalledTimes(1);

@@ -271,11 +271,48 @@ describe("the tool surface stays small", () => {
     await run("hello");
     expect(model.firstOffered().length).toBeLessThan(TOOLS.length / 2);
     expect(model.firstToolBytes()).toBeLessThan(15_000);
+    // A greeting pays for no widget schema...
+    expect(model.firstOffered()).not.toContain("show_view");
+  });
+
+  it("brings a chart along for questions about figures", async () => {
+    const model = scriptModel([says("Up 12%.")]);
+    await run("how are my sales this month");
+    // ...a question about figures can chart its answer unasked.
+    expect(model.firstOffered()).toContain("show_view");
+    expect(model.firstOffered()).not.toContain("show_ui");
+    expect(model.firstToolBytes()).toBeLessThan(17_000);
     // Everyday work needs no unlocking.
     expect(model.firstOffered()).toContain("create_invoice_draft");
     // Specialist work does.
     expect(model.firstOffered()).not.toContain("run_payroll");
     expect(model.firstOffered()).toContain("use_toolset");
+  });
+
+  it("offers Word up front only for document requests", async () => {
+    for (const [text, wanted] of [["write a word document for the landlord", true], ["save it as docx", true], ["open the proposal in Word", true], ["in other words, how are sales?", false]] as const) {
+      const model = scriptModel([says("ok")]);
+      await run(text);
+      expect(model.firstOffered().includes("word"), text).toBe(wanted);
+    }
+  });
+
+  it("offers just the named Office app up front, not every PDF mention or the letter tools", async () => {
+    for (const [text, tool] of [["open budget.xlsx and total column C", "sheet"], ["make an excel sheet of my stock", "sheet"], ["In Sheets, make a table of my top customers", "sheet"],
+      ["sign the contract pdf", "pdf"], ["rotate page 2 of this PDF", "pdf"], ["send me the invoice pdf", ""]] as const) {
+      const model = scriptModel([says("ok")]);
+      await run(text);
+      for (const app of ["sheet", "pdf"]) expect(model.firstOffered().includes(app), `${text}: ${app}`).toBe(app === tool);
+      expect(model.firstOffered(), text).not.toContain("create_letter_draft");
+    }
+  });
+
+  it("offers interactive cards up front only when a request is visual", async () => {
+    for (const [text, wanted] of [["compare these two loan offers", true], ["make me a VAT calculator", true], ["chart this month's sales", true], ["hello", false]] as const) {
+      const model = scriptModel([says("ok")]);
+      await run(text);
+      expect(model.firstOffered().includes("show_ui"), text).toBe(wanted);
+    }
   });
 
   it("brings a domain in when the model asks for it", async () => {

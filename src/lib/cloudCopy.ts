@@ -1,5 +1,5 @@
 // Records stay on this device and follow to the Filey account in the background.
-// Mixed mode (local mode plus "Keep a copy in my Filey account") is Pro or Ultra;
+// Mixed mode (local mode plus "Keep a copy in my Filey account") is Pro or Freedom;
 // cloud mode on the desktop keeps a download-only device copy the same way.
 //
 // Cloud load follows what changed, never the size of the books:
@@ -62,7 +62,7 @@ export function setCloudCopy(uid: string | null): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CLOUD_COPY_EVENT));
 }
 
-/** Pro (live subscription), Ultra (licence on this device) or an Ultra owner's workspace. */
+/** Pro (live subscription), Freedom (licence on this device) or an Freedom owner's workspace. */
 export async function cloudCopyAllowed(): Promise<boolean> {
   try {
     return (await entitlement()) !== "free" || (await cloudAccess()).reason === "paid";

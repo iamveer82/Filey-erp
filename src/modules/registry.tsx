@@ -35,7 +35,6 @@ const PurchaseOrders = page(() => import("../pages/PurchaseOrders"));
 const Reports = page(() => import("../pages/reports/Reports"));
 const People = page(() => import("../pages/People"));
 const Accounting = page(() => import("../pages/Accounting"));
-const ToolsPage = page(() => import("../pages/PdfTools"));
 const MyFilesPage = page(() => import("../pages/MyFiles"));
 const Settings = page(() => import("../pages/Tools"));
 const Integrations = page(() => import("../pages/Integrations"));
@@ -43,7 +42,7 @@ const Marketing = page(() => import("../pages/Marketing"));
 const DeliveryChallan = page(() => import("../pages/DeliveryChallan"));
 const PaymentReceipt = page(() => import("../pages/PaymentReceipt"));
 const DeclarationLetter = page(() => import("../pages/DeclarationLetter"));
-const Letter = page(() => import("../pages/Letter"));
+const OfficeWork = page(() => import("../pages/OfficeWork"));
 const ChequeRegister = page(() => import("../pages/ChequeRegister"));
 const BankAccounts = page(() => import("../pages/BankAccounts"));
 const EmailTemplates = page(() => import("../pages/EmailTemplates"));
@@ -265,15 +264,6 @@ export const MODULES: AppModule[] = [
     Component: Accounting,
   },
   {
-    id: "tools",
-    label: "Tools",
-    short: "Tools",
-    desc: "Local PDF toolkit",
-    icon: "tools",
-    to: "/tools",
-    Component: ToolsPage,
-  },
-  {
     id: "files",
     label: "My Files",
     short: "Files",
@@ -283,13 +273,14 @@ export const MODULES: AppModule[] = [
     Component: MyFilesPage,
   },
   {
+    // id stays "letters" so saved access rules and enabled-app lists keep working.
     id: "letters",
-    label: "Letter",
-    short: "Letters",
-    desc: "Custom company letters, letterheads and issued documents",
+    label: "Office work",
+    short: "Office",
+    desc: "Word, Sheets and PDF editing, plus company letters, in tabs",
     icon: "declaration",
-    to: "/letters",
-    Component: Letter,
+    to: "/office",
+    Component: OfficeWork,
   },
   {
     id: "settings",

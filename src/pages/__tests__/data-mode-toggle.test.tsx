@@ -300,7 +300,7 @@ it("requires cloud storage consent even when the device has no current records",
 
 it("shows the plan gate instead of the cloud copy switch on Basic", async () => {
   render(<DataModePanel />);
-  expect(await screen.findByText(/Available on Pro and Ultra/)).toBeInTheDocument();
+  expect(await screen.findByText(/Available on Pro and Freedom/)).toBeInTheDocument();
   expect(screen.queryByRole("switch", { name: /keep a copy/i })).toBeNull();
 });
 

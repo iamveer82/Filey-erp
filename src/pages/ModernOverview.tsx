@@ -1,24 +1,10 @@
-import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../components/ui/chart";
 import { toast } from "../components/Toaster";
 import { AnnotatedText } from "../components/AnnotatedText";
 import { reportMoney } from "../lib/reportMoney";
 import { getExchangeRates } from "../lib/exchange-rates";
-import { ChartFrame } from "../components/charts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Download, Sparkles, ArrowUpRight, TrendingUp, TrendingDown, CheckCircle2, Clock, User } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
 import {
   erp,
   fin,
@@ -47,11 +33,11 @@ import {
 import {
   useChartStyle,
   ChartPanel,
-  ChartGradient,
 } from "../components/charts";
 import { useAuth } from "../lib/auth";
 import { useDisplayCurrency } from "../lib/displayCurrency";
-import { invoicePaymentsInAed, overviewDeltas, overviewTrend } from "./overviewData";
+import { bucketTrend, collectionSplit, invoicePaymentsInAed, overviewDeltas, overviewTrend, periodChange } from "./overviewData";
+import { BarSeriesChart, RadialSplitChart, TrendFooter } from "../components/modernCharts";
 
 type Range = "7d" | "30d" | "90d";
 const RANGE_DAYS: Record<Range, number> = { "7d": 7, "30d": 30, "90d": 90 };
@@ -203,16 +189,18 @@ export default function ModernOverview() {
     [trend]
   );
 
-  // Customer segments pie
-  const segmentPie = useMemo(() => {
-    const seg: Record<string, number> = {};
-    for (const cu of customers) {
-      const key = cu.segment || "Unsegmented";
-      seg[key] = (seg[key] || 0) + 1;
-    }
-    return Object.entries(seg).map(([name, value]) => ({ name, value }));
-  }, [customers]);
-  const pieColors = [c.accent, c.primary, c.accentSoft, c.tertiary, c.grid];
+  const days = RANGE_DAYS[range];
+  const bars = useMemo(() => bucketTrend(trend), [trend]);
+  const per = bars.length < trend.length ? "by week" : "by day";
+  const periodInvoiced = useMemo(() => trend.reduce((n, r) => n + r.invoiced, 0), [trend]);
+  const periodPayments = useMemo(() => trend.reduce((n, r) => n + r.invoicePayments, 0), [trend]);
+  const periodExpenses = useMemo(() => trend.reduce((n, r) => n + r.expenses, 0), [trend]);
+  const invoicedChange = useMemo(
+    () => periodChange(overviewTrend(invoices, receiptList, expenses, days * 2, new Date(), invoicePayments), "invoiced"),
+    [invoices, receiptList, expenses, days, invoicePayments]
+  );
+  const split = useMemo(() => collectionSplit(invoices, trend[0]?.date ?? ""), [invoices, trend]);
+  const splitTotal = split.collected + split.outstanding;
 
   const recent = useMemo(() => invoices.slice(0, 5), [invoices]);
 
@@ -381,7 +369,7 @@ export default function ModernOverview() {
       <div className="mt-6 mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Business overview</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">Amounts in {currency} · customer segments show the full directory</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Amounts in {currency}</p>
         </div>
         <div role="group" aria-label="Chart period" className="flex items-center gap-1 border border-border rounded-full p-1 text-[12px]">
           {(["7d", "30d", "90d"] as Range[]).map((r) => (
@@ -400,120 +388,82 @@ export default function ModernOverview() {
         </div>
       </div>
 
-      {/* ── Charts row: sales bar + segments pie ── */}
+      {/* ── Charts row: invoicing and payments by period + how much of it is collected ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <ChartPanel
-          title="Invoiced and payment records"
-          subtitle={`Last ${RANGE_DAYS[range]} days · invoices by issue date, invoice payments and receipt documents by payment date`}
-          className="lg:col-span-2 rounded-xl border border-border bg-card"
-          bodyClassName="h-[280px] mt-4"
-        >
-          {loading ? (
-            <Skeleton className="h-full w-full" />
-          ) : error ? (
-            <ChartEmpty error hint="Retry to load your workspace figures." />
-          ) : !hasBarData ? (
-            <ChartEmpty hint="Send an invoice or record an invoice payment or receipt within this period." />
-          ) : (
-            <ChartFrame height={280}>
-              <BarChart data={trend} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
-                <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="invoiced"
-                  name="Invoiced"
-                  fill={c.accent}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="received"
-                  name="Receipt documents"
-                  fill={c.tertiary}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="invoicePayments"
-                  name="Invoice payments"
-                  fill={c.primary}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-              </BarChart>
-            </ChartFrame>
-          )}
-        </ChartPanel>
-        <ChartPanel
-          title="Customer segments"
-          className="rounded-xl border border-border bg-card"
-          subtitle="All customers · from the customer directory"
-          bodyClassName="mt-2"
-        >
-          {loading ? (
-            <Skeleton className="h-[220px] w-full" />
-          ) : error ? (
-            <div className="h-[220px]"><ChartEmpty error hint="Retry to load customer segments." /></div>
-          ) : segmentPie.length === 0 ? (
-            <div className="h-[220px] grid place-items-center text-[12.5px] text-muted-foreground">
-              No customers yet
+        <div className="lg:col-span-2 flex flex-col rounded-xl border border-border bg-card">
+          <ChartPanel
+            title="Invoiced and payment records"
+            subtitle={`Last ${days} days ${per} · invoices by issue date, invoice payments and receipt documents by payment date`}
+            bodyClassName="mt-4"
+          >
+            {loading ? (
+              <Skeleton className="h-[260px] w-full" />
+            ) : error ? (
+              <div className="h-[260px]"><ChartEmpty error hint="Retry to load your workspace figures." /></div>
+            ) : !hasBarData ? (
+              <div className="h-[260px]"><ChartEmpty hint="Send an invoice or record an invoice payment or receipt within this period." /></div>
+            ) : (
+              <BarSeriesChart
+                data={bars}
+                xKey="d"
+                spanKey="span"
+                height={260}
+                valueFormatter={(v) => aed(v)}
+                series={[
+                  { key: "invoiced", label: "Invoiced", color: c.series[0] },
+                  { key: "invoicePayments", label: "Invoice payments", color: c.good },
+                  { key: "received", label: "Receipt documents", color: c.series[1] },
+                ]}
+              />
+            )}
+          </ChartPanel>
+          {!loading && !error && (
+            <div className="mt-auto">
+              <TrendFooter change={invoicedChange} what="Invoicing" caption={`${aed(periodInvoiced)} invoiced in the last ${days} days`} />
             </div>
-          ) : (
-            <>
-              <div className="relative h-[220px]">
-                <ChartFrame height={220}>
-                  <PieChart>
-                    <Pie
-                      isAnimationActive={false}
-                      data={segmentPie}
-                      innerRadius={58}
-                      outerRadius={84}
-                      paddingAngle={2}
-                      dataKey="value"
-                      cornerRadius={3}
-                    >
-                      {segmentPie.map((_, i) => (
-                        <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                      ))}
-                    </Pie>
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                  </PieChart>
-                </ChartFrame>
-                {/* Donut centre: the whole point of the chart, stated once */}
-                <div className="absolute inset-0 grid place-items-center pointer-events-none">
-                  <div className="text-center">
-                    <div className="text-[22px] font-semibold text-foreground tabular-nums leading-none">
-                      {num(customers.length)}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground mt-1">
-                      {customers.length === 1 ? "customer" : "customers"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {segmentPie.map((s, i) => (
-                  <div key={s.name} className="flex items-center justify-between text-[12.5px]">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: pieColors[i % pieColors.length] }}
-                      />
-                      <span className="text-foreground">{s.name}</span>
-                    </div>
-                    <span className="text-muted-foreground tabular-nums">{s.value}</span>
-                  </div>
-                ))}
-              </div>
-            </>
           )}
-        </ChartPanel>
+        </div>
+        <div className="flex flex-col rounded-xl border border-border bg-card">
+          <ChartPanel title="Collected vs outstanding" subtitle={`Invoices issued in the last ${days} days`} bodyClassName="mt-3">
+            {loading ? (
+              <Skeleton className="h-[200px] w-full" />
+            ) : error ? (
+              <div className="h-[200px]"><ChartEmpty error hint="Retry to load your invoices." /></div>
+            ) : splitTotal === 0 ? (
+              <div className="h-[200px] grid place-items-center text-[12.5px] text-muted-foreground">No invoices issued in this period</div>
+            ) : (
+              <>
+                <RadialSplitChart
+                  height={190}
+                  centerValue={chartAmount(splitTotal)}
+                  centerLabel={`${currency} invoiced`}
+                  valueFormatter={(v) => aed(v)}
+                  parts={[
+                    { key: "collected", label: "Collected", color: c.good, value: split.collected },
+                    { key: "outstanding", label: "Outstanding", color: c.series[0], value: split.outstanding },
+                  ]}
+                />
+                <div className="space-y-1.5">
+                  {[["Collected", split.collected, c.good], ["Outstanding", split.outstanding, c.series[0]]].map(([label, value, color]) => (
+                    <div key={label as string} className="flex items-center justify-between text-[12.5px]">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: color as string }} />
+                        <span className="text-foreground">{label}</span>
+                      </div>
+                      <span className="text-muted-foreground tabular-nums">{aed(value as number)}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </ChartPanel>
+          {!loading && !error && splitTotal > 0 && (
+            <div className="mt-auto border-t border-border px-5 py-3 text-[12.5px]">
+              <div className="font-medium text-foreground">{Math.round((split.collected / splitTotal) * 100)}% collected</div>
+              <div className="text-muted-foreground">{aed(split.outstanding)} still open from this period</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Recent invoices + activity ── */}
@@ -609,68 +559,44 @@ export default function ModernOverview() {
         </div>
       </div>
 
-      {/* ── Separate payment records and recorded expenses ── */}
-      <div className="mt-5 rounded-xl border border-border bg-card">
+      {/* ── Payment records and recorded expenses, by period ── */}
+      <div className="mt-5 flex flex-col rounded-xl border border-border bg-card">
         <ChartPanel
           title="Payment records and expenses"
-          subtitle={`Last ${RANGE_DAYS[range]} days · separate payment sources; invoice payments use saved invoice exchange rates. Receipt documents may describe the same payment, so these series are not added together.`}
-            bodyClassName="h-[260px] mt-2"
-          >
-            {loading ? (
-              <Skeleton className="h-full w-full" />
-            ) : error ? (
-              <ChartEmpty error hint="Retry to load your workspace figures." />
-            ) : !hasTrendData ? (
-              <ChartEmpty hint="Record an invoice payment, receipt or expense within this period." />
-            ) : (
-              <ChartFrame height={260}>
-                <AreaChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
-                  <ChartGradient id="cashIn" color={c.accent} from={0.35} />
-                  <ChartGradient id="cashOut" color={c.primary} from={0.25} />
-                  <ChartGradient id="invoicePayments" color={c.tertiary} from={0.2} />
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                  <XAxis dataKey="d" {...cs.axisProps} minTickGap={24} />
-                  <YAxis {...cs.axisProps} width={64} tickFormatter={(value) => chartAmount(Number(value))} />
-                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
-                  <ChartLegend content={<ChartLegendContent />} />
-                  <Area
-                    isAnimationActive={false}
-                    type="monotone"
-                    dataKey="received"
-                    name="Receipt documents"
-                    stroke={c.accent}
-                    fill="url(#cashIn)"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 3, strokeWidth: 0 }}
-                  />
-                  <Area
-                    isAnimationActive={false}
-                    type="monotone"
-                    dataKey="invoicePayments"
-                    name="Invoice payments"
-                    stroke={c.tertiary}
-                    fill="url(#invoicePayments)"
-                    strokeDasharray="5 3"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 3, strokeWidth: 0 }}
-                  />
-                  <Area
-                    isAnimationActive={false}
-                    type="monotone"
-                    dataKey="expenses"
-                    name="Recorded expenses"
-                    stroke={c.primary}
-                    fill="url(#cashOut)"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 3, strokeWidth: 0 }}
-                  />
-                </AreaChart>
-              </ChartFrame>
-            )}
-          </ChartPanel>
+          subtitle={`Last ${days} days ${per} · invoice payments use saved invoice exchange rates. Receipt documents may describe the same payment, so the bars are not added together.`}
+          bodyClassName="mt-4"
+        >
+          {loading ? (
+            <Skeleton className="h-[240px] w-full" />
+          ) : error ? (
+            <div className="h-[240px]"><ChartEmpty error hint="Retry to load your workspace figures." /></div>
+          ) : !hasTrendData ? (
+            <div className="h-[240px]"><ChartEmpty hint="Record an invoice payment, receipt or expense within this period." /></div>
+          ) : (
+            <BarSeriesChart
+              data={bars}
+              xKey="d"
+              spanKey="span"
+              height={240}
+              valueFormatter={(v) => aed(v)}
+              series={[
+                { key: "invoicePayments", label: "Invoice payments", color: c.good },
+                { key: "received", label: "Receipt documents", color: c.series[1] },
+                { key: "expenses", label: "Recorded expenses", color: c.bad },
+              ]}
+            />
+          )}
+        </ChartPanel>
+        {!loading && !error && hasTrendData && (
+          <div className="border-t border-border px-5 py-3 text-[12.5px]">
+            <div className="font-medium text-foreground">
+              {aed(periodPayments)} from invoice payments · {aed(periodExpenses)} in expenses
+            </div>
+            <div className="text-muted-foreground">
+              {periodPayments >= periodExpenses ? "Payments cover expenses" : "Expenses are ahead of payments"} by {aed(Math.abs(periodPayments - periodExpenses))} in this period
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Empty state ── */}

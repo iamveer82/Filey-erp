@@ -13,8 +13,8 @@ const routes: Record<string, string> = {
   "purchase-invoices": "supplier-invoices", inventory: "inventory", people: "people",
   accounting: "accounting", "bank-accounts": "bank-cheques", cheques: "cheques",
   "payment-receipts": "receipts", declaration: "declaration", projects: "projects-support",
-  helpdesk: "helpdesk", team: "team", comms: "communications", tools: "file-tools",
-  files: "files", "my-files": "files", letters: "letters", "email-templates": "email-templates",
+  helpdesk: "helpdesk", team: "team", comms: "communications",
+  files: "files", "my-files": "files", office: "letters", letters: "letters", "email-templates": "email-templates",
   "delivery-challans": "delivery-declarations", integrations: "integrations", browser: "browser",
 };
 export function guideForRoute(pathname: string, search = ""): string | null {

@@ -14,6 +14,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .register_uri_scheme_protocol("fileyui", |_ctx, _request| modules::genui::page())
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 modules::computer_use::window_closed(window.label());
@@ -75,6 +76,7 @@ pub fn run() {
                 modules::storage::cancel_pending_storage,
                 modules::storage::restart_app,
                 modules::storage::write_doc_file,
+                modules::print::print_page,
                 modules::storage::blob_write,
                 modules::storage::blob_read,
                 modules::storage::blob_delete,

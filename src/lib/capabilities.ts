@@ -58,13 +58,14 @@ export const CAPABILITIES: Capability[] = [
       "create_quote",
       "set_invoice_template",
       "update_invoice_appearance",
+      "set_invoice_preset",
     ],
   },
   {
     id: "letters",
-    name: "Company letters",
-    description: "Create and revise letter drafts, read saved letters and export PDFs. Review and issue in Letter.",
-    tools: ["get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
+    name: "Office work",
+    description: "Write and format Word documents, build spreadsheets in Sheets, edit PDFs, create and revise letter drafts, read saved letters and export files. Review and issue letters in Office work.",
+    tools: ["word", "sheet", "pdf", "get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
     readOnlyTools: ["get_letter_context", "list_letters", "get_letter"],
   },
   {
@@ -80,14 +81,14 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "purchasing",
     name: "Purchasing",
-    description: "Create purchase orders, supplier bills and supplier records",
-    tools: ["create_purchase_order", "create_purchase_invoice_draft", "create_supplier"],
+    description: "Create purchase orders, supplier bills, supplier records and VAT declaration letters",
+    tools: ["create_purchase_order", "create_purchase_invoice_draft", "create_supplier", "create_declaration_letter"],
   },
   {
     id: "logistics",
     name: "Delivery challans",
-    description: "Create delivery challans, goods received notes and returns",
-    tools: ["create_delivery_challan"],
+    description: "Create delivery challans, goods received notes, returns and packing lists",
+    tools: ["create_delivery_challan", "create_packing_list"],
   },
   {
     id: "inventory",
@@ -168,6 +169,12 @@ export const CAPABILITIES: Capability[] = [
     tools: ["record_cheque"],
   },
   {
+    id: "cards",
+    name: "Interactive cards",
+    description: "Let the agent save, reuse and delete design-card templates for chat answers",
+    tools: ["card_templates"],
+  },
+  {
     // A saved skill is replayed into every later prompt, so writing one changes
     // how the agent behaves from then on. That makes it a write with an unusually
     // long tail: a instruction injected from a scanned document could teach a
@@ -183,9 +190,10 @@ export const CAPABILITIES: Capability[] = [
     id: "web",
     name: "Web research",
     description: "Read and search public web pages, enrich leads from their own site",
-    readOnlyTools: ["work_service"],
+    readOnlyTools: ["work_service", "find_image"],
     tools: [
       "read_web_page",
+      "find_image",
       "work_service",
       "search_web",
       "enrich_company_website",

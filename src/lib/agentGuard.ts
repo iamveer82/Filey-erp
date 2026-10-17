@@ -160,6 +160,15 @@ function requestedDocument(kind: typeof DOCUMENT_CREATORS[string], request: stri
     (new RegExp(action, "i").test(request) && new RegExp(`(?:\\band\\b|\\bplus\\b|[,;])\\s+${article}${noun}\\b`, "i").test(request));
 }
 
+/** Did the user write this document number, in full ("INV-DLS-032-26") or as its counter ("invoice 32")? */
+export function numberGiven(number: string, userRequest: string): boolean {
+  if (userRequest.toLowerCase().includes(number.trim().toLowerCase())) return true;
+  const counter = (number.match(/\d+/g) ?? []).sort((a, b) => b.length - a.length)[0];
+  if (!counter) return false;
+  const said = (userRequest.match(/\d+/g) ?? []).map(n => Number(n));
+  return said.includes(Number(counter));
+}
+
 export function createGuard(userRequest = ""): AgentGuard {
   const seen = new Map<string, unknown>();
   const log: Step[] = [];
@@ -174,6 +183,10 @@ export function createGuard(userRequest = ""): AgentGuard {
 
   return {
     before(name, args) {
+      // A model's guess at the next number ("INV-063") jumps the real sequence. Only a number the
+      // user wrote is kept; without one Filey assigns the next number from the saved format.
+      if (name === "create_invoice_draft" && typeof args.invoice_number === "string" && !numberGiven(args.invoice_number, userRequest))
+        delete args.invoice_number;
       if (name === "retry_invoice_save" && (!/\b(?:retry|continue|try\s+(?:it\s+)?again)\b/i.test(userRequest) ||
           /\b(?:do not|don't|never|stop)\b[^.!?\n]*\b(?:retry|continue|try)\b/i.test(userRequest))) return {
         short: { error: "The user has not asked to retry the earlier invoice save. Verify it with get_invoice first.", retry_safe: false },
@@ -206,7 +219,7 @@ export function createGuard(userRequest = ""): AgentGuard {
           hint: "Keep the requested document type. Check the invoice failure with read tools, correct valid invoice arguments, or ask whether the user wants a different document. Do not use another write as a probe.",
         },
       };
-      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf", "export_letter_pdf"].includes(name)) return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf", "export_letter_pdf", "word", "sheet", "pdf"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "agent_computer" || name === "browser") &&

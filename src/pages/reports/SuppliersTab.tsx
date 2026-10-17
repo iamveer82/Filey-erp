@@ -1,16 +1,9 @@
-import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
-import { ChartFrame } from "../../components/charts";
+import { AGING_RAMP } from "../../lib/accent";
 import { useMemo } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, num, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
+import { BarSeriesChart } from "../../components/modernCharts";
 import {
   ReportsData,
   useTopSuppliers,
@@ -104,34 +97,15 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
               {allZero(topSuppliers, "total") ? (
                 <ChartEmpty hint="Your biggest suppliers rank here once purchases exist." />
               ) : (
-              <ChartFrame height={280}>
-                <BarChart
-                  data={topSuppliers}
-                  layout="vertical"
-                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
-                  <XAxis
-                    type="number"
-                    {...cs.axisProps}
-                    tickFormatter={(v) => chartAmount(Number(v))}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    {...cs.axisProps}
-                    width={88}
-                  />
-                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                  <Bar
-                    isAnimationActive={false}
-                    dataKey="total"
-                    name="PO Value"
-                    fill={c.accent}
-                    radius={[0, 4, 4, 0]}
-                   maxBarSize={32} />
-                </BarChart>
-              </ChartFrame>
+              <BarSeriesChart
+                data={topSuppliers}
+                xKey="name"
+                height={280}
+                xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
+                valueFormatter={(v) => aed(v)}
+                barColors={c.series}
+                series={[{ key: "total", label: "PO Value", color: c.series[0] }]}
+              />
               )}
             </div>
           )}
@@ -149,30 +123,14 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
             {allZero(agingData, "value") ? (
               <ChartEmpty hint="Posted supplier bills appear here while a balance is due." />
             ) : (
-            <ChartFrame height={280}>
-              <BarChart
+            <BarSeriesChart
                 data={agingData}
-                margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis
-                  dataKey="name"
-                  {...cs.axisProps}
-                />
-                <YAxis
-                  {...cs.axisProps}
-                  tickFormatter={(v) => chartAmount(Number(v))}
-                />
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="value"
-                  name="Payable"
-                  fill={c.accent}
-                  radius={[6, 6, 0, 0]}
-                 maxBarSize={32} />
-              </BarChart>
-            </ChartFrame>
+                xKey="name"
+                height={280}
+                valueFormatter={(v) => aed(v)}
+                barColors={AGING_RAMP}
+                series={[{ key: "value", label: "Payable", color: AGING_RAMP[0] }]}
+              />
             )}
           </div>
         </div>

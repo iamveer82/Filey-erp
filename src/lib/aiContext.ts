@@ -177,6 +177,19 @@ async function composeContext(companyName: string | undefined, ccy: string, curr
       lines.push(` Overdue: ${list.join("; ")}`);
     }
   }
+  // The next number, read (not reserved) from the saved format, so the agent can say which
+  // number a new invoice gets instead of inventing one.
+  try {
+    const [{ loadDocFormats }, { nextFromPattern }] = await Promise.all([import("./numberFormat"), import("./docNumber")]);
+    const pattern = (await loadDocFormats()).invoice;
+    if (pattern) lines.push(`- Next invoice number: ${nextFromPattern({ pattern, existing: (invoices as Row[]).map(d => s(d.number)) })}. Filey assigns it when the draft is saved; never type an invoice number yourself unless the user gave one.`);
+  } catch { /* the brief stands without it */ }
+  try {
+    const { loadInvoicePreset, describeInvoicePreset } = await import("./invoicePresets");
+    const preset = await loadInvoicePreset();
+    if (preset) lines.push(`- ${describeInvoicePreset(preset)}`);
+  } catch { /* the brief stands without it */ }
+  current();
 
   // Quotes
   if (quoteDocs.length) lines.push(`- Quotes: ${quoteDocs.length}`);

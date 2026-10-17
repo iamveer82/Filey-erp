@@ -24,6 +24,13 @@ type ChartContextProps = {
   config: ChartConfig
 }
 
+/** SVG gradient fills ("url(#id)") can't paint an HTML legend or tooltip swatch: use the gradient's first stop. */
+function swatch(color?: string): string | undefined {
+  const id = color?.match(/^url\(#([^)]+)\)$/)?.[1]
+  if (!id) return color
+  return document.getElementById(id)?.querySelector("stop")?.getAttribute("stop-color") ?? "hsl(var(--chart-primary))"
+}
+
 const ChartContext = React.createContext<ChartContextProps | null>(null)
 
 function useChart() {
@@ -206,10 +213,7 @@ function ChartTooltipContent({
             const key = `${nameKey ?? item.dataKey ?? item.name ?? "value"}`
             const itemConfig = getPayloadConfigFromPayload(config, item, key)
             const seriesColor = color ?? item.payload?.fill ?? item.color
-            // SVG gradient URLs cannot paint an HTML legend/tooltip swatch.
-            const indicatorColor = seriesColor?.startsWith("url(")
-              ? "hsl(var(--chart-primary))"
-              : seriesColor
+            const indicatorColor = swatch(seriesColor)
 
             return (
               <div
@@ -322,7 +326,7 @@ function ChartLegendContent({
                 <div
                   className="h-2 w-2 shrink-0 rounded-[2px]"
                   style={{
-                    backgroundColor: item.color?.startsWith("url(") ? "hsl(var(--chart-primary))" : item.color,
+                    backgroundColor: swatch(item.color),
                   }}
                 />
               )}

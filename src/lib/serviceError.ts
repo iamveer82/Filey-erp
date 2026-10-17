@@ -87,9 +87,9 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
       "Custom AI credit amounts are not available yet.",
       "Filey AI has no available model for this request. Try a smaller conversation or use your own API key.",
       "Workspace changed. Reopen Billing before continuing.",
-      "This account already owns Ultra.",
+      "This account already owns Freedom.",
       "This workspace already has a paid plan. Use Manage billing.",
-      "This workspace already includes cloud access through Ultra.",
+      "This workspace already includes cloud access through Freedom.",
       "Only the workspace owner or an admin can manage billing.",
       "No subscription on this workspace yet.",
       "Verify your email before adding AI credits.",
@@ -109,7 +109,7 @@ export async function serviceError(error: unknown, fallback: string): Promise<Er
     );
   if (detail === "No active license on this account")
     return new Error(
-      "No Ultra purchase was found for this account. Sign in with the email used at checkout."
+      "No Freedom purchase was found for this account. Sign in with the email used at checkout."
     );
   if (status === 401 || /^(Unauthorized|Invalid JWT|JWT expired)$/i.test(detail))
     return new Error("Please sign in to your Filey account again, then try this action.");

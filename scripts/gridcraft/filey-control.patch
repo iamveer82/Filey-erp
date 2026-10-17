@@ -1,0 +1,349 @@
+Filey changes to GridCraft's web app (Office work > Sheets): the control bridge
+(apps/gridcraft-web: gridcraftControl/gridcraftOpen) that lets the Filey agent drive it with
+GridCraft's own control protocol, File > Print handed to Filey (fileyPrintPdf), and the app named
+"Sheets" where users see it (credit to GridCraft kept in About, no community link in the web build).
+Upstream: https://github.com/storytold/gridcraft commit f1894c6da64d4326022ae644c767581816a23c2c (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/gridcraft-web; trunk build --release
+Install: node scripts/fetch-office-apps.mjs --app gridcraft --from <gridcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/apps/gridcraft-web/index.html b/apps/gridcraft-web/index.html
+index 5fdd1ea..a7d300b 100644
+--- a/apps/gridcraft-web/index.html
++++ b/apps/gridcraft-web/index.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+-  <title>GridCraft</title>
++  <title>Sheets</title>
+   <link data-trunk rel="icon" href="../../assets/app-icon/gridcraft.ico" />
+   <link data-trunk rel="rust" data-bin="gridcraft-web" data-wasm-opt="z" data-weak-refs />
+   <style>
+@@ -15,6 +15,6 @@
+ </head>
+ <body>
+   <canvas id="gridcraft_canvas"></canvas>
+-  <div id="gridcraft_loading">Loading GridCraft&hellip;</div>
++  <div id="gridcraft_loading">Loading Sheets&hellip;</div>
+ </body>
+ </html>
+diff --git a/apps/gridcraft-web/src/web.rs b/apps/gridcraft-web/src/web.rs
+index c0fcb22..f994ff7 100644
+--- a/apps/gridcraft-web/src/web.rs
++++ b/apps/gridcraft-web/src/web.rs
+@@ -1,10 +1,16 @@
+ //! The browser shell: web `Services`, drag-and-drop, and the eframe web runner.
+ 
++use std::cell::RefCell;
++use std::rc::Rc;
++
+ use gridcraft_engine::Session;
+-use gridcraft_ui_egui::{Inbox, Services, SheetApp};
++use gridcraft_ui_egui::{ControlRequest, ControlResponse, Inbox, Services, SheetApp};
+ use wasm_bindgen::JsCast as _;
+ use wasm_bindgen::JsValue;
+ 
++/// Filey: control requests waiting for the app's reply, with the JS promise each one resolves.
++type Pending = Rc<RefCell<Vec<(std::sync::mpsc::Receiver<ControlResponse>, js_sys::Function)>>>;
++
+ const CANVAS_ID: &str = "gridcraft_canvas";
+ const LOADING_ID: &str = "gridcraft_loading";
+ 
+@@ -48,6 +54,12 @@ pub fn start() {
+                         bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
+                     }
+                     let mut app = SheetApp::new(session, services);
++                    let (control_tx, control_rx) = std::sync::mpsc::channel::<ControlRequest>();
++                    app.control_rx = Some(control_rx);
++                    let pending = Pending::default();
++                    if let Err(e) = expose_control(control_tx, pending.clone(), inbox.clone(), cc.egui_ctx.clone()) {
++                        log::error!("no Filey control bridge: {e}");
++                    }
+                     app.ui.system_theme = true;
+                     // Follow the browser's language, except a CJK one: the web build has no system
+                     // CJK fonts (none are bundled), so that interface would render as tofu.
+@@ -65,7 +77,7 @@ pub fn start() {
+                         }
+                         bridge.post_ready();
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge }))
++                    Ok(Box::new(WebShell { app, inbox, bridge: app_bridge, pending }))
+                 }),
+             )
+             .await;
+@@ -75,7 +87,7 @@ pub fn start() {
+         if let Some(el) = document.get_element_by_id(LOADING_ID) {
+             match result {
+                 Ok(()) => el.remove(),
+-                Err(e) => el.set_inner_html(&format!("<p>GridCraft failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
++                Err(e) => el.set_inner_html(&format!("<p>Sheets failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
+             }
+         }
+     });
+@@ -93,6 +105,7 @@ struct WebShell {
+     app: SheetApp,
+     inbox: Inbox,
+     bridge: Option<crate::host::Bridge>,
++    pending: Pending,
+ }
+ 
+ impl eframe::App for WebShell {
+@@ -113,6 +126,21 @@ impl eframe::App for WebShell {
+             });
+         }
+         self.app.logic(ctx);
++        // The app answered control requests during `logic` (screenshots a few frames later);
++        // hand each reply to its promise.
++        let mut pending = self.pending.borrow_mut();
++        pending.retain(|(rx, resolve)| {
++            let reply = match rx.try_recv() {
++                Ok(v) => v,
++                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++            };
++            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++            false
++        });
++        if !pending.is_empty() {
++            ctx.request_repaint();
++        }
+     }
+ 
+     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+@@ -127,6 +155,40 @@ impl eframe::App for WebShell {
+     }
+ }
+ 
++/// Filey: the page's control bridge, for a same-origin host (the Filey app embeds GridCraft in an
++/// iframe and its agent drives it).
++/// - `gridcraftControl(method, paramsJson)` runs one control-protocol request
++///   (docs/control-protocol.md: `engine.execute`, `engine.commands`, `document.inspect`,
++///   `sheet.read`, `cell.get`, `ui.*`) and resolves with the reply as JSON text, as the desktop
++///   app's control port answers.
++/// - `gridcraftOpen(name, bytes)` opens a file as if it had been dropped on the window.
++fn expose_control(tx: std::sync::mpsc::Sender<ControlRequest>, pending: Pending, inbox: Inbox, ctx: egui::Context) -> Result<(), String> {
++    let window = web_sys::window().ok_or("no window")?;
++    let control_ctx = ctx.clone();
++    let control = wasm_bindgen::closure::Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++        let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Null);
++        let mut next = Some(ControlRequest::new(method, params));
++        js_sys::Promise::new(&mut |resolve, _reject| {
++            let Some((req, rx)) = next.take() else { return };
++            if tx.send(req).is_err() {
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(r#"{"ok":false,"error":"Sheets is not running"}"#));
++                return;
++            }
++            pending.borrow_mut().push((rx, resolve));
++            control_ctx.request_repaint();
++        })
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("gridcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++    control.forget();
++    let open = wasm_bindgen::closure::Closure::<dyn FnMut(String, Vec<u8>)>::new(move |name: String, bytes: Vec<u8>| {
++        inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes));
++        ctx.request_repaint();
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("gridcraftOpen"), open.as_ref()).map_err(|e| format!("{e:?}"))?;
++    open.forget();
++    Ok(())
++}
++
+ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
+     let open_inbox = inbox.clone();
+     let picture_ctx = ctx.clone();
+@@ -222,6 +284,12 @@ fn copy_html(html: &str, text: &str) -> Result<(), String> {
+ fn print_pdf(bytes: &[u8]) -> Result<(), String> {
+     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+     let window = web_sys::window().ok_or("no window")?;
++    // Filey: a desktop webview can't print a PDF frame, so the host prints it instead.
++    if let Ok(host) = js_sys::Reflect::get(&window, &JsValue::from_str("fileyPrintPdf"))
++        && let Some(host) = host.dyn_ref::<js_sys::Function>()
++    {
++        return host.call1(&JsValue::NULL, &js_sys::Uint8Array::from(bytes)).map(|_| ()).map_err(js);
++    }
+     let document = window.document().ok_or("no document")?;
+ 
+     let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+diff --git a/crates/ui-egui/src/backstage.rs b/crates/ui-egui/src/backstage.rs
+index 922baab..5e8799a 100644
+--- a/crates/ui-egui/src/backstage.rs
++++ b/crates/ui-egui/src/backstage.rs
+@@ -888,13 +888,13 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
+         return match app.run(id, json!({"path": path})) {
+             Ok(_) => true,
+             Err(e) => {
+-                app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++                app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+                 false
+             }
+         };
+     }
+     if app.services.download.is_none() {
+-        app.message = Some(("GridCraft".into(), "Exporting needs a file picker, which this window doesn't have.".into()));
++        app.message = Some(("Sheets".into(), "Exporting needs a file picker, which this window doesn't have.".into()));
+         return false;
+     }
+     if fmt == "pdf" {
+@@ -902,7 +902,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
+         return match app.run(id, json!({})) {
+             Ok(_) => true,
+             Err(e) => {
+-                app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++                app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+                 false
+             }
+         };
+@@ -921,7 +921,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
+             }
+         }
+         Err(e) => {
+-            app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++            app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+             false
+         }
+     }
+diff --git a/crates/ui-egui/src/dialogs.rs b/crates/ui-egui/src/dialogs.rs
+index fb899c7..1e132ec 100644
+--- a/crates/ui-egui/src/dialogs.rs
++++ b/crates/ui-egui/src/dialogs.rs
+@@ -776,7 +776,7 @@ impl Dialog {
+             "pickList" => Dialog::custom("pickList", "Pick From List", json!({})),
+             "saveCopy" => Dialog::custom("saveCopy", "Save a Copy", json!({"format": p("format")})),
+             "saveChanges" => Dialog::custom("saveChanges", "Save Changes?", json!({"title": p("title")})),
+-            "start" => Dialog::custom("start", "GridCraft", json!({})),
++            "start" => Dialog::custom("start", "Sheets", json!({})),
+             "comments" => {
+                 app.grid.pane = None;
+                 app.run_or_alert("review.showComments", json!({"on": true}));
+@@ -1483,12 +1483,12 @@ fn about(ui: &mut egui::Ui, d: &mut Dialog) {
+         "Contributors" => crate::credits::contributors_ui(ui),
+         "Models" => crate::credits::models_ui(ui),
+         _ => {
+-            ui.heading("GridCraft");
++            ui.heading("Sheets");
+             ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+             ui.add_space(4.0);
+-            ui.label("A clean-room, open-source, Rust-native spreadsheet. Part of ArtCraft.");
++            ui.label("Sheets in Filey is GridCraft, a clean-room, open-source, Rust-native spreadsheet. Part of ArtCraft.");
+             ui.hyperlink_to("getartcraft.com/apps/gridcraft", "https://getartcraft.com/apps/gridcraft");
+-            ui.hyperlink_to("Join the ArtCraft Discord", "https://discord.gg/artcraft");
++
+         }
+     }
+ }
+diff --git a/crates/ui-egui/src/formula_bar.rs b/crates/ui-egui/src/formula_bar.rs
+index 7f1ad87..597de31 100644
+--- a/crates/ui-egui/src/formula_bar.rs
++++ b/crates/ui-egui/src/formula_bar.rs
+@@ -127,7 +127,7 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
+                     app.run("formulas.defineName", json!({"name": target}))
+                 };
+                 if let Err(e) = r {
+-                    app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++                    app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+                 }
+                 app.grid.ensure_visible = true;
+             }
+diff --git a/crates/ui-egui/src/grid.rs b/crates/ui-egui/src/grid.rs
+index 00e0c18..1fef517 100644
+--- a/crates/ui-egui/src/grid.rs
++++ b/crates/ui-egui/src/grid.rs
+@@ -2269,7 +2269,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
+                     // Ctrl (Cmd on macOS) swaps copying and extending, as in Excel.
+                     let mode = if mods.command { "alternate" } else { "series" };
+                     if let Err(e) = app.run("edit.autoFill", json!({"source": src.a1(), "target": t.a1(), "mode": mode})) {
+-                        app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++                        app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+                     }
+                 }
+             }
+@@ -2290,7 +2290,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
+             }
+             Drag::MoveCols { source, before: Some(before) } => {
+                 if let Err(e) = app.run("sheet.moveColumns", json!({"cols": source.a1(), "before": before})) {
+-                    app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
++                    app.message = Some(("Sheets".into(), crate::clean_error(&e)));
+                 }
+             }
+             _ => {}
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index f96cdac..ba4fa9b 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -538,7 +538,7 @@ impl SheetApp {
+         if e.contains("is not available right now") {
+             self.toast = Some((e, now_ms()));
+         } else {
+-            self.message = Some(("GridCraft".into(), clean_error(&e)));
++            self.message = Some(("Sheets".into(), clean_error(&e)));
+         }
+     }
+ 
+@@ -689,7 +689,7 @@ impl SheetApp {
+         for req in self.session.take_ui_requests() {
+             match req {
+                 UiRequest::Dialog(name, params) => self.open_dialog(&name, params),
+-                UiRequest::Message(m) => self.message = Some(("GridCraft".into(), m)),
++                UiRequest::Message(m) => self.message = Some(("Sheets".into(), m)),
+                 UiRequest::EditCell(text) => {
+                     let text = text.map(|text| {
+                         self.session
+@@ -766,7 +766,7 @@ impl SheetApp {
+             Ok(r) => self.after_open(Some(path), &r),
+             // A password-protected workbook: ask for the password; the dialog opens it.
+             Err(e) if e.contains(gridcraft_engine::io::PASSWORD_REQUIRED) => self.open_dialog("openPassword", json!({"path": path})),
+-            Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
++            Err(e) => self.message = Some(("Sheets".into(), clean_error(&e))),
+         }
+         self.after_engine();
+     }
+@@ -909,7 +909,7 @@ impl SheetApp {
+         let text = match self.session.active().map(|d| formula_locale::canonical(&text, ed.locale, &d.wb, ed.sheet, ed.cell)) {
+             Some(Ok(text)) => text,
+             Some(Err(error)) => {
+-                self.message = Some(("GridCraft".into(), error.to_string()));
++                self.message = Some(("Sheets".into(), error.to_string()));
+                 self.editor = Some(ed);
+                 self.session.mode = gridcraft_engine::Mode::Edit;
+                 return false;
+@@ -921,7 +921,7 @@ impl SheetApp {
+             && let Some((dv, msg)) = gridcraft_engine::cmd::data::check_validation(&d.wb, ed.sheet, ed.cell, &text)
+         {
+             if dv.error_style == gridcraft_engine::model::ErrorStyle::Stop {
+-                let title = if dv.error_title.is_empty() { "GridCraft".to_string() } else { dv.error_title.clone() };
++                let title = if dv.error_title.is_empty() { "Sheets".to_string() } else { dv.error_title.clone() };
+                 self.message = Some((title, msg));
+                 self.editor = Some(ed);
+                 self.session.mode = gridcraft_engine::Mode::Edit;
+@@ -943,7 +943,7 @@ impl SheetApp {
+                 true
+             }
+             Err(e) => {
+-                self.message = Some(("GridCraft".into(), clean_error(&e)));
++                self.message = Some(("Sheets".into(), clean_error(&e)));
+                 self.editor = Some(ed);
+                 self.session.mode = gridcraft_engine::Mode::Edit;
+                 false
+@@ -1075,7 +1075,7 @@ impl SheetApp {
+                     self.backstage = None;
+                     self.open_dialog("openPassword", json!({"name": name, "base64": b64}));
+                 }
+-                Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
++                Err(e) => self.message = Some(("Sheets".into(), clean_error(&e))),
+             }
+             self.after_engine();
+         }
+diff --git a/crates/ui-egui/src/ribbon.rs b/crates/ui-egui/src/ribbon.rs
+index 9c6d89e..e091edc 100644
+--- a/crates/ui-egui/src/ribbon.rs
++++ b/crates/ui-egui/src/ribbon.rs
+@@ -1439,7 +1439,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
+             // in dialogs.rs) — otherwise the prior cell/range selection is left in place, and
+             // Del right after inserting deletes the source data instead of the chart.
+             Ok(r) => app.selected_chart = r.get("chart").and_then(serde_json::Value::as_u64).and_then(|id| u32::try_from(id).ok()),
+-            Err(e) => app.message = Some(("GridCraft".into(), crate::clean_error(&e))),
++            Err(e) => app.message = Some(("Sheets".into(), crate::clean_error(&e))),
+         }
+     }
+     ui.vertical(|ui| {

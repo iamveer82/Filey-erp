@@ -1,18 +1,11 @@
-import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
 import { customerBalanceRows } from "./reportExports";
-import { ChartFrame } from "../../components/charts";
+import { AGING_RAMP } from "../../lib/accent";
 import { useMemo } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, num, cn } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
+import { BarSeriesChart } from "../../components/modernCharts";
 import {
   ReportsData,
   useTopCustomers,
@@ -105,34 +98,15 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
               {allZero(topCustomers, "total") ? (
                 <ChartEmpty hint="Your highest-spending customers rank here once invoices exist." />
               ) : (
-              <ChartFrame height={280}>
-                <BarChart
-                  data={topCustomers}
-                  layout="vertical"
-                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} horizontal={false} />
-                  <XAxis
-                    type="number"
-                    {...cs.axisProps}
-                    tickFormatter={(v) => chartAmount(Number(v))}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    {...cs.axisProps}
-                    width={88}
-                  />
-                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                  <Bar
-                    isAnimationActive={false}
-                    dataKey="total"
-                    name="Revenue"
-                    fill={c.accent}
-                    radius={[0, 4, 4, 0]}
-                   maxBarSize={32} />
-                </BarChart>
-              </ChartFrame>
+              <BarSeriesChart
+                data={topCustomers}
+                xKey="name"
+                height={280}
+                xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
+                valueFormatter={(v) => aed(v)}
+                barColors={c.series}
+                series={[{ key: "total", label: "Revenue", color: c.series[0] }]}
+              />
               )}
             </div>
           )}
@@ -150,30 +124,14 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
             {allZero(agingData, "value") ? (
               <ChartEmpty hint="Unpaid invoices land in these buckets as they age." />
             ) : (
-            <ChartFrame height={280}>
-              <BarChart
+            <BarSeriesChart
                 data={agingData}
-                margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis
-                  dataKey="name"
-                  {...cs.axisProps}
-                />
-                <YAxis
-                  {...cs.axisProps}
-                  tickFormatter={(v) => chartAmount(Number(v))}
-                />
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="value"
-                  name="Outstanding"
-                  fill={c.accent}
-                  radius={[6, 6, 0, 0]}
-                 maxBarSize={32} />
-              </BarChart>
-            </ChartFrame>
+                xKey="name"
+                height={280}
+                valueFormatter={(v) => aed(v)}
+                barColors={AGING_RAMP}
+                series={[{ key: "value", label: "Outstanding", color: AGING_RAMP[0] }]}
+              />
             )}
           </div>
         </div>

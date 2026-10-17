@@ -32,6 +32,9 @@ import {
 import BloubBot from "../components/BloubBot";
 import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
+import GenUiCard from "../components/GenUiCard";
+import GenUiView from "../components/GenUiView";
+import { cardFromArgs, viewFromArgs } from "../lib/genUi";
 import AgentRunProgress from "../components/AgentRunProgress";
 import AgentChatStarters from "../components/AgentChatStarters";
 import { VideoJobCard } from "../components/AgentVideoPanel";
@@ -358,6 +361,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   };
   /** Keep action receipts for continuation; the chat shows only a short status. */
   const [runProgress, setRunProgress] = useState<ChatTurn["run"]>();
+  const [liveUi, setLiveUi] = useState<ChatTurn["ui"]>();
   /** Lets the Stop button cut a run short. ponytail: on desktop the native AI
    *  proxy call itself isn't cancellable (see ai.ts), so an abort stops the
    *  agent between rounds rather than mid-request — which is what "stop doing
@@ -655,6 +659,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       return computerSessionId;
     };
     const trace: NonNullable<ChatTurn["run"]> = { plan: [], actions: [] };
+    const cards: NonNullable<ChatTurn["ui"]> = [];
+    setLiveUi(undefined);
     try {
       let images: AiImage[];
       try {
@@ -693,6 +699,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           } else if (ev.type === "plan") {
             trace.plan = ev.steps;
           } else if (ev.type === "tool_call" && ev.name !== "update_plan") {
+            if (ev.name === "show_ui" || ev.name === "show_view") {
+              const item = ev.name === "show_ui" ? cardFromArgs(ev.args) : viewFromArgs(ev.args);
+              if (typeof item !== "string") {
+                cards.push(item);
+                setLiveUi([...cards]);
+              }
+            }
             trace.actions = [
               ...trace.actions,
               { id: ev.id, name: ev.name, status: "running" as const },
@@ -735,6 +748,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
             text: reply,
             run: { ...trace },
             ...(made.length ? { files: made } : {}),
+            ...(cards.length ? { ui: cards } : {}),
           },
         ],
       }));
@@ -754,6 +768,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               text: partial ? `${partial}\n\n_Stopped._` : "_Stopped._",
               run: { ...trace, outcome: "stopped" },
               ...(stoppedFiles.length ? { files: stoppedFiles } : {}),
+              ...(cards.length ? { ui: cards } : {}),
             },
           ],
         }));
@@ -778,6 +793,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                   "The task stopped before finishing. Check any changes or files already created before trying again.",
                 run: { ...trace, outcome: "error" },
                 ...(failedFiles.length ? { files: failedFiles } : {}),
+                ...(cards.length ? { ui: cards } : {}),
               },
             ],
           }));
@@ -789,6 +805,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       streamedRef.current = "";
       setBusy(false);
       setStreaming("");
+      setLiveUi(undefined);
       setRunProgress(undefined);
     }
   };
@@ -1013,13 +1030,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           ) : (
             // Turns separate by spacing alone: ChatTurn carries no timestamp
             // (aiChats.ts stores none), so no time meta is invented here.
-            chat.turns.map((t, i) => <Bubble key={i} turn={t} active={active} />)
+            chat.turns.map((t, i) => <Bubble key={i} turn={t} active={active} onPrompt={text => void send(text)} />)
           )}
 
           {busy && (
             <>
               <Bubble
-                turn={{ role: "assistant", text: streaming || "", run: runProgress }}
+                turn={{ role: "assistant", text: streaming || "", run: runProgress, ui: liveUi }}
                 pending
                 active={active}
               />
@@ -1468,7 +1485,7 @@ function CopyButton({ text }: { text: string }) {
   </>;
 }
 
-function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: boolean; active?: boolean }) {
+function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pending?: boolean; active?: boolean; onPrompt?: (text: string) => void }) {
   const [fileError, setFileError] = useState("");
   if (turn.role === "user") {
     return (
@@ -1505,6 +1522,9 @@ function Bubble({ turn, pending, active = true }: { turn: ChatTurn; pending?: bo
               matching the thought trail the bot's face is wearing. */}
           {pending && active && <ThinkingDots className="text-muted-foreground" />}
         </div>
+        {turn.ui?.map((item, i) => item.kind === "view"
+          ? <GenUiView key={i} view={item} onPrompt={pending ? undefined : onPrompt} />
+          : <GenUiCard key={i} card={item} onPrompt={pending ? undefined : onPrompt} />)}
         <AgentRunProgress run={turn.run} pending={pending} />
         {!pending && needsCoin(turn.text) && <Link to="/settings?section=credits" className="btn-ghost mt-2"><CoinMark />Add Coin</Link>}
         {!pending && turn.text.trim() && (

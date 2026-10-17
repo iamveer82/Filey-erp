@@ -18,7 +18,7 @@ function environment() {
   const previous = Deno.env.get;
   const config = promotion();
   const values = new Map(Object.entries({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
-    FILEY_AI_DEEPSEEK_KEY: "fixture-model-key", DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "fixture-webhook-key",
+    FILEY_AI_GLM_KEY: "fixture-model-key", DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "fixture-webhook-key",
     DODO_AI_CREDIT_PRODUCT_ID: "pdt_custom", DODO_AI_CREDIT_PACKS: "[]", FILEY_AI_TEST_PROMOTION: JSON.stringify(config) }));
   Deno.env.get = (name) => values.get(name);
   return { config, values, restore: () => { Deno.env.get = previous; } };

@@ -301,7 +301,7 @@ export default function AiCreditsPanel() {
             description="Your balance, top-ups and spending history will appear here when your Filey account is connected."
           >
             <p className="text-sm text-muted-foreground">
-              Available on Basic, Pro and Ultra. You can also use your own model keys
+              Available on Basic, Pro and Freedom. You can also use your own model keys
               without adding money to Filey.
             </p>
             {/^Sign in|^Connect your Filey/.test(error) && (
@@ -319,7 +319,7 @@ export default function AiCreditsPanel() {
         <SettingsPanel>
           <SettingsSection
             title="Your balance"
-            description="Coin is Filey's AI credit. It is separate from your Basic, Pro or Ultra subscription."
+            description="Coin is Filey's AI credit. It is separate from your Basic, Pro or Freedom subscription."
           >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>

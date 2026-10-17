@@ -56,12 +56,13 @@ const toolModules: Record<string,string> = {
   find_suppliers:"suppliers",create_supplier:"suppliers",financial_summary:"accounting",
   list_invoices:"invoicing",get_invoice:"invoicing",list_pending_invoice_saves:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",retry_invoice_save:"invoicing",
   create_quote:"quoting",list_templates:"invoicing",create_order:"orders",
-  get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
+  set_invoice_preset:"invoicing",list_packing_lists:"packaging-list",create_packing_list:"packaging-list",list_declaration_letters:"declaration",create_declaration_letter:"declaration",list_quotes:"quoting",list_orders:"orders",
+  word:"letters",sheet:"letters",pdf:"letters",get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
   create_payment_receipt:"payment-receipts",list_payment_receipts:"payment-receipts",
   create_purchase_order:"purchase-orders",create_purchase_invoice_draft:"purchase-invoices",list_purchase_invoices:"purchase-invoices",
   list_bank_accounts:"bank-accounts",list_cheques:"cheques",record_cheque:"cheques",
   create_campaign:"marketing",list_campaigns:"marketing",list_email_templates:"email-templates",
-  list_my_files:"files",use_saved_file:"files",run_file_tool:"tools",list_file_tools:"tools",read_attached_document:"tools",
+  list_my_files:"files",use_saved_file:"files",run_file_tool:"letters",list_file_tools:"letters",read_attached_document:"files",
 };
 const domains: Record<string,string> = { sales:"invoicing",inventory:"inventory",accounting:"accounting",crm:"crm",people:"people",logistics:"delivery-challans",messaging:"integrations",social:"marketing",reminders:"follow-ups" };
 const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browser","workspace_browser","http_fetch"]);
@@ -71,7 +72,7 @@ const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browse
  *  by name rather than inferred — an unplaced tool is refused below, and
  *  module-access-coverage.test.ts fails the build instead of the user. */
 const MODULE_FREE = new Set([
-  "get_stats","current_time",
+  "get_stats","current_time","show_ui","show_view","card_templates","find_image",
   "remember","recall","search_conversations",
   "list_skills","use_skill","learn_skill","import_skill",
   "list_toolsets","use_toolset",
@@ -116,7 +117,10 @@ export async function requireToolModuleAccess(name: string, args: Record<string,
   let module = toolModules[name] || domains[setOf(name)];
   // Navigation keeps the destination's permission boundary; a section placed
   // under Tools in the sidebar still has its own module ID (for example letters).
-  if (name === "open_page") module = typeof args.page === "string" ? args.page.trim().toLowerCase().replace(/^\/+/, "") : "";
+  if (name === "open_page") {
+    module = typeof args.page === "string" ? args.page.trim().toLowerCase().replace(/^\/+/, "") : "";
+    if (module === "office") module = "letters"; // Office work kept the Letters module id
+  }
   if (name === "list_work_items" || name === "save_work_item") module = args.kind === "ticket" ? "helpdesk" : "projects";
   // Fail closed. An unmapped tool used to skip this gate entirely, so every
   // tool outside a domain toolset ran for members whose role denies the module.

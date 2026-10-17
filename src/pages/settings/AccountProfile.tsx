@@ -288,7 +288,7 @@ export default function AccountProfile() {
           <Link className="btn-primary" to="/settings?section=credits">Open Coin wallet</Link>
           <Link className="btn-ghost" to="/settings?section=billing">Manage plan & billing</Link>
         </div>
-        <p className="text-sm text-muted-foreground">Coin is optional on Basic, Pro and Ultra. Purchased plan benefits activate automatically on your account.</p>
+        <p className="text-sm text-muted-foreground">Coin is optional on Basic, Pro and Freedom. Purchased plan benefits activate automatically on your account.</p>
       </SettingsSection>
       <SettingsSection
         title="Profile Information"

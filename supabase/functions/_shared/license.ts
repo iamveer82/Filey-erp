@@ -132,6 +132,53 @@ export async function licenseDeactivate(
   return { body: { ok: true }, status: 200 };
 }
 
+/** Days a new account may use Filey Local before buying Freedom. */
+export const TRIAL_DAYS = 14;
+
+/** The Basic trial on this device, as a signed token the app verifies offline (like a
+ *  licence). The window is 14 days from the account's creation, and a device keeps the
+ *  window of the first account that trialled on it, so a new email on the same computer
+ *  doesn't restart it. The first trial also gets the one-time $1 Filey AI welcome credit.
+ *  A licence holder gets `licensed: true` instead; the app then activates Freedom. */
+export async function trialActivate(
+  supa: SupabaseClient,
+  user: { id: string; email?: string | null; created_at?: string; email_confirmed_at?: string | null },
+  fingerprint: string,
+  now = new Date()
+): Promise<LicenseResult> {
+  if (fingerprint.length < 8 || fingerprint.length > 256)
+    return { body: { error: "Invalid device fingerprint" }, status: 400 };
+  const owned = await licenseStatus(supa, user.id);
+  if (owned.status !== 200) return owned;
+  if (owned.body.licensed) return { body: { licensed: true }, status: 200 };
+  const created = Date.parse(user.created_at ?? "");
+  if (!Number.isFinite(created)) return { body: { error: "Trial unavailable. Try again." }, status: 503 };
+  const day = 86_400_000;
+  // First come, first served: the insert claims a new device for this account; an existing
+  // row (this account's or another's) is read back unchanged.
+  const { error: claimError } = await supa.from("app_trials")
+    .upsert({ fingerprint, user_id: user.id, started_at: now.toISOString() }, { onConflict: "fingerprint", ignoreDuplicates: true });
+  if (claimError) return { body: { error: "Trial unavailable. Try again." }, status: 503 };
+  const { data: device, error } = await supa.from("app_trials").select("user_id, started_at").eq("fingerprint", fingerprint).maybeSingle();
+  if (error || !device) return { body: { error: "Trial unavailable. Try again." }, status: 503 };
+  const deviceStart = device.user_id === user.id ? Infinity : Date.parse(device.started_at);
+  const ends = new Date(Math.min(created, deviceStart) + TRIAL_DAYS * day);
+  // $1 of Coins once per account, only for a verified email and only while the trial runs.
+  let welcome = false;
+  if (user.email_confirmed_at && ends > now) {
+    const { data } = await supa.rpc("filey_ai_welcome_credit", { p_user: user.id });
+    welcome = data === true;
+  }
+  const token = await signLicense({
+    email: user.email ?? "",
+    product: "filey-trial",
+    issued: now.toISOString().slice(0, 10),
+    device_id: fingerprint,
+    ends: ends.toISOString(),
+  });
+  return { body: { token, ends: ends.toISOString(), welcome_credit: welcome }, status: 200 };
+}
+
 /** Record a paid licence. Idempotent on the provider's payment id, because a
  *  webhook that is delivered twice must not hand out a second licence. */
 export async function grantLicense(

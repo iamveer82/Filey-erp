@@ -91,15 +91,15 @@ export const GUIDES: readonly FileyGuide[] = [
     "id": "letters",
     "category": "Documents & data",
     "title": "Create and issue a company letter",
-    "to": "/letters",
+    "to": "/office?tab=letters",
     "summary": "Write and format a letter on a document page, then keep its issued company copy.",
     "steps": [
-      "Open Tools → Letter and choose New letter. Enter a letter title above the page to identify it on your dashboard. Company details and saved images are copied from Company Details; review the issue date, internal number and layout in Page & company settings.",
+      "Open Office work, choose Letters and then New letter. Enter a letter title above the page to identify it on your dashboard. Company details and saved images are copied from Company Details; review the issue date, internal number and layout in Page & company settings.",
       "Click the blank letter canvas and type the recipient, address, subject, greeting, letter and sign-off directly on the page. Press Enter for a new paragraph or Shift + Enter for a line break. Select the words you want to format.",
       "Use the top editing ribbon for text styles, fonts, bold, italic, underline, color and alignment. Enter your own point size, line spacing or paragraph spacing; After controls the gap after the selected paragraph. Use Undo and Redo, lists or quotes as needed. On a phone, choose More tools to reveal the additional controls.",
       "Use Insert to add the issue date, authorization wording, a company signature or a company stamp at the cursor. Replace bracketed starter instructions with the correct details. Saved signature and stamp images appear when their switches are enabled; an empty slot provides space for manual signing or stamping.",
       "In Page & company settings, choose a layout and use the switches for company details, saved company letterhead, company logo, saved signature and company stamp. Show letter reference is optional; the internal number still identifies the saved letter. Choose Preview to check the final A4 page breaks and every printed page.",
-      "Choose Save draft while preparing the letter. After reviewing it, choose Issue letter to keep its content, formatting, layout and company asset references, then download PDF. Issuing does not send a message or confirm receipt. Find issued copies on the Letter dashboard and use Duplicate draft to revise one. Cloud workspaces require the Letter migration and access to the Letter module."
+      "Choose Save draft while preparing the letter. After reviewing it, choose Issue letter to keep its content, formatting, layout and company asset references, then download PDF. Issuing does not send a message or confirm receipt. Find issued copies under Office work → Letters and use Duplicate draft to revise one. Cloud workspaces require the Letter migration and access to the Letter module."
     ],
     "moduleId": "letters"
   },
@@ -194,14 +194,15 @@ export const GUIDES: readonly FileyGuide[] = [
   {
     "id": "local-editions",
     "category": "Getting started",
-    "title": "Free offline Filey and optional cloud upgrades",
-    "to": "/settings?section=datamode",
-    "summary": "Use the full local app free after one verified account setup.",
+    "title": "Free trial, Freedom and Pro",
+    "to": "/settings?section=billing",
+    "summary": "Try Filey free for 14 days, then keep it for life with Freedom or move to the cloud with Pro.",
     "steps": [
-      "All core local modules, documents and invoices are free with no monthly cap. Local PDFs have no Filey branding. Your records stay on this device until you choose to transfer them.",
-      "Create and verify a free Filey account online, then sign in on this device once. Later offline password access requires a remembered online password sign-in on this device.",
-      "Use the same account if you later choose Pro or Ultra for paid cloud benefits. Paid upgrades are optional; a paid license is not required to use the local app. Manage plans and purchased-license activations in Billing & Subscription and Devices.",
-      "Hosted cloud quotas and provider charges are separate. Free local software does not include unlimited hosted email, SMS, or external AI usage.",
+      "Basic is a 14-day free trial. Create your Filey account online once and use every app on this computer: invoicing, CRM, inventory, accounting, Word, Sheets and PDF. Your data stays on this computer. New accounts also get $1 of Filey AI to try the agent. The trial is counted per account and per computer.",
+      "Freedom is a one-time payment of 999 AED: Filey on your computer for life, with every app, regular updates and support, on 2 computers. Your data stays on your computer, and you can move Freedom to a new PC from Devices.",
+      "Pro is 36 AED a month: your workspace in the cloud, Filey on the web, sync across your devices, team members and backups. Cancel any time in Billing.",
+      "When the trial ends without a plan, everything you made stays here to view, print and export; creating and editing need Freedom or Pro. Buying unlocks the app straight away, with nothing to reinstall.",
+      "Filey AI is separate: buy Coin and use it on any plan, or use your own AI key.",
       "In the desktop app, open Data & Storage to create a full database-and-files backup. The separate summary export is not a complete restorable backup."
     ],
     "moduleId": "settings"
@@ -440,18 +441,18 @@ export const GUIDES: readonly FileyGuide[] = [
   {
     "id": "file-tools",
     "category": "Workflows",
-    "title": "Convert, unlock and prepare files",
-    "to": "/tools",
-    "summary": "Create a new file on your device, download it or continue with another tool.",
+    "title": "Edit PDFs and spreadsheets",
+    "to": "/office?tab=pdf",
+    "summary": "Open PDFs and spreadsheets in Office work, edit them, and keep the results in My Files.",
     "steps": [
-      "Open Tools and search for the task, such as merge, compress, OCR or Remove PDF Password. Each tool shows its accepted file types and whether it needs one file or several.",
-      "Choose files from your device or drag them into the tool. Review Tool settings before running. Tools with a page editor let you adjust the document first; your original file stays unchanged.",
-      "To remove a PDF password, choose Remove PDF Password, add the protected PDF and enter its current password. Run the tool to create a copy that opens without the password. An incorrect password leaves the original protected.",
-      "When Your files are ready appears, choose Download results for every output or Download beside an individual file. Results remain available while you stay in that tool.",
-      "To continue working, search the Next tool menu and choose Continue. Filey passes the generated files directly into the selected tool. Adjust again returns to the current tool's settings.",
-      "If a conversion fails, correct the settings or replace the input and run it again. Large or unsupported HEIC photos may need exporting as JPEG or PNG first. Cancel stops supported long-running conversions. OCR and table extraction need a clear source. Office conversions preserve supported content rather than the complete original layout. Redaction and sanitization create rasterized pages; keep the original if you also need selectable text."
+      "Open Office work and choose PDF or Sheets. Each app opens in its own tab, so several files can stay open. In the desktop app, choose a PDF, workbook or CSV in the Files list to open it in the right app.",
+      "In PDF, read, annotate, edit text and images, fill and sign forms, organize, rotate or delete pages, redact and export. In Sheets, enter values and formulas, format cells, sort, filter and add tables or charts.",
+      "Save keeps the file in My Files, where Office work lists it. Save As in PDF, or Save in Sheets, also asks where to write a copy on your computer.",
+      "File › Print shows the pages in Filey's print preview, then the system print dialog.",
+      "Ask Filey AI to do the work, for example \"open budget.xlsx and total column C\" or \"rotate page 2 of the contract and save it\". For whole-file jobs, such as merging, splitting, compressing, adding a watermark, converting or removing a PDF password, ask Filey AI and attach the files; the results come back in the chat and in My Files.",
+      "Word, Sheets and PDF run in the Filey desktop app. On the web they are not available yet."
     ],
-    "moduleId": "tools"
+    "moduleId": "letters"
   },
   {
     "id": "free-work-tools",
@@ -729,7 +730,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "to": "/settings?section=credits",
     "summary": "Use an optional account wallet for Filey AI without confusing it with a subscription.",
     "steps": [
-      "Open Coin wallet and refresh your available balance and Activity. Coin belongs to the signed-in account and is separate from the Basic, Pro or Ultra plan.",
+      "Open Coin wallet and refresh your available balance and Activity. Coin belongs to the signed-in account and is separate from the Basic, Pro or Freedom plan.",
       "Choose Quick recharge, a listed amount or an available custom amount. Review the Coin amount, service fee, any eligible discount and total before continuing to secure payment.",
       "Complete checkout only when the reviewed amount is correct, then return to Filey for payment verification. A redirect or a payment screen alone is not credited balance; confirm the successful top-up in the wallet and Activity.",
       "Choose Filey AI as the AI payment method. Requests deduct Coin for work performed; if credit is insufficient, add Coin before starting another paid request. No automatic recharge or subscription is created by a top-up.",
@@ -880,7 +881,7 @@ export const GUIDES: readonly FileyGuide[] = [
       "Sign in with the account that owns the purchased plan, then open Devices and wait for its status to load.",
       "Review the listed active devices and available slots. Use the shown device action to apply or restore eligible access on this installation.",
       "Remove an old device only when you intend to free its plan slot. This changes plan access; it does not transfer, back up or delete that device’s business records.",
-      "Confirm the updated device status. Basic already includes local storage and core offline tools; eligible Ultra device benefits and offline activation are separate."
+      "Confirm the updated device status. Freedom works on 2 computers; remove an old one here to use Freedom on a new PC."
     ],
     "moduleId": "settings"
   },

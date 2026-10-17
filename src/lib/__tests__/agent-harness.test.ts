@@ -251,7 +251,8 @@ it("searches and loads specialist tools while respecting access mode", async () 
   const bodies: { tools: { function: { name: string } }[] }[] = [];
   const run = async () => {
     let round = 0;
-    return collect(runAgentStream([{ role: "user", text: "Search payroll tools" }], { isOwner: true }, {
+    // No area word in the request, so nothing is preloaded and the search is what finds payroll.
+    return collect(runAgentStream([{ role: "user", text: "Find the right tool for this" }], { isOwner: true }, {
       cfg: { provider: "openai", baseUrl: "https://example.test", model: "test", apiKey: "test" },
       fetchFn: async (_url, init) => {
         bodies.push(JSON.parse(String(init.body)));

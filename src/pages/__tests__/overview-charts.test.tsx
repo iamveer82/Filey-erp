@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -32,9 +32,13 @@ vi.mock("../../lib/api", async (original) => {
 // Inspect the exact data sent to each chart; layout/rendering stays a browser check.
 vi.mock("recharts", () => ({
   ResponsiveContainer: ({ children }: { children: ReactNode }) => children,
-  BarChart: ({ data }: { data: unknown }) => <output data-testid="sales-series">{JSON.stringify(data)}</output>,
-  AreaChart: ({ data }: { data: unknown }) => <output data-testid="expense-series">{JSON.stringify(data)}</output>,
-  PieChart: () => null,
+  // Both Overview bar charts share one component; the series they draw tell them apart.
+  BarChart: ({ data, children }: { data: unknown; children: ReactNode }) => {
+    const keys = Children.toArray(children).flatMap(child => isValidElement<{ dataKey?: string }>(child) && child.props.dataKey ? [child.props.dataKey] : []);
+    return <output data-testid={keys.includes("expenses") ? "expense-series" : "sales-series"}>{JSON.stringify(data)}</output>;
+  },
+  AreaChart: () => null, PieChart: () => null, RadialBarChart: () => null, RadialBar: () => null, PolarAngleAxis: () => null, PolarRadiusAxis: () => null,
+  Label: () => null, Sector: () => null,
   Bar: () => null, Area: () => null, XAxis: () => null, YAxis: () => null,
   Tooltip: () => null, CartesianGrid: () => null, Pie: () => null, Cell: () => null, Legend: () => null,
 }));
@@ -104,12 +108,14 @@ it("connects normalized invoice, receipt and expense records to both charts and 
   expect(series("expense-series")).toEqual(initial);
   expect(screen.getByRole("button", { name: /Invoiced sales/ })).toHaveTextContent(aed(600).replace(/\s/g, " "));
   expect(screen.getByRole("button", { name: /Outstanding/ })).toHaveTextContent(aed(500).replace(/\s/g, " "));
+  // Longer ranges are drawn a week per bar, so bars stay readable; totals carry over.
   fireEvent.click(screen.getByRole("button", { name: "30d" }));
-  expect(series("sales-series")).toHaveLength(30);
-  expect(series("expense-series")).toHaveLength(30);
+  expect(series("sales-series")).toHaveLength(5);
+  expect(series("expense-series")).toHaveLength(5);
+  expect(series("sales-series").reduce((n, row) => n + row.invoiced, 0)).toBe(600);
   fireEvent.click(screen.getByRole("button", { name: "90d" }));
-  expect(series("sales-series")).toHaveLength(90);
-  expect(series("expense-series")).toHaveLength(90);
+  expect(series("sales-series")).toHaveLength(13);
+  expect(series("expense-series")).toHaveLength(13);
   expect(screen.getByRole("button", { name: "90d" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -166,7 +172,8 @@ it("charts dated sales-invoice payments using saved FX, independently of receipt
   expect(series("expense-series")).toEqual(expected);
   const normalized = invoicePaymentsInAed([payment], sales, { AED: 1, USD: 4 });
   const { result } = renderHook(() => useTrend(sales, [], normalized));
-  expect(result.current).toEqual(expected);
+  // A week with activity keeps the 7-day window the Overview shows.
+  expect(result.current).toEqual({ trend: expected.map(({ span: _span, ...row }: typeof expected[number] & { span?: string }) => row), days: 7 });
   // A receipt may describe this same payment, but stays in its own series.
   vi.mocked(receipts.list).mockResolvedValue([receipt({ currency: "AED", amount: 252, payment_date: "2026-09-05" })]);
   await act(async () => { await live.reload(); });

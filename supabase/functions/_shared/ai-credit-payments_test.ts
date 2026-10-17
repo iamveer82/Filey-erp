@@ -38,7 +38,7 @@ const order = {
   service_fee_cents: 50,
 };
 Deno.test("custom checkout fixes the total and records only purchased credit, rejecting invalid choices before payment", async () => {
-  const names = ["FILEY_AI_DEEPSEEK_KEY", "DODO_AI_CREDIT_PRODUCT_ID", "DODO_AI_CREDIT_PACKS"];
+  const names = ["FILEY_AI_GLM_KEY", "DODO_AI_CREDIT_PRODUCT_ID", "DODO_AI_CREDIT_PACKS"];
   const { values: env, restore } = fixtureEnvironment();
   env.set(names[0], "fixture-not-a-real-key");
   env.set(names[1], "pdt_custom");
@@ -150,7 +150,7 @@ Deno.test("custom credit settlement uses the saved order and rejects an underpai
 });
 
 Deno.test("wallet advertises custom amounts only with configured AI and payments", async () => {
-  const names = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "FILEY_AI_DEEPSEEK_KEY",
+  const names = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "FILEY_AI_GLM_KEY",
     "HF_API_KEY_ID", "HF_API_KEY_SECRET", "DODO_AI_CREDIT_PRODUCT_ID", "DODO_PAYMENTS_API_KEY", "DODO_AI_CREDIT_PACKS"];
   const { values: env, restore } = fixtureEnvironment();
   env.set(names[0], "https://fixture.supabase.co");
@@ -274,7 +274,7 @@ Deno.test(
   "checkout grants nothing and checks the configured product price before taking payment",
   async () => {
     const names = [
-      "FILEY_AI_DEEPSEEK_KEY",
+      "FILEY_AI_GLM_KEY",
       "DODO_AI_CREDIT_PACKS",
       "HF_API_KEY_ID",
       "HF_API_KEY_SECRET",
@@ -353,7 +353,7 @@ Deno.test(
 
 Deno.test("missing or blank webhook verification rejects fixed and custom checkout before all side effects", async () => {
   const { values: env, restore } = fixtureEnvironment();
-  env.set("FILEY_AI_DEEPSEEK_KEY", "fixture-model-key");
+  env.set("FILEY_AI_GLM_KEY", "fixture-model-key");
   env.set("DODO_PAYMENTS_API_KEY", "fixture-payment-key");
   env.set("DODO_AI_CREDIT_PRODUCT_ID", "pdt_custom");
   env.set("DODO_AI_CREDIT_PACKS", '[{"id":"pdt_fixture","cents":500}]');

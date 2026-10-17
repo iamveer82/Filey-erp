@@ -54,13 +54,26 @@ export function useAccent(): { accent: AccentKey; setAccent: (a: AccentKey) => v
   return { accent: snap.split(":")[1] as AccentKey, setAccent };
 }
 
-/** Theme-aware recharts palette (reference useChartColors, verbatim). */
+/** Aging buckets in order (current → oldest): green while fresh, red when long overdue. */
+export const AGING_RAMP = ["#10b981", "#84cc16", "#f59e0b", "#f97316", "#f43f5e", "#be123c"];
+
+/** Vivid categorical colours for every chart (Filey AI cards use the same set). */
+const SERIES_LIGHT = ["#6366f1", "#10b981", "#ec4899", "#06b6d4", "#f97316", "#8b5cf6", "#84cc16", "#f59e0b"];
+const SERIES_DARK = ["#818cf8", "#34d399", "#f472b6", "#22d3ee", "#fb923c", "#a78bfa", "#a3e635", "#fbbf24"];
+
+/** Theme-aware recharts palette. `series` leads with the user's accent, then
+ *  vivid colours, so categories, slices and series each get their own. */
 export function useChartColors() {
   const snap = useSyncExternalStore(subscribe, snapshot);
   const [mode, accent] = snap.split(":");
   const a = accentPalette[accent as AccentKey] || accentPalette.amber;
+  const vivid = mode === "dark" ? SERIES_DARK : SERIES_LIGHT;
+  const series = [a.hex, ...vivid.filter(c => c.toLowerCase() !== a.hex.toLowerCase())];
   if (mode === "dark") {
     return {
+      series,
+      good: "#34d399",
+      bad: "#fb7185",
       primary: "#f4f4f5",
       secondary: a.hex,
       accent: a.hex,
@@ -76,6 +89,9 @@ export function useChartColors() {
     };
   }
   return {
+    series,
+    good: "#10b981",
+    bad: "#f43f5e",
     primary: "#18181b",
     secondary: a.hex,
     accent: a.hex,

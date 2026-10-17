@@ -1,5 +1,5 @@
 import { FileySpinner as Loader2 } from "../components/FileySpinner";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useId, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -45,7 +45,7 @@ import {
 import { isConfigured } from "../lib/supabase";
 import { isLocalMode } from "../lib/dataMode";
 import { isNativeApp } from "../lib/nativePlatform";
-import { saveBytes } from "../lib/localPaths";
+import { hasTauri, saveBytes } from "../lib/localPaths";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import {
@@ -76,8 +76,16 @@ const toolLabel = (tool: string | null) =>
   FILE_FOLDERS.find((f) => f.key === tool)?.label ?? null;
 const toolRoute = (tool: string | null) =>
   FILE_FOLDERS.find((f) => f.key === tool)?.route;
+// Word (desktop) edits these; other types open the preview.
+// Word documents, spreadsheets and PDFs open in Office work's apps (desktop).
+const OFFICE_FILES = /\.(docx|odt|rtf|xlsx|xlsm|xlsb|xls|ods|csv|tsv|pdf)$/i;
+// Other PDFs (invoices, tool outputs) keep the quick preview; PDF's own files open in it.
+const officeDoc = (f: SavedFile) => hasTauri && OFFICE_FILES.test(f.name) && (!/\.pdf$/i.test(f.name) || f.tool === "pdf");
+// Files Office work's apps made (Slides joins when it ships).
+const OFFICE_TOOLS = new Set(["word", "sheet", "pdf"]);
 
-export default function MyFiles() {
+/** `embedded`: just the Office apps' files (no stats or folders), for Office work. */
+export default function MyFiles({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const {
     files,
@@ -106,6 +114,7 @@ export default function MyFiles() {
   const [drag, setDrag] = useState<{ type: string; name: string } | null>(null);
   const [q, setQ] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadId = useId(); // Office work keeps its own copy of this list mounted
 
   const foldersById = useMemo(() => {
     const m = new Map<string, UserFolder>();
@@ -115,14 +124,14 @@ export default function MyFiles() {
 
   // Folders directly inside the current folder.
   const subfolders = useMemo(
-    () => folders.filter((f) => f.parentId === cwd),
-    [folders, cwd]
+    () => (embedded ? [] : folders.filter((f) => f.parentId === cwd)),
+    [folders, cwd, embedded]
   );
 
   // Files in the current folder, before the type filter.
   const folderFilesAll = useMemo(
-    () => files.filter((f) => f.folderId === cwd),
-    [files, cwd]
+    () => (embedded ? files.filter((f) => OFFICE_TOOLS.has(f.tool ?? "")) : files.filter((f) => f.folderId === cwd)),
+    [files, cwd, embedded]
   );
   // Tool keys present among the current folder's files (for the filter chips).
   const toolsPresent = useMemo(() => {
@@ -213,7 +222,8 @@ export default function MyFiles() {
     if (!inputFiles?.length) return;
     setUploading(true);
     try {
-      for (const file of Array.from(inputFiles)) await upload(file, undefined, cwd);
+      const { officeAppFor } = await import("../lib/officeWord");
+      for (const file of Array.from(inputFiles)) await upload(file, embedded ? officeAppFor(file.name) ?? "word" : undefined, cwd);
       toast.success(
         `${inputFiles.length} file${inputFiles.length > 1 ? "s" : ""} uploaded.`
       );
@@ -388,9 +398,46 @@ export default function MyFiles() {
     }
   };
 
+  // Offline there is no link to give, so the file itself goes: paired WhatsApp
+  // on the desktop, the share sheet on a phone or browser.
+  const shareLocal = async (f: SavedFile) => {
+    const bytes = await fileBytes(f);
+    if (!bytes) throw new Error("Could not read this file.");
+    if (isNativeApp() || hasTauri) {
+      const { deliverFile } = await import("../lib/agentFiles");
+      if (isNativeApp()) {
+        const saved = await deliverFile({ name: f.name, bytes });
+        if (!saved.path) throw new Error("Could not prepare the file for sharing.");
+        const { shareNativeFile } = await import("../lib/nativePlatform");
+        return shareNativeFile(saved.path, f.name);
+      }
+      const [{ bridgeState, sendWaFile }, { internationalPhone }] = await Promise.all([import("../lib/waBridge"), import("../lib/documentMessage")]);
+      if ((await bridgeState()).state !== "connected")
+        throw new Error("Pair WhatsApp in Integrations → WhatsApp (QR) to share files offline, or use Download.");
+      const phone = await prompt({ title: `Send “${f.name}” on WhatsApp`, label: "Phone number with country code", defaultValue: "", confirmLabel: "Send" });
+      if (!phone?.trim()) return;
+      const to = internationalPhone(phone);
+      const saved = await deliverFile({ name: f.name, bytes });
+      if (!saved.path) throw new Error("Could not prepare the file. Check the export folder in Settings.");
+      await sendWaFile(`${to.slice(1)}@s.whatsapp.net`, { path: saved.path, filename: f.name, mimetype: f.mime });
+      toast.success(`WhatsApp accepted “${f.name}”.`);
+      return;
+    }
+    const file = new File([bytes as BlobPart], f.name, { type: f.mime });
+    if (!navigator.canShare?.({ files: [file] })) throw new Error("Sharing isn't available in this browser - use Download instead.");
+    await navigator.share({ files: [file], title: f.name });
+  };
+
   const share = async (f: SavedFile) => {
     if (isLocalMode()) {
-      toast.error("Share links need Cloud mode - use Download instead.");
+      setBusyId(f.id);
+      try {
+        await shareLocal(f);
+      } catch (e) {
+        if ((e as Error)?.name !== "AbortError") toast.error(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusyId(null);
+      }
       return;
     }
     setBusyId(f.id);
@@ -415,14 +462,39 @@ export default function MyFiles() {
     navigate(route);
   };
 
+  const openInOffice = async (f: SavedFile) => {
+    setBusyId(f.id);
+    try {
+      const bytes = await fileBytes(f);
+      if (!bytes) throw new Error("Could not read this file.");
+      const { openInOffice, officeAppFor } = await import("../lib/officeWord");
+      await openInOffice(officeAppFor(f.name)!, f.name, bytes);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const header = (action?: React.ReactNode) =>
+    embedded ? (
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-[15px] font-medium text-foreground">Files</h2>
+        {action}
+      </div>
+    ) : (
+      <PageHeader
+        title="My Files"
+        subtitle="Organise documents into folders: drag, drop, and arrange your way"
+        action={action}
+      />
+    );
+
   /* ---------------- gates ---------------- */
   if (!isConfigured || !user) {
     return (
       <div className="">
-        <PageHeader
-          title="My Files"
-          subtitle="Organise documents into folders: drag, drop, and arrange your way"
-        />
+        {header()}
         <div className="rounded-xl border border-border bg-card p-5 text-[13px] text-muted-foreground">
           Sign in to save and access your files across devices.
         </div>
@@ -433,10 +505,7 @@ export default function MyFiles() {
   if (loading) {
     return (
       <div className="">
-        <PageHeader
-          title="My Files"
-          subtitle="Organise documents into folders: drag, drop, and arrange your way"
-        />
+        {header()}
         <div className="grid h-60 place-items-center">
           <Loader2 size={22} className="animate-spin text-muted-foreground" />
         </div>
@@ -447,10 +516,7 @@ export default function MyFiles() {
   if (error) {
     return (
       <div>
-        <PageHeader
-          title="My Files"
-          subtitle="Organise documents into folders: drag, drop, and arrange your way"
-        />
+        {header()}
         <ErrorBanner message={error} />
         <button className="btn-secondary mt-3" onClick={() => void refresh()}>Retry</button>
       </div>
@@ -472,7 +538,7 @@ export default function MyFiles() {
     );
   }
 
-  const empty = !folders.length && !files.length;
+  const empty = embedded ? !folderFilesAll.length : !files.length && !folders.length;
 
   return (
     <DndContext
@@ -482,74 +548,79 @@ export default function MyFiles() {
       onDragEnd={onDragEnd}
     >
       <div className="">
-        <PageHeader
-          title="My Files"
-          subtitle="Organise documents into folders: drag, drop, and arrange your way"
-          action={
-            <div className="flex items-center gap-2">
+        {header(
+          <div className="flex items-center gap-2">
+            {!embedded && (
               <button className="btn-ghost" onClick={newFolder}>
                 <FolderPlus size={14} /> New folder
               </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                id="file-upload"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  doUpload(e.target.files);
-                  if (fileInputRef.current) fileInputRef.current.value = "";
-                }}
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              id={uploadId}
+              multiple
+              accept={embedded ? ".docx,.odt,.rtf,.md,.txt,.html,.xlsx,.xlsm,.xls,.ods,.csv,.tsv,.pdf" : undefined}
+              className="hidden"
+              onChange={(e) => {
+                doUpload(e.target.files);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
+            <label
+              htmlFor={uploadId}
+              className="btn-primary cursor-pointer inline-flex items-center gap-2"
+            >
+              {uploading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <UploadCloud size={14} />
+              )}
+              Upload
+            </label>
+          </div>
+        )}
+
+        {!embedded && (
+          <>
+            {/* KPI cards — same quiet strip as the other sections */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
+              <MetricCard
+                label="Files"
+                value={num(files.length)}
+                change="Across all folders"
+                changeTone="up"
               />
-              <label
-                htmlFor="file-upload"
-                className="btn-primary cursor-pointer inline-flex items-center gap-2"
-              >
-                {uploading ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <UploadCloud size={14} />
-                )}
-                Upload
-              </label>
+              <MetricCard
+                label="Storage used"
+                value={fmtSize(files.reduce((s, f) => s + (Number(f.size) || 0), 0))}
+                change="Documents, PDFs & images"
+                changeTone="up"
+              />
+              <MetricCard
+                label="Folders"
+                value={num(folders.length)}
+                change={folders.length > 0 ? "Organised" : "None yet"}
+                changeTone="up"
+              />
             </div>
-          }
-        />
 
-        {/* KPI cards — same quiet strip as the other sections */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-4">
-          <MetricCard
-            label="Files"
-            value={num(files.length)}
-            change="Across all folders"
-            changeTone="up"
-          />
-          <MetricCard
-            label="Storage used"
-            value={fmtSize(files.reduce((s, f) => s + (Number(f.size) || 0), 0))}
-            change="Documents, PDFs & images"
-            changeTone="up"
-          />
-          <MetricCard
-            label="Folders"
-            value={num(folders.length)}
-            change={folders.length > 0 ? "Organised" : "None yet"}
-            changeTone="up"
-          />
-        </div>
-
-        {/* Breadcrumbs (also drop targets to move items up the tree) */}
-        <Breadcrumbs trail={trail} onNavigate={setCwd} />
+            {/* Breadcrumbs (also drop targets to move items up the tree) */}
+            <Breadcrumbs trail={trail} onNavigate={setCwd} />
+          </>
+        )}
 
         {empty ? (
           <div className="rounded-xl border border-border bg-card">
             <EmptyState
               icon={FolderOpen}
-              title="No saved files yet"
-              description="Generate a document - a copy is filed here automatically - or create a folder to organise things your way."
+              title={embedded ? "No documents yet" : "No saved files yet"}
+              description={embedded
+                ? "Open Word and save a document - every save is kept here. Or upload one to edit."
+                : "Generate a document - a copy is filed here automatically - or create a folder to organise things your way."}
               action={
                 <label
-                  htmlFor="file-upload"
+                  htmlFor={uploadId}
                   className="btn-primary cursor-pointer inline-flex items-center gap-2"
                 >
                   <UploadCloud size={14} /> Upload files
@@ -567,7 +638,7 @@ export default function MyFiles() {
                 placeholder="Search files"
                 className="w-[280px]"
               />
-              {toolsPresent.length > 0 && (
+              {toolsPresent.length > (embedded ? 1 : 0) && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   <FilterChip
                     active={toolFilter === "all"}
@@ -587,7 +658,7 @@ export default function MyFiles() {
                 </div>
               )}
               <div className="ml-auto text-[12px] text-muted-foreground">
-                {visibleFiles.length} files
+                {visibleFiles.length} {visibleFiles.length === 1 ? "file" : "files"}
               </div>
             </div>
 
@@ -621,12 +692,13 @@ export default function MyFiles() {
                     key={f.id}
                     file={f}
                     busy={busyId === f.id}
-                    onOpen={() => setPreview(f)}
+                    onOpen={() => (officeDoc(f) ? void openInOffice(f) : setPreview(f))}
                     onDownload={() => download(f)}
                     onRename={() => doRename(f)}
                     onShare={() => share(f)}
                     onDelete={() => del(f)}
                     onMove={() => setMoveFor(f)}
+                    draggable={!embedded}
                   />
                 ))}
               </div>
@@ -812,6 +884,7 @@ function FileRow({
   onShare,
   onDelete,
   onMove,
+  draggable = true,
 }: {
   file: SavedFile;
   busy: boolean;
@@ -821,6 +894,7 @@ function FileRow({
   onShare: () => void;
   onDelete: () => void;
   onMove: () => void;
+  draggable?: boolean;
 }) {
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
     id: `file:${file.id}`,
@@ -835,14 +909,16 @@ function FileRow({
         isDragging && "opacity-40"
       )}
     >
-      <span
-        {...attributes}
-        {...listeners}
-        className="cursor-grab text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
-        title="Drag to a folder"
-      >
-        <GripVertical size={14} />
-      </span>
+      {draggable && (
+        <span
+          {...attributes}
+          {...listeners}
+          className="cursor-grab text-muted-foreground/40 hover:text-muted-foreground active:cursor-grabbing"
+          title="Drag to a folder"
+        >
+          <GripVertical size={14} />
+        </span>
+      )}
       <button
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
@@ -873,7 +949,7 @@ function FileRow({
         <RowAction title="Rename" onClick={onRename}>
           <Pencil size={14} />
         </RowAction>
-        <RowAction title="Share link" onClick={onShare}>
+        <RowAction title="Share" onClick={onShare}>
           <Share2 size={14} />
         </RowAction>
         <RowAction title="Delete" tone="danger" onClick={onDelete}>

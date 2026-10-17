@@ -1188,3 +1188,13 @@
 
 /* Date shortcuts share one contained calendar surface. */
 .filey-date-popover > [role="group"] { max-width: none !important; border: 0 !important; }
+
+/* Office work › Print (officeWord.printPdf): while its sheet of page images is
+   attached, it is the only thing that prints. */
+#filey-print-sheet { display: none; }
+@media print {
+  body:has(> #filey-print-sheet) > :not(#filey-print-sheet) { display: none !important; }
+  #filey-print-sheet { display: block; }
+  #filey-print-sheet, #filey-print-sheet * { visibility: visible !important; }
+  #filey-print-sheet img { display: block; width: 100%; break-after: page; }
+}

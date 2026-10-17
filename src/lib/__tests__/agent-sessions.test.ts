@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from "vitest";
 import { setCacheOrg } from "../api";
-import { newChat, saveChats } from "../aiChats";
+import { loadChats, newChat, saveChats } from "../aiChats";
 import { getPersona, setPersona } from "../ai";
 import { waLogAdd } from "../waLog";
 import { searchConversations, whatsappContext } from "../agentSessions";
@@ -22,6 +22,19 @@ it("recovers channel context after restart, resets it on /new, and preserves sea
   setCacheOrg("session-fixture", "bob");
   expect(searchConversations("brochure")).toEqual([]);
   expect(whatsappContext("971500000001")).toEqual([]);
+});
+
+it("keeps interactive cards and widgets in chat history", () => {
+  const ui = [
+    { title: "Break-even", html: "<div id=x></div>", jsFunctions: "function go(){}", jsExpressions: ["go()"] },
+    { kind: "view" as const, view: "bar" as const, title: "Sales", labels: ["Jan"], series: [{ name: "AED", values: [5] }] },
+    { kind: "view", view: "nope" },
+  ];
+  saveChats([{ ...newChat(), turns: [{ role: "user", text: "chart it" }, { role: "assistant", text: "Here", ui: ui as never }] }]);
+  const saved = loadChats()[0].turns[1].ui;
+  expect(saved).toHaveLength(2);
+  expect(saved?.[0]).toMatchObject({ title: "Break-even", jsExpressions: ["go()"] });
+  expect(saved?.[1]).toMatchObject({ kind: "view", view: "bar", series: [{ name: "AED", values: [5] }] });
 });
 
 it("keeps personal settings per account while preserving them between local and cloud", () => {

@@ -167,7 +167,7 @@ export default function BillingPanel() {
           .then((state) => {
             if (state?.valid) {
               setOwnsUltra(true);
-              toast.success("Ultra is active on this device.");
+              toast.success("Freedom is active on this device.");
             } else
               toast.info("Payment is still processing. Reopen Billing to check again.");
           })
@@ -208,7 +208,7 @@ export default function BillingPanel() {
     }
   };
 
-  // The org's plan says Basic for someone who bought Ultra: the licence lives
+  // The org's plan says Basic for someone who bought Freedom: the licence lives
   // on the device, not the org. Show what they actually have.
   const current =
     sub.plan === "free" && ownsUltra
@@ -237,7 +237,7 @@ export default function BillingPanel() {
         terms={
           purchase.id === "cloud"
             ? "Renews every month. Cancel any time in Billing."
-            : "Pay once for Ultra. Your account unlocks automatically after payment is confirmed."
+            : "Pay once for Freedom. Your account unlocks automatically after payment is confirmed."
         }
         onBack={() => {
           const next = new URLSearchParams(params);
@@ -269,7 +269,7 @@ export default function BillingPanel() {
       <SettingsPanel>
         <SettingsSection
           title="Current plan"
-          description="The full local app is free. Optional paid cloud benefits activate after payment is confirmed."
+          description="Try Filey free for 14 days. Freedom keeps it on your computer for life; Pro keeps your workspace in the cloud. Plans activate after payment is confirmed."
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
@@ -319,7 +319,7 @@ export default function BillingPanel() {
 
         <SettingsSection
           title="Usage"
-          description={local ? "Your records on this device. Local invoicing is free and unlimited." : "What this workspace holds, and your cloud invoice allowance this month."}
+          description={local ? "Your records on this device. Local invoicing is unlimited." : "What this workspace holds, and your cloud invoice allowance this month."}
         >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-medium tabular-nums text-foreground">

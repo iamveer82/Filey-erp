@@ -42,6 +42,9 @@ Deno.test("a storefront purchase with no metadata is recognised by product and e
   assertEquals(buyerOf(storefront, "pdt_pro", "cloud_subscription"), null);
   const sub = { product_id: "pdt_pro", customer: { email: "a@b.co" } };
   assertEquals(buyerOf(sub, "pdt_pro", "cloud_subscription"), { email: "a@b.co" });
+  // A retired product still renews and expires its old subscriptions.
+  assertEquals(buyerOf(sub, ["pdt_new", "pdt_pro"], "cloud_subscription"), { email: "a@b.co" });
+  assertEquals(buyerOf(sub, ["pdt_new"], "cloud_subscription"), null);
 });
 
 Deno.test("checkout metadata must agree with the purchased product", () => {
@@ -53,4 +56,5 @@ Deno.test("checkout metadata must agree with the purchased product", () => {
   assertEquals(buyerOf(cloudFirstCharge, "pdt_pro", "freedom_license"), null);
   // An unset product id must never match a payload that also lacks one.
   assertEquals(buyerOf({ customer: { email: "a@b.co" } }, "", "freedom_license"), null);
+  assertEquals(buyerOf({ customer: { email: "a@b.co" } }, [], "freedom_license"), null);
 });

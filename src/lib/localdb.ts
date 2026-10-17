@@ -21,6 +21,22 @@ const hasTauri =
 type Row = Record<string, any>;
 type Result = { data: any; error: any };
 
+/** Set when the Basic trial has ended: the message every blocked write returns. */
+let writeLock: string | null = null;
+const LOCK_EXEMPT = new Set(["app_settings", "document_number_reservations"]);
+export function setLocalWriteLock(message: string | null): void {
+  writeLock = message;
+}
+/** The refusal for a write to `coll` (on the device or in the cloud), or null when allowed. */
+export function writeLockFor(coll: string): string | null {
+  return writeLock && !LOCK_EXEMPT.has(coll) ? writeLock : null;
+}
+/** Refuse a write: open the way out where the save failed, not three screens away. */
+export function refuseLockedWrite(message: string): Result {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("filey:upgrade", { detail: { reason: "trial" } }));
+  return { data: null, error: { message, code: "FILEY_PLAN" } };
+}
+
 // All device writes, including pull-sync replacements, share one queue.
 let writeQueue: Promise<unknown> = Promise.resolve();
 function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
@@ -721,6 +737,10 @@ class LocalBuilder implements PromiseLike<Result> {
   }
 
   private async exec(store = this.store): Promise<Result> {
+    // An ended trial reads everything but writes nothing new (license.ts refreshAccess). App
+    // preferences stay editable; business records wait for Freedom.
+    const locked = this.op === "select" ? null : writeLockFor(this.coll);
+    if (locked) return refuseLockedWrite(locked);
     try {
       // Internal rows stay private. Writes replace the array/affected row, and
       // query results and payloads have separate mutable container ownership.

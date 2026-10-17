@@ -1,19 +1,5 @@
-import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../../components/ui/chart";
-import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
-import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, num, cn } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useTrend, useStatusPie } from "./useReportsData";
@@ -21,15 +7,17 @@ import ChartEmpty, { allZero } from "../../components/ChartEmpty";
 
 import { monthlyInvoiceSales } from "../overviewData";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../../components/ui/card";
-import type { ChartConfig } from "../../components/ui/chart";
+import { BarSeriesChart, DonutChart } from "../../components/modernCharts";
+import { bucketTrend } from "../overviewData";
 
 const CLOSED = ["paid", "draft", "cancelled"];
 
 export default function SalesTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
   const c = cs.c;
-  const trend = useTrend(data.invoices, data.receiptList, data.invoicePayments);
-  const pie = useStatusPie(data.invoices, c.accent, c.primary, c.tertiary);
+  const { trend, days } = useTrend(data.invoices, data.receiptList, data.invoicePayments);
+  const bars = useMemo(() => bucketTrend(trend), [trend]);
+  const pie = useStatusPie(data.invoices, c);
 
   const totalInvoiced = useMemo(
     () =>
@@ -62,10 +50,6 @@ export default function SalesTab({ data }: { data: ReportsData }) {
   }, [data.invoices]);
 
   const monthlySales = useMemo(() => monthlyInvoiceSales(data.invoices), [data.invoices]);
-  const monthlyConfig = {
-    paid: { label: "Paid invoices", color: c.primary },
-    open: { label: "Open invoices", color: c.accent },
-  } satisfies ChartConfig;
   const periodTotal = monthlySales.reduce((sum, month) => sum + month.paid + month.open, 0);
 
   const kpis = [
@@ -101,59 +85,25 @@ export default function SalesTab({ data }: { data: ReportsData }) {
         <Card>
           <CardHeader>
             <CardTitle>Sales and payments</CardTitle>
-            <CardDescription>Last 7 days · invoices and recorded payments</CardDescription>
+            <CardDescription>Last {days} days · invoices and recorded payments</CardDescription>
           </CardHeader>
           <CardContent>
           <div className="h-[280px]">
             {allZero(trend, "invoiced", "invoicePayments", "received") ? (
               <ChartEmpty hint="Post an invoice, record an invoice payment or confirm a receipt document to see activity here." />
             ) : (
-            <ChartFrame height={280}>
-              <LineChart
-                data={trend}
-                margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis
-                  dataKey="d"
-                  {...cs.axisProps}
-                />
-                <YAxis
-                  {...cs.axisProps}
-                  tickFormatter={(v) => chartAmount(Number(v))}
-                />
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Line
-                  isAnimationActive={false}
-                  type="monotone"
-                  dataKey="invoiced"
-                  name="Invoiced"
-                  stroke={c.accent}
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-                <Line
-                  isAnimationActive={false}
-                  type="monotone"
-                  dataKey="invoicePayments"
-                  name="Invoice payments"
-                  stroke={c.primary}
-                  strokeWidth={2.5}
-                  strokeDasharray="5 3"
-                  dot={false}
-                />
-                <Line
-                  isAnimationActive={false}
-                  type="monotone"
-                  dataKey="received"
-                  name="Receipt documents"
-                  stroke={c.tertiary}
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-              </LineChart>
-            </ChartFrame>
+            <BarSeriesChart
+              data={bars}
+              xKey="d"
+              spanKey="span"
+              height={280}
+              valueFormatter={(v) => aed(v)}
+              series={[
+                { key: "invoiced", label: "Invoiced", color: c.series[0] },
+                { key: "invoicePayments", label: "Invoice payments", color: c.good },
+                { key: "received", label: "Receipt documents", color: c.series[1] },
+              ]}
+            />
             )}
           </div>
           </CardContent>
@@ -172,17 +122,18 @@ export default function SalesTab({ data }: { data: ReportsData }) {
               {allZero(monthlySales, "paid", "open") ? (
                 <ChartEmpty hint="Monthly totals build up as you invoice through the year." />
               ) : (
-                <ChartFrame height={280} config={monthlyConfig}>
-                  <BarChart accessibilityLayer data={monthlySales} margin={{ top: 10, right: 4, left: -12, bottom: 0 }}>
-                    <CartesianGrid stroke={c.grid} vertical={false} />
-                    <XAxis dataKey="label" {...cs.axisProps} tickMargin={10} tickFormatter={(value: string) => value.slice(0, 3)} />
-                    <YAxis {...cs.axisProps} tickFormatter={(v) => chartAmount(Number(v))} />
-                    <ChartTooltip cursor={cs.cursor} content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    <Bar dataKey="paid" name="Paid invoices" stackId="sales" fill="var(--color-paid)" radius={[0, 0, 4, 4]} maxBarSize={36} isAnimationActive={false} />
-                    <Bar dataKey="open" name="Open invoices" stackId="sales" fill="var(--color-open)" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false} />
-                  </BarChart>
-                </ChartFrame>
+                <BarSeriesChart
+                  data={monthlySales}
+                  xKey="label"
+                  stacked
+                  height={280}
+                  xFormatter={(value) => value.slice(0, 3)}
+                  valueFormatter={(v) => aed(v)}
+                  series={[
+                    { key: "paid", label: "Paid invoices", color: c.good },
+                    { key: "open", label: "Open invoices", color: c.series[1] },
+                  ]}
+                />
               )}
             </div>
           </CardContent>
@@ -206,25 +157,12 @@ export default function SalesTab({ data }: { data: ReportsData }) {
             {allZero(pie, "value") ? (
               <ChartEmpty hint="Invoice statuses appear here once you have invoices." />
             ) : (
-            <ChartFrame height={280}>
-              <PieChart>
-                <Pie
-                  isAnimationActive={false}
-                  data={pie}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={55}
-                  outerRadius={90}
-                  paddingAngle={2}
-                  stroke="none"
-                >
-                  {pie.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => num(Number(v) || 0)} />} />
-              </PieChart>
-            </ChartFrame>
+            <DonutChart
+              height={236}
+              legend={false}
+              valueFormatter={(v) => num(v)}
+              data={pie.map((p, i) => ({ key: p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || `status-${i}`, label: p.name, value: p.value, color: p.color }))}
+            />
             )}
           </div>
         </div>

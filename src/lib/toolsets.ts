@@ -53,8 +53,12 @@ export const CORE_TOOLS = [
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   letters: {
-    about: "Company letters: draft, revise, find and export saved correspondence using company details and letterhead.",
-    tools: ["get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
+    about: "Office work: Word documents, Sheets spreadsheets, PDF editing and company letters",
+    tools: ["word", "sheet", "pdf", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
+  },
+  cards: {
+    about: "Interactive answers in chat: cards (calculators, comparisons, planners, diagrams, 3D), charts, tables, KPIs, choices, design-card templates, photos",
+    tools: ["show_ui", "show_view", "card_templates", "find_image"],
   },
   video: {
     about: "Brand/product videos from a brief or photo (user's fal key, approved in chat); track jobs",
@@ -77,15 +81,20 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "set_recurring",
       "set_invoice_template",
       "update_invoice_appearance",
+      "set_invoice_preset",
       "create_order",
+      "list_orders",
+      "list_quotes",
       "create_payment_receipt",
       "list_payment_receipts",
       "share_document_link",
     ],
   },
   purchasing: {
-    about: "Purchase orders, supplier bills, suppliers",
+    about: "Purchase orders, supplier bills, suppliers, VAT declaration letters",
     tools: [
+      "create_declaration_letter",
+      "list_declaration_letters",
       "create_purchase_order",
       "create_purchase_invoice_draft",
       "list_purchase_invoices",
@@ -103,8 +112,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   },
   logistics: {
     about:
-      "Delivery challans, goods received notes and returns — what physically moved, to whom",
-    tools: ["create_delivery_challan", "list_delivery_challans"],
+      "Delivery challans, goods received notes, returns and packing lists — what physically moved, to whom",
+    tools: ["create_delivery_challan", "list_delivery_challans", "create_packing_list", "list_packing_lists"],
   },
   accounting: {
     about: "Ledger, VAT, cheques, banks, expenses, ageing and statements",

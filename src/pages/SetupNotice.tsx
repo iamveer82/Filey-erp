@@ -52,19 +52,18 @@ export default function SetupNotice() {
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-semibold text-ink">Use on this device</h2>
                     <span className="rounded-full bg-primary-100 px-2 py-0.5 text-[11px] font-semibold text-[#1c1917]">
-                      Basic · Free
+                      14-day free trial
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-brand-500">
-                    Create and verify your free account online once, then keep working offline on this device.
+                    Create your free account online once, then try every app for 14 days on this device.
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
-                      "The full local ERP and CRM is free",
-                      "Unlimited local documents, invoices and edits",
-                      "Local PDFs without Filey branding",
-                      "Works offline — your data stays here",
-                      "Optional paid cloud upgrades",
+                      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets and PDF",
+                      "Works offline — your data stays on this computer",
+                      "$1 of Filey AI to try the agent",
+                      "Then Freedom: 999 AED once, yours for life",
                     ].map((line) => (
                       <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600">
                         <Check size={14} className="shrink-0 text-success" />
@@ -87,7 +86,7 @@ export default function SetupNotice() {
               <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
             </div>
 
-            {/* Cloud is available on every plan. */}
+            {/* Cloud is the Pro plan. */}
             <button
               onClick={() => choose("cloud")}
               className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
@@ -103,12 +102,11 @@ export default function SetupNotice() {
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-ink">Use Filey Cloud</h2>
                     <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
-                      Basic · Free
+                      Pro · 36 AED / month
                     </span>
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Sign in to use Filey on the web and sync your devices. Basic includes
-                    5 new cloud invoices a month and unlimited edits.
+                    Keep your workspace in the cloud: Filey on the web, sync across your devices and your team.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
@@ -133,7 +131,7 @@ export default function SetupNotice() {
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-semibold text-ink">Use offline</h2>
                   <p className="text-[13px] text-brand-500">
-                    The full local app is free, with unlimited documents and unbranded local PDFs. Sign in online once with your verified Filey account to link this device.
+                    Try every app free for 14 days, then get Freedom to keep Filey for life. Sign in online once with your Filey account to link this device.
                   </p>
                 </div>
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />

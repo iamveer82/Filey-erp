@@ -63,9 +63,9 @@ async function providerTest(run: (requests: Row[]) => Promise<void>, respond: (r
   const previousGet = Deno.env.get;
   const requests: Row[] = [];
   // Replace the getter without ever reading the merchant's actual key.
-  Deno.env.get = (name) => name === "FILEY_AI_DEEPSEEK_KEY" ? "synthetic-test-key" : undefined;
+  Deno.env.get = (name) => name === "FILEY_AI_GLM_KEY" ? "synthetic-test-key" : undefined;
   globalThis.fetch = (url, init) => {
-    assertEquals(String(url), "https://api.deepseek.com/chat/completions");
+    assertEquals(String(url), "https://api.z.ai/api/paas/v4/chat/completions");
     assertEquals(new Headers(init?.headers).get("authorization"), "Bearer synthetic-test-key");
     const request = JSON.parse(String(init?.body)) as Row;
     requests.push(request);
@@ -81,7 +81,7 @@ async function providerTest(run: (requests: Row[]) => Promise<void>, respond: (r
 const invoiceInput = { customer_name: "Fixture customer", items: [{ description: "Fixture item", qty: 2, unit_price: 10 }] };
 const useTool = (id: string, name: string, input: unknown) => ({ type: "function", id, function: { name, arguments: JSON.stringify(input) } });
 const response = (toolCalls: unknown[] = [], text = "") => ({
-  id: "fixture-completion", model: "deepseek-flash",
+  id: "fixture-completion", model: "glm-5.3-flash",
   usage: { prompt_tokens: 10, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 10, completion_tokens: 5, total_tokens: 15 },
   choices: [{ message: { role: "assistant", content: text || null, ...(toolCalls.length ? { tool_calls: toolCalls, reasoning_content: "Private fixture reasoning" } : {}) } }],
 });
@@ -124,7 +124,7 @@ Deno.test("hosted model loop executes repeated successful draft calls once acros
     for (const receipt of receipts) assertEquals(JSON.parse(String(receipt.content)).number, "DEMO-42");
     assertEquals(state.walletCalls.map(call => call.p_action), ["reserve", "settle", "reserve", "settle", "reserve", "settle"]);
     assertEquals(new Set(state.walletCalls.filter(call => call.p_action === "reserve").map(call => (call.p_args as Row).run_id)).size, 1);
-    assertEquals(requests[0].model, "deepseek-flash");
+    assertEquals(requests[0].model, "glm-5.3-flash");
     assertStringIncludes(JSON.stringify(messages), "Private fixture reasoning");
     assertEquals(reply.includes("Private fixture reasoning"), false);
   }, (_request, round) => round === 0

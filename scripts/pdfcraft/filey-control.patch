@@ -1,0 +1,265 @@
+Filey changes to PdfCraft's web app (Office work > PDF): the control bridge
+(apps/pdfcraft-web: pdfcraftControl) that lets the Filey agent drive it with PdfCraft's UI control
+channel, printing handed to Filey (fileyPrintPdf), and the app named "PDF" where users see it
+(credit to PdfCraft kept in About and on Home, no community button or card in the web build),
+wheel zoom scaled for browser wheel deltas (a notch was a 2.7x jump), and side panes that
+start closed so the page has room in a Filey tab.
+Files go in and out through PdfCraft's own ?host=parent bridge.
+Upstream: https://github.com/storytold/pdfcraft commit f0c9901c398372782a4eb001c95638289a5edab0 (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/pdfcraft-web; trunk build --release
+Install: node scripts/fetch-office-apps.mjs --app pdfcraft --from <pdfcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 91ed3c4..2babf8d 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4396,6 +4396,7 @@ dependencies = [
+  "egui",
+  "js-sys",
+  "pdfcraft-ui-egui",
++ "serde_json",
+  "wasm-bindgen-futures",
+  "web-sys",
+ ]
+diff --git a/apps/pdfcraft-web/Cargo.toml b/apps/pdfcraft-web/Cargo.toml
+index a64d729..79f2ced 100644
+--- a/apps/pdfcraft-web/Cargo.toml
++++ b/apps/pdfcraft-web/Cargo.toml
+@@ -13,6 +13,7 @@ workspace = true
+ pdfcraft-ui-egui = { workspace = true }
+ eframe = { workspace = true, features = ["default_fonts", "glow", "persistence", "accesskit"] }
+ egui = { workspace = true }
++serde_json = { workspace = true }
+ 
+ [target.'cfg(target_arch = "wasm32")'.dependencies]
+ wasm-bindgen-futures = "0.4"
+diff --git a/apps/pdfcraft-web/index.html b/apps/pdfcraft-web/index.html
+index 46b3a25..abeaa99 100644
+--- a/apps/pdfcraft-web/index.html
++++ b/apps/pdfcraft-web/index.html
+@@ -3,7 +3,7 @@
+   <head>
+     <meta charset="utf-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+-    <title>PdfCraft</title>
++    <title>PDF</title>
+     <link data-trunk rel="rust" data-wasm-opt="z" />
+     <style>
+       html, body { margin: 0; height: 100%; overflow: hidden; background: #f1f1f3; }
+diff --git a/apps/pdfcraft-web/src/main.rs b/apps/pdfcraft-web/src/main.rs
+index a46a467..f2d5f3b 100644
+--- a/apps/pdfcraft-web/src/main.rs
++++ b/apps/pdfcraft-web/src/main.rs
+@@ -71,7 +71,12 @@ fn main() {
+                         app.host_dirty = Some(bridge.dirty_fn());
+                         bridge.post_ready();
+                     }
+-                    Ok(Box::new(app))
++                    let pending = filey::Pending::default();
++                    let client = app.attach_control(&cc.egui_ctx);
++                    if let Err(e) = filey::expose_control(client, pending.clone()) {
++                        eframe::web_sys::console::error_1(&format!("PDF: no Filey control bridge: {e}").into());
++                    }
++                    Ok(Box::new(filey::Shell { app, pending }))
+                 }),
+             )
+             .await;
+@@ -245,6 +250,79 @@ mod host {
+     }
+ }
+ 
++/// Filey: the control bridge for a same-origin host (the Filey app embeds PdfCraft in an iframe
++/// and its agent drives it). `pdfcraftControl(method, paramsJson)` runs one UI control request
++/// (`crates/ui-egui/src/control.rs`: `ui.state`, `ui.commands`, `ui.command`, `ui.inspect`,
++/// `ui.click`, `ui.type`, `ui.key`, `ui.set`, `ui.screenshot`, …) and resolves with
++/// `{"ok":true,"result":…}` or `{"ok":false,"error":"…"}` as JSON text. Files go in and out
++/// through the `?host=parent` bridge above.
++#[cfg(target_arch = "wasm32")]
++mod filey {
++    use std::cell::RefCell;
++    use std::rc::Rc;
++
++    use eframe::wasm_bindgen::{JsValue, closure::Closure};
++    use pdfcraft_ui_egui::PdfCraftApp;
++    use pdfcraft_ui_egui::control::{ControlClient, Reply};
++
++    pub type Pending = Rc<RefCell<Vec<(std::sync::mpsc::Receiver<Reply>, js_sys::Function)>>>;
++
++    /// PdfCraft plus the replies it owes the host, handed over after each frame's logic.
++    pub struct Shell {
++        pub app: PdfCraftApp,
++        pub pending: Pending,
++    }
++
++    impl eframe::App for Shell {
++        fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
++            self.app.raw_input_hook(ctx, raw);
++        }
++
++        fn save(&mut self, storage: &mut dyn eframe::Storage) {
++            self.app.save(storage);
++        }
++
++        fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
++            self.app.logic(ctx, frame);
++            let mut pending = self.pending.borrow_mut();
++            pending.retain(|(rx, resolve)| {
++                let reply = match rx.try_recv() {
++                    Ok(Ok(result)) => serde_json::json!({"ok": true, "result": result}),
++                    Ok(Err(error)) => serde_json::json!({"ok": false, "error": error}),
++                    Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                    Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++                };
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++                false
++            });
++            if !pending.is_empty() {
++                ctx.request_repaint();
++            }
++        }
++
++        fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
++            self.app.ui(ui, frame);
++        }
++    }
++
++    pub fn expose_control(client: ControlClient, pending: Pending) -> Result<(), String> {
++        let window = web_sys::window().ok_or("no window")?;
++        let control = Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++            let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Object(Default::default()));
++            let rx = client.send(&method, params);
++            let mut next = Some(rx);
++            js_sys::Promise::new(&mut |resolve, _reject| {
++                if let Some(rx) = next.take() {
++                    pending.borrow_mut().push((rx, resolve));
++                }
++            })
++        });
++        js_sys::Reflect::set(&window, &JsValue::from_str("pdfcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++        control.forget();
++        Ok(())
++    }
++}
++
+ #[cfg(not(target_arch = "wasm32"))]
+ fn main() {
+     eprintln!("pdfcraft-web targets wasm32: run `trunk serve` or `trunk build --release` in apps/pdfcraft-web");
+diff --git a/crates/ui-egui/src/canvas.rs b/crates/ui-egui/src/canvas.rs
+index 0acab64..33b19b7 100644
+--- a/crates/ui-egui/src/canvas.rs
++++ b/crates/ui-egui/src/canvas.rs
+@@ -2371,6 +2371,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
+ 
+     // Pinch / ctrl+scroll zoom, anchored on the current page.
+     let zoom_delta = crate::motion::zoom_delta(ui.ctx());
++    // Filey: a browser wheel notch is ~100 px, which egui turns into a 2.7× jump (100% → 272%
++    // → 739%); a fifth of that power is a ~22% step per notch, and pinches stay smooth.
++    #[cfg(target_arch = "wasm32")]
++    let zoom_delta = zoom_delta.powf(0.2);
+     // Exclude the previous frame's scrollbar tracks from gesture activation.
+     let navigation_rect = if view.viewport_screen.is_positive() { avail.intersect(view.viewport_screen) } else { avail };
+     let navigation_enabled = app.dialog.is_none() && app.close_request.is_none() && !app.palette_open && ui.is_enabled() && ui.input(|i| i.focused);
+diff --git a/crates/ui-egui/src/chrome.rs b/crates/ui-egui/src/chrome.rs
+index 84e6262..e001b26 100644
+--- a/crates/ui-egui/src/chrome.rs
++++ b/crates/ui-egui/src/chrome.rs
+@@ -299,8 +299,8 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+                     if icons::button(ui, "circle-help", button, false, tl!("Keyboard shortcuts")).clicked() {
+                         app.dialog = Some(Dialog::Shortcuts);
+                     }
+-                    // One click to the community, from anywhere in the app.
+-                    if widgets::ghost_button_sized(ui, "messages-square", "Discord", tab_h).on_hover_text(pdfcraft_engine::links::DISCORD).clicked() {
++                    // Filey: no community button in the web build.
++                    if !cfg!(target_arch = "wasm32") && widgets::ghost_button_sized(ui, "messages-square", "Discord", tab_h).on_hover_text(pdfcraft_engine::links::DISCORD).clicked() {
+                         app.execute("help.discord");
+                     }
+                 });
+diff --git a/crates/ui-egui/src/home.rs b/crates/ui-egui/src/home.rs
+index 3e70f34..5837978 100644
+--- a/crates/ui-egui/src/home.rs
++++ b/crates/ui-egui/src/home.rs
+@@ -22,13 +22,14 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+     let t = Tokens::get(ui.ctx());
+     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+         egui::Frame::NONE.inner_margin(egui::Margin { left: 36, right: 36, top: 28, bottom: 28 }).show(ui, |ui| {
+-            ui.label(egui::RichText::new(tl!("Welcome to PdfCraft")).font(theme::semibold(24.0)));
++            ui.label(egui::RichText::new(tl!("Welcome to PDF")).font(theme::semibold(24.0)));
+             ui.label(
+                 egui::RichText::new(tl!("An open-source PDF workbench — local, private, and scriptable."))
+                     .color(t.text_muted)
+                     .font(theme::regular(14.0)),
+             );
+             ui.add_space(14.0);
++            if !cfg!(target_arch = "wasm32") {
+             egui::Frame::NONE
+                 .fill(t.card)
+                 .stroke(Stroke::new(1.0, t.border))
+@@ -49,6 +50,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+                     }
+                 });
+             ui.add_space(22.0);
++            }
+ 
+             egui::Frame::NONE
+                 .fill(t.card)
+@@ -141,7 +143,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+             });
+             ui.add_space(8.0);
+             if app.recent.is_empty() {
+-                ui.label(egui::RichText::new(tl!("Files you open in PdfCraft appear here. Drop a PDF anywhere to open it.")).color(t.text_muted));
++                ui.label(egui::RichText::new(tl!("Files you open appear here. Drop a PDF anywhere to open it.")).color(t.text_muted));
+             }
+             let mut open = None;
+             let mut remove = None;
+@@ -207,7 +209,7 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
+             ui.add_space(20.0);
+             widgets::section_title(ui, tl!("Privacy"));
+             ui.label(
+-                egui::RichText::new(tl!("PdfCraft works offline. No telemetry, no account, and no cloud processing unless you add a provider."))
++                egui::RichText::new(tl!("PDF works offline, built on PdfCraft. No telemetry and no cloud processing unless you add a provider."))
+                     .color(t.text_muted),
+             );
+         });
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index 7946462..2d4cc0c 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -1320,7 +1320,8 @@ impl PdfCraftApp {
+         // Read mode opens with the panes closed; the rail still opens them (#932). A right panel
+         // the user closed stays closed (#1590).
+         let opening_mode = self.mode_override.unwrap_or(self.default_mode);
+-        if activate && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
++        // Filey: embedded in a Filey tab the page needs the width, so panes start closed there too.
++        if activate && !cfg!(target_arch = "wasm32") && self.right.is_none() && !self.right_panel_closed && opening_mode != Mode::Read {
+             self.right = if !doc.info.annotations.is_empty() {
+                 Some(RightPanel::Comments)
+             } else if !doc.info.outline.is_empty() {
+@@ -3087,7 +3088,7 @@ impl eframe::App for PdfCraftApp {
+             .active
+             .and_then(|i| crate::canvas::tab_label(self, i))
+             .or_else(|| self.combine_showing().then(|| tl!("Combine files").to_owned()))
+-            .map_or_else(|| "PdfCraft".to_owned(), |name| format!("{name} — PdfCraft"));
++            .map_or_else(|| "PDF".to_owned(), |name| format!("{name} — PDF"));
+         if title != self.window_title {
+             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+             self.window_title = title;
+diff --git a/crates/ui-egui/src/print_ui.rs b/crates/ui-egui/src/print_ui.rs
+index 4e0f065..cf4c6c1 100644
+--- a/crates/ui-egui/src/print_ui.rs
++++ b/crates/ui-egui/src/print_ui.rs
+@@ -564,6 +564,14 @@ impl PdfCraftApp {
+     /// prepared is replaced. The dialog closes at once.
+     #[cfg(target_arch = "wasm32")]
+     fn print_in_browser(&mut self, name: String, bytes: Vec<u8>, sheets: Vec<(f64, f64)>) -> bool {
++        use wasm_bindgen::JsCast as _;
++        // Filey: a desktop webview can't print from a frame, so the host prints the PDF itself.
++        if let Some(window) = web_sys::window()
++            && let Ok(host) = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str("fileyPrintPdf"))
++            && let Some(host) = host.dyn_ref::<js_sys::Function>()
++        {
++            return host.call1(&wasm_bindgen::JsValue::NULL, &js_sys::Uint8Array::from(bytes.as_slice())).is_ok();
++        }
+         match crate::web_print::WebPrintJob::new(bytes, sheets, name) {
+             Ok(job) => {
+                 let n = job.total().to_string();

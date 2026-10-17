@@ -10,6 +10,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+# Office work apps (WordCraft, GridCraft, PdfCraft web builds), fetched by scripts/fetch-office-apps.mjs
+public/wordcraft/
+public/gridcraft/
+public/pdfcraft/
 *.local
 
 # Local environment / secrets

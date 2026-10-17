@@ -6,7 +6,8 @@ import { PLANS, startCheckout, awaitCloudPlan, type PlanCard } from "../lib/subs
 import { startFreedomCheckout, claimPurchasedLicense, FREE_LIMITS } from "../lib/license";
 import { useUI } from "../lib/ui";
 
-type Reason = "invoices" | "emails";
+/** Why it opened: a Basic cap, the trial ending, or someone choosing to get Freedom. */
+type Reason = "invoices" | "emails" | "trial" | "freedom";
 
 /** When the Basic allowance comes back: the 1st of next month for invoices,
  *  tomorrow for the daily email cap. */
@@ -59,12 +60,13 @@ export default function UpgradeDialog() {
     reason === "emails"
       ? "You've sent today's Basic emails"
       : `You've used all ${FREE_LIMITS.invoicesPerMonth} Basic cloud invoices this month`;
+  const trialing = reason === "trial" || reason === "freedom";
 
   return (
     <Modal
       open={open}
       onClose={() => setOpen(false)}
-      title="Keep going with Filey"
+      title={reason === "trial" ? "Your free trial has ended" : "Keep going with Filey"}
       size="lg"
     >
       {selected ? (
@@ -79,11 +81,11 @@ export default function UpgradeDialog() {
                 selected.id === "cloud" ? "Monthly subscription" : "One-time purchase",
             },
           ]}
-          total={`${selected.price} USD`}
+          total={selected.price}
           terms={
             selected.id === "cloud"
               ? "Renews every month. Cancel any time in Billing."
-              : "Pay once for Ultra. Your account unlocks after payment is confirmed."
+              : "Pay once for Freedom. Your account unlocks after payment is confirmed."
           }
           onBack={() => setSelected(null)}
           onPay={() =>
@@ -97,16 +99,25 @@ export default function UpgradeDialog() {
         />
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            {headline}. Upgrade to create more now, or your allowance comes back{" "}
-            {reason === "emails" ? "" : "on "}
-            {resetsOn(reason)}.{" "}
-            {reason === "invoices" &&
-              "You can keep editing existing invoices without a limit."}
-          </p>
+          {trialing ? (
+            <p className="text-sm text-muted-foreground">
+              {reason === "trial"
+                ? "Thanks for trying Filey. Get Freedom to keep creating and editing: pay once and use Filey for life, with every app, updates and support. Everything you made is still here to view, print and export."
+                : "Pay once and use Filey for life, or keep your workspace in the cloud with Pro."}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {headline}. Upgrade to create more now, or your allowance comes back{" "}
+              {reason === "emails" ? "" : "on "}
+              {resetsOn(reason)}.{" "}
+              {reason === "invoices" &&
+                "You can keep editing existing invoices without a limit."}
+            </p>
+          )}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {PLANS.filter((p) => p.id !== "free").map((p) => (
+            {/* Freedom first: it is what most people want after trying Filey. */}
+            {PLANS.filter((p) => p.id === "lite" || p.id === "cloud").sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended)).map((p) => (
               <div
                 key={p.id}
                 className={
@@ -143,10 +154,10 @@ export default function UpgradeDialog() {
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              Billed by Dodo Payments. Cancel Pro any time from Settings → Billing.
+              Billed by Dodo Payments. Freedom is a one-time payment; cancel Pro any time from Settings → Billing.
             </p>
             <button className="btn-ghost" onClick={() => setOpen(false)}>
-              Back to my workspace
+              {reason === "trial" ? "View my data" : "Back to my workspace"}
             </button>
           </div>
         </>

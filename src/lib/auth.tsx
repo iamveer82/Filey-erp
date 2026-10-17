@@ -14,7 +14,7 @@ import { isLocalMode } from "./dataMode";
 import { getCacheIdentity, getCacheScope, setCacheOrg } from "./api";
 import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
-import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache } from "./license";
+import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache, refreshAccess } from "./license";
 import { mfaRequired } from "./mfa";
 import { pendingProfile, queueProfile } from "./profileSync";
 import {
@@ -566,11 +566,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((changed) => {
           if (changed) window.dispatchEvent(new Event("filey:entitlement"));
         })
+        .catch(() => {})
+        // Then the plan: trial days left, Freedom, Pro — or an ended trial, which locks writing.
+        .then(() => refreshAccess())
         .catch(() => {});
     };
+    const recheck = () => void refreshAccess().catch(() => {});
     collect();
     window.addEventListener("focus", collect);
-    return () => window.removeEventListener("focus", collect);
+    window.addEventListener("filey:entitlement", recheck);
+    return () => {
+      window.removeEventListener("focus", collect);
+      window.removeEventListener("filey:entitlement", recheck);
+    };
   }, [user?.id]);
 
   const signInWithPassword = async (c: Credential, password: string) => {

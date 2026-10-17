@@ -2,10 +2,13 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { rmSync } from "node:fs";
 import { AI_DEV_ORIGINS } from "./src/lib/aiEndpoint";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+// @ts-expect-error process is a nodejs global
+const desktopBuild = !!process.env.TAURI_ENV_PLATFORM;
 
 // https://vite.dev/config/
 export default defineConfig(async ({ command }) => ({
@@ -23,7 +26,13 @@ export default defineConfig(async ({ command }) => ({
           (_match, prefix, allowed, end) => `${prefix}${allowed} ${hashes.join(" ")}${end}`);
       },
     },
-  }] : [])],
+  }] : []), {
+    // Office work apps (public/wordcraft, gridcraft, pdfcraft: 30-80 MB each) are desktop-only for now;
+    // web and mobile builds leave them out.
+    name: "filey-desktop-only-office",
+    apply: "build" as const,
+    closeBundle() { if (!desktopBuild) for (const app of ["wordcraft", "gridcraft", "pdfcraft"]) rmSync(`dist/${app}`, { recursive: true, force: true }); },
+  }],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

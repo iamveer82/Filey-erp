@@ -36,13 +36,13 @@ describe("resolveTier", () => {
 });
 
 describe("planCardFor", () => {
-  it("describes Basic local invoicing as free and unlimited", () => {
+  it("describes Basic as a 14-day trial on this computer with $1 of Filey AI", () => {
     const basic = PLANS.find(plan => plan.id === "free")!;
-    expect(basic.price).toBe("$0");
-    expect(basic.blurb).toMatch(/unlimited local invoices/i);
-    expect(basic.blurb).toMatch(/verify your account once.*work offline/i);
-    expect(basic.features).toContain("Unlimited local documents, invoices and edits");
-    expect(basic.features).toContain("Optional cloud storage: 5 new cloud invoices per month");
+    expect(basic.price).toBe("Free");
+    expect(basic.period).toBe(" for 14 days");
+    expect(basic.blurb).toMatch(/14 days on your computer/i);
+    expect(basic.features).toContain("$1 of Filey AI to try the agent");
+    expect(basic.features).toContain("Your data saved on your computer");
   });
   // Pro and Enterprise were withdrawn from sale. Orgs still carry those plan
   // values, so the mapping must keep answering for them — a card lookup that
@@ -77,10 +77,11 @@ describe("planCardFor", () => {
   // one number while the checkout charges another is the worst kind of bug to
   // find out about from a customer.
   it("carries the current prices", () => {
-    expect(PLANS.find((p) => p.id === "free")?.price).toBe("$0");
-    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("$5");
+    expect(PLANS.find((p) => p.id === "free")?.price).toBe("Free");
+    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("36 AED");
     expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("$100");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("999 AED");
+    expect(PLANS.find((p) => p.id === "lite")?.name).toBe("Freedom");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });
 });

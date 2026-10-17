@@ -93,31 +93,35 @@ const b64urlToBytes = (s: string): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
+/** A server-signed token's payload, or why it isn't one. */
+async function signedPayload<T>(token: string): Promise<{ payload?: T; reason?: string }> {
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return { reason: "malformed" };
+  const key = await crypto.subtle.importKey(
+    "spki",
+    b64urlToBytes(LICENSE_PUBLIC_KEY),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"]
+  );
+  const ok = await crypto.subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    key,
+    b64urlToBytes(sig),
+    b64urlToBytes(body)
+  );
+  if (!ok) return { reason: "bad_signature" };
+  return { payload: JSON.parse(new TextDecoder().decode(b64urlToBytes(body))) as T };
+}
+
 /** Verify the stored license token offline. Checks the ECDSA signature with
  *  the embedded public key, then that the token belongs to THIS device. */
 export async function verifyStoredLicense(): Promise<LicenseState> {
   const token = await kvGet(TOKEN_KEY);
   if (!token) return { valid: false, reason: "not_activated" };
-  const [body, sig] = token.split(".");
-  if (!body || !sig) return { valid: false, reason: "malformed" };
   try {
-    const key = await crypto.subtle.importKey(
-      "spki",
-      b64urlToBytes(LICENSE_PUBLIC_KEY),
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["verify"]
-    );
-    const ok = await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      key,
-      b64urlToBytes(sig),
-      b64urlToBytes(body)
-    );
-    if (!ok) return { valid: false, reason: "bad_signature" };
-    const payload = JSON.parse(
-      new TextDecoder().decode(b64urlToBytes(body))
-    ) as LicensePayload;
+    const { payload, reason } = await signedPayload<LicensePayload>(token);
+    if (!payload) return { valid: false, reason };
     if (payload.product !== "filey-desktop")
       return { valid: false, reason: "wrong_product" };
     if (payload.device_id !== (await deviceId()))
@@ -142,7 +146,7 @@ export async function hasLocalData(): Promise<boolean> {
   return false;
 }
 
-/** Core local ERP/CRM is free. Paid licenses still unlock paid entitlements. */
+/** Local mode opens for everyone; an ended trial is read-only (refreshAccess locks writing). */
 export async function canUseLocalMode(): Promise<boolean> {
   return true;
 }
@@ -363,6 +367,94 @@ export async function claimPurchasedLicense(
   return null;
 }
 
+/* ---------------- Basic: the 14-day trial ---------------- */
+
+const TRIAL_KEY = "filey:trial_token";
+const DAY = 86_400_000;
+export const TRIAL_DAYS = 14;
+export const TRIAL_ENDED_MESSAGE =
+  "Your 14-day free trial has ended. Get Freedom to keep creating and editing — everything you made stays here to view, print and export.";
+
+/** This device's trial window, from its signed token (checked offline). */
+export async function storedTrial(): Promise<{ ends: Date } | null> {
+  const token = await kvGet(TRIAL_KEY);
+  if (!token) return null;
+  try {
+    const { payload } = await signedPayload<{ product: string; device_id: string; ends: string }>(token);
+    if (payload?.product !== "filey-trial" || payload.device_id !== (await deviceId())) return null;
+    const ends = new Date(payload.ends);
+    return Number.isFinite(ends.getTime()) ? { ends } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Ask the server for this device's trial (and, the first time, the $1 welcome credit). */
+async function fetchTrial(): Promise<{ licensed: boolean; welcome: boolean }> {
+  const data = await billingRequest<{ token?: string; licensed?: boolean; welcome_credit?: boolean }>({ action: "trial_start", fingerprint: await deviceId() });
+  if (data?.token) await kvSet(TRIAL_KEY, data.token);
+  return { licensed: !!data?.licensed, welcome: !!data?.welcome_credit };
+}
+
+/** What this person may do: Pro (cloud), Freedom (lifetime local), the trial with days left,
+ *  an ended trial (read-only), or unknown (no trial on record yet and the server unreachable:
+ *  allowed, so nobody is locked out by a network blip). */
+export interface Access {
+  plan: "pro" | "freedom" | "trial" | "ended" | "unknown";
+  daysLeft?: number;
+}
+
+export function accessFrom(tier: Tier, trialEnds: Date | null, now = new Date()): Access {
+  if (tier === "pro") return { plan: "pro" };
+  if (tier === "lite") return { plan: "freedom" };
+  if (!trialEnds) return { plan: "unknown" };
+  const left = trialEnds.getTime() - now.getTime();
+  return left > 0 ? { plan: "trial", daysLeft: Math.ceil(left / DAY) } : { plan: "ended" };
+}
+
+let access: Access = { plan: "unknown" };
+let lastTrialFetch = 0;
+
+/** The last resolved access, synchronously (for render paths). */
+export function currentAccess(): Access {
+  return access;
+}
+
+/** Work out the plan, fetch the trial when there's none on this device yet (and once a day,
+ *  so a purchase or a reset shows up), then lock or unlock writing. Safe to call often. */
+export async function refreshAccess(): Promise<Access> {
+  const { setLocalWriteLock } = await import("./localdb");
+  if (!ENFORCE_LICENSING) {
+    setLocalWriteLock(null);
+    return (access = { plan: "freedom" });
+  }
+  let tier = await entitlement(true);
+  let trial = await storedTrial();
+  const signedIn = !!supabase && !!(await supabase.auth.getSession()).data.session;
+  const due = !trial ? Date.now() - lastTrialFetch > 10 * 60_000 : Date.now() - lastTrialFetch > DAY;
+  if (tier === "free" && signedIn && due) {
+    lastTrialFetch = Date.now();
+    try {
+      const { licensed, welcome } = await fetchTrial();
+      if (licensed) {
+        await activateThisDevice().catch(() => null);
+        clearEntitlementCache();
+        tier = await entitlement(true);
+      }
+      if (welcome && typeof window !== "undefined") window.dispatchEvent(new Event("filey:welcome-credit"));
+      trial = await storedTrial();
+    } catch {
+      /* offline or not deployed yet: keep what this device knows */
+    }
+  }
+  const next = accessFrom(tier, trial?.ends ?? null);
+  setLocalWriteLock(next.plan === "ended" ? TRIAL_ENDED_MESSAGE : null);
+  const changed = next.plan !== access.plan || next.daysLeft !== access.daysLeft;
+  access = next;
+  if (changed && typeof window !== "undefined") window.dispatchEvent(new Event("filey:access"));
+  return access;
+}
+
 /* ---------------- tiers: free < lite (one-time) < pro (cloud) ---------------- */
 
 export type Tier = "free" | "lite" | "pro";
@@ -482,7 +574,7 @@ export async function cloudAccess(force = false): Promise<CloudAccess> {
       data.plan as string | null,
       data.plan_status as string | null
     );
-    // Basic can use the web too. Only the owner's Ultra licence lifts its cap.
+    // Basic can use the web too. Only the owner's Freedom licence lifts its cap.
     if (access.reason === "basic") {
       const { data: licensed } = await supabase.rpc("filey_org_owner_licensed", { p_org: orgId });
       if (licensed === true) access = { allowed: true, reason: "paid" };
@@ -527,7 +619,7 @@ export async function claimWebsitePurchases(): Promise<boolean> {
 
 /** Turn any payment made elsewhere into access on this machine. Safe to run on
  *  every sign-in, app start and window focus: it collects website purchases,
- *  then activates a new device when Ultra has an available slot. A deliberately
+ *  then activates a new device when Freedom has an available slot. A deliberately
  *  removed device never takes its slot back automatically. */
 export async function collectPurchases(): Promise<boolean> {
   const claimed = await claimWebsitePurchases();
@@ -567,7 +659,7 @@ export async function checkFreeInvoiceCap(
 ): Promise<void> {
   if (isLocalMode() || !ENFORCE_LICENSING) return;
   if ((await entitlement()) !== "free") return;
-  // Pro and Ultra-owner workspaces are uncapped. Historic free-cloud access
+  // Pro and Freedom-owner workspaces are uncapped. Historic free-cloud access
   // does not lift Basic's creation limit now that every plan includes the web.
   // Mirrors enforce_free_invoice_cap() in the database, which stays the gate.
   const { reason } = await cloudAccess();
@@ -577,7 +669,7 @@ export async function checkFreeInvoiceCap(
     offerUpgrade("invoices");
     throw new Error(
       `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} cloud invoices this month). ` +
-        `Editing existing invoices is unlimited. Pro is $5/month, or buy Ultra once for unlimited invoicing — Settings → Billing.`
+        `Editing existing invoices is unlimited. Pro is 36 AED/month, or get Freedom once for unlimited invoicing on your computer — Settings → Billing.`
     );
   }
 }

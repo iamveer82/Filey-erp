@@ -18,7 +18,7 @@ const GROUP_ORDER = [
   "Accounting",
   "Service",
   "Team",
-  "Tools",
+  "Office",
   "System",
 ];
 
@@ -52,11 +52,10 @@ const GROUP_BY_ID: Record<string, string> = {
   declaration: "Accounting",
   cheques: "Accounting",
   "bank-accounts": "Accounting",
-  tools: "Tools",
-  letters: "Tools",
-  files: "Tools",
-  "delivery-challans": "Tools",
-  "email-templates": "Tools",
+  letters: "Office",
+  files: "Office",
+  "delivery-challans": "Office",
+  "email-templates": "Office",
 };
 
 export default function AppsManager() {
@@ -66,7 +65,7 @@ export default function AppsManager() {
   const groups = useMemo(() => {
     const byGroup = new Map<string, typeof modules>();
     for (const m of modules) {
-      const g = GROUP_BY_ID[m.id] ?? "Tools";
+      const g = GROUP_BY_ID[m.id] ?? "Office";
       if (!byGroup.has(g)) byGroup.set(g, []);
       byGroup.get(g)!.push(m);
     }

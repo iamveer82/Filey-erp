@@ -51,12 +51,12 @@ it("explains desktop credential storage and the browser key lifetime", () => {
   expect(screen.queryByText(/without application-level encryption/)).toBeNull();
 });
 
-it("keeps the local-editions guide link and explains free offline use without promising free hosted services", () => {
+it("explains the trial, Freedom and Pro, and that data stays viewable after the trial", () => {
   open("/docs?article=local-editions");
-  expect(screen.getByRole("heading", { name: "Free offline Filey and optional cloud upgrades" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=datamode");
-  expect(screen.getByText(/All core local modules, documents and invoices are free/)).toHaveTextContent("Local PDFs have no Filey branding");
-  expect(screen.getByText(/Create and verify a free Filey account online/)).toHaveTextContent("remembered online password sign-in on this device");
-  expect(screen.getByText(/Use the same account if you later choose Pro or Ultra/)).toHaveTextContent("Paid upgrades are optional");
-  expect(screen.getByText(/Hosted cloud quotas and provider charges are separate/)).toHaveTextContent("does not include unlimited hosted email, SMS, or external AI usage");
+  expect(screen.getByRole("heading", { name: "Free trial, Freedom and Pro" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=billing");
+  expect(screen.getByText(/Basic is a 14-day free trial/)).toHaveTextContent("per account and per computer");
+  expect(screen.getByText(/Freedom is a one-time payment of 999 AED/)).toHaveTextContent("regular updates and support");
+  expect(screen.getByText(/Pro is 36 AED a month/)).toHaveTextContent("Cancel any time");
+  expect(screen.getByText(/When the trial ends without a plan/)).toHaveTextContent("to view, print and export");
 });

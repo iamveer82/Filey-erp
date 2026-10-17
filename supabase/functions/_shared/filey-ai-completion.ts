@@ -2,31 +2,25 @@ import { creditGateway } from "./ai-credit-gateway.ts";
 import { type CreditModel, prepareCreditRequest, UUID } from "./ai-credits.ts";
 
 export const FILEY_AI_MODEL_ID = "filey-ai";
-export const FILEY_AI_UPSTREAM_MODEL = "deepseek-flash";
+export const FILEY_AI_UPSTREAM_MODEL = "glm-5.3-flash";
 
-/** DeepSeek V4.1 Flash, official rates verified 2026-10-03.
- * https://api-docs.deepseek.com/quick_start/pricing
- * Apply Filey's fixed 5/3 tariff to the published off-peak base rates:
- * $0.005/M cached, $0.25/M uncached, $1.00/M output. Reserve at scaled peak
- * bounds ($0.50/M input, $2.00/M output), without guessing Chinese holidays.
- * Keep Filey's existing context/output safety caps, independent of provider caps. */
+/** Z.ai GLM-5.3-Flash, official rates verified 2026-10-17 (docs.z.ai/guides/overview/pricing):
+ * $0.15/M input, $0.03/M cached input, $0.50/M output. Filey's fixed 5/3 tariff makes that
+ * $0.25/M, $0.05/M and $0.8333/M; there is no peak pricing, so the hold uses the tariff.
+ * The model has a 1M context and 128K output; Filey keeps its own, smaller safety caps. */
 export const FILEY_AI_MODEL: Readonly<CreditModel> = Object.freeze({
   id: FILEY_AI_MODEL_ID,
   name: "Filey AI",
   // Public uncached input/output rates reflect the customer's actual tariff.
   input: 0.25 / 1_000_000,
-  output: 1.00 / 1_000_000,
-  context: 131072,
+  output: 0.50 * 5 / 3 / 1_000_000,
+  context: 262144,
   maxOutput: 8192,
   vision: true,
   reasoning: true,
   free: false,
 });
-const RESERVATION_MODEL: Readonly<CreditModel> = Object.freeze({
-  ...FILEY_AI_MODEL,
-  input: 0.50 / 1_000_000,
-  output: 2.00 / 1_000_000,
-});
+const RESERVATION_MODEL: Readonly<CreditModel> = FILEY_AI_MODEL;
 
 export type CreditWallet = (
   action: string,
@@ -81,22 +75,6 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
   ) {
     throw new FileyAIError("Choose a supported reasoning level.", 400);
   }
-  // Thinking + tools requires exact reasoning on every prior assistant turn,
-  // including plain replies. OFF runs need no trace. When switching ON, callers
-  // pass prior UI history as quoted context, never fabricated reasoning.
-  for (const source of prepared.request.messages) {
-    const message = source as Record<string, unknown>;
-    if (
-      reasoningEnabled && prepared.request.tools !== undefined &&
-      message.role === "assistant" &&
-      typeof message.reasoning_content !== "string"
-    ) {
-      throw new FileyAIError(
-        "Turn reasoning off for this conversation, or start a new chat to use reasoning.",
-        400,
-      );
-    }
-  }
   const messages = prepared.request.messages.map((message) => {
     const clean = { ...message } as Record<string, unknown>;
     delete clean.reasoning;
@@ -111,15 +89,10 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
       ...(prepared.request.tools ? { tools: prepared.request.tools } : {}),
       stream: false,
       max_tokens: prepared.request.max_tokens,
-      thinking: { type: reasoningEnabled ? "enabled" : "disabled" },
-      // Positive effort values can enable thinking independently of the toggle.
-      ...(reasoningEnabled ? {
-        reasoning_effort: effort === "max"
-          ? "max"
-          : ["medium", "high", "xhigh"].includes(String(effort))
-          ? "high"
-          : "low",
-      } : {}),
+      // GLM-5.3-Flash always thinks and takes only low, high or max ("cannot be disabled; please
+      // use low, high, or max"). Reasoning off thinks least; earlier turns' thinking isn't replayed.
+      thinking: { type: "enabled", clear_thinking: true },
+      reasoning_effort: !reasoningEnabled ? "low" : effort === "max" || effort === "low" ? effort : "high",
     },
   };
 }
@@ -143,14 +116,15 @@ export function fileyAIUsage(completion: unknown, maxTokens: number) {
     !record(completion.usage)
   ) throw new FileyAIError(USAGE_ERROR);
   const usage = completion.usage;
+  const cache = usage.prompt_tokens_details;
+  if (cache !== undefined && cache !== null && !record(cache)) throw new FileyAIError(USAGE_ERROR);
   const prompt = usage.prompt_tokens,
     output = usage.completion_tokens,
-    hit = usage.prompt_cache_hit_tokens,
-    miss = usage.prompt_cache_miss_tokens,
+    hit = record(cache) && cache.cached_tokens !== undefined ? cache.cached_tokens : 0,
     total = usage.total_tokens;
   if (
-    ![prompt, output, hit, miss, total].every(tokenCount) ||
-    Number(hit) + Number(miss) !== prompt ||
+    ![prompt, output, hit, total].every(tokenCount) ||
+    Number(hit) > Number(prompt) ||
     Number(prompt) + Number(output) !== total ||
     Number(prompt) + maxTokens > FILEY_AI_MODEL.context ||
     Number(output) > maxTokens ||
@@ -169,8 +143,9 @@ export function fileyAIUsage(completion: unknown, maxTokens: number) {
   ) {
     throw new FileyAIError(USAGE_ERROR);
   }
-  const milliMicros = BigInt(Number(hit)) * 3n +
-    BigInt(Number(miss)) * 150n + BigInt(Number(output)) * 600n;
+  // Per token, in thousandths of a micro-dollar: $0.03/M cached, $0.15/M uncached, $0.50/M out.
+  const milliMicros = BigInt(Number(hit)) * 30n +
+    BigInt(Number(prompt) - Number(hit)) * 150n + BigInt(Number(output)) * 500n;
   const chargedMicros = Number((milliMicros * 5n + 2999n) / 3000n);
   return {
     chargedMicros,
@@ -330,7 +305,7 @@ export async function fileyAICompletion(
     }
     const raw: unknown = await response.json();
     const usage = fileyAIUsage(raw, prepared.request.max_tokens);
-    const message = publicMessage(raw, prepared.request.thinking.type === "enabled" && prepared.request.tools !== undefined);
+    const message = publicMessage(raw, false);
     const source = raw as Record<string, unknown>;
     const completion = {
       id: source.id as string,

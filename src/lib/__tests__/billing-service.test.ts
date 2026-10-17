@@ -85,13 +85,13 @@ it("explains an owned Ultra plan instead of displaying the edge function error",
     data: null,
     error: {
       message: "Edge Function returned a non-2xx status code",
-      context: new Response('{"error":"This account already owns Ultra."}', {
+      context: new Response('{"error":"This account already owns Freedom."}', {
         status: 409,
       }),
     },
   } as never);
   await expect(startFreedomCheckout()).rejects.toThrow(
-    "This account already owns Ultra."
+    "This account already owns Freedom."
   );
   expect(supabase!.functions.invoke).toHaveBeenCalledTimes(1);
 });

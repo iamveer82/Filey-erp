@@ -299,7 +299,7 @@ export default function AiSettings() {
 
   return (
     <SettingsPanel>
-      <SettingsSection title="AI payment method" description="Use your own key or optional Coin on Basic, Pro and Ultra. Coin is never spent automatically if your key fails.">
+      <SettingsSection title="AI payment method" description="Use your own key or optional Coin on Basic, Pro and Freedom. Coin is never spent automatically if your key fails.">
         <AiFundingControl />
       </SettingsSection>
       <LinkedDevicesSection />

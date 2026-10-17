@@ -135,15 +135,15 @@ export default function PlanDevices() {
           <>
             <p className="text-sm text-muted-foreground">
               {active
-                ? "Ultra is active on this device, including offline access."
+                ? "Freedom is active on this device, including offline access."
                 : overview
-                  ? "Your account owns Ultra. Access on this device depends on your available device slots."
+                  ? "Your account owns Freedom. Access on this device depends on your available device slots."
                   : "Your purchased plan follows your Filey account. Basic also includes local storage and core offline tools."}
             </p>
             {overview && (
               <div>
                 <p className="text-sm font-medium">
-                  Ultra devices ·{" "}
+                  Freedom devices ·{" "}
                   {overview.devices.filter((d) => !d.deactivated_at).length} /{" "}
                   {LITE_DEVICE_LIMIT}
                 </p>

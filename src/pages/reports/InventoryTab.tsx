@@ -1,17 +1,9 @@
-import { ChartTooltip, ChartTooltipContent } from "../../components/ui/chart";
 import { lowStockRows } from "./reportExports";
-import { ChartFrame } from "../../components/charts";
 import { useMemo } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, num, cn } from "../../lib/format";
 import { useChartStyle } from "../../components/charts";
 import { ReportsData, useCategoryBars } from "./useReportsData";
+import { BarSeriesChart } from "../../components/modernCharts";
 
 export default function InventoryTab({ data }: { data: ReportsData }) {
   const cs = useChartStyle();
@@ -98,30 +90,15 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
             </div>
           ) : (
             <div className="h-[280px] mt-3">
-              <ChartFrame height={280}>
-                <BarChart
-                  data={categoryBars}
-                  margin={{ top: 10, right: 10, left: -12, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                  <XAxis
-                    dataKey="name"
-                    {...cs.axisProps}
-                  />
-                  <YAxis
-                    {...cs.axisProps}
-                    tickFormatter={(v) => chartAmount(Number(v))}
-                  />
-                  <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} />
-                  <Bar
-                    isAnimationActive={false}
-                    dataKey="value"
-                    name="Value"
-                    fill={c.accent}
-                    radius={[6, 6, 0, 0]}
-                   maxBarSize={32} />
-                </BarChart>
-              </ChartFrame>
+              <BarSeriesChart
+                data={categoryBars}
+                xKey="name"
+                height={280}
+                xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
+                valueFormatter={(v) => aed(v)}
+                barColors={c.series}
+                series={[{ key: "value", label: "Value", color: c.series[0] }]}
+              />
             </div>
           )}
         </div>

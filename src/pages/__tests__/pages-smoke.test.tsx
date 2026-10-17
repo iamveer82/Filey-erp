@@ -98,7 +98,6 @@ import PaymentReceipt from "../PaymentReceipt";
 import DeclarationLetter from "../DeclarationLetter";
 import MyFiles from "../MyFiles";
 import Tools from "../Tools";
-import PdfTools from "../PdfTools";
 import AgentChat from "../AgentChat";
 import CustomerDetail from "../CustomerDetail";
 import EmployeeDetail from "../EmployeeDetail";
@@ -143,7 +142,6 @@ const pages: [string, () => ReactElement][] = [
   ["DeclarationLetter", () => <DeclarationLetter />],
   ["MyFiles", () => <MyFiles />],
   ["Tools", () => <Tools />],
-  ["PdfTools", () => <PdfTools />],
   ["AgentChat", () => <AgentChat />],
   // Purchase Invoices = the same page in purchase mode; its branches
   // (supplier labels, doc_type) must mount too.

@@ -11,3 +11,5 @@ pub mod shell;
 pub mod computer_use;
 pub mod desktop_browser;
 pub mod telegram;
+pub mod print;
+pub mod genui;

@@ -1,0 +1,328 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Filey AI interactive card runtime (show_ui). Served from its own origin by
+     genui.rs and framed with sandbox="allow-scripts allow-forms" (no
+     allow-same-origin): card code reaches neither the app nor its storage.
+     Design system, card format and bridge follow OpenIntelligentUI
+     (github.com/CopilotKit/OpenIntelligentUI, MIT), in Filey's palette. -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://esm.sh/three@0.170.0", "three/": "https://esm.sh/three@0.170.0/",
+  "gsap": "https://esm.sh/gsap@3.12.7", "gsap/": "https://esm.sh/gsap@3.12.7/",
+  "d3": "https://esm.sh/d3@7.9.0", "d3/": "https://esm.sh/d3@7.9.0/",
+  "chart.js": "https://esm.sh/chart.js@4.4.7", "chart.js/": "https://esm.sh/chart.js@4.4.7/"
+} }
+</script>
+<style id="filey-design">
+:root {
+  color-scheme: light;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f4f4f5;
+  --color-background-tertiary: #fafafa;
+  --color-background-info: #e8f0fe;
+  --color-background-danger: #fdecec;
+  --color-background-success: #e8f5e9;
+  --color-background-warning: #fdf3e1;
+  --color-text-primary: #18181b;
+  --color-text-secondary: #71717a;
+  --color-text-tertiary: #a1a1aa;
+  --color-text-info: #1d4ed8;
+  --color-text-danger: #b91c1c;
+  --color-text-success: #15803d;
+  --color-text-warning: #a16207;
+  --color-border-primary: rgba(0, 0, 0, 0.4);
+  --color-border-secondary: rgba(0, 0, 0, 0.22);
+  --color-border-tertiary: rgba(0, 0, 0, 0.1);
+  --color-border-info: #1d4ed8;
+  --color-border-danger: #b91c1c;
+  --color-border-success: #15803d;
+  --color-border-warning: #a16207;
+  --color-accent: #6366f1;
+  --color-accent-text: #ffffff;
+  /* Vivid categorical colours (Filey's GEN_UI_PALETTE): series, highlights, tinted tiles. */
+  --chart-1: #6366f1; --chart-2: #10b981; --chart-3: #f59e0b; --chart-4: #ec4899;
+  --chart-5: #06b6d4; --chart-6: #8b5cf6; --chart-7: #f97316; --chart-8: #84cc16;
+  --gradient-brand: linear-gradient(135deg, #6366f1, #8b5cf6 55%, #ec4899);
+  --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", monospace;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  --border-radius-xl: 16px;
+  --p: var(--color-text-primary); --s: var(--color-text-secondary); --t: var(--color-text-tertiary);
+  --bg2: var(--color-background-secondary); --b: var(--color-border-tertiary);
+  /* Short names from Filey's first card version. */
+  --fg: var(--color-text-primary); --muted: var(--color-text-secondary); --border: var(--color-border-tertiary);
+  --card: var(--color-background-primary); --soft: var(--color-background-secondary);
+  --accent: var(--color-accent); --accent-fg: var(--color-accent-text);
+  --good: var(--color-text-success); --bad: var(--color-text-danger); --radius: var(--border-radius-lg);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-background-primary: #18181b;
+  --color-background-secondary: #27272a;
+  --color-background-tertiary: #1f1f23;
+  --color-background-info: #172554;
+  --color-background-danger: #450a0a;
+  --color-background-success: #052e16;
+  --color-background-warning: #422006;
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #71717a;
+  --color-text-info: #93c5fd;
+  --color-text-danger: #fca5a5;
+  --color-text-success: #86efac;
+  --color-text-warning: #fcd34d;
+  --color-border-primary: rgba(255, 255, 255, 0.4);
+  --color-border-secondary: rgba(255, 255, 255, 0.22);
+  --color-border-tertiary: rgba(255, 255, 255, 0.1);
+  --color-border-info: #93c5fd;
+  --color-border-danger: #fca5a5;
+  --color-border-success: #86efac;
+  --color-border-warning: #fcd34d;
+  --color-accent: #818cf8;
+  --color-accent-text: #0b0b17;
+  --chart-1: #818cf8; --chart-2: #34d399; --chart-3: #fbbf24; --chart-4: #f472b6;
+  --chart-5: #22d3ee; --chart-6: #a78bfa; --chart-7: #fb923c; --chart-8: #a3e635;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; }
+body {
+  padding: 1px; overflow: hidden;
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.6;
+  color: var(--color-text-primary); -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4, p, ul, ol { margin: 0 0 8px; }
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { font-size: 20px; } h2 { font-size: 17px; } h3 { font-size: 15px; } h4 { font-size: 14px; }
+button {
+  font: inherit; font-size: 14px; font-weight: 500; padding: 6px 14px; cursor: pointer;
+  color: var(--color-text-primary); background: var(--color-background-primary);
+  border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md);
+  transition: background 0.15s, transform 0.1s;
+}
+button:hover { background: var(--color-background-secondary); }
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--gradient-brand); color: #fff; border-color: transparent; box-shadow: 0 1px 2px rgba(99, 102, 241, 0.35); }
+button.primary:hover { filter: brightness(1.06); background: var(--gradient-brand); }
+input[type="text"], input[type="number"], input[type="email"], input[type="search"], input[type="date"], textarea, select {
+  font: inherit; font-size: 14px; padding: 6px 12px; height: 36px;
+  color: var(--color-text-primary); background: var(--color-background-primary);
+  border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-md);
+  transition: border-color 0.15s;
+}
+input:hover, textarea:hover, select:hover { border-color: var(--color-border-secondary); }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent); }
+textarea { height: auto; min-height: 80px; resize: vertical; }
+input::placeholder, textarea::placeholder { color: var(--color-text-tertiary); }
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 5px; background: color-mix(in srgb, var(--color-accent) 25%, var(--color-border-tertiary)); border-radius: 3px; border: none; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  background: var(--color-background-primary); border: 3px solid var(--color-accent); box-shadow: 0 1px 4px rgba(99, 102, 241, 0.4);
+}
+input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-color: var(--color-accent); }
+label { font-size: 13px; color: var(--color-text-secondary); }
+a { color: var(--color-text-info); text-decoration: none; }
+a:hover { text-decoration: underline; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 9%, transparent); }
+th, td { padding: 7px 8px; border-bottom: 1px solid var(--color-border-tertiary); }
+tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--color-background-secondary) 55%, transparent); }
+img { max-width: 100%; border-radius: var(--border-radius-md); }
+img[data-filey-image]:not([src]) { display: block; min-height: 120px; background: var(--color-background-secondary); }
+.card { background: var(--color-background-primary); border: 1px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px; }
+.muted { color: var(--color-text-secondary); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.stat { --tone: var(--chart-1); position: relative; overflow: hidden; padding: 12px 12px 12px 15px; border-radius: var(--border-radius-lg);
+  background: color-mix(in srgb, var(--tone) 10%, transparent); border: 1px solid color-mix(in srgb, var(--tone) 24%, transparent); }
+.stat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--tone); }
+.stat b { display: block; font-size: 20px; }
+.stat > :first-child { color: var(--tone); font-weight: 500; }
+:is(.grid, .row) > .stat:nth-child(8n+2) { --tone: var(--chart-2); } :is(.grid, .row) > .stat:nth-child(8n+3) { --tone: var(--chart-3); }
+:is(.grid, .row) > .stat:nth-child(8n+4) { --tone: var(--chart-4); } :is(.grid, .row) > .stat:nth-child(8n+5) { --tone: var(--chart-5); }
+:is(.grid, .row) > .stat:nth-child(8n+6) { --tone: var(--chart-6); } :is(.grid, .row) > .stat:nth-child(8n+7) { --tone: var(--chart-7); }
+:is(.grid, .row) > .stat:nth-child(8n+8) { --tone: var(--chart-8); }
+.pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--tone, var(--chart-1)); background: color-mix(in srgb, var(--tone, var(--chart-1)) 14%, transparent); }
+.tone-1 { --tone: var(--chart-1); } .tone-2 { --tone: var(--chart-2); } .tone-3 { --tone: var(--chart-3); } .tone-4 { --tone: var(--chart-4); }
+.tone-5 { --tone: var(--chart-5); } .tone-6 { --tone: var(--chart-6); } .tone-7 { --tone: var(--chart-7); } .tone-8 { --tone: var(--chart-8); }
+.gradient-text { background: var(--gradient-brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.credit { font-size: 11px; color: var(--color-text-tertiary); }
+.filey-error { color: var(--color-text-danger); white-space: pre-wrap; font: 12px/1.4 var(--font-mono); }
+
+svg text.t { font: 400 14px var(--font-sans); fill: var(--p); }
+svg text.ts { font: 400 12px var(--font-sans); fill: var(--s); }
+svg text.th { font: 500 14px var(--font-sans); fill: var(--p); }
+svg .box > rect, svg .box > circle, svg .box > ellipse { fill: var(--bg2); stroke: var(--b); }
+svg .node { cursor: pointer; }
+svg .node:hover { opacity: 0.8; }
+svg .arr { stroke: var(--s); stroke-width: 1.5; fill: none; }
+svg .leader { stroke: var(--t); stroke-width: 0.5; stroke-dasharray: 4 4; fill: none; }
+svg .c-purple > rect, svg .c-purple > circle, svg .c-purple > ellipse, svg rect.c-purple, svg circle.c-purple, svg ellipse.c-purple { fill: #EEEDFE; stroke: #534AB7; }
+svg .c-purple text.th, svg .c-purple text.t { fill: #3C3489; } svg .c-purple text.ts { fill: #534AB7; }
+svg .c-teal > rect, svg .c-teal > circle, svg .c-teal > ellipse, svg rect.c-teal, svg circle.c-teal, svg ellipse.c-teal { fill: #E1F5EE; stroke: #0F6E56; }
+svg .c-teal text.th, svg .c-teal text.t { fill: #085041; } svg .c-teal text.ts { fill: #0F6E56; }
+svg .c-coral > rect, svg .c-coral > circle, svg .c-coral > ellipse, svg rect.c-coral, svg circle.c-coral, svg ellipse.c-coral { fill: #FAECE7; stroke: #993C1D; }
+svg .c-coral text.th, svg .c-coral text.t { fill: #712B13; } svg .c-coral text.ts { fill: #993C1D; }
+svg .c-pink > rect, svg .c-pink > circle, svg .c-pink > ellipse, svg rect.c-pink, svg circle.c-pink, svg ellipse.c-pink { fill: #FBEAF0; stroke: #993556; }
+svg .c-pink text.th, svg .c-pink text.t { fill: #72243E; } svg .c-pink text.ts { fill: #993556; }
+svg .c-gray > rect, svg .c-gray > circle, svg .c-gray > ellipse, svg rect.c-gray, svg circle.c-gray, svg ellipse.c-gray { fill: #F1EFE8; stroke: #5F5E5A; }
+svg .c-gray text.th, svg .c-gray text.t { fill: #444441; } svg .c-gray text.ts { fill: #5F5E5A; }
+svg .c-blue > rect, svg .c-blue > circle, svg .c-blue > ellipse, svg rect.c-blue, svg circle.c-blue, svg ellipse.c-blue { fill: #E6F1FB; stroke: #185FA5; }
+svg .c-blue text.th, svg .c-blue text.t { fill: #0C447C; } svg .c-blue text.ts { fill: #185FA5; }
+svg .c-green > rect, svg .c-green > circle, svg .c-green > ellipse, svg rect.c-green, svg circle.c-green, svg ellipse.c-green { fill: #EAF3DE; stroke: #3B6D11; }
+svg .c-green text.th, svg .c-green text.t { fill: #27500A; } svg .c-green text.ts { fill: #3B6D11; }
+svg .c-amber > rect, svg .c-amber > circle, svg .c-amber > ellipse, svg rect.c-amber, svg circle.c-amber, svg ellipse.c-amber { fill: #FAEEDA; stroke: #854F0B; }
+svg .c-amber text.th, svg .c-amber text.t { fill: #633806; } svg .c-amber text.ts { fill: #854F0B; }
+svg .c-red > rect, svg .c-red > circle, svg .c-red > ellipse, svg rect.c-red, svg circle.c-red, svg ellipse.c-red { fill: #FCEBEB; stroke: #A32D2D; }
+svg .c-red text.th, svg .c-red text.t { fill: #791F1F; } svg .c-red text.ts { fill: #A32D2D; }
+html[data-theme="dark"] svg text.t, html[data-theme="dark"] svg text.th { fill: #e8e6de; }
+html[data-theme="dark"] svg text.ts { fill: #9c9a92; }
+html[data-theme="dark"] svg .c-purple > rect, html[data-theme="dark"] svg .c-purple > circle, html[data-theme="dark"] svg rect.c-purple, html[data-theme="dark"] svg circle.c-purple { fill: #3C3489; stroke: #AFA9EC; }
+html[data-theme="dark"] svg .c-purple text.th, html[data-theme="dark"] svg .c-purple text.t { fill: #CECBF6; }
+html[data-theme="dark"] svg .c-teal > rect, html[data-theme="dark"] svg .c-teal > circle, html[data-theme="dark"] svg rect.c-teal, html[data-theme="dark"] svg circle.c-teal { fill: #085041; stroke: #5DCAA5; }
+html[data-theme="dark"] svg .c-teal text.th, html[data-theme="dark"] svg .c-teal text.t { fill: #9FE1CB; }
+html[data-theme="dark"] svg .c-coral > rect, html[data-theme="dark"] svg .c-coral > circle, html[data-theme="dark"] svg rect.c-coral, html[data-theme="dark"] svg circle.c-coral { fill: #712B13; stroke: #F0997B; }
+html[data-theme="dark"] svg .c-coral text.th, html[data-theme="dark"] svg .c-coral text.t { fill: #F5C4B3; }
+html[data-theme="dark"] svg .c-pink > rect, html[data-theme="dark"] svg .c-pink > circle, html[data-theme="dark"] svg rect.c-pink, html[data-theme="dark"] svg circle.c-pink { fill: #72243E; stroke: #ED93B1; }
+html[data-theme="dark"] svg .c-pink text.th, html[data-theme="dark"] svg .c-pink text.t { fill: #F4C0D1; }
+html[data-theme="dark"] svg .c-gray > rect, html[data-theme="dark"] svg .c-gray > circle, html[data-theme="dark"] svg rect.c-gray, html[data-theme="dark"] svg circle.c-gray { fill: #444441; stroke: #B4B2A9; }
+html[data-theme="dark"] svg .c-gray text.th, html[data-theme="dark"] svg .c-gray text.t { fill: #D3D1C7; }
+html[data-theme="dark"] svg .c-blue > rect, html[data-theme="dark"] svg .c-blue > circle, html[data-theme="dark"] svg rect.c-blue, html[data-theme="dark"] svg circle.c-blue { fill: #0C447C; stroke: #85B7EB; }
+html[data-theme="dark"] svg .c-blue text.th, html[data-theme="dark"] svg .c-blue text.t { fill: #B5D4F4; }
+html[data-theme="dark"] svg .c-green > rect, html[data-theme="dark"] svg .c-green > circle, html[data-theme="dark"] svg rect.c-green, html[data-theme="dark"] svg circle.c-green { fill: #27500A; stroke: #97C459; }
+html[data-theme="dark"] svg .c-green text.th, html[data-theme="dark"] svg .c-green text.t { fill: #C0DD97; }
+html[data-theme="dark"] svg .c-amber > rect, html[data-theme="dark"] svg .c-amber > circle, html[data-theme="dark"] svg rect.c-amber, html[data-theme="dark"] svg circle.c-amber { fill: #633806; stroke: #EF9F27; }
+html[data-theme="dark"] svg .c-amber text.th, html[data-theme="dark"] svg .c-amber text.t { fill: #FAC775; }
+html[data-theme="dark"] svg .c-red > rect, html[data-theme="dark"] svg .c-red > circle, html[data-theme="dark"] svg rect.c-red, html[data-theme="dark"] svg circle.c-red { fill: #791F1F; stroke: #F09595; }
+html[data-theme="dark"] svg .c-red text.th, html[data-theme="dark"] svg .c-red text.t { fill: #F7C1C1; }
+
+#content.initial-render > * { animation: fadeSlideIn 0.4s ease-out both; }
+#content.initial-render > *:nth-child(2) { animation-delay: 0.06s; }
+#content.initial-render > *:nth-child(3) { animation-delay: 0.12s; }
+#content.initial-render > *:nth-child(4) { animation-delay: 0.18s; }
+#content.initial-render > *:nth-child(5) { animation-delay: 0.24s; }
+#content.initial-render > *:nth-child(n+6) { animation-delay: 0.3s; }
+@keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+<div id="content"></div>
+<script>
+(() => {
+  const say = message => parent.postMessage(message, "*");
+  const fail = error => {
+    const p = document.createElement("pre");
+    p.className = "filey-error";
+    p.textContent = "This card hit an error: " + ((error && error.message) || error);
+    document.body.append(p);
+  };
+  addEventListener("error", event => fail(event.error || event.message));
+  addEventListener("unhandledrejection", event => fail(event.reason));
+
+  const images = {};
+  const fillImages = () => {
+    for (const img of document.querySelectorAll("img[data-filey-image]")) {
+      const src = images[img.dataset.fileyImage];
+      if (src && img.getAttribute("src") !== src) img.src = src;
+    }
+  };
+  // The app accepts a follow-up or a link only right after a real click in the card.
+  const send = text => say({ type: "filey-ui-prompt", text: String(text == null ? "" : text).slice(0, 2000) });
+  const openLink = url => say({ type: "filey-ui-link", url: String(url || "") });
+  window.filey = Object.freeze({ send, openLink, images, image: name => images[name] });
+  // OpenIntelligentUI's bridge, so cards written for it run unchanged.
+  window.Websandbox = Object.freeze({ connection: Object.freeze({ remote: Object.freeze({
+    sendPrompt: async ({ text } = {}) => send(text),
+    openLink: async ({ url } = {}) => openLink(url),
+  }) }) });
+
+  let card = null;
+  const run = code => new Promise(resolve => {
+    if (!code || !String(code).trim()) return resolve();
+    const s = document.createElement("script");
+    s.textContent = String(code);
+    document.body.append(s);
+    resolve();
+  });
+
+  // A standalone copy for My Files or a download: the design, the card and its code in one file.
+  const standalone = () => {
+    const esc = s => String(s).replace(/<\/script/gi, "<\\/script");
+    const scripts = [card.jsFunctions, ...(card.jsExpressions || []), card.js].filter(Boolean)
+      .map(code => `<script>${esc(code)}<\/script>`).join("\n");
+    return `<!doctype html>
+<html data-theme="${document.documentElement.dataset.theme || "light"}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${String(card.title || "Filey card").replace(/[<&]/g, "")}</title>
+${document.querySelector('script[type="importmap"]').outerHTML}
+<style>${document.getElementById("filey-design").textContent}
+body { overflow: auto; padding: 16px; max-width: 960px; margin: 0 auto; }</style>
+<style>${card.css || ""}</style>
+</head>
+<body>
+<div id="content">${card.html || ""}</div>
+<script>
+const images = ${JSON.stringify(images).replace(/<\//g, "<\\/")};
+for (const img of document.querySelectorAll("img[data-filey-image]")) if (images[img.dataset.fileyImage]) img.src = images[img.dataset.fileyImage];
+const send = text => alert("In Filey this button asks Filey AI: " + text);
+window.filey = { send, openLink: url => window.open(url, "_blank", "noopener"), images, image: name => images[name] };
+window.Websandbox = { connection: { remote: { sendPrompt: async ({ text }) => send(text), openLink: async ({ url }) => window.open(url, "_blank", "noopener") } } };
+<\/script>
+${scripts}
+</body></html>`;
+  };
+
+  addEventListener("message", async event => {
+    const m = event.data || {};
+    if (event.source !== parent) return;
+    if (m.type === "filey-ui-images") {
+      Object.assign(images, m.images || {});
+      fillImages();
+      dispatchEvent(new Event("filey-images"));
+      return;
+    }
+    if (m.type === "filey-ui-export" && card) return say({ type: "filey-ui-export", html: standalone() });
+    if (m.type !== "filey-ui-render" || card) return;
+    card = m;
+    document.documentElement.dataset.theme = m.theme === "dark" ? "dark" : "light";
+    Object.assign(images, m.images || {});
+    if (m.css) document.head.append(Object.assign(document.createElement("style"), { textContent: String(m.css) }));
+    const root = document.getElementById("content");
+    root.classList.add("initial-render");
+    root.innerHTML = String(m.html || "");
+    setTimeout(() => root.classList.remove("initial-render"), 1200);
+    fillImages();
+    // Scripts set through innerHTML never run: re-create them in order, waiting for each library.
+    for (const old of [...root.querySelectorAll("script")]) {
+      const s = document.createElement("script");
+      for (const a of old.attributes) s.setAttribute(a.name, a.value);
+      if (old.src) {
+        await new Promise(resolve => { s.onload = s.onerror = resolve; old.replaceWith(s); });
+      } else {
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      }
+    }
+    await run(m.jsFunctions);
+    for (const expression of m.jsExpressions || []) await run(expression);
+    await run(m.js);
+    say({ type: "filey-ui-rendered" });
+    const size = () => say({ type: "filey-ui-size", height: Math.ceil(document.documentElement.getBoundingClientRect().height) });
+    new ResizeObserver(size).observe(document.documentElement);
+    size();
+  });
+  say({ type: "filey-ui-ready" });
+})();
+</script>
+</body>
+</html>

@@ -1,11 +1,11 @@
-import { ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "../../components/ui/chart";
-import { ChartFrame } from "../../components/charts";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
+import { useMemo } from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
-import { aed, chartAmount, num, cn } from "../../lib/format";
+import { aed, num, cn } from "../../lib/format";
 import { isPostedStatus } from "../../lib/api";
 import { useChartStyle } from "../../components/charts";
 import ChartEmpty, { allZero } from "../../components/ChartEmpty";
+import { BarSeriesChart } from "../../components/modernCharts";
+import { bucketTrend } from "../overviewData";
 import {
   ReportsData,
   useRevenueTotal,
@@ -26,7 +26,8 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
   const revenueTotal = useRevenueTotal(data.invoices);
   const invoicePaymentsTotal = data.invoicePayments.reduce((sum, payment) => sum + payment.amount, 0);
   const deltas = useDeltas(data.invoices, data.receiptList, data.customers, data.orders);
-  const trend = useTrend(data.invoices, data.receiptList, data.invoicePayments);
+  const { trend, days } = useTrend(data.invoices, data.receiptList, data.invoicePayments);
+  const bars = useMemo(() => bucketTrend(trend), [trend]);
 
   const kpis: Kpi[] = [
     {
@@ -104,7 +105,7 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
             Sales and payments
           </div>
           <div className="text-[12.5px] text-muted-foreground mt-0.5">
-            Last 7 days · invoices by issue date; payments and receipt documents by payment date
+            Last {days} days · invoices by issue date; payments and receipt documents by payment date
           </div>
         </div>
         <div className="p-5">
@@ -112,42 +113,18 @@ export default function DashboardTab({ data }: { data: ReportsData }) {
             {allZero(trend, "invoiced", "invoicePayments", "received") ? (
               <ChartEmpty hint="Post an invoice, record an invoice payment or confirm a receipt document to see activity here." />
             ) : (
-            <ChartFrame height={280}>
-              <BarChart data={trend} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={c.grid} vertical={false} />
-                <XAxis dataKey="d" {...cs.axisProps} />
-                <YAxis
-                  {...cs.axisProps}
-                  tickFormatter={(v) => chartAmount(Number(v))}
-                />
-                <ChartTooltip content={<ChartTooltipContent valueFormatter={(v) => aed(Number(v) || 0)} />} cursor={cs.cursor} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="invoiced"
-                  name="Invoiced"
-                  fill={c.accent}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="invoicePayments"
-                  name="Invoice payments"
-                  fill={c.primary}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-                <Bar
-                  isAnimationActive={false}
-                  dataKey="received"
-                  name="Receipt documents"
-                  fill={c.tertiary}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                />
-              </BarChart>
-            </ChartFrame>
+            <BarSeriesChart
+              data={bars}
+              xKey="d"
+              spanKey="span"
+              height={280}
+              valueFormatter={(v) => aed(v)}
+              series={[
+                { key: "invoiced", label: "Invoiced", color: c.series[0] },
+                { key: "invoicePayments", label: "Invoice payments", color: c.good },
+                { key: "received", label: "Receipt documents", color: c.series[1] },
+              ]}
+            />
             )}
           </div>
         </div>
