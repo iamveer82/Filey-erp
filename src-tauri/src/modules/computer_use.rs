@@ -11,6 +11,26 @@ use tauri::{Manager, Webview};
 const MAX_OUTPUT: u64 = 6_000_000;
 const SNAPSHOT_LIFETIME: Duration = Duration::from_secs(120);
 const HELPER: &str = include_str!("computer_use.ps1");
+/// open-computer-use's Windows runtime: any app through UI Automation, by element index.
+const OCU_RUNTIME: &str = include_str!("ocu_runtime.ps1");
+/// Runs the runtime in memory, dot-sourced so its `$script:` state works. Stdin is the operation
+/// JSON and the script, each base64 (ASCII, so the console code page can't garble them).
+const OCU_BOOTSTRAP: &str = r#"$ErrorActionPreference = 'Stop'
+$parts = [Console]::In.ReadToEnd().Split("`n")
+$utf8 = [Text.UTF8Encoding]::new($false)
+$operation = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGuid() + ".json")
+[IO.File]::WriteAllText($operation, $utf8.GetString([Convert]::FromBase64String($parts[0].Trim())), $utf8)
+try { . ([scriptblock]::Create($utf8.GetString([Convert]::FromBase64String($parts[1].Trim())))) -OperationPath $operation }
+finally { Remove-Item -LiteralPath $operation -ErrorAction SilentlyContinue }"#;
+/// The runtime's opt-ins for real-pointer input, app launching, focus stealing and UIA text
+/// fallback stay off whatever the user's environment says.
+const OCU_FLAGS: [&str; 4] = [
+    "OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS",
+    "OPEN_COMPUTER_USE_WINDOWS_ALLOW_APP_LAUNCH",
+    "OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOCUS_ACTIONS",
+    "OPEN_COMPUTER_USE_WINDOWS_ALLOW_UIA_TEXT_FALLBACK",
+];
+const MAX_TREE: usize = 24_000;
 
 struct Snapshot {
     id: String,
@@ -25,6 +45,8 @@ struct Session {
     root_window: Option<String>,
     dialog_owner: Option<String>,
     browser_tab: Option<String>,
+    /// The latest UI Automation snapshot of each app (no screenshot), by app name, query and pid.
+    apps: HashMap<String, Value>,
 }
 #[derive(Default)]
 struct State {
@@ -56,6 +78,14 @@ fn revoke(current: &mut State) {
         if let Ok(mut child) = child.lock() {
             let _ = child.kill();
         }
+    }
+    super::agent_overlay::hide();
+}
+
+/// Esc on the overlay: the user takes over, whatever was running stops.
+fn escape_revoke() {
+    if let Ok(mut current) = state().lock() {
+        revoke(&mut current);
     }
 }
 
@@ -123,7 +153,10 @@ pub fn computer_start(
         root_window: window_id,
         dialog_owner,
         browser_tab,
+        apps: HashMap::new(),
     });
+    drop(current);
+    super::agent_overlay::show(window.app_handle(), escape_revoke);
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -324,6 +357,144 @@ fn prepare(request: &Value, active: &mut Session) -> Result<Value, String> {
     Ok(prepared)
 }
 
+/// Keys the runtime posts to the app's own window: ctrl/shift/alt chords, never Windows-key ones.
+fn app_key(keys: &str) -> bool {
+    let mut parts: Vec<&str> = keys.split('+').collect();
+    let main = parts.pop().unwrap_or_default().to_ascii_lowercase();
+    parts.iter().all(|m| matches!(m.to_ascii_lowercase().as_str(), "ctrl" | "control" | "shift" | "alt"))
+        && (matches!(main.as_str(), "return" | "enter" | "tab" | "escape" | "esc" | "backspace" | "delete" | "space" | "left" | "up"
+            | "right" | "down" | "home" | "end" | "page_up" | "page_down")
+            || main.len() == 1 && main.chars().all(|c| c.is_ascii_alphanumeric())
+            || main.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=12).contains(&n)))
+}
+
+/// An app request in the runtime's own operation format. Element targets come from the app's
+/// latest snapshot here, never from the request, and acting consumes that snapshot.
+fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
+    if active.root_window.is_some() {
+        return Err("This task is limited to its browser tab; desktop apps are not available to it.".into());
+    }
+    let action = text(request, "action", 24)?;
+    if action == "apps" {
+        return Ok(json!({"tool": "list_apps"}));
+    }
+    let app = text(request, "app", 200)?;
+    if action == "app_state" {
+        return Ok(json!({"tool": "get_app_state", "app": app}));
+    }
+    let snapshot = active.apps.get(&app.to_lowercase()).cloned()
+        .ok_or("Read the app with app_state before acting in it.")?;
+    let pid = snapshot["app"]["pid"].as_u64().ok_or("Read the app with app_state again.")?;
+    let mut op = json!({"app": pid.to_string(), "expected_pid": pid, "windowHandle": snapshot["windowHandle"], "windowBounds": snapshot["windowBounds"]});
+    let element = |op: &mut Value| -> Result<(), String> {
+        let index = request["element_index"].as_u64().ok_or("element_index must be an index from the latest app_state.")?;
+        op["element"] = snapshot["elements"].as_array().and_then(|all| all.iter().find(|e| e["index"].as_u64() == Some(index))).cloned()
+            .ok_or("That element_index is not in the latest app_state. Read the app again.")?;
+        Ok(())
+    };
+    let typed = |key: &str| -> Result<String, String> {
+        let value = request[key].as_str().filter(|v| v.chars().count() <= 2000 && !v.chars().any(|c| c.is_control() && c != '\n' && c != '\t'))
+            .ok_or_else(|| format!("{key} must be at most 2000 characters without control codes."))?;
+        Ok(value.to_owned())
+    };
+    match action {
+        "app_click" => {
+            op["tool"] = json!("click");
+            op["click_method"] = json!("auto");
+            if request.get("element_index").is_some() {
+                element(&mut op)?;
+            } else {
+                let size = |k: &str| snapshot["windowBounds"][k].as_f64().map(|n| n as i64).filter(|n| *n > 0);
+                let (width, height) = size("width").zip(size("height")).ok_or("This window has no usable screenshot; click an element_index.")?;
+                op["x"] = json!(point(request, "x", width)?);
+                op["y"] = json!(point(request, "y", height)?);
+            }
+            let button = request.get("button").and_then(Value::as_str).unwrap_or("left");
+            if !matches!(button, "left" | "right") || request.get("double_click").is_some_and(|v| !v.is_boolean()) {
+                return Err("button must be left or right, double_click true or false.".into());
+            }
+            op["mouse_button"] = json!(button);
+            op["click_count"] = json!(if request["double_click"].as_bool() == Some(true) { 2 } else { 1 });
+        }
+        "app_type" => {
+            let value = typed("text")?;
+            if value.is_empty() {
+                return Err("text is missing.".into());
+            }
+            op["tool"] = json!("type_text");
+            op["text"] = json!(value);
+        }
+        "app_key" => {
+            let keys = text(request, "keys", 32)?;
+            if !app_key(keys) {
+                return Err("Unsupported keys. Use ctrl/shift/alt with a letter, digit, F1-F12 or a named key, like ctrl+s or Return.".into());
+            }
+            op["tool"] = json!("press_key");
+            op["key"] = json!(keys);
+            op["key_method"] = json!("auto");
+        }
+        "app_set_value" => {
+            element(&mut op)?;
+            op["tool"] = json!("set_value");
+            op["value"] = json!(typed("value")?);
+        }
+        "app_scroll" => {
+            element(&mut op)?;
+            let direction = text(request, "direction", 8)?;
+            let pages = request["pages"].as_f64().unwrap_or(1.0);
+            if !(matches!(direction, "up" | "down" | "left" | "right") && pages > 0.0 && pages <= 10.0) {
+                return Err("direction must be up, down, left or right, pages above 0 and at most 10.".into());
+            }
+            op["tool"] = json!("scroll");
+            op["direction"] = json!(direction);
+            op["pages"] = json!(pages);
+        }
+        "app_action" => {
+            element(&mut op)?;
+            let name = text(request, "name", 16)?;
+            if !matches!(name, "invoke" | "toggle" | "select" | "expand" | "collapse" | "scrollintoview") {
+                return Err("name must be invoke, toggle, select, expand, collapse or scrollintoview.".into());
+            }
+            op["tool"] = json!("perform_secondary_action");
+            op["action"] = json!(name);
+        }
+        _ => return Err("Unsupported computer action.".into()),
+    }
+    // Consumed like a screenshot: indexes are only good for the state they were read from.
+    active.apps.retain(|_, s| s["app"]["pid"].as_u64() != Some(pid));
+    Ok(op)
+}
+
+/// What the agent sees of an app snapshot; the snapshot itself is kept for its next action.
+fn app_result(active: &mut Session, query: &str, mut snapshot: Value) -> Result<Value, String> {
+    let pid = snapshot["app"]["pid"].as_u64().ok_or("The app's state could not be read.")?;
+    if pid == u64::from(std::process::id()) {
+        return Err("Filey's own windows are not available to computer control. Use Filey's tools.".into());
+    }
+    let image = snapshot.as_object_mut().and_then(|s| s.remove("screenshotPngBase64")).and_then(|v| v.as_str().map(str::to_owned));
+    let name = snapshot["app"]["name"].as_str().unwrap_or_default().to_owned();
+    let mut tree = snapshot["treeLines"].as_array().map(|lines| lines.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+    if tree.len() > MAX_TREE {
+        let cut = (0..=MAX_TREE).rev().find(|i| tree.is_char_boundary(*i)).unwrap_or(0);
+        tree.truncate(cut);
+        tree.push_str("\n… (tree cut; scroll or act on what is shown)");
+    }
+    let mut out = json!({
+        "app": name, "pid": pid, "window": snapshot["windowTitle"], "tree": tree,
+        "focused": snapshot["focusedSummary"], "selected_text": snapshot["selectedText"],
+        "hint": "Act with element_index from this tree; indexes change after every action, which returns the new tree.",
+    });
+    if let Some(data) = image.filter(|d| d.starts_with("iVBORw0KGgo") && d.len() <= 5_600_000) {
+        out["image"] = json!({"mediaType": "image/png", "dataBase64": data});
+    }
+    for key in [query.to_lowercase(), name.to_lowercase(), pid.to_string()] {
+        if !key.is_empty() {
+            active.apps.insert(key, snapshot.clone());
+        }
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn computer_command(
     window: Webview,
@@ -341,7 +512,9 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
     if !cfg!(windows) {
         return Err("Native computer control currently requires Windows.".into());
     }
-    let (id, child, mut stdout, mut stderr, action) = {
+    let action = request["action"].as_str().unwrap_or_default().to_owned();
+    let ocu = action == "apps" || action.starts_with("app_");
+    let (id, child, mut stdout, mut stderr) = {
         let mut current = state()
             .lock()
             .map_err(|_| "Computer access is unavailable.")?;
@@ -349,7 +522,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             return Err("A computer action is already running. Wait or stop it first.".into());
         }
         let active = session(&mut current, &token)?;
-        let region = if let Some(ref tab) = active.browser_tab {
+        let region = if ocu { None } else if let Some(ref tab) = active.browser_tab {
             let region = super::desktop_browser::computer_region(&app, tab, request["action"] != "list_windows")?;
             if !matches!(request["action"].as_str(), Some("list_windows" | "screenshot"))
                 && active.snapshot.as_ref().is_none_or(|shot| shot.data["browser_region"] != region) {
@@ -358,14 +531,16 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             }
             Some(region)
         } else { None };
-        let mut prepared = prepare(&request, active)?;
+        let mut prepared = if ocu { prepare_app(&request, active)? } else { prepare(&request, active)? };
         if let Some(region) = region { prepared["browser_region"] = region; prepared["strict_browser"] = json!(true); }
         if prepared["action"] == "list_windows" {
             prepared["browser_windows"] = json!(super::desktop_browser::computer_windows(&app));
         }
         use base64::Engine;
+        let b64 = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
+        let input_text = if ocu { format!("{}\n{}", b64(&prepared.to_string()), b64(OCU_RUNTIME)) } else { prepared.to_string() };
         let encoded = base64::engine::general_purpose::STANDARD.encode(
-            HELPER
+            if ocu { OCU_BOOTSTRAP } else { HELPER }
                 .encode_utf16()
                 .flat_map(u16::to_le_bytes)
                 .collect::<Vec<_>>(),
@@ -387,6 +562,9 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        for flag in OCU_FLAGS {
+            command.env_remove(flag);
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -399,7 +577,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             .stdin
             .take()
             .ok_or("Computer helper input unavailable.")?;
-        if let Err(error) = input.write_all(prepared.to_string().as_bytes()) {
+        if let Err(error) = input.write_all(input_text.as_bytes()) {
             let _ = process.kill();
             return Err(error.to_string());
         }
@@ -415,13 +593,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
         let child = Arc::new(Mutex::new(process));
         let id = uuid::Uuid::new_v4().to_string();
         current.job = Some((id.clone(), child.clone()));
-        (
-            id,
-            child,
-            stdout,
-            stderr,
-            prepared["action"].as_str().unwrap().to_string(),
-        )
+        (id, child, stdout, stderr)
     };
     let output = std::thread::spawn(move || {
         let mut data = Vec::new();
@@ -447,7 +619,8 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
                 .map_err(|_| "Computer access is unavailable.")?;
             session(&mut current, &token).is_ok()
         };
-        if !allowed || started.elapsed() > Duration::from_secs(20) {
+        // A large app's UI tree can take the runtime longer to read than a screenshot.
+        if !allowed || started.elapsed() > Duration::from_secs(if ocu { 30 } else { 20 }) {
             let _ = child
                 .lock()
                 .map_err(|_| "Computer helper unavailable.")?
@@ -511,6 +684,18 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
     }
     let mut result: Value =
         serde_json::from_slice(&output).map_err(|_| "Computer helper returned invalid output.")?;
+    if ocu {
+        if result["ok"] != json!(true) {
+            let error = result["error"].as_str().unwrap_or("unknown error").chars().take(1200).collect::<String>();
+            return Err(format!("Computer action failed: {error}"));
+        }
+        if action == "apps" {
+            let own = format!("pid={},", std::process::id());
+            let apps = result["text"].as_str().unwrap_or_default().lines().filter(|l| !l.contains(&own)).collect::<Vec<_>>().join("\n");
+            return Ok(json!({"apps": apps, "hint": "Read one with app_state, by its name or pid."}));
+        }
+        return app_result(active, request["app"].as_str().unwrap_or_default(), result["snapshot"].take());
+    }
     if action == "list_windows" {
         active.windows = result["windows"]
             .as_array()
@@ -568,6 +753,7 @@ mod tests {
             root_window: None,
             dialog_owner: None,
             browser_tab: None,
+            apps: HashMap::new(),
             snapshot: Some(Snapshot {
                 id: "fresh".into(),
                 captured: Instant::now(),
@@ -585,6 +771,35 @@ mod tests {
         assert!(session(&mut current, "session").unwrap().expires.is_none());
         revoke(&mut current);
         assert!(session(&mut current, "session").is_err());
+    }
+    #[test]
+    fn app_actions_target_the_latest_app_state_once_and_refuse_filey_itself() {
+        let mut s = active();
+        assert!(prepare_app(&json!({"action":"app_click","app":"notepad","element_index":1}), &mut s).is_err());
+        assert_eq!(prepare_app(&json!({"action":"app_state","app":"notepad"}), &mut s).unwrap()["tool"], "get_app_state");
+        let shot = json!({"app":{"name":"Notepad","pid":42},"windowHandle":7,"windowBounds":{"x":0,"y":0,"width":800,"height":600},
+            "screenshotPngBase64":"iVBORw0KGgoAAAA","treeLines":["0 window Notepad","1 button Save"],
+            "elements":[{"index":1,"name":"Save","runtimeId":[1,2]}]});
+        let seen = app_result(&mut s, "notepad", shot.clone()).unwrap();
+        assert_eq!(seen["image"]["mediaType"], "image/png");
+        assert!(s.apps["42"].get("screenshotPngBase64").is_none());
+        assert!(prepare_app(&json!({"action":"app_click","app":"notepad","element_index":9}), &mut s).is_err());
+        let click = prepare_app(&json!({"action":"app_click","app":"notepad","element_index":1,"code":"ignored"}), &mut s).unwrap();
+        assert_eq!((click["tool"].as_str(), click["app"].as_str(), click["expected_pid"].as_u64()), (Some("click"), Some("42"), Some(42)));
+        assert_eq!(click["element"]["name"], "Save");
+        assert!(click.get("code").is_none());
+        // Used up: the next action needs a fresh app_state.
+        assert!(prepare_app(&json!({"action":"app_key","app":"notepad","keys":"ctrl+s"}), &mut s).is_err());
+        app_result(&mut s, "notepad", shot.clone()).unwrap();
+        assert!(prepare_app(&json!({"action":"app_key","app":"Notepad","keys":"win+r"}), &mut s).is_err());
+        assert!(prepare_app(&json!({"action":"app_click","app":"notepad","x":900,"y":5}), &mut s).is_err());
+        assert!(prepare_app(&json!({"action":"app_type","app":"42","text":"a\u{7}b"}), &mut s).is_err());
+        assert_eq!(prepare_app(&json!({"action":"app_key","app":"42","keys":"ctrl+shift+F5"}), &mut s).unwrap()["key"], "ctrl+shift+F5");
+        let own = json!({"app":{"name":"filey","pid":std::process::id()}});
+        assert!(app_result(&mut s, "filey", own).is_err());
+        let mut tab = active();
+        tab.root_window = Some("123".into());
+        assert!(prepare_app(&json!({"action":"apps"}), &mut tab).is_err());
     }
     #[test]
     fn pointer_actions_stay_inside_the_snapshot_and_cannot_be_replayed() {

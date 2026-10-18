@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Filey AI is using your computer</title>
+  <!-- Shown over the screen while Filey AI controls the computer (src-tauri/src/modules/agent_overlay.rs).
+       The window ignores the mouse; the pointer position arrives through window.fileyPointer. -->
+  <style>
+    :root { --filey-sky: #38bdf8; --filey-sky-soft: rgba(56, 189, 248, 0.35); }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    body { font: 600 13px/1.2 "Inter", "Segoe UI", system-ui, sans-serif; }
+    .edge {
+      position: fixed; inset: 0; pointer-events: none;
+      border: 3px solid var(--filey-sky);
+      box-shadow: inset 0 0 28px 6px var(--filey-sky-soft), 0 0 0 1px rgba(255, 255, 255, 0.4);
+      animation: breathe 2.4s ease-in-out infinite;
+    }
+    @keyframes breathe { 50% { box-shadow: inset 0 0 40px 10px var(--filey-sky-soft), 0 0 0 1px rgba(255, 255, 255, 0.4); } }
+    .banner {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 10px; border-radius: 999px;
+      color: #0c4a6e; background: rgba(240, 249, 255, 0.94); border: 1px solid var(--filey-sky);
+      box-shadow: 0 6px 24px rgba(14, 116, 144, 0.25);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--filey-sky); box-shadow: 0 0 0 4px var(--filey-sky-soft); }
+    kbd {
+      font: 700 11px/1 "Inter", "Segoe UI", system-ui, sans-serif; padding: 3px 6px; border-radius: 5px;
+      background: #0c4a6e; color: #f0f9ff;
+    }
+    .cursor {
+      position: fixed; left: 0; top: 0; pointer-events: none; will-change: transform;
+      transform: translate(-100px, -100px); transition: transform 60ms linear;
+    }
+    .cursor svg { display: block; filter: drop-shadow(0 2px 6px rgba(14, 116, 144, 0.45)); }
+    .tag {
+      position: absolute; left: 20px; top: 22px; padding: 2px 7px; border-radius: 6px; white-space: nowrap;
+      color: #fff; background: #0284c7; font-size: 11px;
+    }
+    @media (prefers-reduced-motion: reduce) { .edge { animation: none; } .cursor { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="edge"></div>
+  <div class="banner" role="status"><span class="dot"></span>Filey AI is using your computer · Press <kbd>Esc</kbd> to take over</div>
+  <div class="cursor" id="cursor">
+    <svg width="22" height="26" viewBox="0 0 22 26" aria-hidden="true">
+      <path d="M2 2 L2 21 L7.2 16.4 L10.6 24 L14 22.5 L10.7 15 L18 15 Z" fill="#38bdf8" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" />
+    </svg>
+    <span class="tag">Filey AI</span>
+  </div>
+  <script src="./agent-overlay.js"></script>
+</body>
+</html>

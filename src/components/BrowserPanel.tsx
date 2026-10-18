@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { ArrowLeft, ArrowRight, ArrowUp, Globe, PanelRightClose, Plus, RefreshCw, Square, X, Hand, Play } from "lucide-react";
 import { desktopBrowserCommand, desktopBrowserSupported, getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, newBrowserPanelTab, registerBrowserViewportSync, layoutDesktopBrowser, pauseAgentBrowser, closeDesktopBrowserTabs, type DesktopBrowserRequest } from "../lib/desktopBrowser";
-import { disableComputerUse } from "../lib/computerUse";
+import { disableComputerUse, getComputerUseState, subscribeComputerUse } from "../lib/computerUse";
 import "./BrowserPanel.css";
 
 const SITES = [{ name: "WhatsApp", url: "https://web.whatsapp.com/" }, { name: "Instagram", url: "https://www.instagram.com/" }, { name: "LinkedIn", url: "https://www.linkedin.com/" }];
 
 export default function BrowserPanel() {
   const state = useSyncExternalStore(subscribeBrowserPanel, getBrowserPanelState);
+  const computer = useSyncExternalStore(subscribeComputerUse, getComputerUseState);
+  // The agent has this browser: the panel says so and Esc (anywhere) hands it back.
+  const agentWorking = !!state.agentId && !state.paused && computer.enabled;
   const supported = desktopBrowserSupported();
   const selected = state.tabs.find(tab => tab.id === state.activeId);
   const [address, setAddress] = useState("");
@@ -149,10 +152,10 @@ export default function BrowserPanel() {
     {resizing && <div data-browser-overlay aria-hidden="true" className="pointer-events-none fixed inset-0 z-40 cursor-col-resize" />}
     <aside ref={panel} id="filey-browser-panel" aria-label="Built-in browser" hidden={!state.open}
     style={{ "--filey-browser-width": panelWidth === null ? "44%" : `${panelWidth}px` } as CSSProperties}
-    className={state.open ? "filey-browser-panel absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-background xl:relative xl:inset-auto xl:z-auto xl:shrink-0" : "hidden"}>
+    className={state.open ? `filey-browser-panel absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-background xl:relative xl:inset-auto xl:z-auto xl:shrink-0${agentWorking ? " filey-agent-working" : ""}` : "hidden"}>
     <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
       <Globe size={16} className="shrink-0 text-muted-foreground" /><span className="text-[13px] font-medium">{state.agentId ? "Agent browser" : "Browser"}</span>
-      <span className="ml-auto text-xs text-muted-foreground">{state.paused ? "Your control" : state.tabs.length ? `${state.tabs.length} ${state.tabs.length === 1 ? "tab" : "tabs"}` : ""}</span>
+      <span className={agentWorking ? "ml-auto text-xs font-medium text-sky-600 dark:text-sky-400" : "ml-auto text-xs text-muted-foreground"}>{agentWorking ? "Filey AI is working · Esc to take over" : state.paused ? "Your control" : state.tabs.length ? `${state.tabs.length} ${state.tabs.length === 1 ? "tab" : "tabs"}` : ""}</span>
       {supported && state.tabs.length > 0 && <>
         <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void takeOver()} aria-label={state.paused ? "Resume agent" : "Take over browser"} title={state.paused ? "Resume agent" : "Take over browser"}>{state.paused ? <Play size={15} /> : <Hand size={15} />}</button>
         <button type="button" className="btn-ghost w-9 !px-0" onClick={() => void stopWork()} aria-label="Stop browser work" title="Stop browser work"><Square size={13} /></button>

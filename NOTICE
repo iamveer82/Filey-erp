@@ -45,3 +45,11 @@ Blobatar profile avatars
   MIT License. Full terms: licenses/blobatar.txt and licenses/blobatar-swift.txt.
   Generated vector assets: public/avatars/. Filey adds reduced-motion-aware
   idle animation and retains existing profile URLs and uploaded photos.
+
+open-computer-use Windows runtime
+  Source: https://github.com/iFurySt/open-computer-use
+  Revision: 5136415f52b87f419227bae28767cf469a6bc3b5
+  Copyright (c) 2026 Leo. MIT License. Full terms: licenses/open-computer-use.txt.
+  apps/OpenComputerUseWindows/runtime.ps1 vendored unchanged as
+  src-tauri/src/modules/ocu_runtime.ps1: Filey AI's UI Automation access to
+  Windows apps, run inside Filey's approved computer session.

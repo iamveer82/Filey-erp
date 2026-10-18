@@ -82,7 +82,15 @@ export function computerUseSessionActive(sessionId: number): boolean {
 
 function validate(args: Record<string, unknown>): Record<string, unknown> {
   const action = args.action;
-  if (action === "list_windows") return { action };
+  if (action === "list_windows" || action === "apps") return { action };
+  // Any Windows app through UI Automation (open-computer-use); the native side checks each field.
+  if (typeof action === "string" && action.startsWith("app_")) {
+    if (typeof args.app !== "string" || !args.app.trim() || args.app.length > 200) throw new Error("Name the app (or its pid) from apps.");
+    const request: Record<string, unknown> = { action, app: args.app };
+    for (const key of ["element_index", "x", "y", "button", "double_click", "text", "keys", "value", "direction", "pages", "name"])
+      if (args[key] !== undefined) request[key] = args[key];
+    return request;
+  }
   if (action === "screenshot") {
     if (typeof args.window_id !== "string" || !/^\d{1,20}$/.test(args.window_id)) throw new Error("Choose a window_id from list_windows.");
     return { action, window_id: args.window_id };
@@ -148,7 +156,7 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
     if (signal?.aborted || generation !== version) throw new DOMException("Computer action canceled", "AbortError");
     if (permission.scope !== agentStorageScope()) { await disableComputerUse(); throw new Error("Workspace changed. Computer access stopped."); }
     if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("The native computer response was invalid.");
-    if (request.action === "screenshot") {
+    if (request.action === "screenshot" || result.image !== undefined) {
       const image = result.image as { dataBase64?: unknown; mediaType?: unknown } | undefined;
       if (image?.mediaType !== "image/png" || typeof image.dataBase64 !== "string" || !image.dataBase64.startsWith("iVBORw0KGgo") || image.dataBase64.length > 5_600_000)
         throw new Error("The captured image was invalid or exceeded its size limit.");
@@ -173,4 +181,12 @@ if (typeof window !== "undefined") {
   window.addEventListener("filey:workspace-changed", stop);
   window.addEventListener(AGENT_STORAGE_EVENT, () => { if (grant && grant.scope !== agentStorageScope()) stop(); });
   window.addEventListener("storage", (event) => { if (event.key === null || event.key === "filey_data_mode") stop(); });
+  // Esc anywhere on screen (the native overlay): the session already ended there; the task's
+  // later computer calls fail instead of starting a new one, and the agent's browser pauses.
+  if (computerUseSupported()) void import("@tauri-apps/api/event").then(({ listen }) => listen("computer-escape", async () => {
+    stop();
+    const browser = await import("./desktopBrowser");
+    if (browser.getBrowserPanelState().agentId) await browser.pauseAgentBrowser(true);
+    (await import("sonner")).toast.info("You have control. Filey AI stopped using your computer.");
+  })).catch(() => {});
 }

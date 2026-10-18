@@ -174,7 +174,9 @@ export async function desktopBrowserCommand(
       throw new DOMException("Browser control changed", "AbortError");
     activeScope = scope;
     activeProfile = profile;
-    if (request.action === "open" || request.action === "focus") setBrowserPanelOpen(true);
+    // The user watches the agent work live: its browsing brings the panel into view.
+    if (request.action === "open" || request.action === "focus" || (agentId !== undefined && !["list", "close", "close_all", "stop"].includes(request.action)))
+      setBrowserPanelOpen(true);
     const abort = () => { if (request.action !== "list") void closeDesktopBrowserTabs().catch(() => {}); };
     signal?.addEventListener("abort", abort, { once: true });
     try {
