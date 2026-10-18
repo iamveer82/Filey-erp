@@ -14,6 +14,10 @@ dist-ssr
 public/wordcraft/
 public/gridcraft/
 public/pdfcraft/
+public/deckcraft/
+public/designcraft/
+public/figcraft/
+public/vectorcraft/
 # Pyodide runtime for pre-installed skill scripts, copied from node_modules by vite.config.ts
 public/pyodide/
 *.local

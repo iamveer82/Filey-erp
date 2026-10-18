@@ -1,10 +1,10 @@
-/* Office work: a dashboard of office apps that open as tabs. Word, Sheets and PDF are
- * WordCraft, GridCraft and PdfCraft (github.com/storytold, MIT OR Apache-2.0),
- * WebAssembly apps bundled with the desktop app under /wordcraft/, /gridcraft/ and
- * /pdfcraft/ so they run offline. */
+/* Office work: a dashboard of office apps that open as tabs. Word, Sheets, PDF, Slides, Designs,
+ * Fig and Vector are WordCraft, GridCraft, PdfCraft, DeckCraft, DesignCraft, FigCraft and
+ * VectorCraft (github.com/storytold, MIT OR Apache-2.0), WebAssembly apps bundled with the
+ * desktop app under /<app>/ so they run offline. */
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { Home, Mail, Maximize2, Minimize2, Plus, Presentation, Printer, X } from "lucide-react";
+import { Home, Mail, Maximize2, Minimize2, Plus, Printer, X } from "lucide-react";
 import { useModules } from "../lib/modules";
 import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
@@ -22,15 +22,17 @@ const PdfCanvas = lazy(() => import("../components/PdfCanvas"));
 type App = OfficeApp | "letters";
 interface Tab { id: string; app: App; title: string }
 
-const ICONS: Record<OfficeApp, string> = { word: "/icons/wordcraft.svg", sheet: "/icons/gridcraft.svg", pdf: "/icons/pdf-app.png" };
+const ICONS: Record<OfficeApp, string> = {
+  word: "/icons/wordcraft.svg", sheet: "/icons/gridcraft.svg", pdf: "/icons/pdf-app.png",
+  slides: "/icons/deckcraft.png", design: "/icons/designcraft.png", fig: "/icons/figcraft.png", vector: "/icons/vectorcraft.png",
+};
 
 // Letters stays reachable through its old links (?tab=letters) but is no longer an app here: Word covers it.
 const APPS: { app?: App; name: string; icon: string | ComponentType<{ size?: number }>; note?: string }[] = [
   // ponytail: desktop-only until the 30-80 MB bundles are worth serving on the web.
-  ...(["word", "sheet", "pdf"] as const).map(app => hasTauri
+  ...(["word", "sheet", "pdf", "slides", "design", "fig", "vector"] as const).map(app => hasTauri
     ? { app, name: OFFICE_APPS[app].label, icon: ICONS[app] }
     : { name: OFFICE_APPS[app].label, icon: ICONS[app], note: "Desktop app" }),
-  { name: "Slides", icon: Presentation, note: "Soon" },
 ];
 
 /** Lives in the workspace shell so open documents survive moving to another section. */
@@ -102,7 +104,7 @@ function OfficeWork() {
           // A new tab of the app on screen; Word from the dashboard.
           const app = tabs.find(t => t.id === current)?.app;
           const next: OfficeApp = app && app !== "letters" ? app : "word";
-          const what = next === "word" ? "Word document" : next === "sheet" ? "spreadsheet" : "PDF tab";
+          const what = next === "word" ? "Word document" : next === "sheet" ? "spreadsheet" : `${OFFICE_APPS[next].label} tab`;
           return (
             <button type="button" aria-label={`New ${what}`} title={`New ${what}`} onClick={() => void openApp(next)}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
@@ -120,7 +122,7 @@ function OfficeWork() {
       {/* Inert behind the print dialog: an app's canvas would take focus and close it. */}
       <div className="relative min-h-0 flex-1" inert={!!printing}>
         <section hidden={current !== "home"} className="h-full overflow-y-auto">
-          <PageHeader title="Office work" subtitle="Word, Sheets and PDF open in their own tabs, so you can keep several files open." />
+          <PageHeader title="Office work" subtitle="Word, Sheets, PDF, Slides, Designs, Fig and Vector open in their own tabs, so you can keep several files open." />
           <div className="flex flex-wrap gap-4">
             {APPS.map(({ app, name, icon: Icon, note }) => (
               <button key={name} type="button" disabled={!app} onClick={app ? () => open(app) : undefined}

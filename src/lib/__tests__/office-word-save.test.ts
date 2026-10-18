@@ -60,3 +60,22 @@ it("keeps a PDF save in My Files, or hands it to the agent that asked for it", a
 it("knows which Office app opens a file", () => {
   expect(["Plan.docx", "Budget.XLSX", "stock.csv", "Contract.pdf", "photo.png"].map(officeAppFor)).toEqual(["word", "sheet", "sheet", "pdf", undefined]);
 });
+
+it("catches a Slides/Designs/Fig/Vector download for the agent instead of losing it in the webview", async () => {
+  const clicked: string[] = [];
+  class Anchor { download = ""; href = ""; click() { clicked.push(this.href); } }
+  const bytes = new Uint8Array([37, 80, 68, 70]);
+  const win = { Promise, HTMLAnchorElement: Anchor, fetch: async () => ({ arrayBuffer: async () => bytes.buffer }) } as unknown as Window;
+  bridgeDesktop(win, "slides");
+  const capture = captureNextSave(win);
+  const link = Object.assign(new Anchor(), { download: "Pitch.pdf", href: "blob:http://tauri.localhost/1" });
+  link.click();
+  await expect(capture.file).resolves.toEqual({ name: "Pitch.pdf", bytes });
+  // Ordinary links still behave as links.
+  Object.assign(new Anchor(), { href: "https://getartcraft.com" }).click();
+  expect(clicked).toEqual(["https://getartcraft.com"]);
+});
+
+it("opens each Office file type in its app", () => {
+  expect(["Deck.pptx", "Brochure.idml", "App.fig", "Logo.svg", "Book.xlsx"].map(officeAppFor)).toEqual(["slides", "design", "fig", "vector", "sheet"]);
+});

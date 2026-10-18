@@ -31,7 +31,7 @@ export default defineConfig(async ({ command }) => ({
     // web and mobile builds leave them out.
     name: "filey-desktop-only-office",
     apply: "build" as const,
-    closeBundle() { if (!desktopBuild) for (const app of ["wordcraft", "gridcraft", "pdfcraft"]) rmSync(`dist/${app}`, { recursive: true, force: true }); },
+    closeBundle() { if (!desktopBuild) for (const app of ["wordcraft", "gridcraft", "pdfcraft", "deckcraft", "designcraft", "figcraft", "vectorcraft"]) rmSync(`dist/${app}`, { recursive: true, force: true }); },
   }, {
     // Pre-installed agent skills run their Python helpers in Pyodide (skillScripts.worker.ts), whose
     // runtime is served from /pyodide/ and only downloaded the first time a script runs.

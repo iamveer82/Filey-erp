@@ -277,7 +277,7 @@ export const MODULES: AppModule[] = [
     id: "letters",
     label: "Office work",
     short: "Office",
-    desc: "Word, Sheets and PDF editing, plus company letters, in tabs",
+    desc: "Word, Sheets, PDF, Slides and design apps, plus company letters, in tabs",
     icon: "declaration",
     to: "/office",
     Component: OfficeWork,

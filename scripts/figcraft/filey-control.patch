@@ -1,0 +1,212 @@
+Filey changes to FigCraft's web app (Office work > Fig): the control bridge
+(apps/figcraft-web: figcraftControl/figcraftOpen) that lets the Filey agent drive it with
+FigCraft's control channel, File > Save as a .figcraft download in the web build (it had no file
+system, so Save did nothing), and the app named "Fig" where users see it.
+Upstream: https://github.com/storytold/figcraft commit 3f5f673ebc72228550448f6f3a008c98a61feac2 (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/figcraft-web; trunk build --release (CARGO_BUILD_JOBS=2 on 8 GB machines)
+Install: node scripts/fetch-office-apps.mjs --app figcraft --from <figcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/apps/figcraft-web/Cargo.toml b/apps/figcraft-web/Cargo.toml
+index 2f1a819..68ca84f 100644
+--- a/apps/figcraft-web/Cargo.toml
++++ b/apps/figcraft-web/Cargo.toml
+@@ -24,6 +24,7 @@ log = { workspace = true }
+ # `wgpu` pulls egui-wgpu's defaults: WebGPU plus the WebGL2 fallback.
+ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+ wasm-bindgen = "0.2"
++serde_json.workspace = true
+ js-sys = "0.3"
+ wasm-bindgen-futures = "0.4"
+ web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "HtmlElement", "HtmlAnchorElement", "Node", "Blob", "BlobPropertyBag", "Url", "Location", "MediaQueryList", "Navigator", "Gamepad", "GamepadButton", "GamepadMappingType"] }
+diff --git a/apps/figcraft-web/index.html b/apps/figcraft-web/index.html
+index 1a9969d..ac5ec41 100644
+--- a/apps/figcraft-web/index.html
++++ b/apps/figcraft-web/index.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+-  <title>FigCraft</title>
++  <title>Fig</title>
+   <link data-trunk rel="rust" data-bin="figcraft-web" data-cargo-profile="web-release" data-wasm-opt="z" data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-reference-types --enable-multivalue" data-weak-refs />
+   <style>
+     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #f5f5f5; }
+@@ -18,6 +18,6 @@
+ </head>
+ <body>
+   <canvas id="figcraft_canvas"></canvas>
+-  <div id="figcraft_loading">Loading FigCraft&hellip;</div>
++  <div id="figcraft_loading">Loading Fig&hellip;</div>
+ </body>
+ </html>
+diff --git a/apps/figcraft-web/src/web.rs b/apps/figcraft-web/src/web.rs
+index 2921362..6950a2b 100644
+--- a/apps/figcraft-web/src/web.rs
++++ b/apps/figcraft-web/src/web.rs
+@@ -1,8 +1,41 @@
+ //! The browser shell: web `Services` and the eframe web runner.
+ 
++use std::cell::RefCell;
++use std::rc::Rc;
++
+ use figcraft_engine::Session;
+-use figcraft_ui_egui::{FigApp, Services};
++use figcraft_ui_egui::{ControlReply, ControlRequest, FigApp, Services};
+ use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++
++/// Filey: what the host asked for, waiting for the next frame (Filey embeds the app in an iframe
++/// and its agent drives it).
++#[derive(Default)]
++struct HostBridge {
++    /// Control requests not yet queued: method, params, the promise to resolve.
++    submit: Vec<(String, serde_json::Value, js_sys::Function)>,
++    /// Queued requests waiting for their reply.
++    waiting: Vec<(std::sync::mpsc::Receiver<ControlReply>, js_sys::Function)>,
++    /// Files handed over by the host, opened like a dropped file.
++    opens: Vec<(String, Vec<u8>)>,
++}
++type Bridge = Rc<RefCell<HostBridge>>;
++
++/// Filey: a file the host opened, offered to the app the way a dropped file is.
++#[derive(Debug)]
++struct HostFile {
++    path: std::path::PathBuf,
++    bytes: Vec<u8>,
++}
++
++impl egui::DroppedFile for HostFile {
++    fn path(&self) -> &std::path::Path {
++        &self.path
++    }
++    fn bytes_async(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + '_>> {
++        Box::pin(std::future::ready(Ok(self.bytes.clone())))
++    }
++}
+ 
+ const CANVAS_ID: &str = "figcraft_canvas";
+ const LOADING_ID: &str = "figcraft_loading";
+@@ -47,7 +80,11 @@ pub fn start() {
+                         let link = js_sys::decode_uri_component(link).ok().and_then(|s| s.as_string()).unwrap_or_else(|| link.to_string());
+                         figcraft_ui_egui::live::open_invite(&mut fig, &link);
+                     }
+-                    Ok(Box::new(WebShell { fig }))
++                    let bridge = Bridge::default();
++                    if let Err(e) = expose_control(bridge.clone(), cc.egui_ctx.clone()) {
++                        log::error!("no Filey control bridge: {e}");
++                    }
++                    Ok(Box::new(WebShell { fig, bridge }))
+                 }),
+             )
+             .await;
+@@ -66,15 +103,73 @@ fn query() -> String {
+ 
+ struct WebShell {
+     fig: FigApp,
++    bridge: Bridge,
+ }
+ 
+ impl eframe::App for WebShell {
++    /// Filey: a file the host opened arrives the way a dropped one does.
++    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
++        for (name, bytes) in std::mem::take(&mut self.bridge.borrow_mut().opens) {
++            raw.dropped_files.push(std::sync::Arc::new(HostFile { path: name.into(), bytes }));
++        }
++    }
++
+     // `FigApp::ui` runs its own per-frame logic first (fonts, theme), like the desktop app.
+     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
++        let mut bridge = self.bridge.borrow_mut();
++        for (method, params, resolve) in std::mem::take(&mut bridge.submit) {
++            let (tx, rx) = std::sync::mpsc::channel();
++            self.fig.control_queue.push(ControlRequest { id: serde_json::Value::Null, method, params, reply: tx, cancelled: Default::default() });
++            bridge.waiting.push((rx, resolve));
++        }
++        drop(bridge);
+         self.fig.ui(ui);
++        // The app answered during its frame (screenshots a few frames later); resolve each promise.
++        let mut bridge = self.bridge.borrow_mut();
++        bridge.waiting.retain(|(rx, resolve)| {
++            let reply = match rx.try_recv() {
++                Ok(ControlReply { result: Ok(v), .. }) => serde_json::json!({"ok": true, "result": v}),
++                Ok(ControlReply { result: Err(e), .. }) => serde_json::json!({"ok": false, "error": e}),
++                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++            };
++            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++            false
++        });
++        if !bridge.waiting.is_empty() {
++            ui.ctx().request_repaint();
++        }
+     }
+ }
+ 
++/// Filey: the page's control bridge.
++/// - `figcraftControl(method, paramsJson)` runs one control-channel request (see crates/ui-egui/src/control.rs)
++///   and resolves with `{ok, result}` or `{ok: false, error}` as JSON text.
++/// - `figcraftOpen(name, bytes)` opens a file as if it had been dropped on the window.
++fn expose_control(bridge: Bridge, ctx: egui::Context) -> Result<(), String> {
++    let window = web_sys::window().ok_or("no window")?;
++    let (control_bridge, control_ctx) = (bridge.clone(), ctx.clone());
++    let control = wasm_bindgen::closure::Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++        let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Null);
++        let mut next = Some((method, params));
++        let (bridge, ctx) = (control_bridge.clone(), control_ctx.clone());
++        js_sys::Promise::new(&mut |resolve, _reject| {
++            let Some((method, params)) = next.take() else { return };
++            bridge.borrow_mut().submit.push((method, params, resolve));
++            ctx.request_repaint();
++        })
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("figcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++    control.forget();
++    let open = wasm_bindgen::closure::Closure::<dyn FnMut(String, Vec<u8>)>::new(move |name: String, bytes: Vec<u8>| {
++        bridge.borrow_mut().opens.push((name, bytes));
++        ctx.request_repaint();
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("figcraftOpen"), open.as_ref()).map_err(|e| format!("{e:?}"))?;
++    open.forget();
++    Ok(())
++}
++
+ /// Browser services. Open dialogs return nothing for now (the trait's defaults); files are saved
+ /// as downloads. Copies go to the system clipboard through egui's output; pastes arrive as paste
+ /// events with their text (a page can't read the clipboard when it likes).
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index 5d1be47..3e460a9 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -1033,6 +1033,10 @@ impl FigApp {
+     }
+ 
+     pub fn save_as_dialog(&mut self) {
++        #[cfg(target_arch = "wasm32")]
++        if self.services.downloads() {
++            return self.save();
++        }
+         let Ok(name) = self.session.doc().map(|d| d.name.clone()) else { return };
+         self.pick_save(i18n::tr("Save as"), &format!("{name}.figcraft"), &["figcraft", "fig"], |app, mut p| {
+             if p.extension().is_none_or(|e| e.is_empty()) {
+@@ -1065,6 +1069,20 @@ impl FigApp {
+     pub fn save(&mut self) {
+         // A branch tab saves its main file.
+         let tab = figcraft_engine::branches::file_tab(&self.session);
++        #[cfg(target_arch = "wasm32")]
++        if self.services.downloads() {
++            let saved = self.session.docs.get(tab).map(|ds| (format!("{}.figcraft", ds.doc.name), figcraft_engine::cmd::file::file_bytes(ds)));
++            match saved {
++                Some((name, Ok(bytes))) => {
++                    if self.services.download(&name, &bytes) {
++                        self.toast(i18n::tr("Saved"));
++                    }
++                }
++                Some((_, Err(e))) => self.toast(e.to_string()),
++                None => {}
++            }
++            return;
++        }
+         // A path ending in .fig is never saved over silently: a .fig destination is an export copy.
+         let native_path = self
+             .session

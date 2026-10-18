@@ -43,6 +43,11 @@ describe("the agent's app map", () => {
       ["declaration letter to Bapco for LPO 2231", "create_declaration_letter"],
       ["show my open quotes", "list_quotes"],
       ["list sales orders for Rennox", "list_orders"],
+      ["make a presentation about our Q3 sales", "slides"],
+      ["design a flyer for the new product", "design"],
+      ["wireframe the app screens", "fig"],
+      ["draw a logo for Rennox", "vector"],
+      ["سوي عرض تقديمي للشركة", "slides"],
     ];
     for (const [text, tool] of cases) expect(toolsForRequest(text), text).toContain(tool);
   });

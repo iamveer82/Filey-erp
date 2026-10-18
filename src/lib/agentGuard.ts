@@ -219,7 +219,7 @@ export function createGuard(userRequest = ""): AgentGuard {
           hint: "Keep the requested document type. Check the invoice failure with read tools, correct valid invoice arguments, or ask whether the user wants a different document. Do not use another write as a probe.",
         },
       };
-      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf", "export_letter_pdf", "word", "sheet", "pdf"].includes(name)) return {};
+      if (["workspace_browser", "get_video_job", "list_video_jobs", "use_saved_file", "current_time", "export_invoice_pdf", "export_letter_pdf", "word", "sheet", "pdf", "slides", "design", "fig", "vector"].includes(name)) return {};
       // Screen observations are perishable; reusing one can target a changed window.
       if (
         (name === "computer_use" || name === "agent_computer" || name === "browser") &&

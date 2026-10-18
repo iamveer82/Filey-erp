@@ -37,7 +37,7 @@ export const PLANS: PlanCard[] = [
     period: " for 14 days",
     blurb: "Try all of Filey free for 14 days on your computer. No card needed.",
     features: [
-      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets and PDF",
+      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets, PDF and Slides",
       "Your data saved on your computer",
       "$1 of Filey AI to try the agent",
       "Keep everything you made when you get Freedom",

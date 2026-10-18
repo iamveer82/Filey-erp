@@ -1,5 +1,6 @@
 // Puts Office work's apps into public/ (desktop builds only; see vite.config.ts):
-// Word = WordCraft, Sheets = GridCraft, PDF = PdfCraft (MIT OR Apache-2.0,
+// Word = WordCraft, Sheets = GridCraft, PDF = PdfCraft, Slides = DeckCraft, Designs = DesignCraft,
+// Fig = FigCraft, Vector = VectorCraft (MIT OR Apache-2.0,
 // github.com/storytold). Filey ships each rebuilt with scripts/<app>/filey-control.patch,
 // which lets the Filey agent drive it. The 30-80 MB wasm stays out of git: each zip is
 // pinned by SHA-256.
@@ -16,6 +17,10 @@ const APPS = {
   wordcraft: { version: '0.7.0-filey.2', sha256: 'b27148484cdfb3eda1db529ef0f20318e401c6bf51a37ee9f399b560c1d4edc1' },
   gridcraft: { version: '0.7.0-filey.1', sha256: 'ca7e63579c337c000849375bca9d74403830c5b00fbc77734c7540ee8245aec0' },
   pdfcraft: { version: '0.8.0-filey.2', sha256: '1096a2f15169ee98c8c9a9ec81edc1e1579d894b78cc14d12d04f7361966db5b' },
+  deckcraft: { version: '0.7.0-filey.1', sha256: '29d96b1b9cc5c04c7f3b6c7dfaca70003e6eb85f844569d560fe99a26148b49a' },
+  designcraft: { version: '0.8.0-filey.1', sha256: 'ba378e3754cf0c0b2908e60ef6f3815f31d5d4f75b580ac676f02853ea59dc3b' },
+  figcraft: { version: '0.6.0-filey.1', sha256: '43fde951c77976ec78177320829da9b891a2e3a455dffc837606324b65f0cc00' },
+  vectorcraft: { version: '0.12.0-filey.1', sha256: 'bf14e5d3cc0b72e516921a97226bacb8018b707b9842880c1a55f941cf574ab4' },
 };
 const KEEP = /^([\w.-]+\.(?:html|js|wasm|ico|css|png|svg|woff2?|ttf|json)|LICENSE-MIT|LICENSE-APACHE)$/;
 

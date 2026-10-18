@@ -1,0 +1,177 @@
+Filey changes to DeckCraft's web app (Office work > Slides): the control bridge
+(apps/deckcraft-web: deckcraftControl/deckcraftOpen) that lets the Filey agent drive it with
+DeckCraft's own control protocol, File > Print handed to Filey (fileyPrintPdf), the app named
+"Slides" where users see it, and a startup fix: std::process::id() panics on wasm32.
+Upstream: https://github.com/storytold/deckcraft commit a178b9955bd5e31a993a97685eefd07ddadd1478 (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/deckcraft-web; trunk build --release (CARGO_BUILD_JOBS=2 on 8 GB machines)
+Install: node scripts/fetch-office-apps.mjs --app deckcraft --from <deckcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/apps/deckcraft-web/index.html b/apps/deckcraft-web/index.html
+index b1834c3..0ca02cd 100644
+--- a/apps/deckcraft-web/index.html
++++ b/apps/deckcraft-web/index.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+-  <title>DeckCraft</title>
++  <title>Slides</title>
+   <link data-trunk rel="rust" data-bin="deckcraft-web" data-wasm-opt="z" data-weak-refs />
+   <link data-trunk rel="icon" href="../../assets/app-icon/hicolor/32x32/apps/ai.storyteller.deckcraft.png" />
+   <style>
+@@ -15,6 +15,6 @@
+ </head>
+ <body>
+   <canvas id="deckcraft_canvas"></canvas>
+-  <div id="deckcraft_loading">Loading DeckCraft&hellip;</div>
++  <div id="deckcraft_loading">Loading Slides&hellip;</div>
+ </body>
+ </html>
+diff --git a/apps/deckcraft-web/src/web.rs b/apps/deckcraft-web/src/web.rs
+index dabad8a..f387088 100644
+--- a/apps/deckcraft-web/src/web.rs
++++ b/apps/deckcraft-web/src/web.rs
+@@ -1,8 +1,17 @@
+ //! The browser shell: web `Services`, drag-and-drop, and the eframe web runner.
+ 
++use std::cell::RefCell;
++use std::rc::Rc;
++
+ use deckcraft_engine::Session;
+-use deckcraft_ui_egui::{Inbox, InboxEvent, InboxFile, Services, SlideApp};
++use deckcraft_ui_egui::{ControlRequest, ControlResponse, Inbox, InboxEvent, InboxFile, Services, SlideApp};
+ use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++
++/// Filey: control requests waiting for the app's reply, with the JS promise each one resolves.
++type Pending = Rc<RefCell<Vec<(std::sync::mpsc::Receiver<ControlResponse>, js_sys::Function)>>>;
++/// Filey: files handed over by the host, opened like a dropped file on the next frame.
++type Opens = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
+ 
+ const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "txt", "md"];
+ const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
+@@ -49,7 +58,13 @@ pub fn start() {
+                     if q.contains("show") {
+                         app.start_show(0, false);
+                     }
+-                    Ok(Box::new(WebShell { app, inbox }))
++                    let (control_tx, control_rx) = std::sync::mpsc::channel::<ControlRequest>();
++                    app.control_rx = Some(control_rx);
++                    let (pending, opens) = (Pending::default(), Opens::default());
++                    if let Err(e) = expose_control(control_tx, pending.clone(), opens.clone(), cc.egui_ctx.clone()) {
++                        log::error!("no Filey control bridge: {e}");
++                    }
++                    Ok(Box::new(WebShell { app, inbox, pending, opens }))
+                 }),
+             )
+             .await;
+@@ -71,10 +86,17 @@ fn query() -> String {
+ struct WebShell {
+     app: SlideApp,
+     inbox: Inbox,
++    pending: Pending,
++    opens: Opens,
+ }
+ 
+ impl eframe::App for WebShell {
+     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
++        // Filey: a file the host opened arrives the way a dropped one does.
++        for (name, bytes) in std::mem::take(&mut *self.opens.borrow_mut()) {
++            let id = self.app.begin_external_file("drop");
++            push_inbox(&self.inbox, InboxEvent::File(InboxFile { id, name, bytes }));
++        }
+         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+         for f in dropped {
+             // Capture the document and slide now. The bytes arrive later, after the user may
+@@ -98,6 +120,20 @@ impl eframe::App for WebShell {
+             });
+         }
+         self.app.logic(ctx);
++        // The app answered control requests during `logic`; hand each reply to its promise.
++        let mut pending = self.pending.borrow_mut();
++        pending.retain(|(rx, resolve)| {
++            let reply = match rx.try_recv() {
++                Ok(v) => v,
++                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++            };
++            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++            false
++        });
++        if !pending.is_empty() {
++            ctx.request_repaint();
++        }
+     }
+ 
+     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+@@ -109,6 +145,38 @@ impl eframe::App for WebShell {
+     }
+ }
+ 
++/// Filey: the page's control bridge, for a same-origin host (Filey embeds the app in an iframe
++/// and its agent drives it).
++/// - `deckcraftControl(method, paramsJson)` runs one control-protocol request (docs/control-protocol.md)
++///   and resolves with the reply as JSON text.
++/// - `deckcraftOpen(name, bytes)` opens a file as if it had been dropped on the window.
++fn expose_control(tx: std::sync::mpsc::Sender<ControlRequest>, pending: Pending, opens: Opens, ctx: egui::Context) -> Result<(), String> {
++    let window = web_sys::window().ok_or("no window")?;
++    let control_ctx = ctx.clone();
++    let control = wasm_bindgen::closure::Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++        let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Null);
++        let mut next = Some(ControlRequest::new(method, params));
++        js_sys::Promise::new(&mut |resolve, _reject| {
++            let Some((req, rx)) = next.take() else { return };
++            if tx.send(req).is_err() {
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(r#"{"ok":false,"error":"Slides is not running"}"#));
++                return;
++            }
++            pending.borrow_mut().push((rx, resolve));
++            control_ctx.request_repaint();
++        })
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("deckcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++    control.forget();
++    let open = wasm_bindgen::closure::Closure::<dyn FnMut(String, Vec<u8>)>::new(move |name: String, bytes: Vec<u8>| {
++        opens.borrow_mut().push((name, bytes));
++        ctx.request_repaint();
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("deckcraftOpen"), open.as_ref()).map_err(|e| format!("{e:?}"))?;
++    open.forget();
++    Ok(())
++}
++
+ /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
+ /// back to `open_async` (browser picker → inbox) and `download`.
+ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
+diff --git a/crates/engine/src/recovery.rs b/crates/engine/src/recovery.rs
+index 707d0aa..bbbfb4f 100644
+--- a/crates/engine/src/recovery.rs
++++ b/crates/engine/src/recovery.rs
+@@ -44,6 +44,7 @@ pub fn instance_id() -> u64 {
+     *ID.get_or_init(|| {
+         use std::hash::{BuildHasher, Hasher};
+         let mut h = std::collections::hash_map::RandomState::new().build_hasher();
++        #[cfg(not(target_arch = "wasm32"))]
+         h.write_u32(std::process::id());
+         #[cfg(not(target_arch = "wasm32"))]
+         if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index 8867407..d356a4a 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -809,6 +809,14 @@ impl SlideApp {
+         if self.services.pick_save.is_none() {
+             // Web: the browser hands the PDF to the user.
+             let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
++            #[cfg(target_arch = "wasm32")]
++            if let Ok(pdf) = &bytes {
++                let host = js_sys::Reflect::get(&js_sys::global(), &js_sys::JsString::from("fileyPrintPdf").into()).unwrap_or_default();
++                if host.is_function() {
++                    let print = js_sys::Function::from(host);
++                    return print.call1(&js_sys::global().into(), &js_sys::Uint8Array::from(&pdf[..]).into()).is_ok();
++                }
++            }
+             return self.download(&format!("{title}.pdf"), bytes);
+         }
+         let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();

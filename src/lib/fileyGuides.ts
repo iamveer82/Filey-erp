@@ -198,7 +198,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "to": "/settings?section=billing",
     "summary": "Try Filey free for 14 days, then keep it for life with Freedom or move to the cloud with Pro.",
     "steps": [
-      "Basic is a 14-day free trial. Create your Filey account online once and use every app on this computer: invoicing, CRM, inventory, accounting, Word, Sheets and PDF. Your data stays on this computer. New accounts also get $1 of Filey AI to try the agent. The trial is counted per account and per computer.",
+      "Basic is a 14-day free trial. Create your Filey account online once and use every app on this computer: invoicing, CRM, inventory, accounting, Word, Sheets, PDF, Slides and design apps. Your data stays on this computer. New accounts also get $1 of Filey AI to try the agent. The trial is counted per account and per computer.",
       "Freedom is a one-time payment of 999 AED: Filey on your computer for life, with every app, regular updates and support, on 2 computers. Your data stays on your computer, and you can move Freedom to a new PC from Devices.",
       "Pro is 36 AED a month: your workspace in the cloud, Filey on the web, sync across your devices, team members and backups. Cancel any time in Billing.",
       "When the trial ends without a plan, everything you made stays here to view, print and export; creating and editing need Freedom or Pro. Buying unlocks the app straight away, with nothing to reinstall.",
@@ -450,7 +450,21 @@ export const GUIDES: readonly FileyGuide[] = [
       "Save keeps the file in My Files, where Office work lists it. Save As in PDF, or Save in Sheets, also asks where to write a copy on your computer.",
       "File › Print shows the pages in Filey's print preview, then the system print dialog.",
       "Ask Filey AI to do the work, for example \"open budget.xlsx and total column C\" or \"rotate page 2 of the contract and save it\". For whole-file jobs, such as merging, splitting, compressing, adding a watermark, converting or removing a PDF password, ask Filey AI and attach the files; the results come back in the chat and in My Files.",
-      "Word, Sheets and PDF run in the Filey desktop app. On the web they are not available yet."
+      "Word, Sheets, PDF, Slides, Designs, Fig and Vector run in the Filey desktop app. On the web they are not available yet."
+    ],
+    "moduleId": "letters"
+  },
+  {
+    "id": "office-design-apps",
+    "category": "Workflows",
+    "title": "Slides, Designs, Fig and Vector",
+    "to": "/office",
+    "summary": "Make presentations, page layouts, app and social designs, and vector art in Office work.",
+    "steps": [
+      "Open Office work and choose an app: Slides for presentations (.pptx), Designs for brochures, flyers, posters and magazines (.idml and InDesign files open too), Fig for app screens, wireframes and social graphics (.fig files open too), and Vector for logos, icons and illustrations (.svg, .ai and .eps open too).",
+      "Choose a file of that kind in the Files list to open it in the right app. Each app opens in its own tab, so several files stay open.",
+      "Save keeps the file in My Files, where Office work lists it, and offers Save a copy for anywhere on your computer. Slides exports .pptx and PDF, Designs exports PDF, IDML, EPUB and HTML, Fig saves .fig files and exports PNG, SVG and PDF; Vector exports SVG, PDF, AI, PNG and JPG.",
+      "Ask Filey AI to do the work while you watch, for example \"make a 5-slide deck about our Q3 sales\", \"design an A4 flyer for the lubricant offer\" or \"draw a simple logo with our initials\"."
     ],
     "moduleId": "letters"
   },

@@ -2,13 +2,15 @@
  * running a Craft app's web build (Apache-2.0/MIT, github.com/storytold), rebuilt
  * with a small control bridge (scripts/<app>/filey-control.patch) that exposes
  * the app's own control protocol: Word = WordCraft, Sheets = GridCraft,
- * PDF = PdfCraft. The agent's `word`, `sheet` and `pdf` tools go through here. */
+ * PDF = PdfCraft, Slides = DeckCraft, Designs = DesignCraft, Fig = FigCraft,
+ * Vector = VectorCraft. The agent's Office tools (word, sheet, pdf, slides, design,
+ * fig, vector) go through here. */
 
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { writeDocFile } from "./localPaths";
 import { notifyDataChanged } from "./realtime";
 
-export type OfficeApp = "word" | "sheet" | "pdf";
+export type OfficeApp = "word" | "sheet" | "pdf" | "slides" | "design" | "fig" | "vector";
 
 /** Each app's bundle (public/<dir>, scripts/fetch-office-apps.mjs) and the bridge its patch adds. */
 export const OFFICE_APPS: Record<OfficeApp, { label: string; src: string; title: string; control: string; open?: string; files: RegExp }> = {
@@ -16,6 +18,11 @@ export const OFFICE_APPS: Record<OfficeApp, { label: string; src: string; title:
   sheet: { label: "Sheets", src: "/gridcraft/index.html", title: "Sheets", control: "gridcraftControl", open: "gridcraftOpen", files: /\.(xlsx|xlsm|xlsb|xls|ods|csv|tsv)$/i },
   // PDF takes files in and hands saves back through PdfCraft's own `?host=parent` bridge.
   pdf: { label: "PDF", src: "/pdfcraft/index.html?host=parent", title: "PDF", control: "pdfcraftControl", files: /\.pdf$/i },
+  // `?blank`: Slides starts on an empty deck instead of DeckCraft's sample.
+  slides: { label: "Slides", src: "/deckcraft/index.html?blank", title: "Slides", control: "deckcraftControl", open: "deckcraftOpen", files: /\.(pptx|potx|ppsx|deckcraft)$/i },
+  design: { label: "Designs", src: "/designcraft/index.html", title: "Designs", control: "designcraftControl", open: "designcraftOpen", files: /\.(designcraft|idml|indd|indt)$/i },
+  fig: { label: "Fig", src: "/figcraft/index.html", title: "Fig", control: "figcraftControl", open: "figcraftOpen", files: /\.(figcraft|fig)$/i },
+  vector: { label: "Vector", src: "/vectorcraft/index.html", title: "Vector", control: "vectorcraftControl", open: "vectorcraftOpen", files: /\.(vectorcraft|svg|ai|eps)$/i },
 };
 
 export type OfficeWindow = Window & {
@@ -104,11 +111,17 @@ export function registerOfficeFrame(app: OfficeApp, id: string, win: Window, aut
  *  promise handed back is that frame's Promise. Links (hyperlinks, About) go to the
  *  system browser: the webview drops window.open. */
 export function bridgeDesktop(win: Window, tool: OfficeApp = "word"): void {
+  catchDownloads(win, tool);
   const FramePromise = (win as unknown as { Promise: PromiseConstructor }).Promise;
   const local = <T,>(work: () => Promise<T>) => new FramePromise<T>((resolve, reject) => { work().then(resolve, reject); });
   Object.assign(win, {
-    // File › Print hands over its PDF (the apps' Filey patches): Office work shows it in a Filey print dialog.
-    fileyPrintPdf: (pdf: Uint8Array) => office?.print(pdf.slice()),
+    // File › Print hands over its PDF (the apps' Filey patches): the agent's capture takes it when
+    // it asked for a PDF, else Office work shows it in a Filey print dialog.
+    fileyPrintPdf: (pdf: Uint8Array) => {
+      const capture = captures.get(win);
+      captures.delete(win);
+      return capture ? capture("Document.pdf", pdf.slice()) : office?.print(pdf.slice());
+    },
     open: (url?: string | URL) => {
       const href = String(url ?? "");
       if (/^(https?:|mailto:)/i.test(href)) void import("@tauri-apps/plugin-opener").then(o => o.openUrl(href)).catch(() => {});
@@ -135,6 +148,29 @@ export function bridgeDesktop(win: Window, tool: OfficeApp = "word"): void {
       };
     }),
   });
+}
+
+/** Slides, Designs, Fig and Vector save the way a web page does, with a `<a download>` link, which
+ *  the desktop webview drops. The link's file is caught instead: the agent's capture takes it, or
+ *  it is kept in My Files with a "Save a copy…" offer, as PDF saves are. */
+function catchDownloads(win: Window, tool: OfficeApp): void {
+  const anchor = (win as unknown as { HTMLAnchorElement?: typeof HTMLAnchorElement }).HTMLAnchorElement?.prototype;
+  if (!anchor) return;
+  const click = anchor.click;
+  anchor.click = function (this: HTMLAnchorElement) {
+    if (!this.download || !this.href.startsWith("blob:")) return click.call(this);
+    const name = this.download;
+    void win.fetch(this.href).then(r => r.arrayBuffer()).then(buffer => {
+      const bytes = new Uint8Array(buffer);
+      const capture = captures.get(win);
+      captures.delete(win);
+      if (capture) return capture(name, bytes);
+      const copy = () => void saveCopy(name, bytes).catch(err => void import("sonner").then(({ toast }) => toast.error(`Could not save ${name}: ${err instanceof Error ? err.message : err}`)));
+      void keepInMyFiles(name, bytes, tool).then(kept => import("sonner").then(({ toast }) => kept
+        ? toast.success(`${name} saved to My Files`, { action: { label: "Save a copy…", onClick: copy } })
+        : toast.warning(`${name} could not be kept in My Files`, { action: { label: "Save a copy…", onClick: copy } })));
+    }).catch(err => console.warn(`${OFFICE_APPS[tool].label} save failed:`, err));
+  };
 }
 
 async function until(ready: () => boolean, ms: number, what: string, signal?: AbortSignal): Promise<void> {

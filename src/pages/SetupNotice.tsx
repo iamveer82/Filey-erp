@@ -60,7 +60,7 @@ export default function SetupNotice() {
                   </p>
                   <ul className="mt-3 space-y-1.5">
                     {[
-                      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets and PDF",
+                      "Every app: invoicing, CRM, inventory, accounting, Word, Sheets, PDF and Slides",
                       "Works offline — your data stays on this computer",
                       "$1 of Filey AI to try the agent",
                       "Then Freedom: 999 AED once, yours for life",

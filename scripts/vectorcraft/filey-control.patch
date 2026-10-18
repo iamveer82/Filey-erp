@@ -1,0 +1,163 @@
+Filey changes to VectorCraft's web app (Office work > Vector): the control bridge
+(apps/vectorcraft-web: vectorcraftControl/vectorcraftOpen) that lets the Filey agent drive it with
+VectorCraft's own control protocol, File > Print handed to Filey (fileyPrintPdf), and the app named
+"Vector" where users see it.
+Upstream: https://github.com/storytold/vectorcraft commit 299a4b36ad808cf84b52ad517fcc623b6263c5ba (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/vectorcraft-web; trunk build --release (CARGO_BUILD_JOBS=2 on 8 GB machines)
+Install: node scripts/fetch-office-apps.mjs --app vectorcraft --from <vectorcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/apps/vectorcraft-web/Cargo.toml b/apps/vectorcraft-web/Cargo.toml
+index 2e9218d..b6e2755 100644
+--- a/apps/vectorcraft-web/Cargo.toml
++++ b/apps/vectorcraft-web/Cargo.toml
+@@ -27,5 +27,6 @@ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+ rfd = { workspace = true }
+ wasm-bindgen = "0.2"
+ wasm-bindgen-futures = "0.4"
++serde_json.workspace = true
+ js-sys = "0.3"
+ web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlIFrameElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "ClipboardEvent", "DataTransfer", "File", "FileList", "Url", "Location", "CssStyleDeclaration", "Event", "EventTarget", "MouseEvent", "PointerEvent", "TouchEvent", "AddEventListenerOptions", "DomRect", "DragEvent", "Storage", "Navigator", "RequestInit", "Response", "AbortController", "AbortSignal"] }
+diff --git a/apps/vectorcraft-web/index.html b/apps/vectorcraft-web/index.html
+index 42eaaf7..6880d32 100644
+--- a/apps/vectorcraft-web/index.html
++++ b/apps/vectorcraft-web/index.html
+@@ -8,7 +8,7 @@
+   <meta name="apple-mobile-web-app-title" content="VectorCraft">
+   <meta name="apple-mobile-web-app-status-bar-style" content="black">
+   <meta name="theme-color" content="#262626">
+-  <title>VectorCraft</title>
++  <title>Vector</title>
+   <link data-trunk rel="rust" data-bin="vectorcraft-web" data-wasm-opt="z" data-weak-refs />
+   <style>
+     /* iPad: no page scroll, bounce, pinch zoom, text selection or callout; the app takes the gestures. */
+diff --git a/apps/vectorcraft-web/src/web.rs b/apps/vectorcraft-web/src/web.rs
+index cfe8458..6d9c1dd 100644
+--- a/apps/vectorcraft-web/src/web.rs
++++ b/apps/vectorcraft-web/src/web.rs
+@@ -13,8 +13,25 @@ use vectorcraft_ui_egui::graphics::GraphicsLoss;
+ use vectorcraft_ui_egui::i18n;
+ use vectorcraft_ui_egui::place::{DropTarget, PlaceArrival, PlaceInbox};
+ use vectorcraft_ui_egui::print::{PrintJob, PrintService, Printer};
+-use vectorcraft_ui_egui::{Services, VectorcraftApp};
++use vectorcraft_ui_egui::{ControlRequest, ControlResponse, Services, VectorcraftApp};
+ use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++
++/// Filey: the host bridge (Filey embeds the app in an iframe and its agent drives it). It lives as
++/// long as the page, across graphics restarts: the app keeps its control channel when it moves.
++#[derive(Default)]
++struct FileyBridge {
++    /// Requests waiting for the app's reply, with the JS promise each one resolves.
++    pending: Vec<(std::sync::mpsc::Receiver<ControlResponse>, js_sys::Function)>,
++    /// The channel's receiving end until the first app takes it.
++    control_rx: Option<std::sync::mpsc::Receiver<ControlRequest>>,
++    /// The running app's context, to wake it for a request.
++    ctx: Option<egui::Context>,
++}
++
++thread_local! {
++    static FILEY: RefCell<FileyBridge> = RefCell::default();
++}
+ 
+ use crate::locks::WebLocks;
+ use crate::pencil::SharedPointers;
+@@ -81,6 +98,9 @@ pub fn start() {
+             restarts: 0,
+         };
+         track_paste(&host.pasted);
++        if let Err(e) = expose_control(host.inbox.clone()) {
++            log::error!("no Filey control bridge: {e}");
++        }
+         run(host, canvas, None).await;
+     });
+ }
+@@ -124,8 +144,15 @@ async fn run(host: Host, canvas: web_sys::HtmlCanvasElement, moving: Option<Movi
+                         app.status("The graphics were lost and have been restarted");
+                         app
+                     }
+-                    None => VectorcraftApp::new(Session::new(), services),
++                    None => {
++                        let app = VectorcraftApp::new(Session::new(), services);
++                        match FILEY.with(|f| f.borrow_mut().control_rx.take()) {
++                            Some(rx) => app.with_control(rx),
++                            None => app,
++                        }
++                    }
+                 };
++                FILEY.with(|f| f.borrow_mut().ctx = Some(ctx.clone()));
+                 Ok(Box::new(WebShell { app: Some(app), host, canvas: page, loss }))
+             }),
+         )
+@@ -386,6 +413,23 @@ impl eframe::App for WebShell {
+             }
+         }
+         app.logic(ctx);
++        // The app answered control requests during `logic`; hand each reply to its promise.
++        let waiting = FILEY.with(|f| {
++            let mut f = f.borrow_mut();
++            f.pending.retain(|(rx, resolve)| {
++                let reply = match rx.try_recv() {
++                    Ok(v) => v,
++                    Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                    Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++                };
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++                false
++            });
++            !f.pending.is_empty()
++        });
++        if waiting {
++            ctx.request_repaint();
++        }
+     }
+ 
+     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+@@ -594,7 +638,47 @@ impl PrintService for BrowserPrint {
+     }
+ }
+ 
++/// Filey: the page's control bridge.
++/// - `vectorcraftControl(method, paramsJson)` runs one control-protocol request and resolves with the
++///   reply as JSON text.
++/// - `vectorcraftOpen(name, bytes)` opens a file as if it had been dropped on the window.
++fn expose_control(inbox: Inbox) -> Result<(), String> {
++    let window = web_sys::window().ok_or("no window")?;
++    let (tx, rx) = std::sync::mpsc::channel::<ControlRequest>();
++    FILEY.with(|f| f.borrow_mut().control_rx = Some(rx));
++    let wake = || FILEY.with(|f| f.borrow().ctx.clone()).map(|c| c.request_repaint());
++    let control = wasm_bindgen::closure::Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++        let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Null);
++        let mut next = Some(ControlRequest::new(method, params));
++        js_sys::Promise::new(&mut |resolve, _reject| {
++            let Some((req, rx)) = next.take() else { return };
++            if tx.send(req).is_err() {
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(r#"{"ok":false,"error":"Vector is not running"}"#));
++                return;
++            }
++            FILEY.with(|f| f.borrow_mut().pending.push((rx, resolve)));
++            wake();
++        })
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("vectorcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++    control.forget();
++    let open = wasm_bindgen::closure::Closure::<dyn FnMut(String, Vec<u8>)>::new(move |name: String, bytes: Vec<u8>| {
++        inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes));
++        wake();
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("vectorcraftOpen"), open.as_ref()).map_err(|e| format!("{e:?}"))?;
++    open.forget();
++    Ok(())
++}
++
+ fn print_pdf(pdf: &[u8]) -> Result<(), String> {
++    // Filey: a desktop webview can't print a PDF frame, so the host prints it instead.
++    if let Some(window) = web_sys::window()
++        && let Ok(host) = js_sys::Reflect::get(&window, &JsValue::from_str("fileyPrintPdf"))
++        && let Some(host) = host.dyn_ref::<js_sys::Function>()
++    {
++        return host.call1(&JsValue::NULL, &js_sys::Uint8Array::from(pdf)).map(|_| ()).map_err(|e| format!("{e:?}"));
++    }
+     let document = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
+     // The previous job's frame and its blob go first.
+     if let Some(old) = document.get_element_by_id(PRINT_FRAME_ID) {

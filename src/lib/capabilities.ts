@@ -65,7 +65,7 @@ export const CAPABILITIES: Capability[] = [
     id: "letters",
     name: "Office work",
     description: "Write and format Word documents, build spreadsheets in Sheets, edit PDFs, create and revise letter drafts, read saved letters and export files. Review and issue letters in Office work.",
-    tools: ["word", "sheet", "pdf", "get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
+    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
     readOnlyTools: ["get_letter_context", "list_letters", "get_letter"],
   },
   {

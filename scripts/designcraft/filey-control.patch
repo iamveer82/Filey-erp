@@ -1,0 +1,147 @@
+Filey changes to DesignCraft's web app (Office work > Designs): the control bridge
+(apps/designcraft-web: designcraftControl/designcraftOpen) that lets the Filey agent drive it with
+DesignCraft's own control protocol, and the app named "Designs" where users see it.
+Upstream: https://github.com/storytold/designcraft commit 5aeb4dd743067e5a6d797d0f613448a06d141a09 (main). MIT OR Apache-2.0.
+
+Build: git apply filey-control.patch; cd apps/designcraft-web; trunk build --release (CARGO_BUILD_JOBS=2 on 8 GB machines)
+Install: node scripts/fetch-office-apps.mjs --app designcraft --from <designcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
+
+diff --git a/apps/designcraft-web/index.html b/apps/designcraft-web/index.html
+index b05be39..50ebff3 100644
+--- a/apps/designcraft-web/index.html
++++ b/apps/designcraft-web/index.html
+@@ -3,7 +3,7 @@
+ <head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+-  <title>DesignCraft</title>
++  <title>Designs</title>
+   <link data-trunk rel="rust" data-bin="designcraft-web" data-wasm-opt="z" data-weak-refs />
+   <style>
+     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #262626; }
+@@ -14,6 +14,6 @@
+ </head>
+ <body>
+   <canvas id="designcraft_canvas"></canvas>
+-  <div id="designcraft_loading">Loading DesignCraft&hellip;</div>
++  <div id="designcraft_loading">Loading Designs&hellip;</div>
+ </body>
+ </html>
+diff --git a/apps/designcraft-web/src/web.rs b/apps/designcraft-web/src/web.rs
+index fe0f4a7..e9799d1 100644
+--- a/apps/designcraft-web/src/web.rs
++++ b/apps/designcraft-web/src/web.rs
+@@ -3,8 +3,16 @@
+ use super::browser_policy::{has_query_flag, mime_for};
+ use crate::graphics::{GraphicsState, RecoveryDocument, recovery_documents};
+ use designcraft_engine::Session;
+-use designcraft_ui_egui::{DesignApp, ImportRequest, ImportedFile, Inbox, Services};
++use designcraft_ui_egui::{ControlRequest, ControlResponse, DesignApp, ImportRequest, ImportedFile, Inbox, Services};
++use std::cell::RefCell;
++use std::rc::Rc;
+ use wasm_bindgen::JsCast as _;
++use wasm_bindgen::JsValue;
++
++/// Filey: control requests waiting for the app's reply, with the JS promise each one resolves.
++type Pending = Rc<RefCell<Vec<(std::sync::mpsc::Receiver<ControlResponse>, js_sys::Function)>>>;
++/// Filey: files handed over by the host, opened like a dropped file on the next frame.
++type Opens = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
+ 
+ const DOC_EXTS: &[&str] = &["designcraft", "idml", "indd", "indt"];
+ const IMAGE_EXTS: &[&str] = &[
+@@ -72,11 +80,16 @@ pub fn start() {
+                         });
+                     }
+                     let inbox: Inbox = Inbox::default();
+-                    let mut app = DesignApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
++                    let (control_tx, control_rx) = std::sync::mpsc::channel::<ControlRequest>();
++                    let mut app = DesignApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone())).with_control(control_rx);
+                     if has_query_flag(&query(), "sample") {
+                         let _ = app.run("file.newSample", serde_json::json!({}));
+                     }
+-                    Ok(Box::new(WebShell { app, inbox, graphics: creator_graphics }))
++                    let (pending, opens) = (Pending::default(), Opens::default());
++                    if let Err(e) = expose_control(control_tx, pending.clone(), opens.clone(), cc.egui_ctx.clone()) {
++                        log::error!("no Filey control bridge: {e}");
++                    }
++                    Ok(Box::new(WebShell { app, inbox, graphics: creator_graphics, pending, opens }))
+                 }),
+             )
+             .await;
+@@ -341,16 +354,55 @@ fn query() -> String {
+ 
+ /// Wraps the app to read dropped files asynchronously (browsers can't read them synchronously)
+ /// and feed them through the inbox.
++/// Filey: the page's control bridge, for a same-origin host (Filey embeds the app in an iframe
++/// and its agent drives it).
++/// - `designcraftControl(method, paramsJson)` runs one control-protocol request and resolves with the
++///   reply as JSON text.
++/// - `designcraftOpen(name, bytes)` opens a file as if it had been dropped on the window.
++fn expose_control(tx: std::sync::mpsc::Sender<ControlRequest>, pending: Pending, opens: Opens, ctx: egui::Context) -> Result<(), String> {
++    let window = web_sys::window().ok_or("no window")?;
++    let control_ctx = ctx.clone();
++    let control = wasm_bindgen::closure::Closure::<dyn FnMut(String, String) -> js_sys::Promise>::new(move |method: String, params: String| {
++        let params = serde_json::from_str(&params).unwrap_or(serde_json::Value::Null);
++        let mut next = Some(ControlRequest::new(method, params));
++        js_sys::Promise::new(&mut |resolve, _reject| {
++            let Some((req, rx)) = next.take() else { return };
++            if tx.send(req).is_err() {
++                let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(r#"{"ok":false,"error":"Designs is not running"}"#));
++                return;
++            }
++            pending.borrow_mut().push((rx, resolve));
++            control_ctx.request_repaint();
++        })
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("designcraftControl"), control.as_ref()).map_err(|e| format!("{e:?}"))?;
++    control.forget();
++    let open = wasm_bindgen::closure::Closure::<dyn FnMut(String, Vec<u8>)>::new(move |name: String, bytes: Vec<u8>| {
++        opens.borrow_mut().push((name, bytes));
++        ctx.request_repaint();
++    });
++    js_sys::Reflect::set(&window, &JsValue::from_str("designcraftOpen"), open.as_ref()).map_err(|e| format!("{e:?}"))?;
++    open.forget();
++    Ok(())
++}
++
+ struct WebShell {
+     app: DesignApp,
+     inbox: Inbox,
+     graphics: GraphicsState,
++    pending: Pending,
++    opens: Opens,
+ }
+ 
+ impl eframe::App for WebShell {
+     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+         let graphics = self.graphics.clone();
+         let _ = graphics.run_if_healthy(|| {
++            // Filey: a file the host opened arrives the way a dropped one does.
++            for (name, bytes) in std::mem::take(&mut *self.opens.borrow_mut()) {
++                let request = self.app.import_request("drop");
++                self.inbox.lock().unwrap_or_else(|e| e.into_inner()).push(ImportedFile { request, name, bytes });
++            }
+             let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+             for f in dropped {
+                 let request = self.app.import_request("drop");
+@@ -369,6 +421,20 @@ impl eframe::App for WebShell {
+             }
+             self.app.logic(ctx);
+         });
++        // The app answered control requests during `logic`; hand each reply to its promise.
++        let mut pending = self.pending.borrow_mut();
++        pending.retain(|(rx, resolve)| {
++            let reply = match rx.try_recv() {
++                Ok(v) => v,
++                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
++                Err(std::sync::mpsc::TryRecvError::Disconnected) => serde_json::json!({"ok": false, "error": "the request was dropped"}),
++            };
++            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_str(&reply.to_string()));
++            false
++        });
++        if !pending.is_empty() {
++            ctx.request_repaint();
++        }
+     }
+ 
+     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {

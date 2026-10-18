@@ -53,8 +53,8 @@ export const CORE_TOOLS = [
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   letters: {
-    about: "Office work: Word documents, Sheets spreadsheets, PDF editing and company letters",
-    tools: ["word", "sheet", "pdf", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
+    about: "Office work: Word, Sheets, PDF, Slides, Designs, Fig, Vector, letters",
+    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
   },
   cards: {
     about: "Interactive answers in chat: cards (calculators, comparisons, planners, diagrams, 3D), charts, tables, KPIs, choices, design-card templates, photos",
