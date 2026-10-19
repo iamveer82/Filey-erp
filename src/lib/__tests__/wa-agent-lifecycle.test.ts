@@ -86,11 +86,11 @@ const send = (id: string, text: string) =>
 const answered = (id: string) =>
   vi.waitFor(() => expect(mocks.reply).toHaveBeenCalledWith(id, expect.any(String), expect.any(String)));
 
-it("answers a simple greeting without waiting for a model or scanning business records", async () => {
+it("lets Filey AI answer a greeting in its own words, not a canned line", async () => {
   send("greeting", "Hyy");
   await answered("greeting");
-  expect(mocks.reply).toHaveBeenCalledWith("greeting", expect.stringContaining("Send me a task"), "session-one");
-  expect(mocks.agent).not.toHaveBeenCalled();
+  expect(mocks.agent).toHaveBeenCalledTimes(1);
+  expect(mocks.reply).not.toHaveBeenCalledWith("greeting", expect.stringContaining("Send me a task"), "session-one");
 });
 
 it("cancels active and queued work when the WhatsApp connection closes", async () => {
