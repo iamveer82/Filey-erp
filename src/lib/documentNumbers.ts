@@ -20,8 +20,20 @@ const shapes: Record<DocNumberKind, [string, string, string]> = {
   declaration_letter: ["app_settings", "declaration_letters", "declaration_letter"],
 };
 
-/** Allocate, rather than predict, a number. Unused reservations leave harmless
- * gaps; numbers are never recycled after a draft is abandoned or deleted. */
+/** A reservation holds its number while its document is being saved. On a device,
+ * one whose number never reached a saved document and that is older than this was
+ * abandoned (a failed attempt or a deleted draft): it no longer pushes the sequence on,
+ * so the next number follows the documents that exist, as the editors show it. */
+const RESERVATION_HOLD_MS = 10 * 60_000;
+export function liveReservations(rows: { number?: unknown; created_at?: unknown }[], used: string[], now = Date.now()): string[] {
+  const taken = new Set(used.map(value => value.trim().toLowerCase()));
+  return rows.map(row => ({ number: String(row.number ?? ""), at: Date.parse(String(row.created_at ?? "")) }))
+    .filter(row => row.number && (taken.has(row.number.trim().toLowerCase()) || !Number.isFinite(row.at) || now - row.at < RESERVATION_HOLD_MS))
+    .map(row => row.number);
+}
+
+/** Allocate, rather than predict, a number. In the cloud, unused reservations leave
+ * gaps; on a device, abandoned ones stop counting after RESERVATION_HOLD_MS. */
 export async function allocateDocumentNumber(
   kind: DocNumberKind,
   existing: string[] = [],
@@ -91,7 +103,7 @@ export async function allocateDocumentNumber(
     }
     const rows = await client.from(table).select("*");
     if (rows.error) throw rows.error;
-    const numbers = [...existing, ...reservations.map((row: any) => String(row.number))];
+    const numbers = [...existing];
     for (const row of rows.data ?? []) {
       if (row.org_id && row.org_id !== org) continue;
       if (table !== "app_settings") { if (typeof row[field] === "string") numbers.push(row[field]); continue; }
@@ -103,6 +115,7 @@ export async function allocateDocumentNumber(
         if (typeof number === "string") numbers.push(number);
       }
     }
+    numbers.push(...liveReservations(reservations, numbers));
     const number = nextFromPattern({ pattern, existing: numbers, year });
     if (numbers.some(value => value.trim().toLowerCase() === number.trim().toLowerCase()))
       throw new Error("This number format cannot allocate a unique number. Change the format.");

@@ -196,7 +196,8 @@ it("completes the real context→draft→read-back chat workflow using a scripte
   const response = await aiAgent([{ role: "user", text: "Make an authorization letter for Fixture Operator to collect our company documents. Their email and mobile are unknown; save a draft." }],
     { isOwner: true, turnId: "letter-provider", maxRounds: 6 });
   expect(requests).toHaveLength(4);
-  expect(requests[0].tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining(["get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft"]));
+  // New letters are written in Word (Office work); the classic template stays callable.
+  expect(requests[0].tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining(["get_letter_context", "word"]));
   const records = await saved();
   expect(records).toHaveLength(1);
   expect(records[0]).toMatchObject({ form: { status: "draft", recipient_name: "Fixture Officer", company_name: "Fixture Company", show_signature: false, show_stamp: false },

@@ -113,12 +113,13 @@ describe("shared letter drafting instructions", () => {
     expect(requests[0].tools.some(tool => tool.function.name === "task_complete")).toBe(true);
   });
 
-  it("offers letter tools immediately for a letter request but keeps them out of ordinary chat", async () => {
+  it("offers Word and company context for a letter request but keeps them out of ordinary chat", async () => {
     const requests = captureRequest();
     await aiAgent([{ role: "user", text: "Hello" }]);
     await aiAgent([{ role: "user", text: "Draft a company letter for me." }]);
     expect(requests[0].tools.some(tool => tool.function.name === "create_letter_draft")).toBe(false);
-    expect(requests[1].tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining(["get_letter_context", "create_letter_draft", "revise_letter_draft", "get_letter", "export_letter_pdf"]));
+    // Letters are written in Word (Office work); the classic template is not preloaded.
+    expect(requests[1].tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining(["get_letter_context", "word"]));
   });
 
   it("preloading letter tools never bypasses Plan mode or a disabled capability", async () => {
@@ -126,13 +127,14 @@ describe("shared letter drafting instructions", () => {
     setAgentMode("plan");
     await aiAgent([{ role: "user", text: "Draft a company letter." }]);
     const offered = requests[0].tools.map(tool => tool.function.name);
-    expect(offered).toEqual(expect.arrayContaining(["get_letter_context", "get_letter", "list_letters"]));
+    expect(offered).toEqual(expect.arrayContaining(["get_letter_context"]));
+    expect(offered).not.toContain("word");
     expect(offered).not.toContain("create_letter_draft");
     expect(offered).not.toContain("revise_letter_draft");
     expect(offered).not.toContain("export_letter_pdf");
     setAgentMode("accept_edits");
     setCapabilityEnabled("letters", false);
     await aiAgent([{ role: "user", text: "Draft a company letter." }]);
-    expect(requests[1].tools.some(tool => /^(?:get_letter|list_letters|create_letter|revise_letter|export_letter)/.test(tool.function.name))).toBe(false);
+    expect(requests[1].tools.some(tool => /^(?:get_letter|list_letters|create_letter|revise_letter|export_letter|word$)/.test(tool.function.name))).toBe(false);
   });
 });
