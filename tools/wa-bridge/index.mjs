@@ -79,8 +79,12 @@ const pending = new Map(); // id -> { resolve, timer, ackTimer, jid, timedOut }
  *  (look up the customer, price the lines, draft the invoice) blew through it,
  *  and the answer that arrived afterwards was thrown away. */
 const REPLY_TIMEOUT_MS = 240_000;
-/** Silence reads as "it's broken", so say something while the agent works. */
-const ACK_AFTER_MS = 2_000;
+/** WhatsApp shows "typing…" the whole time the agent works, which reads as a person
+ *  answering. A line every two seconds made each answer open with the same robotic
+ *  notice, so only a task still running after this long gets one. */
+const ACK_AFTER_MS = 15_000;
+/** An attachment download shows no typing, so it is acknowledged quickly. */
+const MEDIA_ACK_AFTER_MS = 2_000;
 /** The app's replies open with this line (waFormat in src/lib/waAgent.ts); the
  *  bridge's own messages use the same bold heading and solid separator. */
 const HEADER = "*Filey Agent*\n────────────";
@@ -219,6 +223,11 @@ function startStdinLoop() {
         });
       }
     }
+    // Liveness check from Filey's watchdog: an answer proves this event loop and
+    // its pipes still run, which a "connected" status alone does not.
+    if (v.type === "ping" && v.requestId) {
+      emit({ type: "delivery", requestId: v.requestId, ok: true, messageId: null, skipped: true, connected });
+    }
     if (v.type === "send") {
       // Proactive message to a specific JID (owner notifications). The desktop
       // app drives these after pairing; before that activeSock is null.
@@ -240,7 +249,7 @@ function askAgent(jid, event) {
   return new Promise((resolve) => {
     const entry = { resolve, jid, timedOut: false, stopTyping: beginTyping(jid) };
     entry.ackTimer = setTimeout(() => {
-      if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nGot your request — I'll send the result here. Keep Filey open while I work.`);
+      if (pending.has(id)) void sendTo(jid, `${HEADER}\n\nStill working on this. I'll reply here as soon as it's done.`);
     }, ACK_AFTER_MS);
     entry.timer = setTimeout(() => {
       entry.timedOut = true;
@@ -293,7 +302,7 @@ async function forwardMedia(jid, socket, work) {
   const ack = setTimeout(() => {
     if (!controller.signal.aborted && connected && socket === activeSock)
       void sendTo(jid, `${HEADER}\n\nReceiving your attachment — I'll send the result here. Keep Filey open while I work.`);
-  }, ACK_AFTER_MS);
+  }, MEDIA_ACK_AFTER_MS);
   const timeout = setTimeout(() => controller.abort(), 30_000);
   timeout.unref?.();
   try { await work(controller.signal); }

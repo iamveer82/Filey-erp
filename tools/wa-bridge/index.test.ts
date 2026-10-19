@@ -145,14 +145,15 @@ it.each([-10800, 10800])("accepts new self-chat tasks with %s seconds of device 
   expect(emitted("message")[0].text).toBe("Export my invoice PDF");
 });
 
-it("starts typing promptly, acknowledges after two seconds, and stops after the final reply", async () => {
+it("starts typing promptly, acknowledges a long task after fifteen seconds, and stops after the final reply", async () => {
   const jid = "971500000001@s.whatsapp.net";
   await transport.handlers["messages.upsert"]({ type: "notify", messages: [{ key: { id: "task", remoteJid: jid }, message: { conversation: "Export my invoice" } }] });
   await vi.waitFor(() => expect(transport.presence).toHaveBeenCalledWith("composing", jid));
   await vi.advanceTimersByTimeAsync(2000);
-  expect(transport.send).toHaveBeenCalledWith(jid, { text: "*Filey Agent*\n────────────\n\nGot your request — I'll send the result here. Keep Filey open while I work." }, expect.any(Object));
-  await vi.advanceTimersByTimeAsync(6000);
-  expect(transport.presence.mock.calls.filter(([state]) => state === "composing")).toHaveLength(2);
+  expect(transport.send).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(13_000);
+  expect(transport.send).toHaveBeenCalledWith(jid, { text: "*Filey Agent*\n────────────\n\nStill working on this. I'll reply here as soon as it's done." }, expect.any(Object));
+  expect(transport.presence.mock.calls.filter(([state]) => state === "composing").length).toBeGreaterThanOrEqual(2);
   command({ type: "reply", id: emitted("message")[0].id, text: "Your PDF is ready", requestId: "done" });
   await vi.waitFor(() => expect(transport.presence).toHaveBeenLastCalledWith("paused", jid));
   const count = transport.presence.mock.calls.length;
@@ -172,6 +173,12 @@ it("shares typing across queued messages and releases it on timeout", async () =
   const count = transport.presence.mock.calls.length;
   await vi.advanceTimersByTimeAsync(16_000);
   expect(transport.presence).toHaveBeenCalledTimes(count);
+});
+
+it("answers the desktop watchdog's ping without sending anything to WhatsApp", async () => {
+  command({ type: "ping", requestId: "ping-1" });
+  await vi.waitFor(() => expect(emitted("delivery")).toEqual([expect.objectContaining({ requestId: "ping-1", ok: true, skipped: true })]));
+  expect(transport.send).not.toHaveBeenCalled();
 });
 
 it("ignores malformed protocol data without losing the next valid owner request", async () => {

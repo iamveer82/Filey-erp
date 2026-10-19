@@ -239,15 +239,21 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
         std::thread::spawn(move || {
             // Third-party diagnostics may contain Signal session keys. Drain
             // the pipe, but expose only the bridge's structured status errors.
-            for _ in BufReader::new(stderr).lines().map_while(Result::ok) {}
+            // Raw bytes: a line-by-line reader stopped at invalid UTF-8, the pipe
+            // filled, and the bridge froze while still showing "connected".
+            let _ = std::io::copy(&mut BufReader::new(stderr), &mut std::io::sink());
         });
     }
 
     if let Some(stdout) = stdout {
         let app2 = app.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                let Some(payload) = line.strip_prefix("FILEY ") else {
+            // Byte lines: `lines()` ends at the first invalid UTF-8 line (a library
+            // printing raw bytes), and every later message would go unread.
+            for line in BufReader::new(stdout).split(b'\n') {
+                let Ok(bytes) = line else { break };
+                let line = String::from_utf8_lossy(&bytes);
+                let Some(payload) = line.trim_end_matches('\r').strip_prefix("FILEY ") else {
                     // Never persist library diagnostics, raw messages or QR
                     // material in desktop logs. Status travels via FILEY JSON.
                     continue;
@@ -421,7 +427,19 @@ fn require_session(state: &BridgeState, session_id: &str) -> Result<(), String> 
     Ok(())
 }
 
-async fn send_command(mut payload: serde_json::Value, session_id: String) -> Result<String, String> {
+/// The watchdog's liveness check: the bridge answers within seconds while its event
+/// loop and pipes work, even when nothing else is happening.
+#[tauri::command]
+pub async fn wa_bridge_ping(window: Webview, session_id: String) -> Result<(), String> {
+    super::computer_use::check_window(&window)?;
+    command_with_timeout(serde_json::json!({ "type": "ping" }), session_id, Duration::from_secs(10)).await.map(|_| ())
+}
+
+async fn send_command(payload: serde_json::Value, session_id: String) -> Result<String, String> {
+    command_with_timeout(payload, session_id, Duration::from_secs(90)).await
+}
+
+async fn command_with_timeout(mut payload: serde_json::Value, session_id: String, timeout: Duration) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
         payload["requestId"] = serde_json::Value::String(id.clone());
@@ -436,7 +454,7 @@ async fn send_command(mut payload: serde_json::Value, session_id: String) -> Res
                 .map_err(|e| format!("could not reach the WhatsApp bridge: {e}"))?;
             sup.deliveries.insert(id.clone(), sender);
         }
-        let result = receiver.recv_timeout(Duration::from_secs(90))
+        let result = receiver.recv_timeout(timeout)
             .unwrap_or_else(|_| Err("WhatsApp did not confirm delivery in time. Check the chat before retrying; the message may have been accepted.".into()));
         if let Some(sup) = BRIDGE.lock().unwrap().as_mut() {
             sup.deliveries.remove(&id);

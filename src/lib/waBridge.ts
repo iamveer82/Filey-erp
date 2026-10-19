@@ -254,12 +254,66 @@ let watchingAccount = false;
 let lastAccount: string | null | undefined;
 let autoQueue = Promise.resolve();
 
+/** The supervisor reports "stopped" only when the sidecar exits on its own (a crash,
+ *  a killed process); a stop Filey asked for detaches first and reports nothing.
+ *  WhatsApp then stayed down until the next launch, and messages got no answer. */
+let restarts = 0;
+let restartTimer: ReturnType<typeof setTimeout> | undefined;
+export function restartDelay(attempt: number): number {
+  return Math.min(60_000, 3_000 * 2 ** attempt);
+}
+/** A sidecar can also freeze while still reporting "connected" (a blocked pipe):
+ *  messages then reach nobody. One missed ping can be a busy moment; two in a row
+ *  restart it. */
+let missedPings = 0;
+export async function checkBridgeAlive(ping = (sessionId: string) => invoke("wa_bridge_ping", { sessionId })): Promise<"ok" | "missed" | "restart" | "idle"> {
+  const s = await bridgeState();
+  if (s.state !== "connected" || !s.sessionId) { missedPings = 0; return "idle"; }
+  try {
+    await ping(s.sessionId);
+    missedPings = 0;
+    return "ok";
+  } catch {
+    // A replaced session or a disconnect during the ping is not a freeze.
+    const now = await bridgeState();
+    if (now.state !== "connected" || now.sessionId !== s.sessionId) { missedPings = 0; return "idle"; }
+    return ++missedPings >= 2 ? "restart" : "missed";
+  }
+}
+
+function watchForCrash(): void {
+  setInterval(() => {
+    const account = accountScope();
+    if (!account || localStorage.getItem(ACCOUNT_KEY) !== account) return;
+    void checkBridgeAlive().then((result) => {
+      if (result !== "restart" || account !== accountScope()) return;
+      missedPings = 0;
+      log.warn("whatsapp", "bridge stopped answering, restarting");
+      return invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
+    }).catch((e) => log.warn("whatsapp", "bridge watchdog failed", e));
+  }, 60_000);
+  onBridgeState((s) => {
+    if (s.state === "connected") restarts = 0;
+    if (s.state !== "stopped" || restartTimer) return;
+    const account = accountScope();
+    if (!account || !getBridgeConfig().autoStart || localStorage.getItem(ACCOUNT_KEY) !== account) return;
+    restartTimer = setTimeout(() => {
+      restartTimer = undefined;
+      if (account !== accountScope()) return;
+      log.warn("whatsapp", "bridge stopped unexpectedly, restarting");
+      void invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber })
+        .catch((e) => log.warn("whatsapp", "bridge restart failed", e));
+    }, restartDelay(restarts++));
+  });
+}
+
 export async function autoStartBridge(): Promise<void> {
   if (!hasDesktop) return;
   if (!watchingAccount) {
     watchingAccount = true;
     window.addEventListener(AGENT_STORAGE_EVENT, () => void autoStartBridge());
     window.addEventListener("storage", () => void autoStartBridge());
+    watchForCrash();
   }
   const account = accountScope();
   if (account === lastAccount) return autoQueue;
