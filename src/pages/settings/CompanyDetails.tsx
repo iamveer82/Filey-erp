@@ -609,7 +609,8 @@ export default function CompanyDetails() {
         description="Use {001} for a counter and {YY} or {YYYY} for the year. Leave a format empty to use its default."
       >
         <div className="space-y-3">
-          {DOC_NUMBER_KINDS.map((spec) => (
+          {/* Letters moved to Office work (Word); older letter drafts keep their default numbering. */}
+          {DOC_NUMBER_KINDS.filter((spec) => spec.kind !== "letter").map((spec) => (
             <div key={spec.kind} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField label={spec.label}>
                 <input

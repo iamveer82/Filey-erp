@@ -3,7 +3,9 @@ Filey changes to PdfCraft's web app (Office work > PDF): the control bridge
 channel, printing handed to Filey (fileyPrintPdf), and the app named "PDF" where users see it
 (credit to PdfCraft kept in About and on Home, no community button or card in the web build),
 wheel zoom scaled for browser wheel deltas (a notch was a 2.7x jump), and side panes that
-start closed so the page has room in a Filey tab.
+start closed so the page has room in a Filey tab. The session gets the page's clock and time zone
+(Session::with_wall_clock): the web build has none, so stamps read "Jan 00, 0" and comments
+and saves carried no date.
 Files go in and out through PdfCraft's own ?host=parent bridge.
 Upstream: https://github.com/storytold/pdfcraft commit f0c9901c398372782a4eb001c95638289a5edab0 (main). MIT OR Apache-2.0.
 
@@ -11,7 +13,7 @@ Build: git apply filey-control.patch; cd apps/pdfcraft-web; trunk build --releas
 Install: node scripts/fetch-office-apps.mjs --app pdfcraft --from <pdfcraft>/dist/web (copy LICENSE-MIT/APACHE in first)
 
 diff --git a/Cargo.lock b/Cargo.lock
-index 91ed3c4..2babf8d 100644
+index 91ed3c49..2babf8d7 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -4396,6 +4396,7 @@ dependencies = [
@@ -23,7 +25,7 @@ index 91ed3c4..2babf8d 100644
   "web-sys",
  ]
 diff --git a/apps/pdfcraft-web/Cargo.toml b/apps/pdfcraft-web/Cargo.toml
-index a64d729..79f2ced 100644
+index a64d729d..79f2cedf 100644
 --- a/apps/pdfcraft-web/Cargo.toml
 +++ b/apps/pdfcraft-web/Cargo.toml
 @@ -13,6 +13,7 @@ workspace = true
@@ -35,7 +37,7 @@ index a64d729..79f2ced 100644
  [target.'cfg(target_arch = "wasm32")'.dependencies]
  wasm-bindgen-futures = "0.4"
 diff --git a/apps/pdfcraft-web/index.html b/apps/pdfcraft-web/index.html
-index 46b3a25..abeaa99 100644
+index 46b3a25e..abeaa996 100644
 --- a/apps/pdfcraft-web/index.html
 +++ b/apps/pdfcraft-web/index.html
 @@ -3,7 +3,7 @@
@@ -48,7 +50,7 @@ index 46b3a25..abeaa99 100644
      <style>
        html, body { margin: 0; height: 100%; overflow: hidden; background: #f1f1f3; }
 diff --git a/apps/pdfcraft-web/src/main.rs b/apps/pdfcraft-web/src/main.rs
-index a46a467..f2d5f3b 100644
+index a46a4674..f2d5f3bb 100644
 --- a/apps/pdfcraft-web/src/main.rs
 +++ b/apps/pdfcraft-web/src/main.rs
 @@ -71,7 +71,12 @@ fn main() {
@@ -146,7 +148,7 @@ index a46a467..f2d5f3b 100644
  fn main() {
      eprintln!("pdfcraft-web targets wasm32: run `trunk serve` or `trunk build --release` in apps/pdfcraft-web");
 diff --git a/crates/ui-egui/src/canvas.rs b/crates/ui-egui/src/canvas.rs
-index 0acab64..33b19b7 100644
+index 0acab64a..33b19b75 100644
 --- a/crates/ui-egui/src/canvas.rs
 +++ b/crates/ui-egui/src/canvas.rs
 @@ -2371,6 +2371,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
@@ -161,7 +163,7 @@ index 0acab64..33b19b7 100644
      let navigation_rect = if view.viewport_screen.is_positive() { avail.intersect(view.viewport_screen) } else { avail };
      let navigation_enabled = app.dialog.is_none() && app.close_request.is_none() && !app.palette_open && ui.is_enabled() && ui.input(|i| i.focused);
 diff --git a/crates/ui-egui/src/chrome.rs b/crates/ui-egui/src/chrome.rs
-index 84e6262..e001b26 100644
+index 84e62622..e001b26c 100644
 --- a/crates/ui-egui/src/chrome.rs
 +++ b/crates/ui-egui/src/chrome.rs
 @@ -299,8 +299,8 @@ pub fn tab_strip(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
@@ -176,7 +178,7 @@ index 84e6262..e001b26 100644
                      }
                  });
 diff --git a/crates/ui-egui/src/home.rs b/crates/ui-egui/src/home.rs
-index 3e70f34..5837978 100644
+index 3e70f34e..5837978d 100644
 --- a/crates/ui-egui/src/home.rs
 +++ b/crates/ui-egui/src/home.rs
 @@ -22,13 +22,14 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
@@ -222,10 +224,34 @@ index 3e70f34..5837978 100644
              );
          });
 diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
-index 7946462..2d4cc0c 100644
+index 79464624..fad05d4b 100644
 --- a/crates/ui-egui/src/lib.rs
 +++ b/crates/ui-egui/src/lib.rs
-@@ -1320,7 +1320,8 @@ impl PdfCraftApp {
+@@ -881,10 +881,22 @@ fn rgb_triple(v: &serde_json::Value) -> Option<[f64; 3]> {
+     Some(out)
+ }
+ 
++/// A browser build has no clock or time zone of its own: dynamic stamps read "at 12:00 am,
++/// Jan 00, 0", and comments and saves carry no date. The page's clock and zone stand in.
++fn new_session() -> Session {
++    #[cfg(target_arch = "wasm32")]
++    return Session::new().with_wall_clock(
++        || (js_sys::Date::now() / 1000.0) as i64,
++        || -(js_sys::Date::new_0().get_timezone_offset() as i64) * 60,
++    );
++    #[cfg(not(target_arch = "wasm32"))]
++    Session::new()
++}
++
+ impl PdfCraftApp {
+     pub fn new() -> Self {
+         Self {
+-            session: Session::new(),
++            session: new_session(),
+             views: Vec::new(),
+             closed_tabs: Vec::new(),
+             active: None,
+@@ -1320,7 +1332,8 @@ impl PdfCraftApp {
          // Read mode opens with the panes closed; the rail still opens them (#932). A right panel
          // the user closed stays closed (#1590).
          let opening_mode = self.mode_override.unwrap_or(self.default_mode);
@@ -235,7 +261,7 @@ index 7946462..2d4cc0c 100644
              self.right = if !doc.info.annotations.is_empty() {
                  Some(RightPanel::Comments)
              } else if !doc.info.outline.is_empty() {
-@@ -3087,7 +3088,7 @@ impl eframe::App for PdfCraftApp {
+@@ -3087,7 +3100,7 @@ impl eframe::App for PdfCraftApp {
              .active
              .and_then(|i| crate::canvas::tab_label(self, i))
              .or_else(|| self.combine_showing().then(|| tl!("Combine files").to_owned()))
@@ -245,7 +271,7 @@ index 7946462..2d4cc0c 100644
              ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
              self.window_title = title;
 diff --git a/crates/ui-egui/src/print_ui.rs b/crates/ui-egui/src/print_ui.rs
-index 4e0f065..cf4c6c1 100644
+index 4e0f0658..cf4c6c16 100644
 --- a/crates/ui-egui/src/print_ui.rs
 +++ b/crates/ui-egui/src/print_ui.rs
 @@ -564,6 +564,14 @@ impl PdfCraftApp {
