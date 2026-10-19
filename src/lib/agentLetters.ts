@@ -178,7 +178,7 @@ export async function getAgentLetterContext(args: Record<string, unknown>, signa
   return { company: { name: context.company.name || "", address: context.company.address || "", email: context.company.email || "",
     phone: context.company.phone || "", trn: context.company.trn || "" }, assets_available: context.assets, layouts: [...LAYOUTS],
     defaults: { status: "draft", use_letterhead: context.assets.letterhead, show_company_header: !context.assets.letterhead, show_logo: context.assets.logo && !context.background,
-      show_reference: false, show_signature: false, show_stamp: false, text_style: blankLetterForm("LTR").text_style }, navigation: "/letters" };
+      show_reference: false, show_signature: false, show_stamp: false, text_style: blankLetterForm("LTR").text_style }, navigation: "/office" };
 }
 
 function missing(form: LetterForm): string[] {

@@ -67,7 +67,7 @@ describe("letter context and draft preparation", () => {
     const context = await getAgentLetterContext({});
     expect(context).toMatchObject({ company: { name: "Example Trading", email: "", phone: "" },
       assets_available: { letterhead: true, logo: true, signature: true, stamp: true },
-      defaults: { show_signature: false, show_stamp: false, show_reference: false, show_logo: false }, navigation: "/letters" });
+      defaults: { show_signature: false, show_stamp: false, show_reference: false, show_logo: false }, navigation: "/office" });
     expect(JSON.stringify(context)).not.toContain("letters-user/company/");
     expect(requireModuleAccess).toHaveBeenCalledExactlyOnceWith("letters");
     expect(records()).toEqual([]);

@@ -986,6 +986,14 @@ async function runOfficeTool(app: keyof typeof OFFICE_TOOL, a: Record<string, un
       if (!made.ok) return { error: made.error || `${spec.label} could not start a new file.` };
       await show();
     }
+    // A company letter starts with the saved logo, put in by the app: the image never
+    // passes through the model.
+    if (app === "word" && a.letterhead === true) {
+      const logo = String((await billing.getCompany())?.logo ?? "").match(/^data:image\/(?:png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/)?.[1];
+      assertCurrent();
+      const put = logo ? await officeControl(win, "engine.execute", { command: "insert.picture", params: { data: logo, width: 140, alt: "Company logo" } }) : null;
+      return { ok: true, message: "A new Word letter is open in Office work.", logo: put?.ok ? "added at the top" : logo ? `not added: ${put?.error}` : "none saved in Company Details" };
+    }
     return { ok: true, message: app === "pdf" ? "A new PDF tab is open in Office work; open a file into it." : `A new ${spec.label} file is open in Office work.` };
   }
 
@@ -1059,7 +1067,7 @@ const OFFICE_TOOL_PARAMS = {
 export const TOOLS: ToolDef[] = [
   {
     name: "get_letter_context",
-    description: "Read saved company text, available letterhead and letter layouts before drafting. Load use_toolset('letters') in the same round if draft/edit tools are not yet offered. Private images are never returned. Letters do not require a customer or supplier record.",
+    description: "Company name, address, email, phone and TRN for a letter written in word (Office work), plus the letterhead and layouts of the classic letter template. Private images are never returned. Letters do not require a customer or supplier record.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     run: getAgentLetterContext,
   },
@@ -1082,7 +1090,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "create_letter_draft",
-    description: "Save a new unsigned company letter draft with a unique reference and an editable link. First read get_letter_context. Use blocks for the ordered main content; body is an optional introduction before blocks. Leave unknown optional fields blank or editable placeholders instead of inventing details. Never applies saved signatures or stamps and never issues or sends the letter.",
+    description: "Classic letter template (Office work, Letters tab): only when the owner asks for that template. New letters, NOCs and certificates are written with word instead. Saves an unsigned draft with a unique reference and an editable link. First read get_letter_context. Use blocks for the ordered main content; body is an optional introduction before blocks. Leave unknown optional fields blank or editable placeholders instead of inventing details. Never applies saved signatures or stamps and never issues or sends the letter.",
     parameters: { type: "object", additionalProperties: false, required: ["title"], properties: letterEditableProperties },
     run: createAgentLetterDraft,
   },
@@ -6012,7 +6020,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "word",
     description:
-      'Word (WordCraft) in Office work, desktop app: write and format real documents while the user watches. action "new" or "open" (`file`: a chat attachment or My Files name) starts one; later calls use the open document. action "run" sends `requests`, WordCraft control calls run in order: {"method":"engine.commands","params":{"search":"table"}} finds command ids and their params; {"method":"engine.execute","params":{"command":"text.insert","params":{"text":"Hello"}}} runs any of its 632 commands (select.all, format.bold, format.set, para.set, styles.apply {"style":"Heading 1"}, insert.table {"rows":2,"cols":3}, insert.pageBreak, edit.undo…); {"method":"document.inspect"} reads it back. Batch many steps per call. action "save" exports `name` (.docx, .pdf, .odt, .rtf, .md, .html or .txt), keeps it in My Files (listed in Office work) and returns the file to this chat.',
+      'Word (WordCraft) in Office work, desktop app: write and format real documents while the user watches. action "new" or "open" (`file`: a chat attachment or My Files name) starts one; later calls use the open document. action "run" sends `requests`, WordCraft control calls run in order: {"method":"engine.commands","params":{"search":"table"}} finds command ids and their params; {"method":"engine.execute","params":{"command":"text.insert","params":{"text":"Hello"}}} runs any of its 632 commands (select.all, format.bold, format.set, para.set, styles.apply {"style":"Heading 1"}, insert.table {"rows":2,"cols":3}, insert.pageBreak, edit.undo…); {"method":"document.inspect"} reads it back. Batch many steps per call. action "save" exports `name` (.docx, .pdf, .odt, .rtf, .md, .html or .txt), keeps it in My Files (listed in Office work) and returns the file to this chat. Company letters, NOCs and certificates are written here, not in a Letters section: "new" with letterhead:true puts the saved company logo on top; type the company name, address and TRN from get_letter_context under it, then date, recipient, body and signatory. The owner adds signature and stamp.',
     parameters: OFFICE_TOOL_PARAMS,
     run: (a, signal) => runOfficeTool("word", a, signal),
   },
