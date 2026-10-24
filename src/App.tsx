@@ -1,14 +1,7 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { HashRouter } from "react-router-dom";
 import { getDataMode } from "./lib/dataMode";
 import { AuthProvider, useAuth } from "./lib/auth";
-import {
-  ENFORCE_LICENSING,
-  CLOUD_DEVICE_LIMIT,
-  listOrgDevices,
-  releaseOrgDevice,
-  type OrgDevice,
-} from "./lib/license";
 import { UIProvider } from "./lib/ui";
 import { LanguageProvider } from "./lib/i18n";
 import Login from "./pages/Login";
@@ -17,9 +10,6 @@ import TwoFactorGate from "./components/TwoFactorGate";
 import ProfileSetup from "./pages/ProfileSetup";
 import SetupNotice from "./pages/SetupNotice";
 import FileyLoader from "./components/FileyLoader";
-import { Monitor, Smartphone, LogOut } from "lucide-react";
-import { fmtDate } from "./lib/format";
-import Logo from "./components/Logo";
 import { maybePromptDesktopShortcut } from "./lib/shortcut";
 
 const Workspace = lazy(() => import("./components/Workspace"));
@@ -34,75 +24,6 @@ function recoveryLink(): { token: string; email: string } | null {
   const token = params.get("token_hash")?.trim() || "";
   const email = params.get("email")?.trim().toLowerCase() || "";
   return { token, email };
-}
-
-/** Org hit its cloud device limit and this device was refused a slot —
- *  blocking screen with self-serve release (only when licensing enforced). */
-function DeviceLimitScreen() {
-  const { retryDeviceRegistration, signOut } = useAuth();
-  const [devices, setDevices] = useState<OrgDevice[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const pending = useRef(false);
-  const load = useCallback(async () => {
-    if (pending.current) return;
-    pending.current = true;
-    setBusy(true);
-    setError("");
-    try { setDevices(await listOrgDevices()); }
-    catch { setError("Couldn't load your devices. Check your connection and try again."); }
-    finally { pending.current = false; setBusy(false); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  return (
-    <div className="min-h-dvh grid place-items-center bg-page p-4 sm:p-8">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 sm:p-8 space-y-5">
-        <Logo size={40}/>
-        <div className="space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">Make room for this device</h1>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Your workspace already has {CLOUD_DEVICE_LIMIT} devices connected.
-          Log out a device below to continue here. Your saved records stay safe.
-        </p></div>
-        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-        {busy && <p role="status" className="text-sm text-muted-foreground">Updating devices…</p>}
-        <ul className="max-h-[45dvh] divide-y divide-border overflow-y-auto">
-          {devices.map((d) => (
-            <li key={d.id} className="text-sm flex items-center justify-between gap-3 py-3">
-              {/iphone|android|mobile/i.test(d.device_name||'')?<Smartphone size={20} className="shrink-0 text-muted-foreground"/>:<Monitor size={20} className="shrink-0 text-muted-foreground"/>}
-              <div className="min-w-0 flex-1"><p className="truncate font-medium text-foreground">{d.device_name || "Device"}</p>{d.last_seen && <p className="mt-1 text-xs text-muted-foreground">Last active {fmtDate(d.last_seen)}</p>}</div>
-              <button
-                className="btn-ghost shrink-0 text-danger"
-                disabled={busy}
-                onClick={async () => {
-                  if (pending.current) return;
-                  pending.current = true;
-                  setBusy(true);
-                  setError("");
-                  try {
-                    await releaseOrgDevice(d.id);
-                    await retryDeviceRegistration();
-                    setDevices(await listOrgDevices());
-                  } catch {
-                    setError("Couldn't log out this device. Refresh the list and try again.");
-                  } finally {
-                    pending.current = false;
-                    setBusy(false);
-                  }
-                }}
-              >
-                <LogOut size={14}/> Log out
-              </button>
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted-foreground">The device signs out when connected to Filey. Offline records remain on that device.</p>
-        <button className="btn-ghost w-full" disabled={busy} onClick={() => void load()}>Refresh devices</button>
-        <button className="btn-ghost w-full" disabled={busy} onClick={() => void signOut()}>
-          Use another account
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function ProfileLoadError({ onRetry, title = "Couldn't load your profile", description = "You're signed in, but we couldn't read your account details. This is usually a connection problem — your data is untouched." }: { onRetry: () => void; title?: string; description?: string }) {
@@ -138,7 +59,6 @@ function Gate() {
     mfaLoading,
     mfaError,
     refreshMfaPending,
-    deviceLimitBlocked,
   } = useAuth();
   // Desktop app, first sign-in on this device: offer to place a Desktop
   // shortcut (once per device; the helper self-guards and never throws).
@@ -169,7 +89,6 @@ function Gate() {
   if (profileError)
     return <ProfileLoadError onRetry={() => void reloadProfile()} />;
   if (needsProfile) return <ProfileSetup />;
-  if (deviceLimitBlocked && ENFORCE_LICENSING) return <DeviceLimitScreen />;
 
   return <Suspense fallback={<Splash />}><Workspace key={`${user.id}:${profile?.org_id ?? "default"}`} /></Suspense>;
 }

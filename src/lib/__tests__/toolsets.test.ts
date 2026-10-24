@@ -41,7 +41,7 @@ describe("lookup helpers", () => {
   it("reports the owning set, and empty for core", () => {
     expect(setOf("create_invoice_draft")).toBe("");
     expect(setOf("run_payroll")).toBe("people");
-    expect(setOf("run_shell")).toBe("system");
+    expect(setOf("run_shell")).toBe("");
     expect(setOf("no_such_tool")).toBe("");
   });
 

@@ -10,6 +10,10 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-engine
+# accidental nested copy of this repo; never commit it
+/filey-erp/
+__pycache__/
 # Office work apps (WordCraft, GridCraft, PdfCraft web builds), fetched by scripts/fetch-office-apps.mjs
 public/wordcraft/
 public/gridcraft/

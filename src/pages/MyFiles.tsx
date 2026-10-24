@@ -82,7 +82,6 @@ const OFFICE_FILES = /\.(docx|odt|rtf|xlsx|xlsm|xlsb|xls|ods|csv|tsv|pdf)$/i;
 // Other PDFs (invoices, tool outputs) keep the quick preview; PDF's own files open in it.
 const officeDoc = (f: SavedFile) => hasTauri && OFFICE_FILES.test(f.name) && (!/\.pdf$/i.test(f.name) || f.tool === "pdf");
 // Files Office work's apps made (Slides joins when it ships).
-const OFFICE_TOOLS = new Set(["word", "sheet", "pdf"]);
 
 /** `embedded`: just the Office apps' files (no stats or folders), for Office work. */
 export default function MyFiles({ embedded = false }: { embedded?: boolean }) {
@@ -130,8 +129,8 @@ export default function MyFiles({ embedded = false }: { embedded?: boolean }) {
 
   // Files in the current folder, before the type filter.
   const folderFilesAll = useMemo(
-    () => (embedded ? files.filter((f) => OFFICE_TOOLS.has(f.tool ?? "")) : files.filter((f) => f.folderId === cwd)),
-    [files, cwd, embedded]
+    () => files.filter((f) => f.folderId === cwd),
+    [files, cwd]
   );
   // Tool keys present among the current folder's files (for the filter chips).
   const toolsPresent = useMemo(() => {
@@ -532,8 +531,11 @@ export default function MyFiles({ embedded = false }: { embedded?: boolean }) {
         onShare={() => share(preview)}
         onRename={() => doRename(preview)}
         onDelete={() => del(preview)}
-        onEdit={() => edit(preview)}
-        editable={!!toolRoute(preview.tool)}
+        onEdit={() => {
+          if (officeDoc(preview)) return void openInOffice(preview);
+          edit(preview);
+        }}
+        editable={!!toolRoute(preview.tool) || officeDoc(preview)}
       />
     );
   }
@@ -693,6 +695,12 @@ export default function MyFiles({ embedded = false }: { embedded?: boolean }) {
                     file={f}
                     busy={busyId === f.id}
                     onOpen={() => (officeDoc(f) ? void openInOffice(f) : setPreview(f))}
+                    onEdit={() => {
+                      if (officeDoc(f)) return void openInOffice(f);
+                      const route = toolRoute(f.tool);
+                      if (route) return void navigate(route);
+                      toast.info("This file type has no editor.");
+                    }}
                     onDownload={() => download(f)}
                     onRename={() => doRename(f)}
                     onShare={() => share(f)}
@@ -879,6 +887,7 @@ function FileRow({
   file,
   busy,
   onOpen,
+  onEdit,
   onDownload,
   onRename,
   onShare,
@@ -889,6 +898,7 @@ function FileRow({
   file: SavedFile;
   busy: boolean;
   onOpen: () => void;
+  onEdit: () => void;
   onDownload: () => void;
   onRename: () => void;
   onShare: () => void;
@@ -945,6 +955,9 @@ function FileRow({
         </RowAction>
         <RowAction title="Download" onClick={onDownload} busy={busy}>
           <Download size={14} />
+        </RowAction>
+        <RowAction title="Edit" onClick={onEdit}>
+          <ExternalLink size={14} />
         </RowAction>
         <RowAction title="Rename" onClick={onRename}>
           <Pencil size={14} />
@@ -1127,7 +1140,7 @@ function FilePreviewPage({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden rounded-xl border border-border bg-muted">
+      <div className="flex-1 overflow-auto rounded-xl border border-border bg-muted">
         {err ? (
           <div className="grid h-full place-items-center text-center px-6">
             <div>

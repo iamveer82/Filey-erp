@@ -18,6 +18,9 @@ export default tseslint.config(
       "src/vendor", // vendored third-party libs (xlsx), not our code
       "server", // separate Node runtime, not in the desktop/web build
       "agent", // Filey Agent (Hermes fork): own Python/TS toolchain + lint
+      "filey-erp", // accidental nested copy of this repo, never part of the build
+      "public/pyodide", // fetched Python runtime
+      "public/*craft", // fetched Office app builds (WordCraft, GridCraft, PdfCraft, ...)
       "src-tauri/target",
       "src-tauri/binaries", // generated sidecars and vendored native media packages
       "mobile/android/**/build/**",

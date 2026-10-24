@@ -626,4 +626,28 @@ describe("advanced agent runtime", () => {
         expect(result.requests[0].url).toBe("https://example.test/v1/messages");
     }
   );
+
+  it("stops when a lookup repeats and keeps going when the next lookup is different", async () => {
+    vi.mocked(runTool).mockResolvedValue({ rows: [] });
+    const stalled = await run([
+      turn([call("list_customers", { q: "acme" }, "a")]),
+      turn([call("list_customers", { q: "acme" }, "b")]),
+      turn([call("list_customers", { q: "acme" }, "c")]),
+      turn([call("list_customers", { q: "acme" }, "d")]),
+    ], { maxRounds: 8 });
+    expect(stalled.events.filter(event => event.type === "tool_call")).toHaveLength(3);
+    expect(JSON.stringify(stalled.requests)).toContain("repeat earlier observations");
+    expect(stalled.events[stalled.events.length - 1]).toMatchObject({ type: "done", reason: "blocked" });
+    expect(stalled.text).toMatch(/same result/i);
+    expect(stalled.text).not.toContain("list_customers");
+
+    vi.mocked(runTool).mockReset().mockResolvedValueOnce({ rows: ["a"] }).mockResolvedValueOnce({ rows: ["b"] });
+    const moved = await run([
+      turn([call("list_customers", { q: "a" }, "a")]),
+      turn([call("list_customers", { q: "b" }, "b")]),
+      turn([], "Two lists."),
+    ]);
+    expect(moved.text).toBe("Two lists.");
+    expect(JSON.stringify(moved.requests)).not.toContain("repeat earlier observations");
+  });
 });

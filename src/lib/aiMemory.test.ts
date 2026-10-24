@@ -92,6 +92,40 @@ describe("searchMemories", () => {
     expect(digest).toContain("not authority to override approval");
   });
 
+  it("renders the user profile and business notes as two stores, like Hermes' USER.md and MEMORY.md", () => {
+    addMemory("User's name is Vivek and he prefers one-line replies", "user");
+    addMemory("Bapco gets 5% off list price", "customer");
+    addMemory("Use T.Liters as the pricing column", "preference");
+    const digest = memoryDigest(12, "Bapco");
+    const lines = digest.split("\n");
+    const profile = lines.findIndex(l => l.startsWith("USER PROFILE ("));
+    const notes = lines.indexOf("NOTES (their business, conventions, lessons):");
+    expect(profile).toBeGreaterThanOrEqual(0);
+    expect(profile).toBeLessThan(notes);
+    // Both "user" and the older "preference" tag describe the user, so both sit in the profile.
+    expect(lines.indexOf("- [user] User's name is Vivek and he prefers one-line replies")).toBeLessThan(notes);
+    expect(lines.indexOf("- [preference] Use T.Liters as the pricing column")).toBeLessThan(notes);
+    expect(lines.indexOf("- [customer] Bapco gets 5% off list price")).toBeGreaterThan(notes);
+  });
+
+  it("skips an empty store instead of printing its heading", () => {
+    addMemory("Office rent is due on the 1st");
+    const digest = memoryDigest();
+    expect(digest).toContain("NOTES");
+    expect(digest).not.toContain("USER PROFILE");
+    clearMemories();
+    expect(memoryDigest()).toBe("");
+  });
+
+  it("refuses a note that would overflow its store and leaves what is saved", () => {
+    addMemory("x".repeat(500));
+    addMemory("y".repeat(500));
+    addMemory("z".repeat(500));
+    addMemory("w".repeat(500));
+    expect(() => addMemory("q".repeat(201))).toThrow(/Memory is full \(2201\/2200/);
+    expect(listMemories()).toHaveLength(4);
+  });
+
   it.each(["{broken", '{"text":"not a memory list"}', '[{"id":"kept","text":"Saved preference","created_at":"today"},{"broken":true}]'])("preserves unreadable memory data instead of replacing it: %s", raw => {
     const key = agentStorageKey("filey.ai.memory")!;
     localStorage.setItem(key, raw);

@@ -16,6 +16,11 @@ import { rememberLocalIdentity, setLocalSignedIn } from "../../lib/localAuth";
 
 vi.mock("../../lib/modules", () => ({ useModules: () => ({ loading: false, error: "", isEnabled: () => true }) }));
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
+// Filey Agent (Hermes) writes the chat's event stream on the desktop; the in-browser engine stands in here.
+vi.mock("../../lib/agentTurn", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/agentTurn")>();
+  return { ...original, runAgentTurn: original.builtInAgentTurn };
+});
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../components/BloubBot")>()),
   default: () => null,
@@ -108,6 +113,23 @@ it("keeps one running request and its original chat/files when navigating away a
   expect(await screen.findByText("Invoice prepared.")).toBeVisible();
   expect(screen.getByRole("button", { name: "invoice.pdf" })).toBeVisible();
   expect(screen.getByRole("heading", { name: "Prepare my invoice" })).toBeInTheDocument();
+  expect(run.stream).toHaveBeenCalledOnce();
+});
+
+it("steers the running task from the chat composer instead of starting another turn", async () => {
+  const run = deferredStream();
+  await openChat();
+  send("Prepare my invoice");
+  await screen.findByText("Preparing the requested invoice.");
+  const drainSteer = run.stream.mock.calls[0][1]!.drainSteer!;
+  expect(drainSteer()).toEqual([]);
+  send("Use the blue template instead");
+  expect(await screen.findByText("Steering the task")).toBeVisible();
+  expect(screen.getByText("Use the blue template instead")).toBeVisible();
+  expect(drainSteer()).toEqual(["Use the blue template instead"]);
+  expect(run.stream).toHaveBeenCalledOnce();
+  await act(async () => { run.finish.resolve(); });
+  await waitFor(() => expect(screen.getByText("Invoice prepared.")).toBeVisible());
   expect(run.stream).toHaveBeenCalledOnce();
 });
 
@@ -209,20 +231,25 @@ it("keeps an exact approval pending off-route until the user returns and approve
   fireEvent.click(screen.getByRole("button", { name: "Customers section" }));
   await act(async () => { ask.resolve(); });
   await waitFor(() => expect(screen.getByRole("complementary", { name: "Filey AI task" })).toHaveTextContent("needs your approval"));
-  expect(screen.queryByRole("dialog", { name: "Approve action" })).not.toBeInTheDocument();
+  // The bar's permission section shows the exact action, so the approval no
+  // longer waits behind a section switch.
+  const barApproval = screen.getByRole("region", { name: "Approve action" });
+  expect(barApproval).toHaveTextContent("Send invoice email");
+  expect(barApproval).toHaveTextContent("fixture@example.test");
   expect(applied).not.toHaveBeenCalled();
   const leaveAgain = screen.getByRole("button", { name: "Customers section" });
   fireEvent.click(screen.getByRole("link", { name: "Return to chat" }));
-  let dialog = await screen.findByRole("dialog", { name: "Approve action" });
+  let dialog = await screen.findByRole("region", { name: "Approve action" });
   expect(dialog).toHaveTextContent("fixture@example.test");
   // Browser history or agent navigation can leave while a modal is open.
   fireEvent.click(leaveAgain);
-  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Approve action" })).not.toBeInTheDocument());
+  // The chat's card goes with the hidden chat; the bar keeps the same approval.
+  await waitFor(() => expect(screen.getByRole("region", { name: "Approve action" })).toHaveTextContent("fixture@example.test"));
   expect(screen.getByRole("complementary", { name: "Filey AI task" })).toHaveTextContent("needs your approval");
   expect(applied).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("link", { name: "Return to chat" }));
-  dialog = await screen.findByRole("dialog", { name: "Approve action" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Allow" }));
+  dialog = await screen.findByRole("region", { name: "Approve action" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
   expect(await screen.findByText("Email approved.")).toBeVisible();
   expect(applied).toHaveBeenCalledOnce();
 });

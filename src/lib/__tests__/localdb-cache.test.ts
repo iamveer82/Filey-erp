@@ -6,20 +6,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // stale collection after a write.
 
 const store = new Map<string, string>();
+// Read stamps (sync.rs cache_get_fresh), off unless a test turns them on.
+const stamps = { on: false, next: 0, keys: new Map<string, number>() };
+const touch = (key: string) => stamps.keys.set(key, ++stamps.next);
 const invoke = vi.fn(async (cmd: string, args: any) => {
   if (cmd === "cache_get") return store.get(args.key) ?? null;
+  if (cmd === "cache_get_fresh" && stamps.on) {
+    const stamp = String(stamps.keys.get(args.key) ?? 0);
+    return args.stamp === stamp ? { stamp, unchanged: true, value: null } : { stamp, unchanged: false, value: store.get(args.key) ?? null };
+  }
   if (cmd === "cache_set") {
     store.set(args.key, args.value);
+    touch(args.key);
     return null;
   }
   if (cmd === "cache_set_many") {
-    for (const [key, value] of args.entries) store.set(key, value);
+    for (const [key, value] of args.entries) { store.set(key, value); touch(key); }
     return null;
   }
   if (cmd === "cache_compare_set_many") {
     if (args.expected.some(([key, value]: [string, string | null]) => (store.get(key) ?? null) !== value)) return false;
     for (const [key, value] of args.entries) {
       if (value === null) store.delete(key); else store.set(key, value);
+      touch(key);
     }
     return true;
   }
@@ -40,9 +49,31 @@ async function freshClient() {
   return (await import("../localdb")).localClient;
 }
 
-beforeEach(() => store.clear());
+beforeEach(() => {
+  store.clear();
+  stamps.on = false;
+  stamps.keys.clear();
+});
 
 describe("localdb desktop read cache", () => {
+  it("does not resend an unchanged collection, and re-reads after a save", async () => {
+    stamps.on = true;
+    const c = await freshClient();
+    await c.from("widgets").insert({ id: 1, name: "first" });
+    await c.from("widgets").select(); // holds the collection and its stamp now
+    // What the native side sent back for the widgets collection on the next read.
+    const answers = async () => {
+      const results = await Promise.all(invoke.mock.results.map(r => r.value));
+      return invoke.mock.calls.flatMap(([cmd, args], i) => (cmd === "cache_get_fresh" && args.key === "localdb:widgets") ? [results[i]] : []);
+    };
+    invoke.mockClear();
+    expect((await c.from("widgets").select()).data.map((r: any) => r.name)).toEqual(["first"]);
+    expect(await answers()).toEqual([expect.objectContaining({ unchanged: true, value: null })]);
+    await c.from("widgets").update({ name: "renamed" }).eq("id", 1);
+    invoke.mockClear();
+    expect((await c.from("widgets").select()).data.map((r: any) => r.name)).toEqual(["renamed"]);
+  });
+
   it("keeps a selected nested object isolated from a later unrelated save", async () => {
     const client = await freshClient();
     await client.from("widgets").insert([{ id: 1, custom: { rate: 10 } }, { id: 2, name: "Other" }]);

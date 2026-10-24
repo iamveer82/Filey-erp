@@ -48,9 +48,58 @@ describe("the agent's app map", () => {
       ["design a flyer for the new product", "design"],
       ["wireframe the app screens", "fig"],
       ["draw a logo for Rennox", "vector"],
+      ["open the file I saved", "word"],
+      ["post this update in Slack", "composio_run"],
+      ["send a message on Microsoft Teams", "list_connected_apps"],
+      ["reply in the Discord channel", "composio_run"],
       ["سوي عرض تقديمي للشركة", "slides"],
+      ["write landing page copy for the new product", "create_campaign"],
+      ["run an seo audit on the site", "list_campaigns"],
     ];
     for (const [text, tool] of cases) expect(toolsForRequest(text), text).toContain(tool);
+  });
+
+  it("understands short, everyday requests without the section's name", () => {
+    const cases: [string, string][] = [
+      ["bill ahmed 500", "create_invoice_draft"],
+      ["charge rennox for 20 pails", "create_invoice_draft"],
+      ["inv 23 paid in full", "mark_invoice_paid"],
+      ["ali paid 500", "create_payment_receipt"],
+      ["got 2000 cash from bapco", "create_payment_receipt"],
+      ["fuel 200", "log_expense"],
+      ["rent paid", "log_expense"],
+      ["bought 10 drums from bapco", "create_purchase_invoice_draft"],
+      ["order 20 drums from bapco", "create_purchase_order"],
+      ["sara joined today", "create_employee"],
+      ["ravi absent", "mark_attendance"],
+      ["who hasn't paid", "receivables_aging"],
+      ["how much did we sell this month", "financial_summary"],
+      ["sales today", "get_stats"],
+      ["how many pails left", "find_products"],
+      ["dispatch it to rennox", "create_delivery_challan"],
+      ["don't forget to call ali", "add_reminder"],
+      ["msg him the invoice", "send_invoice_whatsapp"],
+      ["mail it to ali", "email_invoice"],
+      ["بعت لعلي ١٠ كراتين", "create_invoice_draft"],
+      ["علي غائب اليوم", "mark_attendance"],
+    ];
+    for (const [text, tool] of cases) expect(toolsForRequest(text), text).toContain(tool);
+    // What the screens could do and the agent could not, until the 2026-10-23 wiring audit.
+    for (const [text, tool] of [
+      ["they accepted Q-0012, invoice it", "convert_quote_to_invoice"],
+      ["mark the quote to rennox as sent", "set_quote_status"],
+      ["ali paid 500 of INV-0023", "record_invoice_payment"],
+      ["paid bapco 2000 for PO-0012", "record_po_payment"],
+      ["rennox gave a 5000 deposit", "record_advance"],
+      ["use rennox's advance on invoice 31", "apply_advance_to_invoice"],
+      ["stop the monthly invoice for rennox", "cancel_recurring"],
+      ["postpone the call with ali to friday", "reschedule_follow_up"],
+      ["note on rennox: prefers monday deliveries", "add_crm_note"],
+      ["anything new?", "list_notifications"],
+    ] as const) expect(toolsForRequest(text), text).toContain(tool);
+    // Money spent and a customer's order stay where they belong.
+    expect(toolsForRequest("i paid 200 for fuel")).not.toContain("create_payment_receipt");
+    expect(toolsForRequest("got an order from ali")).not.toContain("create_purchase_order");
   });
 
   it("does not turn a receipt or voucher into a letter or an invoice", () => {

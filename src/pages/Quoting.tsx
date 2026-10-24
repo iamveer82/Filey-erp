@@ -1,4 +1,5 @@
 import Step from "../components/DocumentStep";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
 import { COUNTRY_OPTIONS } from "../lib/taxRegimes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -28,6 +29,7 @@ import {
   PackageSearch,
   CheckCircle2,
   Pencil,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   billing,
@@ -106,6 +108,7 @@ import {
   ShareToggle,
   SearchInput,
   FilterChip,
+  ToggleTile,
 } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import {
@@ -124,6 +127,7 @@ import {
 } from "../components/StampSignature";
 import {
   loadBankInfo,
+  hasBankInfo,
   EMPTY_BANK,
   type BankInfo,
 } from "../components/BankDetails";
@@ -158,6 +162,9 @@ type Form = Omit<QuotationInput, "items" | "custom_columns" | "doc_type"> & {
   signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
+  show_logo?: boolean;
+  show_bank?: boolean;
+  logo?: string;
   unit_price_formula?: { a: string; b: string } | null;
 };
 
@@ -223,6 +230,8 @@ function blankForm(
     customColumns: [],
     show_stamp: false,
     show_signature: false,
+    show_logo: false,
+    show_bank: false,
     unit_price_formula: null,
   };
 }
@@ -446,6 +455,8 @@ export default function Quoting() {
         customColumns: sanitizeCustomColumns(d.custom_columns || []),
         show_stamp: d.show_stamp ?? false,
         show_signature: d.show_signature ?? false,
+        show_logo: d.show_logo ?? false,
+        show_bank: d.show_bank ?? false,
         unit_price_formula: d.unit_price_formula || null,
       });
     } catch (e: any) {
@@ -493,6 +504,8 @@ export default function Quoting() {
           customColumns: sanitizeCustomColumns(d.custom_columns || []),
           show_stamp: d.show_stamp ?? false,
           show_signature: d.show_signature ?? false,
+          show_logo: d.show_logo ?? false,
+          show_bank: d.show_bank ?? false,
           unit_price_formula: d.unit_price_formula || null,
         });
       } else if (form) {
@@ -503,6 +516,8 @@ export default function Quoting() {
           id: undefined,
           stamp: form.stamp,
           signature: form.signature,
+          show_logo: form.show_logo,
+          show_bank: form.show_bank,
         });
       }
       toast.success("Duplicated into a new draft quotation.");
@@ -564,6 +579,8 @@ export default function Quoting() {
       delete payload.doc_type;
       payload.show_stamp = form.show_stamp ?? false;
       payload.show_signature = form.show_signature ?? false;
+      payload.show_logo = form.show_logo ?? false;
+      payload.show_bank = form.show_bank ?? false;
       payload.discount = form.discount || 0;
       payload.tax_rate = form.tax_rate || 0;
       payload.round_off = !!form.round_off;
@@ -703,7 +720,6 @@ export default function Quoting() {
   // hooks run unconditionally on every render (React rules-of-hooks) instead of
   // inside `if (form)`, which changed the hook count when the editor opened and
   // could crash it. The editor JSX below reads this state from here.
-  const [showBank, setShowBank] = useState(false);
   const [bank, setBank] = useState<BankInfo>(EMPTY_BANK);
   const [companyStampSig, setCompanyStampSig] = useState<CompanyStampSig>(EMPTY_STAMP_SIG);
   const [zoom, setZoom] = useState(100);
@@ -714,6 +730,7 @@ export default function Quoting() {
   const [designing, setDesigning] = useState(false);
   const [tplNonce, setTplNonce] = useState(0);
   const [viewAll, setViewAll] = useState(false);
+  const [editorTab, setEditorTab] = useState("details");
 
   useEffect(() => {
     loadBankInfo().then(setBank).catch(() => {});
@@ -1190,15 +1207,14 @@ export default function Quoting() {
           <ResizablePanels
             left={
               <div className="no-print space-y-4">
-                {/* 1 · Template */}
+                {/* Template, then the same three sections as the invoice editor */}
                 <Step
-                  n={1}
-                  title="Choose Template"
-                  subtitle="Select a template for your quotation"
+                  title="Template"
+                  subtitle="Choose a document layout"
                   action={
                     <div className="flex flex-wrap items-center gap-2">
                     <button className="btn-ghost text-xs" onClick={() => setViewAll((value) => !value)}>
-                      {viewAll ? "Show less" : "View all templates"}
+                      {viewAll ? "Close templates" : "Browse templates"}
                     </button>
                     <button
                       className="btn-ghost text-xs flex items-center gap-1"
@@ -1221,10 +1237,15 @@ export default function Quoting() {
                                     />
                 </Step>
 
-                {/* 2 · Quote details */}
+                <Tabs value={editorTab} onValueChange={setEditorTab}>
+                  <TabsList aria-label="Quotation editor sections" className="grid w-full grid-cols-3">
+                    <TabsTrigger value="details">Details</TabsTrigger>
+                    <TabsTrigger value="items">Items <span className="text-xs tabular-nums text-muted-foreground">{form.items.length}</span></TabsTrigger>
+                    <TabsTrigger value="finishing">Finishing touches</TabsTrigger>
+                  </TabsList>
+                <TabsContent value="details" forceMount hidden={editorTab !== "details"}>
                 <Step
-                  n={2}
-                  title="Quotation Details"
+                  title="Quotation details"
                   subtitle="Customer, dates and reference information"
                   action={
                     <button className="btn-ghost text-xs" onClick={() => setCompanyOpen(true)}>
@@ -1361,10 +1382,11 @@ export default function Quoting() {
                     </div>
                   </div>
                 </Step>
+                <div className="mt-4 flex justify-end"><button type="button" className="btn-ghost" onClick={() => setEditorTab("items")}>Items →</button></div>
+                </TabsContent>
 
-                {/* 3 · Items */}
+                <TabsContent value="items" forceMount hidden={editorTab !== "items"}>
                 <Step
-                  n={3}
                   title="Items"
                   subtitle="Products, services, per-line discount and tax"
                   action={
@@ -1818,78 +1840,7 @@ export default function Quoting() {
                     <button className="btn-primary" onClick={addItem}>
                       <Plus size={14} /> Add item
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowBank((v) => !v)}
-                      className={`btn-ghost text-xs ${showBank ? "!bg-brand-50 !text-ink" : ""}`}
-                      title="Show saved bank details"
-                    >
-                      <Landmark size={13} /> Bank details: {showBank ? "On" : "Off"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const on = !form.show_stamp;
-                        setForm({
-                          ...form,
-                          show_stamp: on,
-                          stamp:
-                            on && !form.stamp?.data && companyStampSig.stamp?.data
-                              ? { ...companyStampSig.stamp, opacity: 100 }
-                              : form.stamp,
-                        });
-                      }}
-                      className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
-                      title="Show company stamp"
-                      disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
-                    >
-                      <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const on = !form.show_signature;
-                        setForm({
-                          ...form,
-                          show_signature: on,
-                          signature:
-                            on && !form.signature?.data && companyStampSig.signature?.data
-                              ? { ...companyStampSig.signature, opacity: 100 }
-                              : form.signature,
-                        });
-                      }}
-                      className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
-                      title="Show company signature"
-                      disabled={!form.signature?.data && !companyStampSig.signature?.data}
-                    >
-                      <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
-                    </button>
                   </div>
-
-                  {(form.show_stamp || form.show_signature) &&
-                    (form.stamp?.data || form.signature?.data || companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
-                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-                        {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
-                          <StampSigAdjust
-                            label="Stamp"
-                            icon={<Stamp size={13} />}
-                            value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
-                            onChange={(v) => setForm({ ...form, stamp: v })}
-                          />
-                        )}
-                        {form.show_signature &&
-                          (form.signature?.data || companyStampSig.signature?.data) && (
-                            <StampSigAdjust
-                              label="Signature"
-                              icon={<PenTool size={13} />}
-                              value={
-                                form.signature?.data ? form.signature : companyStampSig.signature!
-                              }
-                              onChange={(v) => setForm({ ...form, signature: v })}
-                            />
-                          )}
-                      </div>
-                    )}
 
                   <datalist id="unit-suggestions">
                     <option value="pcs" />
@@ -1917,9 +1868,67 @@ export default function Quoting() {
                     <option value="dozen" />
                   </datalist>
                 </Step>
+                <div className="mt-4 flex justify-between gap-2"><button type="button" className="btn-ghost" onClick={() => setEditorTab("details")}>Back to details</button><button type="button" className="btn-ghost" onClick={() => setEditorTab("finishing")}>Finishing touches →</button></div>
+                </TabsContent>
 
-                {/* 4 · Settings */}
-                <Step n={4} title="Additional Settings" subtitle="Notes, terms, logo and accent">
+                <TabsContent value="finishing" forceMount hidden={editorTab !== "finishing"} className="space-y-4">
+                  <p className="text-xs text-muted-foreground">Optional details for the finished document. Your company defaults are already included.</p>
+                  <Step title="Branding" subtitle="Logo, bank details, stamp and signature on the printed quotation">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <ToggleTile
+                        icon={ImageIcon}
+                        label="Logo"
+                        desc={form.logo ? "Show your logo in the quotation header" : "Upload a logo in Settings first"}
+                        active={!!form.show_logo}
+                        onToggle={() => { if (form.logo) setForm({ ...form, show_logo: !form.show_logo }); }}
+                      />
+                      <ToggleTile
+                        icon={Landmark}
+                        label="Bank details"
+                        desc={hasBankInfo(bank) ? "Show payment bank details" : "Add bank details in Settings first"}
+                        active={!!form.show_bank}
+                        onToggle={() => { if (hasBankInfo(bank)) setForm({ ...form, show_bank: !form.show_bank }); }}
+                      />
+                      <ToggleTile
+                        icon={Stamp}
+                        label="Company stamp"
+                        desc={companyStampSig.stamp?.data ? "Show official stamp - adjust below" : "Upload a stamp in Settings first"}
+                        active={!!form.show_stamp}
+                        onToggle={() => {
+                          if (!form.stamp?.data && !companyStampSig.stamp?.data) return;
+                          const on = !form.show_stamp;
+                          setForm({
+                            ...form,
+                            show_stamp: on,
+                            stamp: on && !form.stamp?.data && companyStampSig.stamp?.data ? { ...companyStampSig.stamp, opacity: 100 } : form.stamp,
+                          });
+                        }}
+                        extra={form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                          <div className="mt-2"><StampSigAdjust label="Stamp" icon={<Stamp size={13} />} value={form.stamp?.data ? form.stamp : companyStampSig.stamp!} onChange={(v) => setForm({ ...form, stamp: v })} /></div>
+                        )}
+                      />
+                      <ToggleTile
+                        icon={PenTool}
+                        label="Signature"
+                        desc={companyStampSig.signature?.data ? "Show signature block - adjust below" : "Upload a signature in Settings first"}
+                        active={!!form.show_signature}
+                        onToggle={() => {
+                          if (!form.signature?.data && !companyStampSig.signature?.data) return;
+                          const on = !form.show_signature;
+                          setForm({
+                            ...form,
+                            show_signature: on,
+                            signature: on && !form.signature?.data && companyStampSig.signature?.data ? { ...companyStampSig.signature, opacity: 100 } : form.signature,
+                          });
+                        }}
+                        extra={form.show_signature && (form.signature?.data || companyStampSig.signature?.data) && (
+                          <div className="mt-2"><StampSigAdjust label="Signature" icon={<PenTool size={13} />} value={form.signature?.data ? form.signature : companyStampSig.signature!} onChange={(v) => setForm({ ...form, signature: v })} /></div>
+                        )}
+                      />
+                    </div>
+                  </Step>
+
+                <Step title="Additional settings" subtitle="Notes, terms, logo and accent">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="rounded-xl border border-border p-4">
                       <div className="flex items-center gap-2 text-ink font-semibold text-sm">
@@ -1999,6 +2008,8 @@ export default function Quoting() {
                     </div>
                   </div>
                 </Step>
+                </TabsContent>
+                </Tabs>
               </div>
             }
             right={
@@ -2071,7 +2082,7 @@ export default function Quoting() {
                           }}
                         />
                         <DocView
-                          bank={showBank ? bank : undefined}
+                          bank={form.show_bank ? bank : undefined}
                           form={docViewForm}
                           pageItems={pages[curPageIdx]?.map(
                             asDocViewItem
@@ -2151,7 +2162,7 @@ export default function Quoting() {
                                   />
                                 )}
                                 <DocView
-                                  bank={showBank ? bank : undefined}
+                                  bank={form.show_bank ? bank : undefined}
                                   form={docViewForm}
                                   pageItems={group.map(
                                     asDocViewItem
@@ -2250,7 +2261,7 @@ export default function Quoting() {
                           }}
                         />}
                         <DocView
-                          bank={showBank ? bank : undefined}
+                          bank={form.show_bank ? bank : undefined}
                           form={docViewForm}
                           pageItems={viewPages[viewPageIdx]?.map(
                             asDocViewItem

@@ -25,6 +25,80 @@ fn read_cache_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
         .optional()?)
 }
 
+// ---- read stamps ----
+// A page that already holds a collection asks whether it changed instead of receiving the
+// whole collection again (an invoice list can be megabytes, read several times per page).
+// A key's stamp moves on every write made through this connection. A commit from any other
+// connection, such as the MCP server's, moves SQLite's data_version and with it every stamp,
+// and so does opening another account's workspace. A stale stamp only costs a re-read.
+
+struct Stamps {
+    generation: u64,
+    data_version: i64,
+    keys: std::collections::HashMap<String, u64>,
+    next: u64,
+}
+
+static STAMPS: std::sync::Mutex<Option<Stamps>> = std::sync::Mutex::new(None);
+
+fn with_stamps<T>(f: impl FnOnce(&mut Stamps) -> T) -> T {
+    let mut slot = STAMPS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(slot.get_or_insert_with(|| Stamps { generation: 0, data_version: -1, keys: Default::default(), next: 0 }))
+}
+
+fn touch<'a>(keys: impl IntoIterator<Item = &'a String>) {
+    with_stamps(|s| {
+        for key in keys {
+            s.next += 1;
+            s.keys.insert(key.clone(), s.next);
+        }
+    });
+}
+
+/// Every stamp is void: the open database was replaced (another account's workspace).
+pub fn invalidate_stamps() {
+    with_stamps(|s| {
+        s.generation += 1;
+        s.keys.clear();
+    });
+}
+
+/// Taken BEFORE the value is read, so a commit landing in between can only make the next
+/// read fetch again, never make a stale value look current.
+fn stamp_of(conn: &Connection, key: &str) -> AppResult<String> {
+    let data_version: i64 = conn.query_row("PRAGMA data_version", [], |r| r.get(0))?;
+    Ok(with_stamps(|s| {
+        if s.data_version != data_version {
+            s.data_version = data_version;
+            s.generation += 1;
+            s.keys.clear();
+        }
+        format!("{}:{}", s.generation, s.keys.get(key).copied().unwrap_or(0))
+    }))
+}
+
+#[derive(Serialize)]
+pub struct FreshRead {
+    stamp: String,
+    unchanged: bool,
+    value: Option<String>,
+}
+
+/// The value only when it changed since `stamp`; `unchanged` otherwise.
+#[tauri::command]
+pub async fn cache_get_fresh(db: State<'_, Db>, key: String, stamp: Option<String>) -> AppResult<FreshRead> {
+    let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
+    read_fresh(&conn, &key, stamp.as_deref())
+}
+
+fn read_fresh(conn: &Connection, key: &str, known: Option<&str>) -> AppResult<FreshRead> {
+    let stamp = stamp_of(conn, key)?;
+    if known == Some(stamp.as_str()) {
+        return Ok(FreshRead { stamp, unchanged: true, value: None });
+    }
+    Ok(FreshRead { value: read_cache_value(conn, key)?, stamp, unchanged: false })
+}
+
 #[tauri::command]
 pub async fn cache_set(db: State<'_, Db>, key: String, value: String) -> AppResult<()> {
     let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
@@ -34,6 +108,7 @@ pub async fn cache_set(db: State<'_, Db>, key: String, value: String) -> AppResu
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
         rusqlite::params![key, value],
     )?;
+    touch([&key]);
     Ok(())
 }
 
@@ -52,6 +127,7 @@ fn write_cache_batch(conn: &mut Connection, entries: &[(String, String)]) -> App
         tx.execute("INSERT INTO kv_cache(key,value,updated_at) VALUES(?1,?2,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at", rusqlite::params![key,value])?;
     }
     tx.commit()?;
+    touch(entries.iter().map(|(key, _)| key));
     Ok(())
 }
 
@@ -116,6 +192,7 @@ fn compare_cache_batch(
         }
     }
     tx.commit()?;
+    touch(entries.iter().map(|(key, _)| key));
     Ok(true)
 }
 
@@ -159,6 +236,29 @@ pub async fn outbox_clear(db: State<'_, Db>) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reader_is_told_unchanged_until_any_writer_commits() {
+        let path = std::env::temp_dir().join(format!("filey-stamps-{}.db", uuid::Uuid::new_v4()));
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute_batch("CREATE TABLE kv_cache(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT); INSERT INTO kv_cache(key,value) VALUES('localdb:stamp_test','v1');").unwrap();
+        let first = read_fresh(&conn, "localdb:stamp_test", None).unwrap();
+        assert_eq!(first.value.as_deref(), Some("v1"));
+        assert!(read_fresh(&conn, "localdb:stamp_test", Some(&first.stamp)).unwrap().unchanged);
+        // A save through this connection.
+        let entries = vec![("localdb:stamp_test".to_string(), Some("v2".to_string()))];
+        let expected = vec![("localdb:stamp_test".to_string(), Some("v1".to_string()))];
+        assert!(compare_cache_batch(&mut conn, &entries, &expected).unwrap());
+        let second = read_fresh(&conn, "localdb:stamp_test", Some(&first.stamp)).unwrap();
+        assert_eq!((second.unchanged, second.value.as_deref()), (false, Some("v2")));
+        // A commit from another process (the MCP server) on the same file.
+        let peer = Connection::open(&path).unwrap();
+        peer.execute("UPDATE kv_cache SET value='v3' WHERE key='localdb:stamp_test'", []).unwrap();
+        let third = read_fresh(&conn, "localdb:stamp_test", Some(&second.stamp)).unwrap();
+        assert_eq!((third.unchanged, third.value.as_deref()), (false, Some("v3")));
+        drop((conn, peer));
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn collection_and_journal_batch_rolls_back_together_on_a_failed_write() {

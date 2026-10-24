@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, Copy, Download, Eye, Mail, MessageCircle, Package, Plus, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, Copy, Download, Eye, Image as ImageIcon, Mail, MessageCircle, Package, PenTool, Plus, Save, Stamp, Trash2 } from "lucide-react";
 import { billing, crm, type CompanyProfile, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
 import { AGENT_STORAGE_EVENT, agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import { errMsg, fmtDate } from "../lib/format";
 import { loadDocFormats, type DocFormats } from "../lib/numberFormat";
-import { allocateDocumentNumber } from "../lib/documentNumbers";
+import { nextDocumentNumber } from "../lib/documentNumbers";
 import { useLiveSync } from "../lib/realtime";
 import { useUI } from "../lib/ui";
 import { bytesToBase64, emailShell, esc, sendEmail } from "../lib/email";
@@ -12,7 +12,7 @@ import { autoSaveDocument, safeName } from "../lib/files";
 import { downloadFile } from "../lib/pdfTools";
 import { reactToPdfBytes } from "../lib/reactPdf";
 import { blankPackagingForm, deletePackagingList, loadPackagingLists, packagingTotals, savePackagingList, validatePackagingForm, type PackagingForm, type PackagingItem, type PackagingRecord, type PackagingStatus } from "../lib/packagingLists";
-import { Badge, Card, DataTable, ErrorBanner, Field, FilterChip, Modal, PageHeader, SearchInput } from "../components/ui";
+import { Badge, Card, DataTable, ErrorBanner, Field, FilterChip, Modal, PageHeader, SearchInput, ToggleTile } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import { SelectMenu } from "../components/ui-menu";
 import { RowActions } from "../components/RowActions";
@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/Tabs";
 import { ResizablePanels } from "../components/ResizablePanels";
 import FitPreview from "../components/FitPreview";
 import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
+import Step from "../components/DocumentStep";
 import { EMPTY_STAMP_SIG, loadCompanyStampSig, type CompanyStampSig } from "../components/StampSignatureSettings";
 import { StampSigAdjust } from "../components/StampSignature";
 import PackagingListDocument, { PACKAGING_TEMPLATES, usePackagingPages } from "../components/PackagingListDocument";
@@ -119,13 +120,13 @@ export default function PackagingList() {
   };
   const create = () => run(async () => {
     const scope = agentStorageScope();
-    const next = blankPackagingForm(await allocateDocumentNumber("packaging_list", records.map((record) => record.form.number), formats));
+    const next = blankPackagingForm(nextDocumentNumber("packaging_list", records.map((record) => record.form.number), formats));
     requireAgentStorageScope(scope ?? "signed-out");
     openEditor({ ...next, template: PACKAGING_TEMPLATES[0].id, company_name: company?.name || "", company_address: company?.address || "", company_trn: company?.trn || "", company_phone: company?.phone || "", company_email: company?.email || "", company_logo: company?.logo || "" });
   });
   const duplicate = (record: PackagingRecord) => run(async () => {
     const scope = agentStorageScope();
-    const blank = blankPackagingForm(await allocateDocumentNumber("packaging_list", records.map((row) => row.form.number), formats));
+    const blank = blankPackagingForm(nextDocumentNumber("packaging_list", records.map((row) => row.form.number), formats));
     requireAgentStorageScope(scope ?? "signed-out");
     openEditor({ ...record.form, number: blank.number, issue_date: blank.issue_date, status: "draft", items: record.form.items.map((item) => ({ ...item, id: crypto.randomUUID() })) });
   });
@@ -206,23 +207,29 @@ export default function PackagingList() {
       ]} />
     </>}
     <Modal open={!!preview} onClose={() => setPreview(null)} title={preview ? `Packaging List ${preview.number}` : "Packaging list preview"} size="document">
-      {preview && <div className="mx-auto max-w-[900px]"><div className="mb-4 flex justify-end"><button type="button" className="btn-ghost" disabled={busy} onClick={() => { void download(preview); }}><Download size={15} /> Download PDF</button></div><PackagingPreview key={preview.number} form={preview} companyStampSig={stampSig} /></div>}
+      {preview && <PackagingPreview key={preview.number} form={preview} companyStampSig={stampSig} actions={<button type="button" className="btn-ghost" disabled={busy} onClick={() => { void download(preview); }}><Download size={15} /> Download PDF</button>} />}
     </Modal>
   </>;
 }
 
-function PackagingPreview({ form, companyStampSig, onChange }: { form: PackagingForm; companyStampSig: CompanyStampSig; onChange?: (form: PackagingForm) => void }) {
+function PackagingPreview({ form, companyStampSig, onChange, actions }: { form: PackagingForm; companyStampSig: CompanyStampSig; onChange?: (form: PackagingForm) => void; actions?: ReactNode }) {
   const [page, setPage] = useState(0);
   const count = usePackagingPages(form).length;
   const current = Math.min(page, Math.max(0, count - 1));
-  return <div className="min-w-0">
-    <FitPreview baseWidth={794} zoom={100} padding={0} zoomable><PackagingListDocument form={form} companyStampSig={companyStampSig} onChange={onChange} pageIndex={current} /></FitPreview>
-    <div className="mt-3 flex items-center justify-between gap-3" role="group" aria-label="Preview pages">
-      <button type="button" className="btn-ghost h-10 w-10 p-0" disabled={current === 0} aria-label="Previous preview page" onClick={() => setPage(current - 1)}><ChevronLeft size={16} /></button>
-      <output aria-live="polite" className="text-xs text-muted-foreground">Page {current + 1} of {count}</output>
-      <button type="button" className="btn-ghost h-10 w-10 p-0" disabled={current + 1 >= count} aria-label="Next preview page" onClick={() => setPage(current + 1)}><ChevronRight size={16} /></button>
-    </div>
+  const sheet = <FitPreview baseWidth={794} zoom={100} padding={0} zoomable><PackagingListDocument form={form} companyStampSig={companyStampSig} onChange={onChange} pageIndex={current} /></FitPreview>;
+  const pages = (className: string) => <div className={className} role="group" aria-label="Preview pages">
+    <button type="button" className="btn-ghost h-10 w-10 p-0" disabled={current === 0} aria-label="Previous preview page" onClick={() => setPage(current - 1)}><ChevronLeft size={16} /></button>
+    <output aria-live="polite" className="text-xs text-muted-foreground">Page {current + 1} of {count}</output>
+    <button type="button" className="btn-ghost h-10 w-10 p-0" disabled={current + 1 >= count} aria-label="Next preview page" onClick={() => setPage(current + 1)}><ChevronRight size={16} /></button>
   </div>;
+  // In a document dialog the toolbar and the page box must be the body's direct children:
+  // the dialog styles stretch the box to fill and scroll (index.css .filey-document-dialog),
+  // as the invoice preview does. A wrapper there pins the page left and cuts it off.
+  if (actions) return <>
+    <div className="flex flex-wrap items-center justify-between gap-2">{pages("flex items-center gap-2")}<div className="flex items-center gap-2">{actions}</div></div>
+    {sheet}
+  </>;
+  return <div className="min-w-0">{sheet}{pages("mt-3 flex items-center justify-between gap-3")}</div>;
 }
 
 function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, busy, lookupError, lookupsLoading, onRetryLookups, onBack, onSave, onDownload, onPreview, onShare }: {
@@ -303,7 +310,25 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
                 <Field label="Description" required><textarea className="input min-h-20 w-full resize-y" maxLength={2000} value={item.description} onChange={(event) => setItem(item.id, { description: event.target.value })} /></Field>
                 <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Field label="Quantity"><input className="input w-full" type="number" min="0" step="any" value={item.qty} onChange={(event) => setItem(item.id, { qty: event.target.value === "" ? 0 : Number(event.target.value) })} /></Field>
-                  <Field label="Unit"><input className="input w-full" maxLength={20} value={item.unit} placeholder="pcs, cartons…" onChange={(event) => setItem(item.id, { unit: event.target.value })} /></Field>
+                  <Field label="Unit">
+                    <SelectMenu
+                      value={item.unit}
+                      onChange={(value) => setItem(item.id, { unit: value === "custom" ? "" : value })}
+                      options={[
+                        { value: "pcs", label: "pcs (pieces)" },
+                        { value: "cartons", label: "cartons" },
+                        { value: "boxes", label: "boxes" },
+                        { value: "pallets", label: "pallets" },
+                        { value: "kg", label: "kg" },
+                        { value: "lb", label: "lb" },
+                        { value: "m", label: "m (meters)" },
+                        { value: "ft", label: "ft (feet)" },
+                        { value: "custom", label: "Other…" }
+                      ]}
+                      ariaLabel="Quantity unit"
+                      searchPlaceholder="Type or choose unit…"
+                    />
+                  </Field>
                   <Field label="Package type"><input className="input w-full" maxLength={60} value={item.package_type} placeholder="Box, pallet…" onChange={(event) => setItem(item.id, { package_type: event.target.value })} /></Field>
                   {(["package_count", "net_weight", "gross_weight"] as const).map((key) => <Field key={key} label={key === "package_count" ? "Packages" : `${key === "net_weight" ? "Net" : "Gross"} / unit (${form.weight_unit})`}><input className="input w-full" type="number" min="0" step={key === "package_count" ? "1" : "any"} value={item[key] ?? ""} placeholder="Optional" onChange={(event) => setItem(item.id, { [key]: event.target.value === "" ? null : Number(event.target.value) })} /></Field>)}
                 </div>
@@ -315,13 +340,55 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
             <TabsContent value="appearance" className="mt-0 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-sm font-semibold">Document template</h2><p className="mt-1 text-xs text-muted-foreground">{PACKAGING_TEMPLATES.find((template) => template.id === form.template)?.name || "Selected template"}</p></div><button type="button" className="btn-ghost" onClick={() => setBrowseTemplates(true)}>Browse templates</button></div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="Accent colour"><input type="color" className="input h-11 w-full" value={form.accent} onChange={(event) => set("accent", event.target.value)} /></Field><Field label="Typeface"><SelectMenu value={form.font} onChange={(value) => set("font", value)} options={[{ value: "'Plus Jakarta Sans', system-ui, sans-serif", label: "Sans serif" }, { value: "'Lora', Georgia, serif", label: "Serif" }, { value: "'IBM Plex Mono', monospace", label: "Monospace" }]} ariaLabel="Document typeface" /></Field></div>
-              <section><h2 className="mb-2 text-sm font-semibold">Visible information</h2><div className="grid grid-cols-1 sm:grid-cols-2">{check("show_logo", "Company logo", !form.company_logo)}{check("show_packages", "Packages")}{check("show_net_weight", "Net weights")}{check("show_gross_weight", "Gross weights")}</div></section>
-              <section className="space-y-4 border-t border-border pt-4"><h2 className="text-sm font-semibold">Stamp & signature</h2><p className="text-xs text-muted-foreground">Use your company assets from Settings → Company Details. Drag enabled marks on the last preview page.</p>
-                {check("show_stamp", stamp?.data ? "Show stamp" : "Show stamp (add one in Settings)", !stamp?.data)}
-                {form.show_stamp && stamp && <StampSigAdjust label="Stamp" value={stamp} onChange={(value) => set("stamp", value)} />}
-                {check("show_signature", signature?.data ? "Show signature" : "Show signature (add one in Settings)", !signature?.data)}
-                {form.show_signature && signature && <StampSigAdjust label="Signature" value={signature} onChange={(value) => set("signature", value)} />}
-              </section>
+              {/* Branding - matches invoicing */}
+              <Step title="Branding" subtitle="Logo, stamp and signature on the printed packing list">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <ToggleTile
+                    icon={ImageIcon}
+                    label="Logo"
+                    desc={form.company_logo ? "Show your logo in the document header" : "Upload a logo in Settings first"}
+                    active={!!form.show_logo}
+                    onToggle={() => { if (form.company_logo) setForm({ ...form, show_logo: !form.show_logo }); }}
+                  />
+                  <ToggleTile
+                    icon={Stamp}
+                    label="Company stamp"
+                    desc={stamp?.data ? "Show official stamp - adjust below" : "Upload a stamp in Settings first"}
+                    active={!!form.show_stamp}
+                    onToggle={() => {
+                      if (!form.stamp?.data && !stamp?.data) return;
+                      const on = !form.show_stamp;
+                      setForm({
+                        ...form,
+                        show_stamp: on,
+                        stamp: on && !form.stamp?.data && stamp?.data ? { ...stamp, opacity: 100 } : form.stamp,
+                      });
+                    }}
+                    extra={form.show_stamp && (form.stamp?.data || stamp?.data) && (
+                      <div className="mt-2"><StampSigAdjust label="Stamp" value={form.stamp?.data ? form.stamp : stamp!} onChange={(v) => setForm({ ...form, stamp: v })} /></div>
+                    )}
+                  />
+                  <ToggleTile
+                    icon={PenTool}
+                    label="Signature"
+                    desc={signature?.data ? "Show signature block - adjust below" : "Upload a signature in Settings first"}
+                    active={!!form.show_signature}
+                    onToggle={() => {
+                      if (!form.signature?.data && !signature?.data) return;
+                      const on = !form.show_signature;
+                      setForm({
+                        ...form,
+                        show_signature: on,
+                        signature: on && !form.signature?.data && signature?.data ? { ...signature, opacity: 100 } : form.signature,
+                      });
+                    }}
+                    extra={form.show_signature && (form.signature?.data || signature?.data) && (
+                      <div className="mt-2"><StampSigAdjust label="Signature" value={form.signature?.data ? form.signature : signature!} onChange={(v) => setForm({ ...form, signature: v })} /></div>
+                    )}
+                  />
+                </div>
+              </Step>
+              <section><h2 className="mb-2 text-sm font-semibold">Visible information</h2><div className="grid grid-cols-1 sm:grid-cols-2">{check("show_packages", "Packages")}{check("show_net_weight", "Net weights")}{check("show_gross_weight", "Gross weights")}</div></section>
             </TabsContent>
           </div>
         </Tabs>
@@ -335,7 +402,7 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
       </div>)}</div>
     </Modal>
     <Modal open={!!templatePreview} onClose={() => setTemplatePreview(null)} title={PACKAGING_TEMPLATES.find((template) => template.id === templatePreview)?.name || "Template preview"} size="document">
-      {templatePreview && <div className="mx-auto max-w-[850px]"><div className="mb-4 flex justify-end"><button type="button" className="btn-primary" onClick={() => { set("template", templatePreview); setTemplatePreview(null); setBrowseTemplates(false); }}>Use this template</button></div><PackagingPreview form={{ ...form, template: templatePreview }} companyStampSig={companyStampSig} /></div>}
+      {templatePreview && <PackagingPreview form={{ ...form, template: templatePreview }} companyStampSig={companyStampSig} actions={<button type="button" className="btn-primary" onClick={() => { set("template", templatePreview); setTemplatePreview(null); setBrowseTemplates(false); }}>Use this template</button>} />}
     </Modal>
   </>;
 }

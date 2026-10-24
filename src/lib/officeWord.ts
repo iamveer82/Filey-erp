@@ -140,7 +140,9 @@ export function bridgeDesktop(win: Window, tool: OfficeApp = "word"): void {
           close: () => local(async () => {
             const bytes = new Uint8Array(await new Blob(parts).arrayBuffer());
             const sep = Math.max(dest!.lastIndexOf("/"), dest!.lastIndexOf("\\"));
-            keepInMyFiles(capture ? name : dest!.slice(sep + 1), bytes, tool);
+            keepInMyFiles(capture ? name : dest!.slice(sep + 1), bytes, tool).then(kept => import("sonner").then(({ toast }) => kept
+              ? toast.success(`${name} saved to My Files`)
+              : toast.warning(`${name} could not be saved to My Files`)));
             if (capture) return capture(name, bytes);
             await writeDocFile(dest!.slice(0, sep), dest!.slice(sep + 1), bytes);
           }),
@@ -197,9 +199,10 @@ export async function officeWindow(app: OfficeApp, fresh: boolean, signal?: Abor
   return frames.get(id)!.win;
 }
 
-/** Opens a file in a new tab of the app, showing the document rather than its start page. */
+/** Opens a file in the app's tab, reusing an existing one of the same app so
+ *  you don't get a new tab per file. */
 export async function openInOffice(app: OfficeApp, name: string, bytes: Uint8Array, signal?: AbortSignal): Promise<OfficeWindow> {
-  const win = await officeWindow(app, true, signal, name);
+  const win = await officeWindow(app, false, signal, name);
   const open = OFFICE_APPS[app].open;
   if (open) (win[open] as (name: string, bytes: Uint8Array) => void)(name, bytes);
   else win.postMessage({ type: "pdfcraft:open", name, bytes: bytes.slice() }, location.origin);

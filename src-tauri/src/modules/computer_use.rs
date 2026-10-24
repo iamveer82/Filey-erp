@@ -22,10 +22,12 @@ $operation = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGui
 [IO.File]::WriteAllText($operation, $utf8.GetString([Convert]::FromBase64String($parts[0].Trim())), $utf8)
 try { . ([scriptblock]::Create($utf8.GetString([Convert]::FromBase64String($parts[1].Trim())))) -OperationPath $operation }
 finally { Remove-Item -LiteralPath $operation -ErrorAction SilentlyContinue }"#;
-/// The runtime's opt-ins for real-pointer input, app launching, focus stealing and UIA text
-/// fallback stay off whatever the user's environment says.
-const OCU_FLAGS: [&str; 4] = [
-    "OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS",
+/// Real-pointer clicks can land on any window, including Filey's own approval prompts, so that
+/// fallback stays off no matter what the environment says. Launch, focus and text entry are on:
+/// an app the task names can be opened and typed into. Launch itself only starts an installed
+/// app by its Start-menu name (ocu_runtime.ps1), never a path or a shell.
+const OCU_OFF: [&str; 1] = ["OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS"];
+const OCU_ON: [&str; 3] = [
     "OPEN_COMPUTER_USE_WINDOWS_ALLOW_APP_LAUNCH",
     "OPEN_COMPUTER_USE_WINDOWS_ALLOW_FOCUS_ACTIONS",
     "OPEN_COMPUTER_USE_WINDOWS_ALLOW_UIA_TEXT_FALLBACK",
@@ -103,6 +105,7 @@ pub fn computer_start(
     duration_seconds: Option<u64>,
     window_id: Option<String>,
     browser_tab: Option<String>,
+    mascot: Option<String>,
 ) -> Result<Value, String> {
     check_window(&window)?;
     if !cfg!(windows) {
@@ -156,7 +159,7 @@ pub fn computer_start(
         apps: HashMap::new(),
     });
     drop(current);
-    super::agent_overlay::show(window.app_handle(), escape_revoke);
+    super::agent_overlay::show(window.app_handle(), escape_revoke, mascot.as_deref().unwrap_or("blue"));
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -212,6 +215,17 @@ fn point(request: &Value, name: &str, max: i64) -> Result<i64, String> {
         .and_then(Value::as_i64)
         .filter(|n| *n >= 0 && *n < max)
         .ok_or_else(|| format!("{name} must be an integer inside the screenshot."))
+}
+
+/// x/y the model read off an app screenshot, in window pixels. The screenshot's long edge is
+/// capped (ocu_runtime.ps1 screenshotScale), so its pixels are not the window's.
+fn image_point(snapshot: &Value, request: &Value, x: &str, y: &str) -> Result<(i64, i64), String> {
+    let scale = snapshot["screenshotScale"].as_f64().filter(|s| *s > 0.0 && *s <= 1.0).unwrap_or(1.0);
+    let size = |k: &str| snapshot["windowBounds"][k].as_f64().filter(|n| *n >= 1.0);
+    let (width, height) = size("width").zip(size("height")).ok_or("This window has no usable screenshot; act on an element_index.")?;
+    let image = |n: f64| ((n * scale).floor() as i64).max(1);
+    let window = |n: i64, limit: f64| (n as f64 / scale).round().min(limit - 1.0) as i64;
+    Ok((window(point(request, x, image(width))?, width), window(point(request, y, image(height))?, height)))
 }
 
 fn virtual_key(key: &str) -> Option<(u16, bool)> {
@@ -380,7 +394,25 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
     }
     let app = text(request, "app", 200)?;
     if action == "app_state" {
-        return Ok(json!({"tool": "get_app_state", "app": app}));
+        let mut op = json!({"tool": "get_app_state", "app": app});
+        if let Some(limit) = request.get("text_limit") {
+            let usable = limit == &json!("max")
+                || limit.as_u64().is_some_and(|n| (1..=100_000).contains(&n));
+            if !usable {
+                return Err("text_limit must be a number from 1 to 100000, or \"max\".".into());
+            }
+            op["text_limit"] = limit.clone();
+        }
+        for key in ["max_tree_nodes", "max_tree_depth"] {
+            if let Some(value) = request.get(key) {
+                let n = value
+                    .as_u64()
+                    .filter(|n| (1..=100_000).contains(n))
+                    .ok_or_else(|| format!("{key} must be a number from 1 to 100000."))?;
+                op[key] = json!(n);
+            }
+        }
+        return Ok(op);
     }
     let snapshot = active.apps.get(&app.to_lowercase()).cloned()
         .ok_or("Read the app with app_state before acting in it.")?;
@@ -404,10 +436,9 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             if request.get("element_index").is_some() {
                 element(&mut op)?;
             } else {
-                let size = |k: &str| snapshot["windowBounds"][k].as_f64().map(|n| n as i64).filter(|n| *n > 0);
-                let (width, height) = size("width").zip(size("height")).ok_or("This window has no usable screenshot; click an element_index.")?;
-                op["x"] = json!(point(request, "x", width)?);
-                op["y"] = json!(point(request, "y", height)?);
+                let (x, y) = image_point(&snapshot, request, "x", "y")?;
+                op["x"] = json!(x);
+                op["y"] = json!(y);
             }
             let button = request.get("button").and_then(Value::as_str).unwrap_or("left");
             if !matches!(button, "left" | "right") || request.get("double_click").is_some_and(|v| !v.is_boolean()) {
@@ -449,6 +480,15 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             op["direction"] = json!(direction);
             op["pages"] = json!(pages);
         }
+        "app_drag" => {
+            let (from_x, from_y) = image_point(&snapshot, request, "x", "y")?;
+            let (to_x, to_y) = image_point(&snapshot, request, "to_x", "to_y")?;
+            op["tool"] = json!("drag");
+            op["from_x"] = json!(from_x);
+            op["from_y"] = json!(from_y);
+            op["to_x"] = json!(to_x);
+            op["to_y"] = json!(to_y);
+        }
         "app_action" => {
             element(&mut op)?;
             let name = text(request, "name", 16)?;
@@ -465,11 +505,26 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
     Ok(op)
 }
 
+/// Same list as Test-ControllableProcess in computer_use.ps1: typing into a shell runs commands.
+fn blocked_app(name: &str) -> bool {
+    let name = name.trim_end_matches(".exe").to_lowercase();
+    [
+        "powershell", "pwsh", "cmd", "windowsterminal", "openconsole", "conhost", "wscript", "cscript",
+        "mshta", "regedit", "mmc", "bash", "wsl", "credentialuibroker", "logonui", "lockapp",
+        "sechealthui", "keepass", "keepassxc", "1password", "bitwarden",
+    ]
+    .contains(&name.as_str())
+}
+
 /// What the agent sees of an app snapshot; the snapshot itself is kept for its next action.
+/// Filey's own windows stay out: they carry the YES/approve prompts that gate the agent.
 fn app_result(active: &mut Session, query: &str, mut snapshot: Value) -> Result<Value, String> {
     let pid = snapshot["app"]["pid"].as_u64().ok_or("The app's state could not be read.")?;
     if pid == u64::from(std::process::id()) {
         return Err("Filey's own windows are not available to computer control. Use Filey's tools.".into());
+    }
+    if blocked_app(snapshot["app"]["name"].as_str().unwrap_or_default()) {
+        return Err("Command shells and password managers are not available to computer control.".into());
     }
     let image = snapshot.as_object_mut().and_then(|s| s.remove("screenshotPngBase64")).and_then(|v| v.as_str().map(str::to_owned));
     let name = snapshot["app"]["name"].as_str().unwrap_or_default().to_owned();
@@ -482,7 +537,7 @@ fn app_result(active: &mut Session, query: &str, mut snapshot: Value) -> Result<
     let mut out = json!({
         "app": name, "pid": pid, "window": snapshot["windowTitle"], "tree": tree,
         "focused": snapshot["focusedSummary"], "selected_text": snapshot["selectedText"],
-        "hint": "Act with element_index from this tree; indexes change after every action, which returns the new tree.",
+        "hint": "Act with element_index from this tree; indexes change after every action, which returns the new tree. x/y are pixels in this screenshot.",
     });
     if let Some(data) = image.filter(|d| d.starts_with("iVBORw0KGgo") && d.len() <= 5_600_000) {
         out["image"] = json!({"mediaType": "image/png", "dataBase64": data});
@@ -562,8 +617,11 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        for flag in OCU_FLAGS {
+        for flag in OCU_OFF {
             command.env_remove(flag);
+        }
+        for flag in OCU_ON {
+            command.env(flag, "1");
         }
         #[cfg(windows)]
         {
@@ -777,6 +835,9 @@ mod tests {
         let mut s = active();
         assert!(prepare_app(&json!({"action":"app_click","app":"notepad","element_index":1}), &mut s).is_err());
         assert_eq!(prepare_app(&json!({"action":"app_state","app":"notepad"}), &mut s).unwrap()["tool"], "get_app_state");
+        let full = prepare_app(&json!({"action":"app_state","app":"notepad","text_limit":"max","max_tree_nodes":3000,"max_tree_depth":96}), &mut s).unwrap();
+        assert_eq!((full["text_limit"].as_str(), full["max_tree_nodes"].as_u64()), (Some("max"), Some(3000)));
+        assert!(prepare_app(&json!({"action":"app_state","app":"notepad","text_limit":0}), &mut s).is_err());
         let shot = json!({"app":{"name":"Notepad","pid":42},"windowHandle":7,"windowBounds":{"x":0,"y":0,"width":800,"height":600},
             "screenshotPngBase64":"iVBORw0KGgoAAAA","treeLines":["0 window Notepad","1 button Save"],
             "elements":[{"index":1,"name":"Save","runtimeId":[1,2]}]});
@@ -795,8 +856,23 @@ mod tests {
         assert!(prepare_app(&json!({"action":"app_click","app":"notepad","x":900,"y":5}), &mut s).is_err());
         assert!(prepare_app(&json!({"action":"app_type","app":"42","text":"a\u{7}b"}), &mut s).is_err());
         assert_eq!(prepare_app(&json!({"action":"app_key","app":"42","keys":"ctrl+shift+F5"}), &mut s).unwrap()["key"], "ctrl+shift+F5");
-        let own = json!({"app":{"name":"filey","pid":std::process::id()}});
+        app_result(&mut s, "notepad", shot.clone()).unwrap();
+        let drag = prepare_app(&json!({"action":"app_drag","app":"notepad","x":10,"y":20,"to_x":300,"to_y":150}), &mut s).unwrap();
+        assert_eq!((drag["tool"].as_str(), drag["from_x"].as_i64(), drag["to_x"].as_i64()), (Some("drag"), Some(10), Some(300)));
+        app_result(&mut s, "notepad", shot.clone()).unwrap();
+        assert!(prepare_app(&json!({"action":"app_drag","app":"notepad","x":900,"y":20,"to_x":300,"to_y":150}), &mut s).is_err());
+        // A half-size screenshot: x/y read off it land on the window pixel twice as far in.
+        let mut half = shot.clone();
+        half["screenshotScale"] = json!(0.5);
+        app_result(&mut s, "notepad", half.clone()).unwrap();
+        let click = prepare_app(&json!({"action":"app_click","app":"notepad","x":100,"y":50}), &mut s).unwrap();
+        assert_eq!((click["x"].as_i64(), click["y"].as_i64()), (Some(200), Some(100)));
+        app_result(&mut s, "notepad", half).unwrap();
+        assert!(prepare_app(&json!({"action":"app_click","app":"notepad","x":400,"y":10}), &mut s).is_err());
+        let own = json!({"app":{"name":"filey","pid":std::process::id()},"windowTitle":"Filey","treeLines":["0 window Filey"],"elements":[]});
         assert!(app_result(&mut s, "filey", own).is_err());
+        let shell = json!({"app":{"name":"WindowsTerminal","pid":9},"treeLines":[],"elements":[]});
+        assert!(app_result(&mut s, "terminal", shell).is_err());
         let mut tab = active();
         tab.root_window = Some("123".into());
         assert!(prepare_app(&json!({"action":"apps"}), &mut tab).is_err());

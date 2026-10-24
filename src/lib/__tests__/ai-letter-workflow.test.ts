@@ -94,7 +94,8 @@ describe("shared letter drafting instructions", () => {
     const requests = captureRequest();
     const facts = "Create an authorization letter for Fixture Operator to collect our documents. Their email and mobile are unknown. Recipient note: PRIVATE-LETTER-FACT.";
     await aiAgent([{ role: "system", text: buildSystemPrompt("Assist in Filey.", getPersona()) }, { role: "user", text: facts }]);
-    expect(requests).toHaveLength(1);
+    // A text-only answer to a work request gets one execution-check round.
+    expect(requests).toHaveLength(2);
     letterGuidance(requests[0].messages.find(message => message.role === "system")!.content);
     expect(requests[0].messages.find(message => message.role === "user")?.content).toBe(facts);
     expect(requests[0].messages.filter(message => message.role === "system").map(message => message.content).join("\n")).not.toContain("PRIVATE-LETTER-FACT");
@@ -113,13 +114,14 @@ describe("shared letter drafting instructions", () => {
     expect(requests[0].tools.some(tool => tool.function.name === "task_complete")).toBe(true);
   });
 
-  it("offers Word and company context for a letter request but keeps them out of ordinary chat", async () => {
+  it("starts a letter request small: letter tools load on demand, never preloaded", async () => {
     const requests = captureRequest();
     await aiAgent([{ role: "user", text: "Hello" }]);
     await aiAgent([{ role: "user", text: "Draft a company letter for me." }]);
     expect(requests[0].tools.some(tool => tool.function.name === "create_letter_draft")).toBe(false);
-    // Letters are written in Word (Office work); the classic template is not preloaded.
-    expect(requests[1].tools.map(tool => tool.function.name)).toEqual(expect.arrayContaining(["get_letter_context", "word"]));
+    const offered = requests[1].tools.map(tool => tool.function.name);
+    expect(offered).toContain("use_toolset");
+    expect(offered).not.toContain("create_letter_draft");
   });
 
   it("preloading letter tools never bypasses Plan mode or a disabled capability", async () => {
@@ -127,14 +129,14 @@ describe("shared letter drafting instructions", () => {
     setAgentMode("plan");
     await aiAgent([{ role: "user", text: "Draft a company letter." }]);
     const offered = requests[0].tools.map(tool => tool.function.name);
-    expect(offered).toEqual(expect.arrayContaining(["get_letter_context"]));
     expect(offered).not.toContain("word");
     expect(offered).not.toContain("create_letter_draft");
     expect(offered).not.toContain("revise_letter_draft");
     expect(offered).not.toContain("export_letter_pdf");
     setAgentMode("accept_edits");
     setCapabilityEnabled("letters", false);
+    requests.length = 0;
     await aiAgent([{ role: "user", text: "Draft a company letter." }]);
-    expect(requests[1].tools.some(tool => /^(?:get_letter|list_letters|create_letter|revise_letter|export_letter|word$)/.test(tool.function.name))).toBe(false);
+    for (const request of requests) expect(request.tools.some(tool => /^(?:get_letter|list_letters|create_letter|revise_letter|export_letter|word$)/.test(tool.function.name))).toBe(false);
   });
 });

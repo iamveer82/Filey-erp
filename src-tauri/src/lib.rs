@@ -9,13 +9,31 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Filey keeps running in the tray, so a second launch (desktop shortcut)
+    // must bring the running copy forward, not start another one with its own
+    // WhatsApp bridge on the same database. Release builds only: a dev build
+    // would otherwise just focus the installed app and exit.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        modules::always_on::show_main(app);
+    }));
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .register_uri_scheme_protocol("fileyui", |_ctx, _request| modules::genui::page())
         .on_window_event(|window, event| {
+            // Closing the main window hides it; the agent keeps working in the tray.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && modules::always_on::hide_instead_of_close(window.app_handle()) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    modules::always_on::window_hidden(window.app_handle());
+                }
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 modules::computer_use::window_closed(window.label());
                 modules::desktop_browser::window_closed(window.app_handle(), window.label());
@@ -31,6 +49,7 @@ pub fn run() {
             let conn = Connection::open(&db_path).expect("open db");
             db::init(&conn).expect("init db");
             app.manage(Db(Mutex::new(conn)));
+            modules::always_on::setup(app)?;
             Ok(())
         })
         .invoke_handler(|invoke| {
@@ -45,6 +64,7 @@ pub fn run() {
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
                 // Offline cache / sync outbox
                 modules::sync::cache_get,
+                modules::sync::cache_get_fresh,
                 modules::sync::cache_set,
                 modules::sync::cache_set_many,
                 modules::sync::cache_compare_set_many,
@@ -75,11 +95,18 @@ pub fn run() {
                 modules::storage::storage_recovery_status,
                 modules::storage::cancel_pending_storage,
                 modules::storage::restart_app,
+                modules::storage::open_account_store,
+                modules::storage::active_account_store,
                 modules::storage::write_doc_file,
+                modules::word_desktop::office_image,
+                modules::word_desktop::open_user_document,
+                modules::word_desktop::read_user_document,
+                modules::word_desktop::letterhead_image,
                 modules::print::print_page,
                 modules::storage::blob_write,
                 modules::storage::blob_read,
                 modules::storage::blob_delete,
+                modules::storage::read_file,
                 modules::storage::backup_db,
                 modules::storage::restore_db,
                 modules::storage::backup_all,
@@ -99,6 +126,16 @@ pub fn run() {
                 modules::filey_agent::filey_agent_send,
                 modules::filey_agent::filey_agent_stop,
                 modules::filey_agent::filey_agent_session,
+                modules::filey_agent::filey_agent_model,
+                modules::agent_engine::filey_agent_install,
+                // Filey as an MCP server for the owner's other agents (off until turned on)
+                modules::mcp_server::filey_mcp_configure,
+                modules::mcp_server::filey_mcp_rotate_token,
+                modules::mcp_server::filey_mcp_respond,
+                // Filey as an MCP server for the owner's other agents (off until turned on)
+                modules::mcp_server::filey_mcp_configure,
+                modules::mcp_server::filey_mcp_rotate_token,
+                modules::mcp_server::filey_mcp_respond,
                 // Owner-only shell execution (terminal / repo run)
                 modules::shell::shell_exec,
                 // Explicit, short-lived native computer control (Windows).
@@ -107,6 +144,10 @@ pub fn run() {
                 modules::computer_use::computer_command,
                 modules::desktop_browser::desktop_browser_command,
             modules::desktop_browser::desktop_browser_layout,
+                // Always-on agent (tray, pause, desktop alerts)
+                modules::always_on::always_on_configure,
+                modules::always_on::always_on_notify,
+                modules::always_on::always_on_show,
             ];
             handler(invoke)
         })

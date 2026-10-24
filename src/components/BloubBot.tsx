@@ -99,19 +99,25 @@ function subscribeSkin(cb: () => void): () => void {
 function skinSnapshot(): string {
   const dark = document.documentElement.classList.contains("dark");
   const persona = getPersona();
-  return `${dark ? "dark" : "light"}:${persona.orbColor}:${persona.botShape}:${persona.botMotion}`;
+  return `${dark ? "dark" : "light"}:${persona.orbColor}:${persona.botShape}:${persona.botMotion}:${persona.mascot || "none"}`;
 }
 
 /** The assistant's colour and the current theme, kept live. Exported because
  *  the settings preview wants the same value the bots are using. */
-export function useBotSkin(): { dark: boolean; color: string; shape: ShapeId; motion: BotMotion } {
+export function useBotSkin(): { dark: boolean; color: string; shape: ShapeId; motion: BotMotion; mascot: string } {
   const snap = useSyncExternalStore(
     subscribeSkin,
     skinSnapshot,
-    () => "light:#FFD600:cercle:playful"
+    () => "light:#FFD600:cercle:playful:none"
   );
-  const [mode, color, shape, motion] = snap.split(":");
-  return { dark: mode === "dark", color, shape: shape as ShapeId, motion: motion as BotMotion };
+  const [mode, color, shape, motion, mascot] = snap.split(":");
+  return { dark: mode === "dark", color, shape: shape as ShapeId, motion: motion as BotMotion, mascot: mascot === "none" ? "" : mascot };
+}
+
+export function AgentFace({ size = 28 }: { size?: number }) {
+  const { mascot } = useBotSkin();
+  if (mascot) return <img src={`/mascots/${mascot}.png`} alt="" width={size} height={size} className="object-contain" style={{ width: size, height: size }} />;
+  return <BloubBot size={size} state="idle" ambient />;
 }
 
 function motionPaused(): boolean {

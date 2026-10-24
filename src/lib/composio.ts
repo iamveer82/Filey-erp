@@ -57,6 +57,8 @@ export const COMPOSIO_TOOLKITS = [
   { slug: "googledrive", name: "Google Drive", desc: "Find and file documents" },
   { slug: "outlook", name: "Outlook", desc: "Read and send from Outlook" },
   { slug: "slack", name: "Slack", desc: "Post and read messages in Slack" },
+  { slug: "discord", name: "Discord", desc: "Post and read messages in Discord" },
+  { slug: "microsoft_teams", name: "Microsoft Teams", desc: "Post and read messages in Teams" },
   { slug: "telegram", name: "Telegram", desc: "Message via a Telegram bot" },
   { slug: "whatsapp", name: "WhatsApp", desc: "Message customers on WhatsApp" },
   { slug: "hubspot", name: "HubSpot", desc: "Sync contacts and deals" },

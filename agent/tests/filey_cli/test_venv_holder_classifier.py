@@ -1,0 +1,50 @@
+"""Cross-platform unit tests for the venv-holder message classifier (#90778)."""
+
+import pytest
+
+from filey_cli.update_cmd import (
+    _filey_holder_subcommand,
+)
+
+class TestHolderSubcommand:
+    @pytest.mark.parametrize(
+        ("cmdline", "expected"),
+        [
+            (r"C:\x\venv\Scripts\python.exe -m filey_cli.main serve --host 127.0.0.1", "serve"),
+            (r"C:\x\venv\Scripts\python.exe -m filey_cli.main dashboard", "dashboard"),
+            (r"python.exe -m filey_cli.main gateway run", "gateway"),
+            # profile selector skipped; its VALUE must not become the subcommand
+            (r"python -m filey_cli.main --profile serve gateway run", "gateway"),
+            (r"python -m filey_cli.main -p work serve", "serve"),
+            # 90778: flags containing subcommand words are not subcommands
+            (r"python -m filey_cli.main kanban --preserve-cache", "kanban"),
+            # 91869 review: EVERY top-level value flag must be skipped —
+            # a flag VALUE equal to a subcommand must not become the label
+            (r"python -m filey_cli.main --reasoning high serve", "serve"),
+            (r"python -m filey_cli.main -m dashboard serve", "serve"),
+            (r"python -m filey_cli.main -t browser,files gateway run", "gateway"),
+            (r"python -m filey_cli.main --model=dashboard serve", "serve"),
+            # -c consumes ONE value token; later bare tokens are (harmless,
+            # unhinted) subcommand candidates — pin that shape honestly
+            (r"python -m filey_cli.main -c mysession serve", "serve"),
+            (r"C:\bin\filey.exe dashboard", "dashboard"),
+            (r"/usr/local/bin/filey serve", "serve"),
+            # no filey entry at all
+            (r"python -c import time; time.sleep(3)", None),
+            # entry but no subcommand
+            (r"python -m filey_cli.main", None),
+        ],
+    )
+    def test_parses_subcommand(self, cmdline, expected):
+        assert _filey_holder_subcommand(cmdline) == expected
+
+    def test_shlex_joined_store_launcher_bootstrap_is_inventoried(self):
+        """launchd ProgramArguments arrive ``shlex.join``ed (single-quoted source); the dashboard
+        inventory must still read the subcommand behind the bootstrap."""
+        import shlex
+        from pathlib import Path
+
+        from filey_cli._launchers import runtime_command
+
+        cmdline = shlex.join(runtime_command(Path("/opt/filey-agent"), ["dashboard"], python="/opt/store/python"))
+        assert _filey_holder_subcommand(cmdline) == "dashboard"

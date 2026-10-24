@@ -9,21 +9,29 @@
 .workspace-agent main > div { width: 100%; height: 100%; min-height: 0; }
 .workspace-agent .workspace-content { height: 100%; padding: 0; animation: none; }
 .workspace-agent .workspace-header { border-bottom-color: transparent; }
-.filey-chat { height: 100%; min-height: 0; }
-.filey-chat-header { flex-shrink: 0; padding: 12px 20px; border-bottom: 1px solid hsl(var(--border)); }
+.filey-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.filey-chat-header { flex-shrink: 0; padding: 16px 20px 8px; border-bottom: 0; }
+.filey-chat-presence { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 999px; background: hsl(var(--muted)); }
+.filey-chat-kicker { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.filey-chat-ask { margin: 10px 0 0; font-size: 40px; font-weight: 560; letter-spacing: -0.035em; line-height: 1.05; color: hsl(var(--foreground)); text-wrap: balance; }
+.filey-chat-stay { margin: 12px 0 0; font-size: 14px; color: hsl(var(--muted-foreground)); }
 .filey-conversation-viewport { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
-.filey-conversation-scroll { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 0 24px; }
-.filey-user-message, .filey-assistant-message { font-size: 15px; overflow-wrap: anywhere; }
-.filey-chat-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 40px; border: 0; border-radius: 999px; color: hsl(var(--foreground)); background: transparent; transition: background-color 150ms ease-out; }
-.filey-chat-icon:hover { background: hsl(var(--hover)); }
+.filey-conversation-scroll { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 8px 28px 0; }
+.filey-user-message, .filey-assistant-message { font-size: 15.5px; overflow-wrap: anywhere; }
+.filey-user-message { border-radius: 22px; background: hsl(var(--muted)); }
+.filey-assistant-message { max-width: 68ch; }
+.filey-chat-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 999px; color: hsl(var(--muted-foreground)); background: transparent; transition: background-color 150ms ease-out, color 150ms ease-out; }
+.filey-chat-icon:hover { background: hsl(var(--hover)); color: hsl(var(--foreground)); }
 .filey-chat-icon:disabled { opacity: .4; cursor: not-allowed; }
-.filey-chat-icon[aria-expanded="true"] { background: hsl(var(--hover)); }
-.filey-chat-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
+.filey-chat-icon[aria-expanded="true"] { background: hsl(var(--hover)); color: hsl(var(--foreground)); }
+.filey-chat-jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--foreground)); }
 .filey-reply-copy { width: 32px; height: 32px; color: hsl(var(--muted-foreground)); margin-left: -8px; }
-.filey-composer-dock { flex-shrink: 0; padding: 12px 24px max(12px, env(safe-area-inset-bottom)); }
-.filey-composer { padding: 8px; border: 1px solid hsl(var(--border) / .65); border-radius: 20px; background: hsl(var(--muted)); transition: border-color 150ms ease-out; }
-.filey-composer:focus-within { border-color: hsl(var(--muted-foreground) / .65); }
-.filey-composer-input { display: block; min-height: 36px; max-height: min(160px, calc(var(--filey-viewport-height, 100dvh) * .3)); padding: 4px 12px 8px; font-size: 16px; line-height: 24px; }
+.filey-composer-dock { flex-shrink: 0; margin-top: auto; padding: 8px 28px 18px; }
+.filey-composer { padding: 6px 6px 6px 8px; border: 1px solid hsl(var(--border) / .8); border-radius: 28px; background: hsl(var(--card)); box-shadow: 0 10px 30px hsl(var(--foreground) / .04); transition: border-color 150ms ease-out, box-shadow 150ms ease-out; }
+.filey-composer:focus-within { border-color: hsl(var(--foreground) / .25); box-shadow: 0 12px 34px hsl(var(--foreground) / .06); }
+.filey-composer-input { display: block; min-height: 44px; max-height: min(160px, calc(var(--filey-viewport-height, 100dvh) * .3)); padding: 10px 12px 4px; font-size: 16px; line-height: 24px; }
+.filey-chat-send, .filey-chat-send:hover { width: 36px; height: 36px; border-radius: 999px; background: hsl(var(--foreground)); color: hsl(var(--background)); }
+.filey-chat-send:disabled { background: hsl(var(--foreground) / .12); color: hsl(var(--muted-foreground)); opacity: 1; }
 @supports (field-sizing: content) {
   .filey-composer-input { field-sizing: content; height: auto !important; }
 }
@@ -31,22 +39,177 @@
 .filey-composer-models { margin-left: auto; }
 .filey-composer .composer-control { min-height: 40px; flex-shrink: 0; }
 .filey-composer .composer-effort { flex-shrink: 1; }
-.filey-chat-send, .filey-chat-send:hover { background: hsl(var(--foreground)); color: hsl(var(--background)); }
-.filey-chat-send:disabled { background: hsl(var(--foreground) / .08); color: hsl(var(--muted-foreground)); opacity: 1; }
 .filey-touch-hint { display: none; }
 
 .filey-chat-history {
-  width: 14rem;
+  width: 15rem;
   height: 100%;
   min-height: 0;
-  padding: 8px 12px;
+  padding: 12px;
+  background: hsl(var(--muted) / .45);
 }
+/* Filey Agent terminal: Hermes' console inside the app. Always dark, like a terminal. */
+.filey-agent-views {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 3px;
+  border-radius: 999px;
+  background: hsl(var(--muted));
+}
+.filey-agent-views button {
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+.filey-agent-views button[aria-pressed="true"] {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  box-shadow: 0 1px 3px hsl(var(--foreground) / .08);
+}
+.filey-terminal {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 190px);
+  min-height: 360px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #0d1014;
+  color: #e6e8eb;
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.filey-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  font-size: 12px;
+  color: rgba(255, 255, 255, .7);
+}
+.filey-terminal-dot { width: 8px; height: 8px; border-radius: 999px; background: #f5b83d; }
+.filey-terminal-dot[data-state="ready"] { background: #3ecf8e; }
+.filey-terminal-dot[data-state="working"] { background: #3ecf8e; animation: filey-terminal-pulse 1s ease-in-out infinite; }
+.filey-terminal-dot[data-state="unavailable"] { background: #ef5f5f; }
+@keyframes filey-terminal-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .filey-terminal-dot[data-state="working"] { animation: none; } }
+.filey-terminal-out { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.filey-terminal-line { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.filey-terminal-line[data-kind="user"] { color: #ffffff; margin-top: 10px; }
+.filey-terminal-line[data-kind="tool"] { color: #8b96a5; }
+.filey-terminal-line[data-kind="notice"] { color: #c9b27c; }
+.filey-terminal-line[data-kind="error"] { color: #ff8a8a; }
+.filey-terminal-prompt { color: #3ecf8e; font-weight: 700; }
+.filey-terminal-suggest {
+  margin: 0 14px;
+  padding: 4px 0;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 10px;
+  background: #151a20;
+  list-style: none;
+}
+.filey-terminal-suggest button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 10px;
+  text-align: left;
+}
+.filey-terminal-suggest button[aria-selected="true"],
+.filey-terminal-suggest button:hover { background: rgba(255, 255, 255, .06); }
+.filey-terminal-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+}
+.filey-terminal-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+.filey-terminal-input input::placeholder { color: rgba(255, 255, 255, .35); }
 
-.filey-chat-starters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: min(100%, 440px); margin: 28px auto 0; }
-.filey-chat-starters button { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 12px 14px; border: 1px solid hsl(var(--border)); border-radius: 14px; background: transparent; text-align: left; font-size: 13px; color: hsl(var(--muted-foreground)); transition: background-color 150ms ease-out, color 150ms ease-out; }
-.filey-chat-starters button:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
-.filey-chat-starters svg { flex-shrink: 0; }
-.filey-chat-icon:focus-visible, .filey-chat-starters button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 3px; }
+/* An action waiting for the owner's OK: the figure, what it is for, and two plain buttons. */
+.filey-approval-card {
+  margin-bottom: 12px;
+  padding: 16px 16px 14px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 22px;
+  background: hsl(var(--card));
+  box-shadow: 0 8px 28px hsl(var(--foreground) / .06);
+}
+.filey-approval-headline {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.filey-approval-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 0;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 15px;
+  color: hsl(var(--foreground));
+  text-align: left;
+}
+.filey-approval-details {
+  display: grid;
+  gap: 4px;
+  max-height: 10rem;
+  overflow: auto;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: hsl(var(--muted));
+  font-size: 12px;
+}
+.filey-approval-approve,
+.filey-approval-decline {
+  display: flex;
+  width: 100%;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: opacity .15s ease, background-color .15s ease;
+}
+.filey-approval-approve {
+  margin-top: 6px;
+  background: hsl(var(--foreground));
+  color: hsl(var(--background));
+}
+.filey-approval-approve:hover:not(:disabled) { opacity: .88; }
+.filey-approval-decline {
+  margin-top: 8px;
+  border: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--foreground));
+}
+.filey-approval-decline:hover:not(:disabled) { background: hsl(var(--muted)); }
+.filey-approval-approve:disabled,
+.filey-approval-decline:disabled { opacity: .5; cursor: default; }
 .filey-chat-empty { width: 100%; }
 
 @container filey-agent (max-width: 719px) {
@@ -70,8 +233,7 @@
   .filey-composer .composer-control { justify-content: center; width: 44px; height: 44px; padding: 0; }
   .filey-composer .filey-chat-icon { width: 44px; height: 44px; }
   .filey-composer-hint { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .filey-chat-starters { margin-top: 24px; gap: 8px; }
-  .filey-chat-starters button { padding: 11px; gap: 8px; }
+  .filey-chat-ask { font-size: 32px; }
 }
 
 @media (max-width: 1023px) {
@@ -99,5 +261,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .filey-composer, .filey-chat-icon, .filey-chat-starters button { transition: none; }
+  .filey-composer, .filey-chat-icon { transition: none; }
 }

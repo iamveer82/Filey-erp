@@ -56,7 +56,7 @@ it("explains the trial, Freedom and Pro, and that data stays viewable after the 
   expect(screen.getByRole("heading", { name: "Free trial, Freedom and Pro" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=billing");
   expect(screen.getByText(/Basic is a 14-day free trial/)).toHaveTextContent("per account and per computer");
-  expect(screen.getByText(/Freedom is a one-time payment of 999 AED/)).toHaveTextContent("regular updates and support");
+  expect(screen.getByText(/Freedom is a one-time payment of 1499 AED/)).toHaveTextContent("regular updates and support");
   expect(screen.getByText(/Pro is 36 AED a month/)).toHaveTextContent("Cancel any time");
   expect(screen.getByText(/When the trial ends without a plan/)).toHaveTextContent("to view, print and export");
 });

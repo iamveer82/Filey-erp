@@ -111,7 +111,7 @@ it("binds agent input to its conversation, tab and native grant, and revokes on 
   await expect(agentComputerCommand({ action: "click", x: 1, y: 1, snapshot_id: "fresh" }, "chat-a")).rejects.toThrow("fresh screenshot");
   await expect(agentComputerCommand({ action: "screenshot" }, "chat-b")).rejects.toThrow("workspace first");
   await agentComputerCommand({ action: "screenshot" }, "chat-a", controller.signal);
-  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: null, windowId: "123", browserTab: tab.id });
+  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: null, mascot: "blue", windowId: "123", browserTab: tab.id });
   await agentComputerCommand({ action: "click", x: 1, y: 1, snapshot_id: "fresh" }, "chat-a", controller.signal);
   expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-token", request: { action: "click", x: 1, y: 1, snapshot_id: "fresh", button: "left", double_click: false } });
   await pauseAgentBrowser(true);

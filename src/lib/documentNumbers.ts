@@ -128,3 +128,13 @@ export async function allocateDocumentNumber(
     return number;
   }, { retrySafe: true });
 }
+
+/** Compute the next number for a kind without reserving it. For opening a new
+ * editor — the number is only shown, not consumed until save. This stops the
+ * serial from advancing every time the owner clicks "new" and backs out. */
+export function nextDocumentNumber(kind: DocNumberKind, existing: string[] = [], formats: DocFormats = {}, year = new Date().getFullYear()): string {
+  const spec = DOC_NUMBER_KINDS.find(item => item.kind === kind);
+  if (!spec) throw new Error(`Unknown document kind: ${kind}`);
+  const pattern = formats[kind] && /\{\d+\}/.test(formats[kind]!) ? formats[kind]! : `${spec.prefix}-{YYYY}-{0001}`;
+  return nextFromPattern({ pattern, existing, year });
+}

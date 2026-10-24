@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => ({
   allowed: true, loading: false, error: "", currency: "AED",
   currencyListeners: new Set<() => void>(),
   mounted: vi.fn(), unmounted: vi.fn(), businessMounted: vi.fn(), stop: vi.fn(),
+  sent: [] as string[], settled: [] as boolean[],
   finish: undefined as undefined | (() => void),
 }));
 vi.mock("../../lib/agentStorage", () => ({
@@ -48,19 +49,26 @@ vi.mock("../BrowserPanel", () => ({ default: () => null }));
 vi.mock("../AnimatedThemeToggler", () => ({ default: () => null }));
 vi.mock("../ThinkingDots", () => ({ default: () => <span role="status" aria-label="Thinking" /> }));
 vi.mock("../../pages/AgentChat", async () => {
-  const { useEffect, useState } = await import("react");
+  const { useCallback, useEffect, useState } = await import("react");
   return { default: function AgentFixture({ active, onStatusChange }: { active: boolean; onStatusChange: (value: unknown) => void }) {
     const [draft, setDraft] = useState("");
     const [busy, setBusy] = useState(false);
-    const [approvalPending, setApprovalPending] = useState(false);
+    const [approval, setApproval] = useState<null | { id: number; name: string; args: Record<string, unknown>; preview: string }>(null);
     const [reply, setReply] = useState("");
+    const settleApproval = useCallback((ok: boolean) => { fixture.settled.push(ok); setApproval(null); setBusy(false); }, []);
+    const send = useCallback((text: string) => { fixture.sent.push(text); setBusy(true); }, []);
     useEffect(() => { fixture.mounted(); return () => { fixture.unmounted(); }; }, []);
-    useEffect(() => { onStatusChange({ busy, approvalPending, stop: fixture.stop }); }, [busy, approvalPending, onStatusChange]);
+    useEffect(() => {
+      onStatusChange({ busy, approvalPending: !!approval, stop: fixture.stop, send, approval, settleApproval });
+    }, [busy, approval, onStatusChange, send, settleApproval]);
     fixture.finish = () => { setBusy(false); setReply("Generated task finished."); };
     return <section aria-label="Generated chat fixture" data-active={active}>
       <input aria-label="Generated draft" value={draft} onChange={event => setDraft(event.target.value)} />
       <button onClick={() => setBusy(true)}>Start generated task</button>
-      <button onClick={() => { setBusy(true); setApprovalPending(true); }}>Request generated approval</button>
+      <button onClick={() => {
+        setApproval({ id: 1, name: "send_invoice_email", args: { to: "fixture@example.test" }, preview: '{\n  "to": "fixture@example.test"\n}' });
+        setBusy(true);
+      }}>Request generated approval</button>
       <p>{reply}</p>
     </section>;
   } };
@@ -96,6 +104,8 @@ beforeEach(() => {
   fixture.scope = "cloud:org:user:alice";
   fixture.allowed = true; fixture.loading = false; fixture.error = ""; fixture.currency = "AED";
   fixture.finish = undefined;
+  fixture.sent = [];
+  fixture.settled = [];
   vi.stubGlobal("matchMedia", (media: string) => ({ matches: true, media, addEventListener() {}, removeEventListener() {} }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -116,6 +126,7 @@ it("mounts AI only on its first visit and retains its draft/task while section a
   await act(async () => { fixture.currency = "USD"; fixture.currencyListeners.forEach(changed => changed()); });
   expect(fixture.businessMounted).toHaveBeenCalledTimes(3);
   await act(async () => { fixture.finish?.(); });
+  // Idle again: the bar belongs to work in flight, not to every section.
   expect(screen.queryByRole("complementary", { name: "Filey AI task" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open AI section" }));
   expect(screen.getByRole("textbox", { name: "Generated draft" })).toBe(draft);
@@ -125,14 +136,25 @@ it("mounts AI only on its first visit and retains its draft/task while section a
   expect(fixture.unmounted).not.toHaveBeenCalled();
 });
 
-it("keeps approval pending off-route with an accessible return link and explicit Stop", async () => {
+it("keeps approval pending off-route and settles it from the bar's permission section", async () => {
   open("/agent");
   fireEvent.click(await screen.findByRole("button", { name: "Request generated approval" }));
   fireEvent.click(screen.getByRole("button", { name: "Open customers section" }));
   expect(screen.getByRole("status")).toHaveTextContent("Filey AI needs your approval.");
+  const approval = screen.getByRole("region", { name: "Approve action" });
+  expect(approval).toHaveTextContent("Send invoice email");
+  expect(approval).toHaveTextContent("fixture@example.test");
+  // The mini composer works mid-approval: it steers the running task.
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI from this section" }), { target: { value: "Use the other template" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send to Filey AI" }));
+  expect(fixture.sent).toEqual(["Use the other template"]);
+  expect(screen.getByRole("textbox", { name: "Message Filey AI from this section" })).toHaveValue("");
   fireEvent.click(screen.getByRole("button", { name: "Stop Filey AI task" }));
   expect(fixture.stop).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("link", { name: "Return to chat" }));
+  fireEvent.click(within(approval).getByRole("button", { name: "Approve" }));
+  expect(fixture.settled).toEqual([true]);
+  expect(screen.queryByRole("region", { name: "Approve action" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open AI section" }));
   expect(screen.getByRole("textbox", { name: "Generated draft" })).toBeVisible();
   expect(fixture.mounted).toHaveBeenCalledOnce();
 });

@@ -314,6 +314,17 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                         }
                     }
                     Some(kind @ ("message" | "voice_note")) => {
+                        // Skip echo of messages we sent ourselves (fromMe) — otherwise
+                        // every agent reply via wa_bridge_reply is re-emitted as an
+                        // incoming wa-message, starting a new agent turn and echo loop.
+                        let from_me = v
+                            .get("key")
+                            .and_then(|k| k.get("fromMe"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if from_me {
+                            continue;
+                        }
                         let session_id = BRIDGE.lock().unwrap().as_ref()
                             .filter(|sup| sup.pid == pid && sup.state.state == "connected")
                             .and_then(|sup| sup.state.session_id.clone());

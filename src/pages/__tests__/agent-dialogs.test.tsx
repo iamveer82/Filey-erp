@@ -23,6 +23,12 @@ import * as voice from "../../lib/voice";
 import { agentStorageScope, readAgentStorage, writeAgentStorage } from "../../lib/agentStorage";
 
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: async () => "" }));
+// The chat screen consumes one AgentEvent stream whichever engine writes it. On the desktop
+// that is Filey Agent (Hermes, a separate process); here the in-browser engine stands in.
+vi.mock("../../lib/agentTurn", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/agentTurn")>();
+  return { ...original, runAgentTurn: original.builtInAgentTurn };
+});
 vi.mock("../../components/BloubBot", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../components/BloubBot")>()),
   default: () => null,
@@ -309,12 +315,12 @@ it("settles an earlier approval safely when another sensitive action requests ap
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
   let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
   await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-NO-RECORD" }); });
-  await screen.findByRole("dialog", { name: "Approve action" });
+  await screen.findByRole("region", { name: "Approve action" });
   await act(async () => { second = runTool("mark_invoice_paid", { invoice_number: "SECOND-NO-RECORD" }); });
   await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
-  const dialog = screen.getByRole("dialog", { name: "Approve action" });
+  const dialog = screen.getByRole("region", { name: "Approve action" });
   expect(dialog).toHaveTextContent("SECOND-NO-RECORD");
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
   await expect(second).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
 });
 
@@ -326,12 +332,12 @@ it("requires a fresh click when a pending pointer gesture's approval is replaced
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
   let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
   await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-INVOICE" }); });
-  const firstAllow = within(await screen.findByRole("dialog", { name: "Approve action" })).getByRole("button", { name: "Allow" });
+  const firstAllow = within(await screen.findByRole("region", { name: "Approve action" })).getByRole("button", { name: "Approve" });
   fireEvent.pointerDown(firstAllow, { pointerId: 1, button: 0 });
   await act(async () => { second = runTool("mark_invoice_paid", { invoice_number: "SECOND-INVOICE" }); });
   await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
-  const dialog = screen.getByRole("dialog", { name: "Approve action" });
-  const secondAllow = within(dialog).getByRole("button", { name: "Allow" });
+  const dialog = screen.getByRole("region", { name: "Approve action" });
+  const secondAllow = within(dialog).getByRole("button", { name: "Approve" });
   expect(secondAllow).not.toBe(firstAllow);
   expect(firstAllow.isConnected).toBe(false);
   fireEvent.pointerUp(firstAllow, { pointerId: 1, button: 0 });
@@ -359,22 +365,22 @@ it("ignores an old approval callback while its replacement is waiting to render"
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
   let first!: ReturnType<typeof runTool>, second!: ReturnType<typeof runTool>;
   await act(async () => { first = runTool("mark_invoice_paid", { invoice_number: "FIRST-INVOICE" }); });
-  const firstAllow = within(await screen.findByRole("dialog", { name: "Approve action" })).getByRole("button", { name: "Allow" });
+  const firstAllow = within(await screen.findByRole("region", { name: "Approve action" })).getByRole("button", { name: "Approve" });
   await act(async () => {
     second = runTool("mark_invoice_paid", { invoice_number: "SECOND-INVOICE" });
     // React batches this replacement. The displayed button still has A's
     // callback while the synchronous pending ref already belongs to B.
     for (let tick = 0; tick < 30 && requests < 2; tick++) await Promise.resolve();
     expect(requests).toBe(2);
-    expect(screen.getByRole("dialog", { name: "Approve action" })).toHaveTextContent("FIRST-INVOICE");
+    expect(screen.getByRole("region", { name: "Approve action" })).toHaveTextContent("FIRST-INVOICE");
     fireEvent.click(firstAllow);
   });
   await expect(first).resolves.toEqual({ error: "Cancelled — the user did not approve this action." });
   expect(read).not.toHaveBeenCalled();
   expect(write).not.toHaveBeenCalled();
-  const replacement = screen.getByRole("dialog", { name: "Approve action" });
+  const replacement = screen.getByRole("region", { name: "Approve action" });
   expect(replacement).toHaveTextContent("SECOND-INVOICE");
-  fireEvent.click(within(replacement).getByRole("button", { name: "Allow" }));
+  fireEvent.click(within(replacement).getByRole("button", { name: "Approve" }));
   await expect(second).resolves.toEqual({ ok: true, message: "SECOND-INVOICE marked paid." });
   expect(write).toHaveBeenCalledExactlyOnceWith(2, "paid");
 });
@@ -390,13 +396,13 @@ it("denies a waiting sensitive tool when the approval dialog is closed", async (
     // The gate resolves before any data lookup or write; no invoice is created.
     result = runTool("mark_invoice_paid", { invoice_number: "NO-RECORD" });
   });
-  const dialog = await screen.findByRole("dialog", { name: "Approve action" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+  const dialog = await screen.findByRole("region", { name: "Approve action" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Not now" }));
   await expect(result).resolves.toEqual({
     error: "Cancelled — the user did not approve this action.",
   });
   expect(
-    screen.queryByRole("dialog", { name: "Approve action" })
+    screen.queryByRole("region", { name: "Approve action" })
   ).not.toBeInTheDocument();
 });
 
@@ -498,7 +504,8 @@ it("starts desktop computer access automatically for an approved task without an
   await screen.findByText("Computer task complete.");
   expect(enable).toHaveBeenCalledOnce();
   expect(enable.mock.calls.every(args => args.length === 0)).toBe(true);
-  expect(disable).not.toHaveBeenCalled();
+  // Access ends with the task: the overlay and Filey's cursor do not stay on screen.
+  expect(disable).toHaveBeenCalledWith(42);
   await expect(session()).rejects.toMatchObject({ name: "AbortError" });
   cleanup();
   expect(disable).toHaveBeenCalled();
@@ -587,21 +594,21 @@ it("passes the chosen effort into the agent and remembers it for this workspace"
   expect(stream.mock.calls[0][1]).not.toHaveProperty("reasoningEnabled");
 });
 
-it("starts Filey AI with reasoning off and ignores an old managed effort choice", async () => {
+it("starts Filey AI with reasoning on at low effort and ignores an old managed effort choice", async () => {
   writeAgentStorage("filey.agent.effort", "high");
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {
-    yield { type: "text" as const, text: "Fast reply." }; return "Fast reply.";
+    yield { type: "text" as const, text: "Thoughtful reply." }; return "Thoughtful reply.";
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toHaveAttribute("title", "Filey AI · Fast · Reasoning off");
+  expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toHaveAttribute("title", "Filey AI · Low reasoning");
   expect(screen.queryByRole("button", { name: /Reasoning effort/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("slider", { name: "Reasoning effort" })).not.toBeInTheDocument();
   expect(document.body).not.toHaveTextContent(/filey-ai|DeepSeek|deepseek-flash/);
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Quick answer." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-  await screen.findByText("Fast reply.");
-  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: false, effort: "auto" });
+  await screen.findByText("Thoughtful reply.");
+  expect(stream.mock.calls[0][1]).toMatchObject({ reasoningEnabled: true, effort: "low" });
 });
 
 it("turns Filey AI reasoning on and off for later turns and remembers only this workspace's choice", async () => {
@@ -610,8 +617,7 @@ it("turns Filey AI reasoning on and off for later turns and remembers only this 
     yield { type: "text" as const, text: "Managed reply." }; return "Managed reply.";
   });
   const view = render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  fireEvent.click(openManagedReasoning());
-  expect(screen.getByRole("switch", { name: "Reasoning" })).toHaveAttribute("aria-checked", "true");
+  expect(openManagedReasoning()).toHaveAttribute("aria-checked", "true");
   closeManagedEffort();
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Review this draft." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -621,7 +627,7 @@ it("turns Filey AI reasoning on and off for later turns and remembers only this 
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
   expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
   act(() => { setCacheOrg("other-org", "test-user"); });
-  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
   act(() => { setCacheOrg("test-org", "test-user"); });
   expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
   fireEvent.click(openManagedReasoning());
@@ -641,7 +647,7 @@ it("keeps the current reasoning selection fixed during a running task", async ()
     yield { type: "text" as const, text: "Working." }; await done; return "Done.";
   });
   render(<MemoryRouter><AgentChat /></MemoryRouter>);
-  fireEvent.click(openManagedReasoning());
+  openManagedReasoning();
   fireEvent.change(screen.getByRole("textbox", { name: "Message Filey AI" }), { target: { value: "Check this." } });
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
   await screen.findByText("Working.");
@@ -692,7 +698,7 @@ it("uses the managed slider effort without overwriting the user's own provider e
   expect(screen.getByRole("button", { name: "Filey AI effort: High" })).toBeInTheDocument();
   act(() => { setCacheOrg("other-org", "test-user"); });
   expect(ai.getFileyAiEffort()).toBe("low");
-  expect(screen.getByRole("button", { name: "Filey AI effort: Fast" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Filey AI effort: Low" })).toBeInTheDocument();
   act(() => { setCacheOrg("test-org", "test-user"); });
   expect(screen.getByRole("button", { name: "Filey AI effort: High" })).toBeInTheDocument();
   fireEvent.change(openManagedEffort(), { target: { value: "0" } });

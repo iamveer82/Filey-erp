@@ -63,7 +63,7 @@ export default function SetupNotice() {
                       "Every app: invoicing, CRM, inventory, accounting, Word, Sheets, PDF and Slides",
                       "Works offline — your data stays on this computer",
                       "$1 of Filey AI to try the agent",
-                      "Then Freedom: 999 AED once, yours for life",
+                      "Then Freedom: 1499 AED once, yours for life",
                     ].map((line) => (
                       <li key={line} className="flex items-center gap-2 text-[13px] text-brand-600">
                         <Check size={14} className="shrink-0 text-success" />

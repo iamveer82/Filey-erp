@@ -5150,6 +5150,7 @@ export interface QuotationDoc {
   show_stamp?: boolean;
   show_logo?: boolean;
   show_signature?: boolean;
+  show_bank?: boolean;
 }
 export type QuotationInput = Omit<
   QuotationDoc,

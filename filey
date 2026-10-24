@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Filey Agent in a terminal — the same agent the desktop app runs, with its
+# full shell, file, browser and Filey tool surface. Any `filey` subcommand
+# passes through: ./filey gateway, ./filey doctor, ...
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x "$ROOT/agent/.venv/bin/filey" ]; then
+  exec "$ROOT/agent/.venv/bin/filey" "$@"
+fi
+exec python3 "$ROOT/agent/cli.py" "$@"

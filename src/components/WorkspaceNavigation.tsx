@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { prefetchModule, type AppModule } from "../modules/registry";
 import { useLang } from "../lib/i18n";
 import SidebarIcon from "./SidebarIcon";
-import BloubBot from "./BloubBot";
+import BloubBot, { useBotSkin } from "./BloubBot";
 
 const GROUPS = [
   { title: "Assistant", ids: ["agent"] },
@@ -28,6 +28,7 @@ export default function WorkspaceNavigation({
   onNavigate: () => void;
 }) {
   const { t } = useLang();
+  const { mascot } = useBotSkin();
   const { pathname } = useLocation();
   const prefix = useId();
   const [query, setQuery] = useState("");
@@ -111,7 +112,9 @@ export default function WorkspaceNavigation({
                   >
                     {direct && <span className="workspace-nav-icon" aria-hidden="true">
                       {id === "agent"
-                        ? <BloubBot size={30} state="idle" animate={isDesktop || mobileOpen} ambient trackCursor />
+                        ? mascot
+                          ? <img src={`/mascots/${mascot}.png`} alt="" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
+                          : <BloubBot size={30} state="idle" animate={isDesktop || mobileOpen} ambient trackCursor />
                         : <SidebarIcon name={icon} size={16} />}
                     </span>}
                     <span className="min-w-0 truncate">{t(label)}</span>

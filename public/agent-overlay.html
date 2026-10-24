@@ -28,14 +28,9 @@
       background: #0c4a6e; color: #f0f9ff;
     }
     .cursor {
-      position: fixed; left: 0; top: 0; pointer-events: none; will-change: transform;
-      transform: translate(-100px, -100px); transition: transform 60ms linear;
+      position: fixed; left: -80px; top: -80px; z-index: 5; width: 84px; height: 84px; pointer-events: none;
     }
-    .cursor svg { display: block; filter: drop-shadow(0 2px 6px rgba(14, 116, 144, 0.45)); }
-    .tag {
-      position: absolute; left: 20px; top: 22px; padding: 2px 7px; border-radius: 6px; white-space: nowrap;
-      color: #fff; background: #0284c7; font-size: 11px;
-    }
+    .cursor img { display: block; width: 84px; height: 84px; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(12, 74, 110, 0.45)); }
     @media (prefers-reduced-motion: reduce) { .edge { animation: none; } .cursor { transition: none; } }
   </style>
 </head>
@@ -43,10 +38,7 @@
   <div class="edge"></div>
   <div class="banner" role="status"><span class="dot"></span>Filey AI is using your computer · Press <kbd>Esc</kbd> to take over</div>
   <div class="cursor" id="cursor">
-    <svg width="22" height="26" viewBox="0 0 22 26" aria-hidden="true">
-      <path d="M2 2 L2 21 L7.2 16.4 L10.6 24 L14 22.5 L10.7 15 L18 15 Z" fill="#38bdf8" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" />
-    </svg>
-    <span class="tag">Filey AI</span>
+    <img id="mascot" alt="" width="72" height="72" src="/mascots/blue.png" />
   </div>
   <script src="./agent-overlay.js"></script>
 </body>

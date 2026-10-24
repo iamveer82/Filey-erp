@@ -222,18 +222,16 @@ describe("invoice WhatsApp tools", () => {
 });
 
 describe("connected work discovery and permissions", () => {
-  it.each(["whatsapp:owner", "telegram:owner"])("does not bootstrap the owner's computer or personal browser for %s", async agentId => {
+  it.each(["whatsapp:owner", "telegram:owner"])("lets %s use the owner's computer with a session but never open a shell", async agentId => {
     const session = vi.fn(async () => 42);
-    expect(await runTool("computer_use", { action: "list_windows" }, () => true, true, "remote-turn", undefined, session, agentId)).toHaveProperty("error");
-    expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toMatchObject({ retry_safe: false });
-    expect(session).not.toHaveBeenCalled();
-    expect(runComputerUse).not.toHaveBeenCalled();
-    expect(desktopBrowserCommand).not.toHaveBeenCalled();
-    expect(offeredTools({ isOwner: true, computerSession: session, agentId }, new Set(["web"])).map(tool => tool.name)).not.toContain("workspace_browser");
-    setCapabilityEnabled("agent_computers", true);
+    expect(await runTool("computer_use", { action: "list_windows" }, () => true, true, "remote-turn", undefined, session, agentId)).toEqual({ windows: [] });
+    expect(session).toHaveBeenCalledOnce();
+    expect(runComputerUse).toHaveBeenCalled();
     expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toHaveProperty("tab");
-    expect(desktopBrowserCommand).toHaveBeenCalledWith(expect.objectContaining({ action: "open" }), undefined, agentId);
-    expect(session).not.toHaveBeenCalled();
+    expect(desktopBrowserCommand).toHaveBeenCalledWith(expect.objectContaining({ action: "open" }), undefined);
+    expect(offeredTools({ isOwner: true, computerSession: session, agentId }, new Set(["web"])).map(tool => tool.name)).toContain("workspace_browser");
+    expect(await runTool("run_shell", { command: "echo hi" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toMatchObject({ retry_safe: false });
+    expect(desktopBrowserCommand).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), agentId);
   });
   it("respects capability and mode revocation while approval is pending", async () => {
     const args = { action: "list_windows" };
@@ -270,7 +268,7 @@ describe("connected work discovery and permissions", () => {
     expect(session).toHaveBeenCalledOnce();
     expect(runComputerUse).toHaveBeenCalledWith(args, undefined, 42);
     vi.mocked(runComputerUse).mockClear();
-    expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/Remote and scheduled tasks/) });
+    expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/no desktop session/) });
     expect(runComputerUse).not.toHaveBeenCalled();
   });
   const sensitive = ["prepare_invoice_whatsapp", "send_invoice_whatsapp", "workspace_browser"];

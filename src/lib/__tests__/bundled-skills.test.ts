@@ -5,7 +5,13 @@ import { skillsIndex } from "../agentSkills";
 
 // Pre-installed: the Instagram, YouTube and LinkedIn packs (MIT) and Agent-Reach rewritten for Filey.
 it("offers each pack in one prompt line and lists its skills on demand", async () => {
-  expect(bundledSkillsIndex()).toHaveLength(4);
+  expect(bundledSkillsIndex()).toHaveLength(12);
+  // open-computer-use names only actions the computer_use schema really has.
+  const ocu = JSON.stringify(await bundledSkill("open-computer-use"));
+  const { TOOLS } = await import("../aiTools");
+  const actions = (TOOLS.find((t) => t.name === "computer_use")!.parameters as { properties: { action: { enum: string[] } } }).properties.action.enum;
+  for (const action of ocu.match(/\bapp_[a-z_]+\b/g) ?? []) expect(actions).toContain(action);
+  expect(ocu).toContain("app_state");
   expect(skillsIndex()).toContain("- instagram (pre-installed):");
   const ig = (await bundledSkill("Instagram")) as { skills: { name: string; description: string }[]; platform: string };
   expect(ig.skills).toHaveLength(13);
@@ -13,6 +19,14 @@ it("offers each pack in one prompt line and lists its skills on demand", async (
   expect(ig.platform).toContain("schedule_social_post");
   expect(((await bundledSkill("youtube")) as { skills: unknown[] }).skills).toHaveLength(11);
   expect(((await bundledSkill("linkedin")) as { skills: unknown[] }).skills).toHaveLength(11);
+  const marketing = (await bundledSkill("marketing")) as { skills: { name: string; description: string }[] };
+  expect(marketing.skills).toHaveLength(10);
+  expect(marketing.skills.find((s) => s.name === "copywriting")?.description).toMatch(/^Write or edit marketing copy/);
+  expect(marketing.skills.find((s) => s.name === "product-marketing")?.description).toMatch(/other marketing skills/);
+  const science = (await bundledSkill("scientific")) as { skills: { name: string }[] };
+  expect(science.skills.map((s) => s.name).sort()).toEqual([
+    "citation-management", "critical-thinking", "literature-review", "scientific-slides", "scientific-writing", "statistical-reading",
+  ]);
 });
 
 it("loads one skill with how to run its scripts in Filey, and reads its data files only", async () => {

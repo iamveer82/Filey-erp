@@ -7,6 +7,7 @@
 // denies them so the agent asks the user, and a "yes" reply re-runs with them
 // allowed. Nothing leaves without approval.
 import { aiReady } from "./ai";
+import { agentCommand } from "./agentCommands";
 import { log } from "./log";
 import { serviceError } from "./serviceError";
 
@@ -177,8 +178,20 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
   const scope = agentStorageScope();
   const epoch = generation;
   const deadline = Date.now() + RUN_TIMEOUT_MS;
+  // Tell the owner why WhatsApp isn't answering instead of dropping into silence.
+  // An empty reply (genuine non-owner) stays silent by design.
+  const st = await bridgeState().catch(() => ({ state: "stopped" } as any));
+  if (st.state !== "connected") {
+    await replyWa(m.id, waFormat("WhatsApp isn't connected — open Integrations → Built-in connections, connect WhatsApp, then send again."), m.bridgeSession).catch(() => {});
+    return;
+  }
   if (!scope || !(await isOwnerSender(m.from, m.bridgeSession)) || scope !== agentStorageScope() || epoch !== generation) {
     await replyWa(m.id, "", m.bridgeSession).catch(() => {});
+    return;
+  }
+  const owned = m.text ? agentCommand(m.text) : null;
+  if (owned?.kind === "reply" && /^\/(memory|forget|persona|skills)\b/i.test(m.text!.trim())) {
+    if (scope === agentStorageScope()) await replyWa(m.id, waFormat(owned.text), m.bridgeSession).catch(() => {});
     return;
   }
   const command = m.text?.trim().toLowerCase();
@@ -204,7 +217,7 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
     const text = command === "/new" ? "New conversation started. Your saved preferences and skills are kept."
       : command === "/stop" ? "WhatsApp tasks stopped and pending approvals cleared. An action already submitted may have completed; check before repeating it."
       : command === "/status" ? `Filey is connected. AI ${aiReady() ? "is ready" : "needs setup in Settings"}. ${queued} request(s) active or queued.`
-      : "Send a task, question or voice note. /status checks readiness, /stop cancels WhatsApp tasks, /new starts fresh context. Reply YES only to an exact action proposal you want to approve.";
+      : "Send a task, question or voice note. /status checks readiness, /stop cancels WhatsApp tasks, /new starts fresh context. /memory, /persona and /skills show what the agent keeps. Reply YES only to an exact action proposal you want to approve.";
     if (scope === agentStorageScope()) await replyWa(m.id, waFormat(text + stopWarning), m.bridgeSession).catch(() => {});
     return;
   }
@@ -237,6 +250,11 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
 async function handleVoice(v: WaVoice, deadline: number, signal: AbortSignal): Promise<void> {
   const scope = agentStorageScope();
   const epoch = generation;
+  const st = await bridgeState().catch(() => ({ state: "stopped" } as any));
+  if (st.state !== "connected") {
+    await replyWa(v.id, waFormat("WhatsApp isn't connected — open Integrations → Built-in connections, connect WhatsApp, then send again."), v.bridgeSession).catch(() => {});
+    return;
+  }
   if (!scope || !(await isOwnerSender(v.from, v.bridgeSession)) || scope !== agentStorageScope() || epoch !== generation || signal.aborted) {
     await replyWa(v.id, "", v.bridgeSession);
     return;

@@ -15,12 +15,17 @@ import { errMsg } from "../lib/format";
 import { getReachConfig, setReachConfig, readUrl } from "../lib/reach";
 import { enrichFromWebsite } from "../lib/scout";
 import { CAPABILITIES } from "../lib/capabilities";
+import { gatewayConnect, type GatewayConnect } from "../lib/channelGateway";
+import { CHANNELS } from "../lib/channelRegistry";
+import ChannelConnection from "../components/ChannelConnection";
 import ZernioPanel from "../components/ZernioPanel";
 
 /* Connect pages for the Filey-native integrations — the ones Filey implements
  * itself rather than brokering through Composio. The two web ones share a
  * reader and a settings store; social publishing has its own credential and
- * renders its own panel below. */
+ * renders its own panel below. The messaging channels (WhatsApp, Telegram,
+ * Slack, Discord, Teams, Email) share this slot too, so every Connect button
+ * in Integrations opens a page instead of a bare field. */
 
 type AppId = "web-research" | "lead-enrichment" | "social-publishing";
 
@@ -50,6 +55,44 @@ const APPS: Record<
 
 export default function IntegrationConnect() {
   const { app } = useParams<{ app: string }>();
+  // A messaging channel reuses this slot: one Connect button, one page.
+  const channel = gatewayConnect(app ?? "");
+  if (channel) return <ChannelConnectPage id={channel.id} />;
+  return <BuiltInConnect app={app} />;
+}
+
+const CHANNEL_SUBTITLE: Record<GatewayConnect["id"], string> = {
+  whatsapp: "Pair WhatsApp in the desktop app — QR linked device, no API key",
+  telegram: "Chat with Filey AI from Telegram with a free BotFather token",
+  slack: "Post Filey messages to Slack with a free incoming webhook",
+  discord: "Post Filey messages to Discord with a free channel webhook",
+  teams: "Post Filey messages to Teams with a free incoming webhook",
+  email: "Send Filey messages from your own mailbox",
+};
+
+function ChannelConnectPage({ id }: { id: GatewayConnect["id"] }) {
+  const profile = CHANNELS[id];
+  return (
+    <div className="">
+      <PageHeader
+        title={profile.label}
+        subtitle={CHANNEL_SUBTITLE[id]}
+        action={
+          <Link to="/integrations?tab=free" className="btn-secondary">
+            <ArrowLeft size={15} /> Integrations
+          </Link>
+        }
+      />
+      <ChannelConnection id={id} />
+      <p className="text-xs text-brand-500">
+        Every channel connects with a free link you own — no paid channel key. The
+        connection is saved on this computer, inside this workspace.
+      </p>
+    </div>
+  );
+}
+
+function BuiltInConnect({ app }: { app?: string }) {
   const meta = APPS[app as AppId];
   const { toast } = useUI();
 

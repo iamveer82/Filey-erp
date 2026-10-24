@@ -96,6 +96,19 @@ npm run tauri dev    # the desktop app
 
 Sign up with any email/password and you're in.
 
+### The agent in a terminal
+
+The same agent also runs as a full terminal CLI, with its own shell, files,
+browser and the Filey tools:
+
+```bash
+npm run filey        # macOS, Windows and Linux
+./filey doctor       # or filey.cmd on Windows; any agent subcommand works
+```
+
+It launches the Python agent in `agent/` — the same one the desktop app starts
+as its sidecar.
+
 ### 4. Build desktop installers
 
 ```bash

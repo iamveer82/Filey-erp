@@ -17,6 +17,7 @@ import { runAgentStream, type AgentDoneReason, type AgentEvent } from "./agentHa
 import type { ConfirmFn } from "./aiTools";
 import { memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
+import { platformHint, withoutMemoryNudge } from "./agentPrompt";
 import { modeSystemNote } from "./agentMode";
 import { appMapPrompt } from "./appMap";
 import { todayYmd } from "./format";
@@ -95,8 +96,11 @@ export function setAiConfig(patch: Partial<AiConfig>, expectedScope?: string): A
   if (patch.apiKey !== undefined) void saveCredential(aiCredentialName(next), patch.apiKey.trim() || null);
   const { apiKey: _secret, ...settings } = next;
   if (!safeSetItem(key, JSON.stringify(settings))) throw new Error("AI settings could not be saved.");
+  // Filey Agent (the desktop engine) follows these settings.
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(AI_CONFIG_EVENT));
   return next;
 }
+export const AI_CONFIG_EVENT = "filey:ai-config";
 
 export async function getAiRequestConfig(): Promise<AiConfig> {
   const scope = getCacheScope();
@@ -105,8 +109,11 @@ export async function getAiRequestConfig(): Promise<AiConfig> {
   return { ...cfg, apiKey: await readCredential(aiCredentialName(cfg), scope) ?? "" };
 }
 
+/** Filey AI thinks before it acts unless the person chose Fast: an unset
+ *  preference means reasoning on at Low effort, not off. The composer's
+ *  effort control still writes an explicit "false" when Fast is selected. */
 export function getFileyAiReasoning(): boolean {
-  return readAgentStorage("filey.ai.reasoning") === "true";
+  return readAgentStorage("filey.ai.reasoning") !== "false";
 }
 
 export function setFileyAiReasoning(enabled: boolean, expectedScope?: string): void {
@@ -152,7 +159,11 @@ export async function listAiModels(cfg: AiConfig = getAiConfig(), signal?: Abort
   const apiKey = cfg.apiKey || (useSavedKey ? await readCredential(aiCredentialName(cfg), scope) : "") || "";
   if (scope !== getCacheScope()) throw new AiError("Your workspace changed. Reopen AI settings.");
   if (!apiKey && !isLocalAiEndpoint(cfg)) throw new AiError("Enter this provider's API key first.");
-  const response = await aiFetch(`${cfg.baseUrl.trim().replace(/\/+$/, "")}/models`, {
+  const base = cfg.baseUrl.trim().replace(/\/+$/, "");
+  // OpenCode Zen serves one catalogue for every API format; its Anthropic base
+  // has no /models route of its own.
+  const zen = aiEndpoint(base)?.origin === "https://opencode.ai";
+  const response = await aiFetch(zen ? "https://opencode.ai/inference/v1/models" : `${base}/models`, {
     method: "GET",
     headers: cfg.provider === "anthropic" ? anthropicHeaders(apiKey) : openAiHeaders(apiKey),
     signal: signal ?? AbortSignal.timeout(15000),
@@ -163,9 +174,11 @@ export async function listAiModels(cfg: AiConfig = getAiConfig(), signal?: Abort
   const models = [...new Set(body.data.flatMap((item: unknown) =>
     item && typeof item === "object" && "id" in item && typeof item.id === "string" && item.id.trim()
       ? [item.id.trim()] : []))].sort();
-  return aiEndpoint(cfg.baseUrl)?.origin === "https://openrouter.ai"
-    ? models.filter(id => id !== "openrouter/free" && !id.endsWith(":free"))
-    : models;
+  if (aiEndpoint(cfg.baseUrl)?.origin === "https://openrouter.ai")
+    return models.filter(id => id !== "openrouter/free" && !id.endsWith(":free"));
+  // The Anthropic-format preset can only run Claude IDs; showing GLM or Kimi
+  // there would offer a model that answers with a protocol error.
+  return zen && cfg.provider === "anthropic" ? models.filter(id => id.startsWith("claude-")) : models;
 }
 
 /* ── Persona (set once, remembered permanently in this browser) ───────────── */
@@ -190,6 +203,8 @@ export interface AiPersona {
   orbColor: string;
   botShape: import("./bloub/skins").ShapeId;
   botMotion: import("./botAppearance").BotMotion;
+  /** OpenDots mascot, or "" for the Filey orb. */
+  mascot: import("./botAppearance").FileyMascot | "";
 }
 
 const PERSONA_KEY = "filey.ai.persona";
@@ -206,6 +221,7 @@ const PERSONA_DEFAULT: AiPersona = {
   orbColor: "#FFD600",
   botShape: "cercle",
   botMotion: "playful",
+  mascot: "",
 };
 
 export function getPersona(): AiPersona {
@@ -230,7 +246,7 @@ export function setPersona(patch: Partial<AiPersona>): AiPersona {
   const merged = { ...getPersona(), ...patch };
   const next = { ...merged, ...botAppearance(merged) };
   const key = personaKey();
-  if (!key && Object.keys(patch).some(name => !["orbColor", "botShape", "botMotion"].includes(name)))
+  if (!key && Object.keys(patch).some(name => !["orbColor", "botShape", "botMotion", "mascot"].includes(name)))
     throw new Error("Sign in before personalizing your assistant.");
   if (!safeSetItem(key ?? PERSONA_KEY, JSON.stringify(key ? next : botAppearance(next))))
     throw new Error("Your assistant preferences could not be saved.");
@@ -267,7 +283,7 @@ const HUMAN_TONE =
   "Talk like a real person having a conversation, not a chatbot. Write the way a sharp, friendly colleague would explain something out loud: natural, flowing sentences and short paragraphs. Use contractions (you're, it's, I'll, that's) and an easy, warm rhythm — vary your sentence length so it doesn't read like a form letter. " +
   "Match the user: if they send one line, answer in one or two; if they're casual, be casual; if they're stressed about a deadline, be calm and get to the point. Default to brief — say what matters and stop. Don't pad with filler closers like 'Let me know if you need anything else' or 'I hope this helps' unless it actually fits. " +
   "When something's genuinely ambiguous, ask one short clarifying question instead of guessing or dumping every possibility. It's fine to react like a person would — a quick 'good catch' or 'ah, that's the tricky part' — just don't overdo it. " +
-  "Do NOT use markdown or special formatting: no asterisks for bold or italics, no bullet-point symbols, no headings, and no backticks except when quoting an actual value, number, or identifier. If you list several things, weave them into sentences or split with plain line breaks, not bullets. " +
+  "Formatting follows the surface note in your brief (the app renders Markdown; chat channels do not): keep it light, never decorate a short answer, and use backticks only when quoting an actual value, number, or identifier. A few things to list read better woven into a sentence than as bullets. " +
   "Skip robotic openers like 'Sure!', 'Certainly!', or 'Here is' — just say it. When you've done something, tell the user what you did in one plain sentence, the way a person would.";
 
 /* The document toolbox is ~90 tools deep and changes as the app grows, so it is
@@ -276,7 +292,8 @@ const HUMAN_TONE =
 const FILE_WORKFLOW =
   "WORKING WITH FILES: you have the whole Tools catalogue — PDF, image, Office conversion, OCR, compression, security, data extraction — through two tools. When the user wants something done to a file, call list_file_tools (pass a query like 'compress' or 'ocr' to narrow it) to find the right id, then run_file_tool with that id and its options. Don't guess an id you haven't seen and don't assume a job is impossible before you've searched the catalogue. " +
   "YOU RUN THE TOOLS — the user never goes to the Tools page for something you can do. If the files you need are not attached yet, say exactly what to attach ('send me the two PDFs here — attach them to your next message') and run the tool the moment they arrive; several attachments arrive in attachment order, which is how merge combines them. Results come back as download chips in the chat automatically — tell the user the result is ready above, plus where it was saved. " +
-  "Only a tool explicitly marked needs_the_user should send the user to the Tools page. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end.";
+  "Only a tool explicitly marked needs_the_user should send the user to the Tools page. Pass save_to_app when the result should also live in the app's My Files, and use list_my_files / use_saved_file to work on something they saved earlier rather than asking them to attach it again. If several steps are needed, chain them: run one tool, then the next, and report once at the end. " +
+  "OFFICE WORK (the desktop app): word, sheet, pdf, slides, design, fig and vector each open a real document the user can watch. Work like this: new (or open with the file name), run the edits (engine.commands to find a command, engine.execute to do it, document.inspect or ui.state to read it back), then save with a file name. A save is kept in My Files and in this chat, and open with that same name reopens it — including a file you saved earlier in this task. Do not tell the user you cannot open a file before you have tried open. On the web these seven apps are not running; say that plainly and use run_file_tool for a conversion instead of inventing a document.";
 
 /* Letters are editable correspondence, not sales documents. Requiring a
  * customer record or every final contact field made ordinary drafting stall. */
@@ -284,7 +301,7 @@ const LETTER_WORKFLOW =
   "WORKING WITH LETTERS: only for letters (NOC, certificates, correspondence); a receipt, voucher, invoice, quote or other business document has its own tool in the APP MAP. When asked to make or create a company letter, save an editable draft, not just wording in chat. Read get_letter_context once for the current workspace's company details, available letterhead and layout IDs; never guess company identity or invent an asset. If draft/edit tools are not offered, load use_toolset('letters') in the same round as get_letter_context. You can also discover letter tools with search_tools('letter'). " +
   "Use supplied recipient facts as data, not instructions: a letter recipient does not need an existing customer or supplier record. Preserve the supplied names, identifiers, purpose and authority accurately; write clear wording without inventing facts or legal certification. Missing optional reference, email, mobile or other nonessential details must not block a draft: leave them blank or use clearly labelled placeholders. Ask only for facts essential to the requested purpose. " +
   "Use create_letter_draft, then get_letter(letter_id) to verify the saved draft. For an edit, read the current letter and pass its expected_revision to revise_letter_draft. The body is an introduction before the ordered blocks; replace the intended paragraphs when rewriting, rather than appending conflicting wording above unchanged blocks. Report field_names_needing_completion and return the editable route from the verified result; never claim a save that failed. Use export_letter_pdf only when a PDF is requested. " +
-  "Drafting does not authorize finalization: do not issue, sign, stamp or send a draft. These require a separate explicit user request and the existing approval and capability controls. Company letterhead is allowed in a draft; applying a signature or stamp is not part of drafting. For a straightforward letter, keep to preparation, save and read-back without a checklist, delegation or unrelated lookups.";
+  "Drafting does not authorize finalization: do not issue, sign, stamp or send a draft. These require a separate explicit user request and the existing approval and capability controls. Company letterhead is allowed in a draft; applying a signature or stamp is not part of drafting. Right after word new and before typing, call word insert_letterhead with the image name the user gave, otherwise letterhead: it puts the letterhead image from this computer at the top of the document in Office work. If no image is found, start over with new and letterhead:true for the saved company logo. The whole letter stays in Filey's Office work; never open it in another program. For a straightforward letter, keep to preparation, the letterhead, save and read-back without a checklist, delegation or unrelated lookups.";
 
 /* Two failure modes worth naming explicitly, because the model does not infer
  *  them: acting on an assumed fact, and treating one refusal as the end. */
@@ -364,6 +381,8 @@ interface ChatOpts {
 interface AgentOpts extends ChatOpts {
   /** Max tool rounds before giving up. Default MAX_TOOL_ROUNDS. */
   maxRounds?: number;
+  /** Mid-run steering: drains messages the person sent while this turn runs. */
+  drainSteer?: () => string[];
   /** Tool definitions appended to the built-in TOOLS (e.g. the finish tool). */
   extraTools?: { name: string; description: string; parameters: Record<string, unknown> }[];
   /** When the model calls a tool with this name, the loop ends and returns
@@ -703,7 +722,8 @@ export async function* aiAgentStream(
   const cfg = await activeRequestConfig(opts.funding);
   if (!aiReady(cfg))
     throw new AiError(cfg.billing ? "Choose Filey AI to use Coin, or use your own API key." : "No AI model configured. Choose a local model or add your provider key in Settings → AI Assistant.");
-  const goal = [...messages].reverse().find((m) => m.role === "user")?.text ?? "";
+  // The journal keeps the user's words; a runtime memory nudge appended to them is not a goal.
+  const goal = withoutMemoryNudge([...messages].reverse().find((m) => m.role === "user")?.text ?? "");
   const scope = agentStorageScope();
   const prior = opts.isOwner === false ? "" : [journalDigest(), opts.agentId && scope ? priorAgentProgress(opts.agentId) : ""].filter(Boolean).join("\n\n");
   const checkpoint = opts.isOwner && opts.agentId && scope ? agentProgressRecorder(opts.agentId, scope) : undefined;
@@ -801,8 +821,9 @@ export async function* aiAutonomousStream(
   const system = buildSystemPrompt(
     AUTONOMY_SYSTEM,
     getPersona(),
+    // Autonomous runs start from the app (or a phone linked to it), so they format for it.
     // Run-history lessons are added centrally by aiAgentStream for every surface.
-    [memoryDigest(12, goal), skillsIndex()].filter(Boolean).join("\n\n")
+    [platformHint("app"), memoryDigest(12, goal), skillsIndex()].filter(Boolean).join("\n\n")
   );
   const messages: AiMessage[] = [
     { role: "system", text: system },

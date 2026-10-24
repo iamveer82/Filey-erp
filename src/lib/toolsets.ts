@@ -48,29 +48,31 @@ export const CORE_TOOLS = [
   // reach for more
   "list_toolsets",
   "use_toolset",
+  // A real terminal is part of the desk, not a domain to unlock: "open
+  // Explorer", "run this repo", "check the build" must not need a toolset round.
+  "run_shell",
 ] as const;
 
 /** Everything else, by the domain a person would name. */
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   letters: {
-    about: "Office work: Word, Sheets, PDF, Slides, Designs, Fig, Vector, letters",
+    about: "Office work: Word, Sheets, PDF, Slides, Designs, letters",
     tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
   },
   cards: {
-    about: "Interactive answers in chat: cards (calculators, comparisons, planners, diagrams, 3D), charts, tables, KPIs, choices, design-card templates, photos",
+    about: "Cards, charts, tables, KPIs in chat",
     tools: ["show_ui", "show_openui", "card_templates", "find_image"],
   },
   video: {
-    about: "Brand/product videos from a brief or photo (user's fal key, approved in chat); track jobs",
+    about: "Brand videos from a brief or photo; track jobs",
     tools: ["create_video_draft", "list_video_jobs", "get_video_job", "cancel_video_job"],
   },
   service: {
-    about: "Projects, delivery tasks, time entries and support tickets",
+    about: "Projects, tasks, time entries, support tickets",
     tools: ["list_work_items", "save_work_item"],
   },
   sales: {
-    about:
-      "Invoice branding (logo, bank details, stamp, signature on/off), templates, pending save recovery, sending, PDFs, payments, recurring billing, orders and receipts",
+    about: "Invoices, quotes, orders, receipts, PDFs",
     tools: [
       "list_pending_invoice_saves",
       "retry_invoice_save",
@@ -84,46 +86,66 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "set_invoice_preset",
       "create_order",
       "list_orders",
+      "update_order_status",
       "list_quotes",
+      "get_quote",
+      "set_quote_status",
+      "convert_quote_to_invoice",
+      "record_invoice_payment",
+      "list_invoice_payments",
+      "record_advance",
+      "list_advances",
+      "apply_advance_to_invoice",
+      "list_recurring",
+      "cancel_recurring",
       "create_payment_receipt",
       "list_payment_receipts",
+      "update_payment_receipt_status",
       "share_document_link",
     ],
   },
   purchasing: {
-    about: "Purchase orders, supplier bills, suppliers, VAT declaration letters",
+    about: "Purchase orders, supplier bills, suppliers, VAT letters",
     tools: [
       "create_declaration_letter",
       "list_declaration_letters",
       "create_purchase_order",
+      "list_purchase_orders",
+      "get_purchase_order",
+      "update_purchase_order_status",
+      "receive_purchase_order",
+      "record_po_payment",
       "create_purchase_invoice_draft",
       "list_purchase_invoices",
       "create_supplier",
+      "update_supplier",
     ],
   },
   links: {
-    about:
-      "Record links: which quote became an invoice, what a customer generated; read or join records",
+    about: "Which quote became an invoice; join records",
     tools: ["find_links", "link_records"],
   },
   inventory: {
-    about: "Create products, stock levels and adjustments",
-    tools: ["create_product", "adjust_stock"],
+    about: "Products, stock levels, adjustments",
+    tools: ["create_product", "update_product", "adjust_stock", "stock_history", "reorder_low_stock"],
   },
   logistics: {
-    about:
-      "Delivery challans, goods received notes, returns and packing lists — what physically moved, to whom",
+    about: "Delivery challans, GRNs, returns, packing lists",
     tools: ["create_delivery_challan", "list_delivery_challans", "create_packing_list", "list_packing_lists"],
   },
   accounting: {
-    about: "Ledger, VAT, cheques, banks, expenses, ageing and statements",
+    about: "Ledger, VAT, cheques, banks, expenses, ageing",
     tools: [
       "log_expense",
       "list_expenses",
       "list_transactions",
+      "create_account",
+      "post_journal_entry",
       "list_bank_accounts",
+      "save_bank_account",
       "list_cheques",
       "record_cheque",
+      "update_cheque_status",
       "financial_statements",
       "receivables_aging",
       "payables_aging",
@@ -131,7 +153,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     ],
   },
   crm: {
-    about: "Leads, deals, pipeline, deal contacts and activity history",
+    about: "Leads, deals, pipeline, contacts, activities",
     tools: [
       "create_lead",
       "find_leads",
@@ -147,21 +169,27 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "get_deal_contacts",
       "set_deal_contact",
       "score_lead",
+      "update_customer",
+      "add_crm_note",
     ],
   },
   people: {
-    about: "Employees, attendance, payroll and WPS",
+    about: "Employees, attendance, payroll, WPS",
     tools: [
       "list_employees",
+      "create_employee",
+      "update_employee",
       "mark_attendance",
+      "list_attendance",
       "get_attendance_today",
       "run_payroll",
       "list_payroll",
+      "mark_salary_paid",
       "generate_wps_file",
     ],
   },
   files: {
-    about: "Read, edit and convert PDFs and images; saved files",
+    about: "Read, edit, convert files; saved files",
     tools: [
       "run_file_tool",
       "list_file_tools",
@@ -172,7 +200,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     ],
   },
   messaging: {
-    about: "Email, WhatsApp, connected apps and campaigns",
+    about: "Email, WhatsApp, connected apps, campaigns",
     tools: [
       "send_gmail",
       "send_whatsapp",
@@ -181,19 +209,43 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "prepare_invoice_whatsapp",
       "list_whatsapp_messages",
       "connect_whatsapp",
+      "list_channels",
+      "send_to_channel",
       "composio_run",
       "list_connected_apps",
       "list_email_templates",
+      "save_email_template",
+      "delete_email_template",
       "create_campaign",
       "list_campaigns",
     ],
   },
+  team: {
+    about: "Team channels and the comms log",
+    tools: [
+      "list_team_channels",
+      "create_team_channel",
+      "post_team_message",
+      "list_comms_log",
+      "log_call",
+    ],
+  },
+  admin: {
+    about: "Company details and workspace users",
+    tools: [
+      "get_company_profile",
+      "update_company_profile",
+      "list_users",
+      "create_user",
+      "set_user_active",
+    ],
+  },
   web: {
-    about:
-      "Keyless market data, holidays and licensed images; public web research and Filey browser windows",
+    about: "Market data, web research, Filey browser",
     tools: [
       "read_web_page",
       "search_web",
+      "viking",
       "http_fetch",
       "enrich_company_website",
       "find_prospects",
@@ -209,31 +261,29 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     ],
   },
   computer: {
-    about:
-      "Use a private agent browser workspace, or observe and operate Windows desktop apps",
+    about: "Agent browser, or operate Windows apps",
     tools: ["computer_use", "agent_computer"],
   },
   social: {
-    about: "Post and schedule to connected social accounts",
+    about: "Post and schedule to social accounts",
     tools: ["list_social_accounts", "schedule_social_post", "list_social_posts"],
   },
   reminders: {
-    about: "Reminders and follow-ups",
-    tools: ["add_reminder", "list_reminders", "cancel_reminder", "remind_me"],
+    about: "Reminders and automations",
+    tools: ["add_reminder", "list_reminders", "cancel_reminder", "remind_me", "list_follow_ups", "complete_follow_up", "reschedule_follow_up", "list_notifications", "create_automation", "list_automations", "update_automation"],
   },
   skills: {
-    about: "Helper scripts of the pre-installed Instagram, YouTube and LinkedIn skills",
+    about: "Instagram, YouTube, LinkedIn scripts",
     tools: ["run_skill_script"],
   },
   system: {
-    about: "Secrets, saved procedures and the machine itself",
+    about: "Secrets, procedures, the machine",
     tools: [
       "save_secret",
       "recall_secret",
       "list_secrets",
       "learn_skill",
       "import_skill",
-      "run_shell",
     ],
   },
 };

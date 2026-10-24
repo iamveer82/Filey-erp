@@ -3,6 +3,11 @@ import { afterEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ scope: "org:user:alice", run: vi.fn(), success: vi.fn(), error: vi.fn() }));
 vi.mock("../../lib/api", () => ({ getCacheScope: () => state.scope }));
 vi.mock("../../lib/ai", () => ({ aiReady: () => true, aiAutonomous: state.run, DENY_SENSITIVE: () => "deny" }));
+// Automations run on Filey Agent (Hermes); the fake keeps the old (goal, options) shape.
+vi.mock("../../lib/fileyAgent", () => ({
+  fileyAgentReply: (_chatId: string, goal: string, ctx: unknown) => state.run(goal, ctx),
+  fileyAgentStatus: () => ({ state: "ready" }),
+}));
 vi.mock("../../lib/ui", () => ({ useUI: () => ({ toast: { success: state.success, error: state.error } }) }));
 import AgentScheduler from "../AgentScheduler";
 import { loadTasks, saveTasks } from "../../lib/agentTasks";

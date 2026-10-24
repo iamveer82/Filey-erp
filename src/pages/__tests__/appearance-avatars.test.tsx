@@ -46,6 +46,19 @@ it("selects and restores the assistant's look and motion through Appearance", ()
   );
 });
 
+it("lets the Filey agent wear an OpenDots mascot", () => {
+  render(
+    <UIProvider>
+      <AppearancePanel />
+    </UIProvider>
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Mint mascot" }));
+  expect(getPersona().mascot).toBe("mint");
+  expect(screen.getByRole("button", { name: "Mint mascot" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "Orb face" }));
+  expect(getPersona().mascot).toBe("");
+});
+
 it("keeps a custom personal avatar on save failure, retries it and supports returning to initials", async () => {
   save.mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(undefined);
   render(

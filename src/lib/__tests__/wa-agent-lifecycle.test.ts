@@ -19,6 +19,12 @@ const mocks = vi.hoisted(() => ({
   ttsAvailable: vi.fn(),
   textToSpeech: vi.fn(),
   deliverFile: vi.fn(),
+  forget: vi.fn(),
+}));
+// Filey Agent (Hermes) answers channel turns; the fake keeps the old (messages, options) shape.
+vi.mock("../fileyAgent", () => ({
+  fileyAgentReply: (_chatId: string, text: string, ctx: unknown) => mocks.agent([{ role: "user", text }], ctx),
+  forgetFileyAgentSession: mocks.forget,
 }));
 vi.mock("../agentStorage", () => ({
   agentStorageScope: () => state.scope,
@@ -326,7 +332,7 @@ it("rejects requests from a prior native bridge session or a disconnected phone"
   expect(mocks.agent).not.toHaveBeenCalled();
   expect(mocks.clearProgress).not.toHaveBeenCalled();
   expect(mocks.reply).toHaveBeenCalledWith("old-session", "", "session-old");
-  expect(mocks.reply).toHaveBeenCalledWith("disconnected", "", "session-one");
+  expect(mocks.reply).toHaveBeenCalledWith("disconnected", expect.stringContaining("isn't connected"), "session-one");
 });
 
 it("does not run a control whose owner lookup completed after stop", async () => {
@@ -434,14 +440,17 @@ it("restores delivered remote conversation history without restoring runtime app
   const first = await runRemoteAgentTurn(remoteTurn("telegram", "Review private invoice 5"));
   first.delivered("Saved conversation result; delivery accepted");
   clearRemoteAgentTurns(state.scope!, "telegram");
-  mocks.agent.mockImplementationOnce(async (messages, opts) => {
-    expect(JSON.stringify(messages)).toContain("delivery accepted");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => {
+    // The engine session keeps the conversation; only the runtime approval is gone.
     expect(opts.confirm("email_invoice", { id: 5 })).toBe(false);
     return "Approval expired after restart";
   });
   const second = await runRemoteAgentTurn(remoteTurn("telegram", "YES"));
   second.delivered();
+  expect(mocks.forget).not.toHaveBeenCalled();
   clearRemoteAgentConversation(state.scope!, "telegram", "971500000001");
+  // A cleared conversation starts a fresh engine session too.
+  expect(mocks.forget).toHaveBeenCalledWith("telegram:971500000001");
   const third = await runRemoteAgentTurn(remoteTurn("telegram", "Fresh context"));
   third.delivered();
   expect(JSON.stringify(mocks.agent.mock.calls[2][0])).not.toContain("Review private invoice 5");

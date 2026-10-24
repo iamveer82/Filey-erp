@@ -14,3 +14,7 @@ pub mod telegram;
 pub mod print;
 pub mod agent_overlay;
 pub mod genui;
+pub mod word_desktop;
+pub mod always_on;
+pub mod agent_engine;
+pub mod mcp_server;

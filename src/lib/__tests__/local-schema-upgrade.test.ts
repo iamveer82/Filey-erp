@@ -8,6 +8,8 @@ const native = vi.hoisted(() => {
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: { key?: string; value?: string; entries?: [string, string | null][]; expected?: [string, string | null][] }) => {
     if (command === "cache_get") return native.values.get(args.key!) ?? null;
+    // A native layer without read stamps: every read takes the full cache_get path.
+    if (command === "cache_get_fresh") return null;
     if (command === "cache_set") {
       native.writes.push(command); native.values.set(args.key!, args.value!); return;
     }

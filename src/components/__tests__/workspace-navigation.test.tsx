@@ -3,11 +3,15 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import WorkspaceNavigation from "../WorkspaceNavigation";
 import { MODULES } from "../../modules/registry";
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); skin.mascot = ""; });
 
 vi.mock("../../lib/i18n", () => ({ useLang: () => ({ t: (text: string) => text }) }));
 vi.mock("../../modules/registry", async original => ({ ...(await original<typeof import("../../modules/registry")>()), prefetchModule: vi.fn() }));
-vi.mock("../BloubBot", () => ({ default: () => <span data-testid="animated-assistant" /> }));
+const skin = vi.hoisted(() => ({ mascot: "" }));
+vi.mock("../BloubBot", () => ({
+  default: () => <span data-testid="animated-assistant" />,
+  useBotSkin: () => ({ mascot: skin.mascot }),
+}));
 
 const modules = [
   { id: "agent", to: "/agent", label: "Filey AI", icon: "agent", desc: "Business assistant" },
@@ -16,6 +20,16 @@ const modules = [
   { id: "orders", to: "/orders", label: "Orders", icon: "orders", desc: "Sales orders" },
   { id: "settings", to: "/settings", label: "Settings", icon: "settings", desc: "Workspace preferences" },
 ];
+
+it("shows the chosen OpenDots mascot beside Filey AI", () => {
+  skin.mascot = "mint";
+  render(<MemoryRouter>
+    <WorkspaceNavigation modules={modules} isDesktop mobileOpen={false} onNavigate={() => {}} />
+  </MemoryRouter>);
+  const link = screen.getByRole("link", { name: "Filey AI" });
+  expect(link.querySelector("img")).toHaveAttribute("src", "/mascots/mint.png");
+  expect(screen.queryByTestId("animated-assistant")).not.toBeInTheDocument();
+});
 
 it("keeps permitted pages reachable without a Browser shortcut in Tools", () => {
   render(<MemoryRouter><WorkspaceNavigation modules={MODULES} isDesktop mobileOpen={false} onNavigate={() => {}} /></MemoryRouter>);

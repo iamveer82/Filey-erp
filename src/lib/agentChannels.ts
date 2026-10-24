@@ -1,6 +1,7 @@
 import { enqueueAgentTask, AgentTask } from "./agentCore";
+import { CHANNELS, type ChannelId } from "./channelRegistry";
 
-export type ChannelSource = "app" | "whatsapp";
+export type ChannelSource = ChannelId;
 
 export type ChannelMessage = {
   source: ChannelSource;
@@ -42,4 +43,22 @@ export async function ingestChannelMessage(message: ChannelMessage, userId: stri
     input: normalized.payload,
     idempotencyKey: normalized.dedupeKey,
   } satisfies AgentTask);
+}
+
+/** What the agent can be reached on, and how. The agent reads this to answer
+ *  "where can I send this?" without knowing the app's internals. */
+export function channelCatalogue(): {
+  channel: ChannelId;
+  label: string;
+  remote: boolean;
+  files: boolean;
+  delivery: string;
+}[] {
+  return Object.values(CHANNELS).map((c) => ({
+    channel: c.id,
+    label: c.label,
+    remote: c.remote,
+    files: c.files,
+    delivery: c.delivery,
+  }));
 }

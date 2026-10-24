@@ -89,6 +89,27 @@ it("discards a provider reply if the workspace changed away and back while it wa
   expect(fetchFn).toHaveBeenCalledOnce();
 });
 
+it("steers a running answer with words sent while the model was still replying", async () => {
+  const bodies: string[] = [];
+  const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+    bodies.push(String(init.body));
+    return new Response(JSON.stringify(oa(bodies.length === 1 ? "Drafting the invoice." : "Drafting it with the blue template.")));
+  });
+  const queued = ["Use the blue template instead"];
+  let drains = 0;
+  // Round 1 opens with nothing queued; the message arrives while the model is
+  // answering, so the completion boundary must take another round.
+  const { final } = await collect(runAgentStream(
+    [{ role: "user", text: "Say hello" }],
+    { drainSteer: () => (++drains === 2 ? queued.splice(0) : []) },
+    { cfg: { provider: "openai", baseUrl: "https://example.test", model: "test", apiKey: "test" }, fetchFn },
+  ));
+  expect(final).toBe("Drafting it with the blue template.");
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1]).toContain("Use the blue template instead");
+  expect(bodies[1]).toContain("change to the current task");
+});
+
 describe("cancellation at a yielded completion boundary", () => {
   it.each([
     ["openai", "stop"], ["openai", "other-workspace"], ["openai", "away-and-back"],
@@ -295,11 +316,12 @@ it("grounds desktop browser availability on the first request without exposing i
   expect(prompt).toContain("panel is open, with 1 known tabs");
   expect(prompt).toContain("Use workspace_browser list");
   expect(prompt).toContain("Opening URLs and listing tabs work even with a text-only model");
-  expect(prompt).toContain("Never ask for a password in chat");
+  expect(prompt).toContain("type it into the password field and do not repeat it");
   expect(prompt).not.toContain("Untrusted page title");
   expect(bodies[0].tools.some(t => t.function.name === "workspace_browser")).toBe(true);
+  const nextRun = bodies.length;
   await collect(runAgentStream([{ role: "user", text: "Open Instagram" }], { isOwner: true }, deps));
-  expect(bodies[1].messages.map(m => m.content).join("\n")).not.toContain("panel is open");
+  expect(bodies[nextRun].messages.map(m => m.content).join("\n")).not.toContain("panel is open");
 });
 
 it("executes a requested website open in the built-in browser with a text-only model", async () => {

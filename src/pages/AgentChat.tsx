@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -7,10 +8,8 @@ import {
   Paperclip,
   X,
   Download,
-  FolderOpen,
   Brain,
   Trash2,
-  ShieldAlert,
   ArrowUp,
   ArrowDown,
   FileText,
@@ -28,8 +27,9 @@ import {
   MoreHorizontal,
   SquarePen,
   Plug,
+  Share2,
 } from "lucide-react";
-import BloubBot from "../components/BloubBot";
+import { AgentFace } from "../components/BloubBot";
 import CoinMark from "../components/CoinMark";
 import ThinkingDots from "../components/ThinkingDots";
 import GenUiCard from "../components/GenUiCard";
@@ -37,7 +37,6 @@ import GenUiView from "../components/GenUiView";
 import { cardFromArgs, openUiFromArgs, viewFromArgs } from "../lib/genUi";
 import OpenUiCard from "../components/OpenUiCard";
 import AgentRunProgress from "../components/AgentRunProgress";
-import AgentChatStarters from "../components/AgentChatStarters";
 import { VideoJobCard } from "../components/AgentVideoPanel";
 import AgentMediaPanel, { MediaJobCard } from "../components/AgentMediaPanel";
 import { AgentAccessControl, AgentEffortControl } from "../components/AgentComposerControls";
@@ -47,19 +46,22 @@ import { aiEffortLevels, EFFORT_LABELS, type AiEffort } from "../lib/aiEndpoint"
 import { getBrowserPanelState, subscribeBrowserPanel, setBrowserPanelOpen, selectAgentBrowser } from "../lib/desktopBrowser";
 import { enableComputerUse, disableComputerUse } from "../lib/computerUse";
 import { AGENT_STORAGE_EVENT, agentStorageScope, readAgentStorage, writeAgentStorage } from "../lib/agentStorage";
-import { botExpressionFor, botStateFor } from "../lib/botMood";
 import { GitBranch, Globe, Laptop } from "lucide-react";
 import { useDeviceLink } from "../components/LinkedDevices";
 import { getReachConfig, setReachConfig } from "../lib/reach";
 import Markdown from "../components/Markdown";
-import { openFolder, saveBytes } from "../lib/localPaths";
-import { isNativeApp, shareNativeFile } from "../lib/nativePlatform";
+import { saveBytes, hasTauri } from "../lib/localPaths";
+import { isNativeApp, nativeFileUrl, shareNativeFile } from "../lib/nativePlatform";
 import { ErrorBanner, Modal } from "../components/ui";
+import { toast } from "sonner";
 import AutomationsDrawer from "../components/AutomationsDrawer";
+import AgentEngineStatus from "../components/AgentEngineStatus";
+import ApprovalCard from "../components/ApprovalCard";
+import QueuedApprovals from "../components/QueuedApprovals";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { buildAiContext } from "../lib/aiContext";
-import { getAgentMode, setAgentMode, type AgentMode } from "../lib/agentMode";
+import { fullAccessPreapproved, getAgentMode, grantDesktopFullAccess, setAgentMode, type AgentMode } from "../lib/agentMode";
 import { isToolAllowed } from "../lib/capabilities";
 import { runAgentTurn } from "../lib/agentTurn";
 import { linkedAgentTurn, preferLinked } from "../lib/linkedAgent";
@@ -100,6 +102,8 @@ import {
   type ChatTurn,
 } from "../lib/aiChats";
 import { enqueueFinancialAssistantTurn } from "../lib/agentTaskService";
+import { agentCommand } from "../lib/agentCommands";
+import { fileyAgentEnabled, fileyAgentSlash } from "../lib/fileyAgent";
 import { cn } from "../lib/format";
 import { startDictation, speechRecognitionSupported } from "../lib/voice";
 import {
@@ -137,6 +141,11 @@ export interface AgentChatStatus {
   busy: boolean;
   approvalPending: boolean;
   stop: () => void;
+  /** Compose from the shell's Filey AI bar, without opening the chat section. */
+  send?: (text: string) => void;
+  /** The approval on screen, for the bar's permission section. */
+  approval?: { id: number; name: string; args: Record<string, unknown>; preview: string } | null;
+  settleApproval?: (ok: boolean) => void;
 }
 
 interface AgentChatProps {
@@ -172,7 +181,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     active && location.pathname === "/agent" && typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope) ? location.state.draft.slice(0, 4000) : ""
   );
   const [busy, setBusy] = useState(false);
-  const [auto, setAuto] = useState(false);
+  const [iteration, setIteration] = useState(0);
+  const [auto, setAuto] = useState(() => import.meta.env.DEV && "__TAURI_INTERNALS__" in window && !!scope);
   const [err, setErr] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -182,6 +192,12 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   const draftsRef = useRef(new Map<string, { text: string; files: File[] }>());
   const [pendingConfirm, setPendingConfirm] = useState<PendingApproval | null>(null);
   const approvalIdRef = useRef(0);
+  /** Stable bridge for the shell's bar: `send` is rebuilt every render. */
+  const sendRef = useRef<(text: string) => void>(() => {});
+  const shellSend = useCallback((text: string) => { void sendRef.current(text); }, []);
+  /** Messages typed while a turn is running. The harness drains these between
+   *  rounds, so they steer the current task instead of being dropped. */
+  const steerRef = useRef<string[]>([]);
   const [memOpen, setMemOpen] = useState(false);
   const [mems, setMems] = useState<Memory[]>([]);
   const [histOpen, setHistOpen] = useState(false);
@@ -323,6 +339,16 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   useDeviceLink();
   const linkedLabel = linkedHost()?.label;
   const [mode, setMode] = useState<AgentMode>(getAgentMode);
+  // Dev desktop: one grant per signed-in workspace for this app session, so a
+  // later switch to Plan or Manual is kept until Filey is restarted.
+  useEffect(() => {
+    if (!import.meta.env.DEV || !scope || !("__TAURI_INTERNALS__" in window)) return;
+    if (sessionStorage.getItem("filey.dev.fullAccess") === scope) return;
+    grantDesktopFullAccess();
+    sessionStorage.setItem("filey.dev.fullAccess", scope);
+    setMode(getAgentMode());
+    setAuto(true);
+  }, [scope]);
   const [effort, setEffort] = useState<AiEffort>(() => {
     const saved = readAgentStorage("filey.agent.effort");
     return saved && Object.prototype.hasOwnProperty.call(EFFORT_LABELS, saved) ? saved as AiEffort : "auto";
@@ -436,12 +462,20 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
   }, [active, input]);
 
-  // Route this session's sensitive-action approvals through an in-app modal.
+  // Route this session's sensitive-action approvals through a card in the chat.
   // Ordinary section changes keep its exact resolver and arguments pending.
   // pendingRef mirrors pendingConfirm so unmount cleanup can settle whatever
   // is on screen: leaving with the dialog up used to strand its resolver
   // unreached — the awaiting runTool promise (and the whole turn) hung forever.
   const pendingRef = useRef<PendingApproval | null>(null);
+  /** Settle the approval on screen (also used by the shell's permission section). */
+  const settleApproval = useCallback((ok: boolean) => {
+    const request = pendingRef.current;
+    if (!request) return;
+    request.resolve(ok);
+    pendingRef.current = null;
+    setPendingConfirm(current => current?.resolve === request.resolve ? null : current);
+  }, []);
   const stop = useCallback(() => {
     abortRef.current?.abort();
     pendingRef.current?.resolve(false);
@@ -450,20 +484,38 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     void disableComputerUse().catch(() => {});
   }, []);
   useEffect(() => {
-    onStatusChange?.({ busy, approvalPending: !!pendingConfirm, stop });
-  }, [busy, pendingConfirm, stop, onStatusChange]);
+    onStatusChange?.({
+      busy,
+      approvalPending: !!pendingConfirm,
+      stop,
+      send: shellSend,
+      approval: pendingConfirm
+        ? {
+            id: pendingConfirm.id,
+            name: pendingConfirm.name,
+            args: pendingConfirm.args,
+            preview: JSON.stringify(approvalArgs(pendingConfirm.name, pendingConfirm.args), null, 2),
+          }
+        : null,
+      settleApproval,
+    });
+  }, [busy, pendingConfirm, stop, onStatusChange, shellSend, settleApproval]);
   useEffect(() => () => {
     // A contained chat crash can unmount this session while its shell survives.
     onStatusChange?.({ busy: false, approvalPending: false, stop });
   }, [onStatusChange, stop]);
-  const requestConfirm = useCallback((name: string, args: Record<string, unknown>) =>
-    new Promise<boolean>((resolve) => {
+  const requestConfirm = useCallback((name: string, args: Record<string, unknown>) => {
+    // Full access already approved this desktop session. A caller-supplied
+    // confirm on WhatsApp still asks; this callback is only the in-app card.
+    if (fullAccessPreapproved(undefined, name)) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
       if (!scope || scope !== agentStorageScope() || abortRef.current?.signal.aborted) { resolve(false); return; }
       pendingRef.current?.resolve(false);
       const pc = { id: ++approvalIdRef.current, name, args, resolve };
       pendingRef.current = pc;
       setPendingConfirm(pc);
-    }), [scope]);
+    });
+  }, [scope]);
   useEffect(() => {
     setToolConfirm(requestConfirm);
     return () => {
@@ -489,9 +541,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   /** A callback from a replaced dialog must never settle its successor. */
   const settleConfirm = (request: PendingApproval, ok: boolean) => {
     if (pendingRef.current?.resolve !== request.resolve) return;
-    request.resolve(ok);
-    pendingRef.current = null;
-    setPendingConfirm(current => current?.resolve === request.resolve ? null : current);
+    settleApproval(ok);
   };
 
   // Persist the conversation (shared store with the popover copilot).
@@ -589,10 +639,61 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     if (!busy) changeChat(newChat());
   };
 
-  const send = async (raw: string) => {
+  const send = async (raw: string, display?: string) => {
     const q = raw.trim();
     const attached = files;
-    if (!active || (!q && !attached.length) || busy) return;
+    const command = !attached.length ? agentCommand(q) : null;
+    if (command?.kind === "stop") {
+      abortRef.current?.abort();
+      setInput("");
+      if (!busy && active) setChat(c => ({ ...c, turns: [...c.turns, { role: "user", text: q }, { role: "assistant", text: command.text }] }));
+      return;
+    }
+    if ((!q && !attached.length)) return;
+    // Filey Agent is Hermes: every slash command is Hermes' own (/help, /model, /skills, /steer,
+    // /queue, /retry, skills…), running on this chat's session — also mid-task. Only /new (a new
+    // chat is a new session) and /stop (interrupts the session) are handled here.
+    if (fileyAgentEnabled() && !attached.length && /^\/\S/.test(q) && command?.kind !== "new") {
+      setInput("");
+      setErr(null);
+      try {
+        const result = await fileyAgentSlash(chat.id, q);
+        if (result.kind === "send" && !busy) { await send(result.message, result.display ?? q); return; }
+        const reply = result.kind === "output" ? result.text
+          : result.kind === "prefill" ? result.notice ?? "" : result.notice ?? "Sent to the running task.";
+        setChat(c => ({ ...c, turns: [...c.turns, { role: "user", text: q }, ...(reply ? [{ role: "assistant" as const, text: reply }] : [])] }));
+        if (result.kind === "prefill") setInput(result.message);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+        setInput(q);
+      }
+      return;
+    }
+    if (busy) {
+      // The turn is already running: this is steering, not a new task. The
+      // harness delivers it at the next round so the work so far is kept.
+      if (!q || command) return;
+      if (!scope || scope !== agentStorageScope()) { setErr("Your workspace changed. Start a new task in the current workspace."); return; }
+      steerRef.current.push(q);
+      setChat(c => ({ ...c, turns: [...c.turns, { role: "user", text: q, steering: true }] }));
+      setErr(null);
+      setInput("");
+      setIteration(n => n + 1);
+      toast.info(`Redirected current run (iteration ${iteration + 1}). I'll adjust using your correction.`);
+      return;
+    }
+    if (command?.kind === "new") {
+      setInput("");
+      const fresh = newChat();
+      fresh.turns = [{ role: "assistant", text: command.text }];
+      changeChat(fresh);
+      return;
+    }
+    if (command?.kind === "reply") {
+      setInput("");
+      setChat(c => ({ ...c, turns: [...c.turns, { role: "user", text: q }, { role: "assistant", text: command.text }] }));
+      return;
+    }
     if (!scope || scope !== agentStorageScope()) { setErr("Your workspace changed. Start a new task in the current workspace."); return; }
     if (!ready) {
       setErr(
@@ -609,7 +710,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     attach(null); // clears the files AND revokes the preview object URL
 
     const names = attached.map((f) => `📎 ${f.name}`).join("\n");
-    const shownText = attached.length ? `${q}${q ? "\n\n" : ""}${names}` : q;
+    const shownText = attached.length ? `${q}${q ? "\n\n" : ""}${names}` : display ?? q;
     // Explicit hint so the agent knows it can work on the attached files via
     // tools — several at once, in attachment order.
     const fileList = attached.map((f) => `"${f.name}"`).join(", ");
@@ -631,6 +732,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setShowJumpToLatest(false);
     setChat(withUser);
     setBusy(true);
+    setIteration(0);
     setRunProgress(undefined);
     void enqueueFinancialAssistantTurn(shownText).catch(() => {});
     setStreaming(auto ? "Planning…" : "");
@@ -679,13 +781,21 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       // Trusted interactive user; organization permissions remain enforced by the data API.
       const selectedEffort = modelConfig.billing === "credits" ? reasoningEnabled ? managedEffort : "auto" : aiEffortLevels(modelConfig).includes(effort) ? effort : "auto";
       const options = { isOwner: !!scope, signal: ctl.signal, turnId, agentId: chat.id, maxTokens: 4096, effort: selectedEffort,
-        ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm };
-      const here = () => runAgentTurn({ chatId: chat.id, goalText, history, images, auto }, options);
+        ...(modelConfig.billing === "credits" ? { reasoningEnabled } : {}), computerSession, confirm: requestConfirm,
+        drainSteer: () => steerRef.current.splice(0),
+        // Steering the agent could not take goes back to the box with the rest, never lost.
+        returnSteer: (texts: string[]) => { steerRef.current.unshift(...texts); } };
+      // chat.turns is the whole chat (only the model history is capped), so this is the real count.
+      const userTurn = chat.turns.filter(t => t.role === "user").length + 1;
+      const here = () => runAgentTurn({ chatId: chat.id, goalText, history, userTurn, images, auto }, options);
       // A connected computer that is open runs the turn with its own engine and tools.
       // ponytail: attachments stay here; send them over the link if phones need it.
       const stream = linkedHost() && !attached.length
-        ? preferLinked(() => linkedAgentTurn({ chatId: chat.id, goalText, history, auto }, { confirm: requestConfirm, signal: ctl.signal }), here)
+        ? preferLinked(() => linkedAgentTurn({ chatId: chat.id, goalText, history, userTurn, auto }, { confirm: requestConfirm, signal: ctl.signal }), here)
         : here();
+      // Sealed segments, plus the one still streaming in token by token.
+      let sealed = "";
+      let live = "";
       try {
         for (;;) {
           const step = await stream.next();
@@ -694,10 +804,15 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
             break;
           }
           const ev = step.value;
-          if (ev.type === "text" && ev.text) {
-            streamedRef.current = streamedRef.current
-              ? `${streamedRef.current}\n\n${ev.text}`
-              : ev.text;
+          if (ev.type === "delta" && ev.text) {
+            live += ev.text;
+            streamedRef.current = [sealed, live].filter(Boolean).join("\n\n");
+            setStreaming(streamedRef.current);
+          } else if (ev.type === "text" && ev.text) {
+            // The sealed text replaces whatever of it already streamed.
+            sealed = sealed ? `${sealed}\n\n${ev.text}` : ev.text;
+            live = "";
+            streamedRef.current = sealed;
             setStreaming(streamedRef.current);
           } else if (ev.type === "plan") {
             trace.plan = ev.steps;
@@ -809,15 +924,24 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       }
     } finally {
       ctl.abort(new DOMException("Task completed", "AbortError"));
+      // The session has no expiry: left open, the overlay and Filey's cursor stayed on screen
+      // after the task and computer access outlived the turn that was approved for it.
+      if (computerSessionId !== undefined) void disableComputerUse(computerSessionId).catch(() => {});
       endTurn(turnId); // no-op when already drained above — never leaks
       abortRef.current = null;
       streamedRef.current = "";
+      // Anything the run never reached (an engine that can't take steering, or
+      // a message typed as the task ended) goes back to the box, not the bin.
+      const leftover = steerRef.current.splice(0);
+      if (leftover.length)
+        setInput(current => [current.trim(), leftover.join("\n\n")].filter(Boolean).join("\n\n"));
       setBusy(false);
       setStreaming("");
       setLiveUi(undefined);
       setRunProgress(undefined);
     }
   };
+  sendRef.current = send;
 
   const openMemory = () => {
     setMems(listMemories());
@@ -920,7 +1044,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         if (dropped.length && !busy) attach([...files, ...dropped]);
       }}
     >
-      {histOpen && <aside id="filey-chat-history" aria-label="Chat history" className="filey-chat-history sticky top-0 flex shrink-0 flex-col self-start border-r border-border pr-3"
+      {histOpen && <aside id="filey-chat-history" aria-label="Chat history" className="filey-chat-history sticky top-0 flex shrink-0 flex-col self-start pr-3"
         onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); closeHistory(); } }}>
         <div className="flex h-11 shrink-0 items-center justify-between gap-2">
           <h2 className="pl-2 text-[13px] font-medium">Chats</h2>
@@ -960,14 +1084,18 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
 
         <header className="filey-chat-header">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="filey-chat-icon"><History size={20} /></button>
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <button ref={historyToggleRef} type="button" onClick={openHistory} aria-label="Chat history" title="Chat history" aria-expanded={histOpen} aria-controls="filey-chat-history" className="filey-chat-icon"><History size={18} /></button>
+              <div className="filey-chat-presence" aria-hidden="true">
+                {active && <AgentFace size={28} />}
+              </div>
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold leading-tight text-foreground" title={chat.title || "Filey AI"}>
+                <h1 className="truncate text-sm font-semibold leading-tight text-foreground" title={chat.title || "Filey"}>
                   {empty ? "New chat" : chat.title || "Conversation"}
                 </h1>
-                {busy && !pendingConfirm ? <ThinkingDots className="mt-1" />
-                  : (empty || busy) && <p role={busy ? "status" : undefined} className="mt-1 truncate text-xs text-muted-foreground">{busy ? "Waiting for your approval" : "How can I help you today?"}</p>}
+                <p role="status" className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {busy && pendingConfirm ? "Waiting for your approval" : busy ? "Thinking…" : "Here with you"}
+                </p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
@@ -1025,16 +1153,9 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
         >
           {empty && !busy ? (
             <div className="filey-chat-empty mx-auto max-w-xl text-center">
-              {/* The empty chat is where the bot has room to be itself, so this
-                  one animates: it breathes, blinks and looks around while it
-                  waits for a first question. */}
-              <div className="mx-auto mb-4 grid h-12 w-12 place-items-center">
-                {active && <BloubBot size={48} state="idle" label="Filey AI" ambient />}
-              </div>
-              <h2 className="text-xl font-medium leading-tight text-foreground tracking-tight sm:text-2xl">
-                What shall we work on?
-              </h2>
-              {!input.trim() && !files.length && <AgentChatStarters onDraft={text => { if (!busy && active) { setInput(text); textareaRef.current?.focus({ preventScroll: true }); } }} onAttach={() => { if (!busy && active) fileRef.current?.click(); }} />}
+              <p className="filey-chat-kicker">A little space to think</p>
+              <h2 className="filey-chat-ask">What’s on your mind?</h2>
+              <p className="filey-chat-stay">Your conversation stays here, across this chat.</p>
             </div>
           ) : (
             // Turns separate by spacing alone: ChatTurn carries no timestamp
@@ -1084,6 +1205,16 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
           className="filey-composer-dock"
         >
           <div className={COLUMN}>
+            {active && pendingConfirm && (
+              <ApprovalCard
+                key={pendingConfirm.id}
+                tool={pendingConfirm.name}
+                args={approvalArgs(pendingConfirm.name, pendingConfirm.args)}
+                onApprove={() => settleConfirm(pendingConfirm, true)}
+                onDecline={() => settleConfirm(pendingConfirm, false)}
+              />
+            )}
+            {active && !pendingConfirm && <QueuedApprovals />}
             {!ready && !busy && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>Choose an AI connection to start chatting.</span>
               <Link to="/settings?section=ai" className="btn-secondary">Set up AI <Settings2 size={14} /></Link>
@@ -1141,15 +1272,17 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 </div>
               )}
 
+              <AgentEngineStatus />
+
               {/* Input */}
               <textarea
                 ref={textareaRef}
                 aria-label="Message Filey AI"
                 aria-describedby="filey-message-hint"
-                data-ph={busy ? "Draft a follow-up…" : auto ? "Describe a task…" : "Ask Filey…"}
+                data-ph={busy ? `Steer this task (iteration ${iteration})…` : auto ? "Describe a task…" : "Ask Filey… (/help)"}
                 rows={1}
                 value={input}
-                placeholder={busy ? "Draft a follow-up…" : auto ? "Describe a task…" : "Ask Filey…"}
+                placeholder={busy ? `Steer this task (iteration ${iteration})…` : auto ? "Describe a task…" : "Ask Filey… (/help)"}
                 onChange={(e) => { if (busy) followUpEditedRef.current = true; setInput(e.target.value); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches)) {
@@ -1311,8 +1444,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                     <Mic size={20} />
                   </button>
                 )}
-                {/* Send and Stop keep the same position and touch target. */}
-                {busy ? (
+                {/* Send and Stop keep the same position and touch target. A
+                    running task can still take words: with text in the box the
+                    arrow stays, and Enter steers the current turn. */}
+                {busy && (
                   <button
                     type="button"
                     onClick={stop}
@@ -1322,13 +1457,14 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                   >
                     <Square size={12} fill="currentColor" />
                   </button>
-                ) : (
+                )}
+                {(!busy || input.trim() || files.length > 0) && (
                   <button
                     type="button"
                     onClick={() => void send(input)}
                     disabled={!input.trim() && !files.length}
                     aria-label="Send message"
-                    title="Send (Enter)"
+                    title={busy ? "Send to the running task (Enter)" : "Send (Enter)"}
                     className="filey-chat-icon filey-chat-send"
                   >
                     <ArrowUp size={20} />
@@ -1338,7 +1474,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               </div>
             </div>
             <p id="filey-message-hint" className="filey-composer-hint mt-2 px-1 text-center text-[11px] text-muted-foreground">
-              {busy ? "Draft your next message while Filey works." : <><span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
+              {busy ? `Iteration ${iteration}. Enter to steer the task while Filey works.` : <><span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
               <span className="filey-touch-hint">Tap the arrow to send</span></>}
             </p>
           </div>
@@ -1370,41 +1506,6 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
             <button type="button" className="btn-primary" disabled={busy} onClick={recoverHistory}>Recover history</button>
           </div>
         </Modal>
-        {active && pendingConfirm && (
-          <Modal key={pendingConfirm.id} open onClose={() => settleConfirm(pendingConfirm, false)} title="Approve action">
-            <p className="flex items-start gap-2 text-sm text-muted-foreground">
-              <ShieldAlert size={18} className="shrink-0 text-warning" />
-              <span>
-                The assistant wants to run{" "}
-                <b className="text-foreground">{pendingConfirm.name}</b>. This can change
-                data or send something out.
-              </span>
-            </p>
-            {Object.keys(pendingConfirm.args).length > 0 && (
-              <pre className="mt-3 max-h-60 overflow-auto rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-                {JSON.stringify(
-                  approvalArgs(pendingConfirm.name, pendingConfirm.args),
-                  null,
-                  2
-                )}
-              </pre>
-            )}
-            <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-              <button
-                type="button"
-                className="btn-ghost"
-                autoFocus
-                onClick={() => settleConfirm(pendingConfirm, false)}
-              >
-                Deny
-              </button>
-              <button type="button" className="btn-primary" onClick={() => settleConfirm(pendingConfirm, true)}>
-                Allow
-              </button>
-            </div>
-          </Modal>
-        )}
-
         <Modal open={active && memOpen} onClose={() => setMemOpen(false)} title="Agent memory">
           {mems.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
@@ -1498,7 +1599,10 @@ function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pe
   const [fileError, setFileError] = useState("");
   if (turn.role === "user") {
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
+        {turn.steering && (
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Steering the task</span>
+        )}
         <div className="filey-user-message max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-4 py-3 leading-relaxed text-foreground">
           {turn.text}
         </div>
@@ -1508,14 +1612,11 @@ function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pe
   return (
     <div className="group/msg">
       {/* Keep Filey's animated identity while working, and give replies the full width. */}
-      {active && pending && <div className="mb-2 grid h-7 w-7 place-items-center">
-        <BloubBot
-          size={28}
-          animate
-          ambient
-          state={botStateFor(pending ? "thinking" : "idle")}
-          expression={botExpressionFor(pending ? "thinking" : "idle")}
-        />
+      {active && pending && <div className="mb-2 flex items-center gap-2">
+        <div className="grid h-7 w-7 place-items-center">
+          <AgentFace size={28} />
+        </div>
+        <span className="text-xs text-muted-foreground">Filey is thinking</span>
       </div>}
       <div className="min-w-0 flex-1">
         <div
@@ -1545,37 +1646,180 @@ function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pe
         )}
         {!!turn.files?.length && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {turn.files.map((f, i) =>
-              // Desktop: the file is already on disk, so open it where it
-              // landed. Browser: hand over the blob as a real download.
-              f.mediaJobId ? (active ? <MediaJobCard key={f.mediaJobId} id={f.mediaJobId} /> : null) : f.videoJobId ? (active ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : null) : f.path ? (
-                <button
-                  key={i}
-                  type="button"
-                  title={f.path}
-                  onClick={() => {
-                    setFileError("");
-                    void (isNativeApp() ? shareNativeFile(f.path!, f.name) : openFolder(f.path!)).catch(error => {
-                      if ((error as Error).name !== "AbortError") setFileError((error as Error).message || "Could not open this file.");
-                    });
-                  }}
-                  className="btn-ghost max-w-full"
-                >
-                  <FolderOpen size={12} />
-                  <span className="max-w-[200px] truncate">{f.name}</span>
-                </button>
-              ) : f.url ? (
-                <a
-                  key={i}
-                  href={f.url}
-                  download={f.name}
-                  className="btn-ghost max-w-full"
-                >
-                  <Download size={12} />
-                  <span className="max-w-[200px] truncate">{f.name}</span>
-                </a>
-              ) : null
-            )}
+            {turn.files.map((f, i) => {
+              // Native desktop file on disk.
+              if (f.path) {
+                const path = f.path;
+                const fileUrl = nativeFileUrl(path);
+                const downloadFile = async () => {
+                  setFileError("");
+                  try {
+                    if (isNativeApp()) {
+                      // On Capacitor native, share the file (opens save dialog).
+                      await shareNativeFile(path, f.name);
+                    } else if (hasTauri) {
+                      // Read bytes from disk and save via save-as dialog.
+                      const bytes = await invoke<ArrayBuffer>("read_file", {
+                        path,
+                      });
+                      await saveBytes(f.name, new Uint8Array(bytes));
+                    } else {
+                      const link = document.createElement("a");
+                      link.href = fileUrl;
+                      link.download = f.name;
+                      link.click();
+                    }
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    if ((error as Error).name !== "AbortError")
+                      setFileError(message || "Could not download this file.");
+                  }
+                };
+                const shareFile = async () => {
+                  setFileError("");
+                  try {
+                    if (isNativeApp()) {
+                      await shareNativeFile(path, f.name);
+                    } else if (hasTauri) {
+                      const bytes = await invoke<ArrayBuffer>("read_file", {
+                        path,
+                      });
+                      await saveBytes(f.name, new Uint8Array(bytes));
+                    } else {
+                      const res = await fetch(fileUrl);
+                      const blob = await res.blob();
+                      const file = new File([blob], f.name, { type: "application/octet-stream" });
+                      if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file], title: f.name });
+                      } else {
+                        throw new Error("Sharing isn't available in this browser - use Download.");
+                      }
+                    }
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    if ((error as Error).name !== "AbortError")
+                      setFileError(message || "Could not share this file.");
+                  }
+                };
+                const copyFile = async () => {
+                  setFileError("");
+                  try {
+                    await navigator.clipboard.writeText(path);
+                    setFileError("Copied path");
+                    setTimeout(() => setFileError(""), 1500);
+                  } catch {
+                    setFileError("Could not copy path.");
+                  }
+                };
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    title={path}
+                    className="btn-ghost max-w-full flex items-center gap-2 px-3 py-2 text-left"
+                    onClick={downloadFile}
+                  >
+                    <Download size={12} />
+                    <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void shareFile(); }}
+                      className="btn-ghost w-8 h-8 shrink-0 rounded-full text-muted-foreground hover:bg-hover"
+                      aria-label={`Share ${f.name}`}
+                    >
+                      <Share2 size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void copyFile(); }}
+                      className="btn-ghost w-8 h-8 shrink-0 rounded-full text-muted-foreground hover:bg-hover"
+                      aria-label={`Copy path ${f.name}`}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </button>
+                );
+              }
+              // Browser object URL file.
+              if (f.url) {
+                const url = f.url;
+                const downloadFile = async () => {
+                  setFileError("");
+                  try {
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = f.name;
+                    link.click();
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    if ((error as Error).name !== "AbortError")
+                      setFileError(message || "Could not download this file.");
+                  }
+                };
+                const shareFile = async () => {
+                  setFileError("");
+                  try {
+                    const res = await fetch(url);
+                    const blob = await res.blob();
+                    const file = new File([blob], f.name, { type: "application/octet-stream" });
+                    if (navigator.canShare?.({ files: [file] })) {
+                      await navigator.share({ files: [file], title: f.name });
+                    } else {
+                      throw new Error("Sharing isn't available in this browser - use Download.");
+                    }
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : String(error);
+                    if ((error as Error).name !== "AbortError")
+                      setFileError(message || "Could not share this file.");
+                  }
+                };
+                const copyFile = async () => {
+                  setFileError("");
+                  try {
+                    await navigator.clipboard.writeText(url);
+                    setFileError("Copied URL");
+                    setTimeout(() => setFileError(""), 1500);
+                  } catch {
+                    setFileError("Could not copy URL.");
+                  }
+                };
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    className="btn-ghost max-w-full flex items-center gap-2 px-3 py-2 text-left"
+                    onClick={downloadFile}
+                  >
+                    <Download size={12} />
+                    <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void shareFile(); }}
+                      className="btn-ghost w-8 h-8 shrink-0 rounded-full text-muted-foreground hover:bg-hover"
+                      aria-label={`Share ${f.name}`}
+                    >
+                      <Share2 size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void copyFile(); }}
+                      className="btn-ghost w-8 h-8 shrink-0 rounded-full text-muted-foreground hover:bg-hover"
+                      aria-label={`Copy URL ${f.name}`}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </button>
+                );
+              }
+              // Media job / video job cards (existing behaviour).
+              if (f.mediaJobId) return active ? <MediaJobCard key={f.mediaJobId} id={f.mediaJobId} /> : null;
+              if (f.videoJobId) return active ? <VideoJobCard key={f.videoJobId} id={f.videoJobId} /> : null;
+              return null;
+            })}
           </div>
         )}
         {fileError && <ErrorBanner message={fileError} />}

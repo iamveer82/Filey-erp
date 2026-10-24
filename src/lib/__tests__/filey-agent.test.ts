@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 const runTool = vi.fn();
+const computer = vi.hoisted(() => ({ get: vi.fn(async () => 7), stop: vi.fn(async () => {}) }));
+vi.mock("../computerUse", () => ({ taskComputerSession: () => computer }));
 vi.mock("../aiTools", () => ({
   TOOLS: [
     { name: "create_invoice_draft", description: "Create draft invoice. Long detail.", parameters: { type: "object" }, run: vi.fn() },
@@ -51,19 +53,31 @@ describe("Filey Agent client", () => {
     });
 
     const confirm = vi.fn(() => true);
+    const controller = new AbortController();
     const events = [];
-    const stream = fileyAgentStream(client, "s1", "Invoice Acme for 2 oil at 500", { confirm, isOwner: true, turnId: "t9", agentId: "chat-1" });
+    const stream = fileyAgentStream(client, "s1", "Invoice Acme for 2 oil at 500", { confirm, isOwner: true, turnId: "t9", agentId: "chat-1", signal: controller.signal });
     let step = await stream.next();
     while (!step.done) { events.push(step.value); step = await stream.next(); }
 
     expect(runTool).toHaveBeenCalledWith("create_invoice_draft",
-      { customer_name: "Acme", items: [{ description: "Oil", qty: 2, unit_price: 500 }] }, confirm, true, "t9", undefined, undefined, "chat-1");
+      { customer_name: "Acme", items: [{ description: "Oil", qty: 2, unit_price: 500 }] }, confirm, true, "t9", controller.signal, computer.get, "chat-1");
+    expect(computer.stop).toHaveBeenCalledOnce();
     expect(events).toEqual([
-      { type: "tool_call", id: "t1", name: "create_invoice_draft", args: { name: "create_invoice_draft" } },
+      // The business action's own arguments (none in this fixture), not the filey_run wrapper.
+      { type: "tool_call", id: "t1", name: "create_invoice_draft", args: {} },
       { type: "tool_result", id: "t1", name: "create_invoice_draft", result: { ok: true, id: 41, number: "INV-0041", total: 1050 } },
       { type: "done", text: "Created INV-0041.", reason: "answered" },
     ]);
     expect(step.value).toBe("Created INV-0041.");
+  });
+
+  it("answers a window request immediately so the gateway does not keep waiting", async () => {
+    const agent = fakeAgent();
+    const client = new FileyAgentClient(agent.transport);
+    const answered = new Promise<Record<string, unknown>>(resolve => agent.onFrame(f => { if (f.id === "srq-win") resolve(f); }));
+    agent.emit({ jsonrpc: "2.0", id: "srq-win", method: "preview.read", params: { session_id: "s1" } });
+    expect(await answered).toMatchObject({ error: { code: 4404 } });
+    client.close();
   });
 
   it("a throwing tool still answers the agent instead of leaving it waiting", async () => {
