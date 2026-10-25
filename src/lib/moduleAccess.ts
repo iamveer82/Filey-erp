@@ -63,9 +63,27 @@ const toolModules: Record<string,string> = {
   list_bank_accounts:"bank-accounts",list_cheques:"cheques",record_cheque:"cheques",
   create_campaign:"marketing",list_campaigns:"marketing",list_email_templates:"email-templates",
   list_my_files:"files",use_saved_file:"files",run_file_tool:"letters",list_file_tools:"letters",read_attached_document:"files",
+  list_purchase_orders:"purchase-orders",update_purchase_order_status:"purchase-orders",receive_purchase_order:"purchase-orders",
+  list_follow_ups:"follow-ups",complete_follow_up:"follow-ups",
+  save_bank_account:"bank-accounts",save_email_template:"email-templates",delete_email_template:"email-templates",
+  update_customer:"customers",update_supplier:"suppliers",update_product:"inventory",update_order_status:"orders",
+  update_cheque_status:"cheques",update_payment_receipt_status:"payment-receipts",
+  create_employee:"people",update_employee:"people",mark_salary_paid:"people",list_attendance:"people",
+  create_account:"accounting",post_journal_entry:"accounting",
+  list_team_channels:"team",create_team_channel:"team",post_team_message:"team",
+  list_comms_log:"comms",log_call:"comms",
+  get_company_profile:"settings",
+  // Wiring audit 2026-10-23: each tool sits in the module whose screen does the same thing.
+  get_quote:"quoting",set_quote_status:"quoting",convert_quote_to_invoice:"invoicing",
+  record_invoice_payment:"invoicing",list_invoice_payments:"invoicing",apply_advance_to_invoice:"invoicing",
+  list_recurring:"invoicing",cancel_recurring:"invoicing",
+  record_advance:"customers",list_advances:"customers",
+  get_purchase_order:"purchase-orders",record_po_payment:"purchase-orders",reorder_low_stock:"purchase-orders",
+  stock_history:"inventory",reschedule_follow_up:"follow-ups",add_crm_note:"crm",
 };
 const domains: Record<string,string> = { sales:"invoicing",inventory:"inventory",accounting:"accounting",crm:"crm",people:"people",logistics:"delivery-challans",messaging:"integrations",social:"marketing",reminders:"follow-ups" };
-const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browser","workspace_browser","http_fetch"]);
+const ADMIN_TOOLS = new Set(["run_shell","computer_use","agent_computer","browser","workspace_browser","http_fetch",
+  "list_users","create_user","set_user_active","update_company_profile"]);
 /** Tools that belong to no business module: orientation, the agent's own
  *  memory and skills, public web/reference reads, and per-account secrets
  *  (credentialStore scopes those to the signed-in workspace already). Listed
@@ -79,9 +97,13 @@ const MODULE_FREE = new Set([
   "generate_image","work_service",
   // Personal AI-credit wallet; no business records or organization funds.
   "create_video_draft","list_video_jobs","get_video_job","cancel_video_job",
-  "read_web_page","search_web","enrich_company_website","find_prospects",
+  "read_web_page","search_web","viking","enrich_company_website","find_prospects",
   "read_github","read_github_file","search_github","watch_youtube","read_rss","read_social_page",
   "save_secret","recall_secret","list_secrets",
+  // The signed-in person's own notifications inbox.
+  "list_notifications",
+  // The agent's own standing jobs. Each run's tools are checked one by one.
+  "create_automation","list_automations","update_automation",
 ]);
 /** A link is a write into both sides, so it needs both modules. */
 const ENTITY_MODULE: Record<string,string> = {
@@ -105,6 +127,17 @@ export async function requireToolModuleAccess(name: string, args: Record<string,
     // The tool resolves the durable request and checks its actual document
     // module again before replaying; purchase-only roles must reach that check.
     if (!canUseModule(access, "invoicing") && !canUseModule(access, "purchase-invoices")) deny("invoicing");
+    return;
+  }
+  // A conversion reads the quote and writes an invoice: both sides' modules.
+  if (name === "convert_quote_to_invoice") {
+    for (const module of ["quoting", "invoicing"]) if (!canUseModule(access, module)) deny(module);
+    return;
+  }
+  // A supplier's advance lives with suppliers, a customer's with customers.
+  if (name === "record_advance" || name === "list_advances") {
+    const module = String(args.party).toLowerCase() === "supplier" ? "suppliers" : "customers";
+    if (!canUseModule(access, module)) deny(module);
     return;
   }
   if (name === "link_records" || name === "find_links") {

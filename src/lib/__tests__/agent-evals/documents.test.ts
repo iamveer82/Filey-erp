@@ -315,21 +315,12 @@ describe("the tool surface stays small", () => {
     expect(results[1]).toMatchObject({ ok: true, shown: true });
   });
 
-  it("offers Word up front only for document requests", async () => {
-    for (const [text, wanted] of [["write a word document for the landlord", true], ["save it as docx", true], ["open the proposal in Word", true], ["in other words, how are sales?", false]] as const) {
+  it("keeps Office apps and letter tools out of round 1; they load on demand", async () => {
+    for (const text of ["write a word document for the landlord", "open budget.xlsx and total column C", "sign the contract pdf", "in other words, how are sales?"]) {
       const model = scriptModel([says("ok")]);
       await run(text);
-      expect(model.firstOffered().includes("word"), text).toBe(wanted);
-    }
-  });
-
-  it("offers just the named Office app up front, not every PDF mention or the letter tools", async () => {
-    for (const [text, tool] of [["open budget.xlsx and total column C", "sheet"], ["make an excel sheet of my stock", "sheet"], ["In Sheets, make a table of my top customers", "sheet"],
-      ["sign the contract pdf", "pdf"], ["rotate page 2 of this PDF", "pdf"], ["send me the invoice pdf", ""]] as const) {
-      const model = scriptModel([says("ok")]);
-      await run(text);
-      for (const app of ["sheet", "pdf"]) expect(model.firstOffered().includes(app), `${text}: ${app}`).toBe(app === tool);
-      expect(model.firstOffered(), text).not.toContain("create_letter_draft");
+      for (const app of ["word", "sheet", "pdf", "create_letter_draft"]) expect(model.firstOffered(), text).not.toContain(app);
+      expect(model.firstOffered(), text).toContain("use_toolset");
     }
   });
 

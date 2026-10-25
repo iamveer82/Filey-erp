@@ -199,7 +199,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "summary": "Try Filey free for 14 days, then keep it for life with Freedom or move to the cloud with Pro.",
     "steps": [
       "Basic is a 14-day free trial. Create your Filey account online once and use every app on this computer: invoicing, CRM, inventory, accounting, Word, Sheets, PDF, Slides and design apps. Your data stays on this computer. New accounts also get $1 of Filey AI to try the agent. The trial is counted per account and per computer.",
-      "Freedom is a one-time payment of 999 AED: Filey on your computer for life, with every app, regular updates and support, on 2 computers. Your data stays on your computer, and you can move Freedom to a new PC from Devices.",
+      "Freedom is a one-time payment of 1499 AED: Filey on your computer for life, with every app, regular updates and support, on 2 computers. Your data stays on your computer, and you can move Freedom to a new PC from Devices.",
       "Pro is 36 AED a month: your workspace in the cloud, Filey on the web, sync across your devices, team members and backups. Cancel any time in Billing.",
       "When the trial ends without a plan, everything you made stays here to view, print and export; creating and editing need Freedom or Pro. Buying unlocks the app straight away, with nothing to reinstall.",
       "Filey AI is separate: buy Coin and use it on any plan, or use your own AI key.",

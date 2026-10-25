@@ -142,7 +142,6 @@ export default function FitPreview({
             style={{
               width: Math.round(baseWidth * scale),
               height: Math.round(a4Height * scale),
-              overflow: "hidden",
             }}
           >
             <div

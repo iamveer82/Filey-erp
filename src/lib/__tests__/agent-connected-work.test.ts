@@ -222,18 +222,16 @@ describe("invoice WhatsApp tools", () => {
 });
 
 describe("connected work discovery and permissions", () => {
-  it.each(["whatsapp:owner", "telegram:owner"])("does not bootstrap the owner's computer or personal browser for %s", async agentId => {
+  it.each(["whatsapp:owner", "telegram:owner"])("lets %s use the owner's computer with a session but never open a shell", async agentId => {
     const session = vi.fn(async () => 42);
-    expect(await runTool("computer_use", { action: "list_windows" }, () => true, true, "remote-turn", undefined, session, agentId)).toHaveProperty("error");
-    expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toMatchObject({ retry_safe: false });
-    expect(session).not.toHaveBeenCalled();
-    expect(runComputerUse).not.toHaveBeenCalled();
-    expect(desktopBrowserCommand).not.toHaveBeenCalled();
-    expect(offeredTools({ isOwner: true, computerSession: session, agentId }, new Set(["web"])).map(tool => tool.name)).not.toContain("workspace_browser");
-    setCapabilityEnabled("agent_computers", true);
+    expect(await runTool("computer_use", { action: "list_windows" }, () => true, true, "remote-turn", undefined, session, agentId)).toEqual({ windows: [] });
+    expect(session).toHaveBeenCalledOnce();
+    expect(runComputerUse).toHaveBeenCalled();
     expect(await runTool("workspace_browser", { action: "open", url: "https://example.test" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toHaveProperty("tab");
-    expect(desktopBrowserCommand).toHaveBeenCalledWith(expect.objectContaining({ action: "open" }), undefined, agentId);
-    expect(session).not.toHaveBeenCalled();
+    expect(desktopBrowserCommand).toHaveBeenCalledWith(expect.objectContaining({ action: "open" }), undefined);
+    expect(offeredTools({ isOwner: true, computerSession: session, agentId }, new Set(["web"])).map(tool => tool.name)).toContain("workspace_browser");
+    expect(await runTool("run_shell", { command: "echo hi" }, () => true, true, "remote-turn", undefined, undefined, agentId)).toMatchObject({ retry_safe: false });
+    expect(desktopBrowserCommand).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), agentId);
   });
   it("respects capability and mode revocation while approval is pending", async () => {
     const args = { action: "list_windows" };
@@ -270,8 +268,58 @@ describe("connected work discovery and permissions", () => {
     expect(session).toHaveBeenCalledOnce();
     expect(runComputerUse).toHaveBeenCalledWith(args, undefined, 42);
     vi.mocked(runComputerUse).mockClear();
-    expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/Remote and scheduled tasks/) });
+    expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/no desktop session/) });
     expect(runComputerUse).not.toHaveBeenCalled();
+  });
+  it("counts only computer inputs per turn, so reads stay free", async () => {
+    const session = vi.fn(async () => 42);
+    const run = (action: string, turnId = "input-turn") =>
+      runTool("computer_use", { action }, () => true, true, turnId, undefined, session);
+    try {
+      for (let i = 0; i < 20; i++) expect(await run("list_windows")).toEqual({ windows: [] });
+      for (let i = 0; i < 10; i++) expect(await run("app_click")).toEqual({ windows: [] });
+      expect(await run("app_click")).toMatchObject({ error: expect.stringMatching(/computer-input limit/) });
+      expect(await run("list_windows")).toEqual({ windows: [] });
+      expect(await run("app_click", "fresh-turn")).toEqual({ windows: [] });
+    } finally {
+      endTurn("input-turn");
+      endTurn("fresh-turn");
+    }
+    expect(await run("app_click")).toEqual({ windows: [] });
+  });
+  it("ends the computer window after 90 seconds, even for reads", async () => {
+    const session = vi.fn(async () => 42);
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const run = (turnId = "clock-turn") =>
+      runTool("computer_use", { action: "list_windows" }, () => true, true, turnId, undefined, session);
+    try {
+      expect(await run()).toEqual({ windows: [] });
+      now.mockReturnValue(1_090_001);
+      expect(await run()).toMatchObject({ error: expect.stringMatching(/90-second computer window/) });
+      expect(await run("new-clock-turn")).toEqual({ windows: [] });
+      endTurn("clock-turn");
+      expect(await run()).toEqual({ windows: [] });
+    } finally {
+      now.mockRestore();
+      endTurn("clock-turn");
+      endTurn("new-clock-turn");
+    }
+  });
+  it("caps browser steps per turn, and a new turn starts fresh", async () => {
+    setCapabilityEnabled("computer", true);
+    const tab_id = "filey-browser-00000000-0000-0000-0000-000000000000";
+    const run = (turnId = "browser-turn", action = "read") =>
+      runTool("workspace_browser", { action, tab_id }, () => true, true, turnId);
+    try {
+      for (let i = 0; i < 60; i++) expect(await run()).toHaveProperty("tabs");
+      expect(await run()).toMatchObject({ error: expect.stringMatching(/browser-step limit/) });
+      expect(await run("browser-turn", "stop")).toHaveProperty("tabs");
+      expect(await run("fresh-browser-turn")).toHaveProperty("tabs");
+    } finally {
+      endTurn("browser-turn");
+      endTurn("fresh-browser-turn");
+    }
+    expect(await run()).toHaveProperty("tabs");
   });
   const sensitive = ["prepare_invoice_whatsapp", "send_invoice_whatsapp", "workspace_browser"];
   const offered = (isOwner = true) => offeredTools({ isOwner }, new Set(["messaging", "web"])).map((tool) => tool.name);

@@ -27,7 +27,7 @@ export interface PlanCard {
 
 /* Display names: Basic (id "free", the 14-day trial), Pro (id "cloud"), Freedom (id "lite").
  * The ids are what the database, the webhook and licence tokens store, so they never follow
- * a rename. Prices are what Dodo charges: Pro 36 AED a month, Freedom 999 AED once. */
+ * a rename. Prices are what Dodo charges: Pro 36 AED a month, Freedom 1499 AED once. */
 export const PLANS: PlanCard[] = [
   {
     id: "free",
@@ -64,7 +64,7 @@ export const PLANS: PlanCard[] = [
     id: "lite",
     kind: "license",
     name: "Freedom",
-    price: "999 AED",
+    price: "1499 AED",
     period: " one-time",
     recommended: true,
     blurb: "Filey on your computer for life. Pay once, own it.",

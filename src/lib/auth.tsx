@@ -14,8 +14,9 @@ import { isLocalMode } from "./dataMode";
 import { getCacheIdentity, getCacheScope, setCacheOrg } from "./api";
 import { ConnectionUnavailableError, isTransientConnectionError } from "./connectionError";
 import { watchRealtimeSession, stopRealtime } from "./realtime";
-import { registerCloudDevice, checkCloudDeviceLogout, entitlement, collectPurchases, clearEntitlementCache, refreshAccess } from "./license";
+import { entitlement, collectPurchases, clearEntitlementCache, refreshAccess } from "./license";
 import { mfaRequired } from "./mfa";
+import { storedAccountFor, switchAccountStore } from "./accountStores";
 import { pendingProfile, queueProfile } from "./profileSync";
 import {
   assertLocalAccount,
@@ -175,11 +176,6 @@ interface AuthValue {
   mfaError: string | null;
   /** Re-check the assurance level (after a code is accepted). */
   refreshMfaPending: () => Promise<void>;
-  /** True when the org is at its cloud device limit and THIS device was
-   *  refused a slot. UI gates on this only when licensing is enforced. */
-  deviceLimitBlocked: boolean;
-  /** Re-attempt device registration (after the user released a slot). */
-  retryDeviceRegistration: () => Promise<void>;
   /** Returns needsOtp=false when Supabase confirmation is disabled (instant session). */
   signUpWithPassword: (c: Credential, password: string) => Promise<{ needsOtp: boolean }>;
   /** Passwordless: sends a login code to an existing account. */
@@ -510,40 +506,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshMfaPending]);
 
-  // Cloud device registry (20 per workspace): claim/refresh this device's slot on
-  // session start. Best-effort — a network blip must not lock the app.
-  const [deviceLimitBlocked, setDeviceLimitBlocked] = useState(false);
-  const retryDeviceRegistration = async () => {
-    try {
-      const r = await registerCloudDevice();
-      if (!r.ok && r.reason === "logged_out") await checkCloudDeviceLogout();
-      setDeviceLimitBlocked(!r.ok && r.reason === "limit");
-    } catch {
-      /* keep previous state */
-    }
-  };
-  useEffect(() => {
-    if (!session?.user || local) return;
-    void retryDeviceRegistration();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id, profile?.org_id]);
-
-  useEffect(()=>{
-    if(!session?.user || local)return;
-    const check=()=>{void checkCloudDeviceLogout().catch(()=>{});};
-    const changed=(event:Event)=>{
-      const tables=(event as CustomEvent<{tables?:string[]}>).detail?.tables;
-      if(!tables || tables.includes('org_devices'))check();
-    };
-    window.addEventListener('focus',check);
-    window.addEventListener('online',check);
-    window.addEventListener('filey:cloud-change',changed);
-    return()=>{
-      window.removeEventListener('focus',check); window.removeEventListener('online',check);
-      window.removeEventListener('filey:cloud-change',changed);
-    };
-  },[session?.user?.id,profile?.org_id,local]);
-
   // Local use has no paid feature gate and needs no plan request at startup.
   // Hosted render paths can still read the warmed tier synchronously.
   useEffect(() => {
@@ -603,12 +565,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           attempt.check();
           if (error) throw error;
           const identity = verifiedEmailIdentity(data);
+          // Another account on this computer opens its own books instead of being refused.
+          const switched = await switchAccountStore(identity.userId);
           assertLocalAccount(identity.userId);
           await rememberLocalCredential(identity.email, identity.userId, password);
           attempt.check();
           await pullCloudProfile(identity.userId, identity.email, attempt.isCurrent);
           attempt.check();
           completeLocalSignIn(localUserFrom(identity));
+          if (switched) window.location.reload();
           return;
         } catch (e: any) {
           attempt.check();
@@ -633,6 +598,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Otherwise the server was unreachable: fall through to the device.
         }
       }
+      // Offline, an account that used this computer before opens its own books by its email.
+      const stored = getLocalCredential()?.email === email ? null : storedAccountFor(email);
+      const switchedOffline = stored ? await switchAccountStore(stored) : false;
+      attempt.check();
       if (!hasLocalCredential())
         throw new Error(
           "This device isn't linked to a Filey account yet. Connect to the internet once to sign in or create one."
@@ -653,6 +622,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("That email and password don't match this device's account.");
       attempt.check();
       completeLocalSignIn(localUserFrom(getLocalCredential()));
+      if (switchedOffline) window.location.reload();
       return;
     }
     if (!supabase) throw new Error("Supabase not configured");
@@ -691,6 +661,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const address = credential.channel === "email" ? verified.user.email : verified.user.phone;
     if (address?.trim().toLowerCase() !== credential.value.trim().toLowerCase())
       throw new Error("The verified account changed. Start signup again.");
+    const switched = local ? await switchAccountStore(verified.user.id) : false;
     if (local) assertLocalAccount(verified.user.id);
     // Repeated signup for an unconfirmed account does not replace its old
     // password. Only set the chosen password after proof of email/phone ownership.
@@ -714,6 +685,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await pullCloudProfile(verified.user.id, credential.value.trim().toLowerCase(), isCurrent);
       check();
       completeLocalSignIn(localUserFrom({ email: credential.value.trim().toLowerCase(), userId: verified.user.id }));
+      if (switched) window.location.reload();
     }
   };
 
@@ -802,6 +774,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // too. Otherwise anyone who only ever signs in by code has an unclaimed
     // device, and switching that device to offline strands them at the login
     // screen with no account attached.
+    const switched = local ? await switchAccountStore(uid) : false;
     if (local) assertLocalAccount(uid);
     if (c.channel === "email") {
       // Same account (an email change, or the code that confirms a signup this
@@ -820,6 +793,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await pullCloudProfile(uid, identity.email, attempt.isCurrent);
       attempt.check();
       completeLocalSignIn(localUserFrom(identity));
+      if (switched) window.location.reload();
     }
   };
 
@@ -964,8 +938,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mfaLoading,
     mfaError,
     refreshMfaPending,
-    deviceLimitBlocked,
-    retryDeviceRegistration,
     signUpWithPassword,
     sendLoginOtp,
     verifyOtp,

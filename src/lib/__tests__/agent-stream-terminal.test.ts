@@ -12,6 +12,9 @@ import { runRemoteAgentTurn } from "../remoteAgentTurn";
 // Inject only the provider/tool stream; no live model or business records.
 vi.mock("../agentHarness", () => ({ runAgentStream: vi.fn() }));
 vi.mock("../aiContext", () => ({ buildAiContext: async () => "" }));
+// Channel turns run on Filey Agent (Hermes); only its reply call is faked.
+const engine = vi.hoisted(() => ({ reply: vi.fn() }));
+vi.mock("../fileyAgent", () => ({ fileyAgentReply: engine.reply, forgetFileyAgentSession: vi.fn() }));
 
 const output = { name: "demo-invoice.pdf", path: "C:/Filey/demo-invoice.pdf" };
 const toolCall = { type: "tool_call" as const, id: "export-demo", name: "export_invoice_pdf", args: { number: "INV-DEMO" } };
@@ -60,24 +63,20 @@ it("delivers a saved record receipt even if its optional progress checkpoint can
   expect(warning).toHaveBeenCalledWith("Agent progress could not be saved on this device.");
 });
 
-it("closes a provider failure once while returning files already produced to the remote transport", async () => {
-  const writes = vi.spyOn(storage, "writeAgentStorage");
-  vi.mocked(runAgentStream).mockImplementation(async function* (_messages, opts) {
-    yield toolCall;
-    setTurnFiles(opts.turnId!, [], [output]);
-    yield toolResult;
+it("returns files already produced to the remote transport when the engine fails, without its private error", async () => {
+  engine.reply.mockImplementationOnce(async (_chatId: string, _text: string, ctx: { turnId?: string }) => {
+    setTurnFiles(ctx.turnId!, [], [output]);
     throw new Error("Private provider response detail");
   });
   const result = await runRemoteAgentTurn({ scope: agentStorageScope()!, channel: "whatsapp", conversationId: "demo-owner",
     text: "Export INV-DEMO", signal: new AbortController().signal, deadline: Date.now() + 30_000, isCurrent: () => true });
   expect(result.files).toEqual([output]);
   expect(result.text).not.toContain("Private provider response detail");
-  expect(progress()).toEqual([expect.objectContaining({ agentId: "whatsapp:demo-owner", outcome: "error",
-    actions: [expect.objectContaining({ id: "export-demo", status: "completed", references: { invoice_id: 7, number: "INV-DEMO" } })] })]);
-  expect(terminalWrites(writes, "error")).toHaveLength(1);
+  // One engine session per channel conversation, as the owner, under the channel's agent id.
+  expect(engine.reply).toHaveBeenCalledWith("whatsapp:demo-owner", expect.stringContaining("Export INV-DEMO"),
+    expect.objectContaining({ isOwner: true, agentId: "whatsapp:demo-owner" }));
   result.delivered();
   result.delivered();
-  expect(terminalWrites(writes, "error")).toHaveLength(1);
 });
 
 it("does not treat a changed workspace as an optional checkpoint failure", async () => {
@@ -143,11 +142,8 @@ it("keeps an approval pause's existing terminal outcome when its consumer closes
 it("never finalizes or exposes old outputs in a different active account", async () => {
   const writes = vi.spyOn(storage, "writeAgentStorage");
   const originalScope = agentStorageScope()!;
-  const originalKey = agentStorageKey("filey.agent.progress")!;
-  vi.mocked(runAgentStream).mockImplementation(async function* (_messages, opts) {
-    yield toolCall;
-    setTurnFiles(opts.turnId!, [], [output]);
-    yield toolResult;
+  engine.reply.mockImplementationOnce(async (_chatId: string, _text: string, ctx: { turnId?: string }) => {
+    setTurnFiles(ctx.turnId!, [], [output]);
     setCacheOrg("different-org", "different-user");
     throw new Error("Provider failed after the account switch");
   });
@@ -155,7 +151,6 @@ it("never finalizes or exposes old outputs in a different active account", async
     text: "Export INV-DEMO", signal: new AbortController().signal, deadline: Date.now() + 30_000, isCurrent: () => true }))
     .rejects.toMatchObject({ name: "AbortError" });
   expect(progress()).toEqual([]);
-  expect(JSON.parse(localStorage.getItem(originalKey)!)[0]).toMatchObject({ outcome: "running", actions: [{ status: "completed" }] });
   expect(terminalWrites(writes, "error")).toHaveLength(0);
   expect(terminalWrites(writes, "stopped")).toHaveLength(0);
 });

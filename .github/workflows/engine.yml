@@ -1,0 +1,45 @@
+# Build and publish the Filey Agent engine the desktop app downloads on first use.
+# Run by hand (Actions → Engine → Run workflow) with the engine version the app expects
+# (ENGINE_VERSION in src-tauri/src/modules/agent_engine.rs).
+#
+# The release is a pre-release and never "latest": the app updater reads
+# releases/latest/download/latest.json, which must keep pointing at the app.
+name: Engine
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Engine version (matches ENGINE_VERSION in agent_engine.rs)"
+        required: true
+        default: "1"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build engine
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./scripts/build-engine.ps1 -Version "${{ inputs.version }}"
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "engine-v${{ inputs.version }}"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --prerelease --latest=false --title "Filey Agent engine ${{ inputs.version }}" --notes "Downloaded by the Filey desktop app on first use. Signed with the app's release key."
+          }
+          gh release upload $tag dist-engine/filey-engine-windows-x64.zip dist-engine/filey-engine-windows-x64.zip.sig --clobber

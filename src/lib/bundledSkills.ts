@@ -41,6 +41,46 @@ export const BUNDLED_PACKS: BundledPack[] = [
     source: "github.com/Panniantong/Agent-Reach (MIT), adapted to Filey's tools",
     description: "research the internet: web search, any page, YouTube, GitHub, RSS and public social posts, with the right reader for each link",
   },
+  {
+    name: "browser-use",
+    source: "github.com/browser-use/browser-use (MIT), adapted to Filey's browser",
+    description: "drive a website one observed action at a time with workspace_browser and computer_use",
+  },
+  {
+    name: "open-computer-use",
+    source: "github.com/iFurySt/open-computer-use (MIT), mapped onto Filey's computer_use",
+    description: "operate any Windows app like Codex: apps, app_state, then click, type, keys, set_value, scroll, drag on element indexes, reading the app again after each step",
+  },
+  {
+    name: "agentmemory",
+    source: "github.com/rohitg00/agentmemory, mapped onto Filey's remember, recall, and skills",
+    description: "save preferences, observations, and lessons, and recall them in a later chat",
+  },
+  {
+    name: "scientific",
+    source: "github.com/K-Dense-AI/scientific-agent-skills (MIT), research workflow for Filey",
+    description: "literature review, scientific writing, citations, critical reading, statistics, and slides. Lab, molecule, and clinical-treatment skills from that collection are not installed",
+  },
+  {
+    name: "harness",
+    source: "github.com/ai-boost/awesome-harness-engineering and github.com/google-research/harness2 (Apache-2.0), applied to Filey's loop",
+    description: "plan, act, probe one refinement, keep a lesson only when a retry worked, and drop it when that failure returns",
+  },
+  {
+    name: "openviking",
+    source: "github.com/volcengine/OpenViking, connected by HTTP when the user provides a server",
+    description: "search and read an OpenViking context database the user has connected",
+  },
+  {
+    name: "opendots",
+    source: "github.com/CopilotKit/OpenDots (MIT), working style for Filey's agent",
+    description: "keep one persona and memory, use connected apps, and pause before sending",
+  },
+  {
+    name: "marketing",
+    source: "github.com/coreyhaines31/marketingskills (MIT, Corey Haines), adapted to Filey's tools",
+    description: "copy, landing pages, SEO, ads, email, social, and growth. Load product-marketing first, then copywriting, cro, seo, ads, emails, social-content, growth, sales-marketing, or marketing-plan",
+  },
 ];
 
 /** How the social packs act on the platform itself, in Filey. */

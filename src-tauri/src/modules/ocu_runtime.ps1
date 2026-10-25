@@ -637,17 +637,31 @@ function Resolve-App([string]$query) {
         return $match
     }
 
+    # Only an installed app, by its Start-menu name: never a file path (a downloaded program)
+    # and never a shell, so a prompt-injected task cannot run commands.
     if (Test-EnvFlagEnabled "OPEN_COMPUTER_USE_WINDOWS_ALLOW_APP_LAUNCH") {
+        $leaf = [IO.Path]::GetFileNameWithoutExtension($normalized)
+        $started = $null
         try {
-            $started = Start-Process -FilePath $normalized -PassThru
+            if ($leaf -match '(?i)powershell|pwsh|command prompt|^cmd$|terminal|^wt$|bash|wsl|ubuntu|registry|keepass|1password|bitwarden') { return $null }
+            $listed = @(Get-StartApps | Where-Object { $_.Name -ieq $normalized -or $_.Name -ieq $leaf })
+            if ($listed.Count -ge 1) {
+                $started = Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\$($listed[0].AppID)" -PassThru
+            } else {
+                $roots = @("$env:ProgramData\Microsoft\Windows\Start Menu\Programs", "$env:AppData\Microsoft\Windows\Start Menu\Programs")
+                $lnk = $roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue } |
+                    Where-Object { $_.BaseName -ieq $normalized -or $_.BaseName -ieq $leaf } | Select-Object -First 1
+                if ($null -ne $lnk) { $started = Start-Process -FilePath $lnk.FullName -PassThru }
+            }
+        } catch {}
+        if ($null -ne $started) {
             for ($i = 0; $i -lt 20; $i++) {
                 Start-Sleep -Milliseconds 250
-                $candidate = Get-Process -Id $started.Id -ErrorAction SilentlyContinue
-                if ($null -ne $candidate -and $candidate.MainWindowHandle -ne 0) {
-                    return $candidate
-                }
+                $candidate = @(Get-Process | Where-Object {
+                    $_.MainWindowHandle -ne 0 -and ($_.Id -eq $started.Id -or $_.ProcessName -ieq $leaf -or $_.MainWindowTitle -like "*$leaf*")
+                }) | Select-Object -First 1
+                if ($null -ne $candidate) { return $candidate }
             }
-        } catch {
         }
     }
 
@@ -874,6 +888,14 @@ function Render-Tree($element, $windowBounds, $TextLimit = $script:DefaultTextLi
     }
 }
 
+# Filey: the long edge is capped like the screenshot route (computer_use.ps1). A full-size
+# capture of a maximized window ran to megabytes per read, and providers shrink it anyway, so
+# x/y read off it missed. computer_use.rs maps app_click/app_drag x/y back through screenshotScale.
+$script:ScreenshotMaxEdge = 1600.0
+function Get-ScreenshotScale($bounds) {
+    return [Math]::Min(1.0, $script:ScreenshotMaxEdge / [Math]::Max([double]$bounds.width, [double]$bounds.height))
+}
+
 function Capture-WindowPngBase64($bounds) {
     if (-not (Test-CapturableFrame $bounds)) {
         return $null
@@ -881,17 +903,28 @@ function Capture-WindowPngBase64($bounds) {
     $bitmap = $null
     $graphics = $null
     $stream = $null
+    $scaled = $null
+    $scaledGraphics = $null
     try {
         $bitmap = New-Object System.Drawing.Bitmap ([int][math]::Round($bounds.width)), ([int][math]::Round($bounds.height))
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
         $graphics.CopyFromScreen([int][math]::Round($bounds.x), [int][math]::Round($bounds.y), 0, 0, $bitmap.Size)
+        $scale = Get-ScreenshotScale $bounds
+        if ($scale -lt 1.0) {
+            $scaled = New-Object System.Drawing.Bitmap ([Math]::Max(1, [int][Math]::Floor($bitmap.Width * $scale))), ([Math]::Max(1, [int][Math]::Floor($bitmap.Height * $scale)))
+            $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)
+            $scaledGraphics.DrawImage($bitmap, 0, 0, $scaled.Width, $scaled.Height)
+        }
         $stream = New-Object System.IO.MemoryStream
-        $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $picture = if ($null -ne $scaled) { $scaled } else { $bitmap }
+        $picture.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
         $bytes = $stream.ToArray()
         return [Convert]::ToBase64String($bytes)
     } catch {
         return $null
     } finally {
+        if ($null -ne $scaledGraphics) { $scaledGraphics.Dispose() }
+        if ($null -ne $scaled) { $scaled.Dispose() }
         if ($null -ne $graphics) { $graphics.Dispose() }
         if ($null -ne $bitmap) { $bitmap.Dispose() }
         if ($null -ne $stream) { $stream.Dispose() }
@@ -973,6 +1006,7 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
         windowTitle = Limit-Text $process.MainWindowTitle $TextLimit
         windowBounds = $bounds
         screenshotPngBase64 = $image
+        screenshotScale = $(if ($null -ne $image) { Get-ScreenshotScale $bounds } else { 1.0 })
         treeLines = @($rendered.lines)
         focusedSummary = $focus
         selectedText = $selection

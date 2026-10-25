@@ -13,6 +13,7 @@ import { getSyncStatus, isMigrating, resolveSyncConflicts, setAutoSyncEnabled, s
 import { migrateCloudToLocal } from "./migrate";
 import { journalSnapshot } from "./localdb";
 import { withCloudTransfer } from "./cloudTransfer";
+import { switchAccountStore } from "./accountStores";
 import { cloudPosition, pullChanges, reconcile, savePosition } from "./changeFeed";
 
 let switching = false;
@@ -51,6 +52,9 @@ export async function switchWorkspace(
       throw new Error(
         "Connect your cloud account below before switching. Your current workspace is still open."
       );
+    // Going local as a different account than the one whose books are on this computer
+    // opens that account's own store; the other account's books stay where they are.
+    if (target === "local") await switchAccountStore(user.id);
     assertLocalAccount(user.id);
     await verifyCloudSession(supabase, data.session!);
     let localProfile: Profile | null = null;

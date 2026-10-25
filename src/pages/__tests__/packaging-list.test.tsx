@@ -12,7 +12,7 @@ import PackagingList from "../PackagingList";
 vi.mock("../../lib/api", () => ({ getCacheScope: () => "org:user:owner", billing: { getCompany: vi.fn(async () => null), listDocs: vi.fn(async () => []), saveDoc: vi.fn() }, crm: { customers: vi.fn(async () => []) } }));
 vi.mock("../../lib/agentStorage", () => ({ AGENT_STORAGE_EVENT: "filey:agent-storage", agentStorageScope: () => "local:org:user:owner", requireAgentStorageScope: () => "local:org:user:owner" }));
 vi.mock("../../lib/numberFormat", () => ({ loadDocFormats: vi.fn(async () => ({})), pickDocNumber: vi.fn(() => "PL-0001") }));
-vi.mock("../../lib/documentNumbers", () => ({ allocateDocumentNumber: async (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args) }));
+vi.mock("../../lib/documentNumbers", () => ({ allocateDocumentNumber: async (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args), nextDocumentNumber: (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args) }));
 vi.mock("../../lib/realtime", () => ({ useLiveSync: () => {}, notifyDataChanged: () => {} }));
 vi.mock("../../lib/packagingLists", async (original) => ({ ...await original<typeof import("../../lib/packagingLists")>(), loadPackagingLists: async () => [], savePackagingList: vi.fn(), deletePackagingList: vi.fn() }));
 vi.mock("../../lib/files", () => ({ safeName: (name: string) => name, autoSaveDocument: vi.fn(async () => false) }));

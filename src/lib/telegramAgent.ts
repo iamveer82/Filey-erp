@@ -6,6 +6,7 @@ import { requireModuleAccess } from "./moduleAccess";
 import { runRemoteAgentTurn, clearRemoteAgentConversation, clearRemoteAgentTurns } from "./remoteAgentTurn";
 import { stopAgentComputer } from "./agentComputer";
 import { aiReady } from "./ai";
+import { agentCommand } from "./agentCommands";
 
 export const TELEGRAM_EVENT = "filey:telegram-agent";
 const KEY = "filey.telegram_agent";
@@ -194,6 +195,11 @@ async function poll(generation: number, expected: string) {
           continue;
         }
         if (!isPrivateOwner(message, c.ownerId)) continue;
+        const owned = message.text ? agentCommand(message.text) : null;
+        if (owned?.kind === "reply" && /^\/(memory|forget|persona|skills)\b/i.test(message.text!.trim())) {
+          await send(c.ownerId, owned.text, generation, expected);
+          continue;
+        }
         const command = message.text?.trim().toLowerCase();
         if (command && ["/stop", "/new", "/help", "/status"].includes(command)) {
           let stopWarning = "";
@@ -204,7 +210,7 @@ async function poll(generation: number, expected: string) {
             if (!current(generation, expected)) return;
           }
           if (command === "/new") clearRemoteAgentConversation(expected, "telegram", c.ownerId);
-          await send(c.ownerId, command === "/help" ? "Ask me to find records, draft or revise an invoice, export a PDF, or process an attached file. Enabled Filey tools and your workspace role apply. Sensitive actions need one exact YES approval. /stop cancels tasks; /new also starts a fresh conversation." : command === "/status" ? `Connected to Filey desktop. ${activeTask ? "A task is running." : aiReady() ? "Ready for a task." : "Connect a model in Filey Settings → AI Assistant first."}` : `Stopped. A tool already in progress may have finished; check Filey before repeating an action.${stopWarning}`, generation, expected);
+          await send(c.ownerId, command === "/help" ? "Ask me to find records, draft or revise an invoice, export a PDF, or process an attached file. Enabled Filey tools and your workspace role apply. Sensitive actions need one exact YES approval. /stop cancels tasks; /new also starts a fresh conversation. /memory, /persona and /skills show what the agent keeps." : command === "/status" ? `Connected to Filey desktop. ${activeTask ? "A task is running." : aiReady() ? "Ready for a task." : "Connect a model in Filey Settings → AI Assistant first."}` : `Stopped. A tool already in progress may have finished; check Filey before repeating an action.${stopWarning}`, generation, expected);
           continue;
         }
         const acceptedAt = Date.now();

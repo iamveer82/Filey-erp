@@ -102,9 +102,85 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
     app_data(app)
 }
 
+// ---- one computer, several accounts ----
+// The device's first owner keeps their books in `data_dir`, exactly as before. Any other
+// account that uses local mode gets its own folder, accounts/<id> under app data, created
+// empty on first use. Nothing is ever copied between them. The open account survives a
+// restart through active_account.txt; empty means the first owner.
+
+/// Not read yet / read: the active account other than the first owner, if any.
+static ACTIVE_ACCOUNT: Mutex<Option<Option<String>>> = Mutex::new(None);
+
+fn account_file(app: &AppHandle) -> PathBuf {
+    app_data(app).join("active_account.txt")
+}
+
+/// Account ids become folder names: letters, digits, `-` and `_` only.
+fn valid_account(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn active_account(app: &AppHandle) -> Option<String> {
+    let mut slot = ACTIVE_ACCOUNT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if slot.is_none() {
+        let saved = fs::read_to_string(account_file(app)).ok().map(|s| s.trim().to_owned()).filter(|s| valid_account(s));
+        *slot = Some(saved);
+    }
+    slot.clone().flatten()
+}
+
+/// The open account's workspace: the database and its files.
+pub fn workspace_dir(app: &AppHandle) -> PathBuf {
+    match active_account(app) {
+        Some(id) => app_data(app).join("accounts").join(id),
+        None => data_dir(app),
+    }
+}
+
+/// Moving or restoring the data folder changes the first owner's workspace, so it is only
+/// done while that account is open.
+fn main_account_only(app: &AppHandle) -> AppResult<()> {
+    if active_account(app).is_some() {
+        return Err(AppError::Io("Sign in with this computer's main Filey account to move or restore its data folder.".into()));
+    }
+    Ok(())
+}
+
+/// Open `user_id`'s books on this computer. `primary` is the device's first owner, whose
+/// workspace is the existing data folder; anyone else's is their own folder.
+#[tauri::command]
+pub async fn open_account_store(app: AppHandle, user_id: String, primary: bool) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !primary && !valid_account(&user_id) {
+            return Err(AppError::Io("This account cannot have a workspace on this computer.".into()));
+        }
+        let _guard = STORAGE_OPERATION.lock().map_err(|e| AppError::Io(e.to_string()))?;
+        ensure_writable()?;
+        let dir = if primary { data_dir(&app) } else { app_data(&app).join("accounts").join(&user_id) };
+        fs::create_dir_all(&dir).map_err(|e| AppError::Io(e.to_string()))?;
+        let conn = rusqlite::Connection::open(dir.join("filey-erp.db"))?;
+        crate::db::init(&conn)?;
+        let db = app.state::<Db>();
+        let mut open = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
+        atomic_write(&account_file(&app), if primary { b"" } else { user_id.as_bytes() }).map_err(|e| AppError::Io(e.to_string()))?;
+        *open = conn;
+        super::sync::invalidate_stamps();
+        *ACTIVE_ACCOUNT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((!primary).then_some(user_id));
+        Ok(dir.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| AppError::Io(e.to_string()))?
+}
+
+/// The open account when it is not the first owner; empty for the first owner.
+#[tauri::command]
+pub fn active_account_store(app: AppHandle) -> String {
+    active_account(&app).unwrap_or_default()
+}
+
 /// Full path to the database file. Used at startup before the DB opens.
 pub fn resolve_db_path(app: &AppHandle) -> PathBuf {
-    data_dir(app).join("filey-erp.db")
+    workspace_dir(app).join("filey-erp.db")
 }
 
 #[tauri::command]
@@ -118,6 +194,7 @@ pub async fn set_data_dir(app: AppHandle, dir: String) -> AppResult<String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = STORAGE_OPERATION.lock().map_err(|e| AppError::Io(e.to_string()))?;
         ensure_writable()?;
+        main_account_only(&app)?;
         let db = app.state::<Db>();
         let conn = db.0.lock().map_err(|e| AppError::Pool(e.to_string()))?;
         let target = copy_workspace(&conn, &data_dir(&app), &PathBuf::from(dir))?;
@@ -221,7 +298,7 @@ pub async fn write_doc_file(dir: String, filename: String, bytes: Vec<u8>) -> Ap
 // ({uid}/{id}/{name}); each segment is sanitized and "../" is rejected.
 
 fn files_dir(app: &AppHandle) -> PathBuf {
-    data_dir(app).join("files")
+    workspace_dir(app).join("files")
 }
 
 /// Resolve a relative storage key to an absolute path under {data_dir}/files,
@@ -347,6 +424,21 @@ pub async fn blob_read(app: AppHandle, path: String) -> AppResult<Option<Vec<u8>
     decrypt_blob(&raw).map(Some).map_err(AppError::Io)
 }
 
+/// Read raw bytes from any absolute path the agent produced (download/share in chat).
+#[tauri::command]
+pub async fn read_file(path: String) -> AppResult<Option<Vec<u8>>> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() {
+        return Err(AppError::Io("read_file requires an absolute path".into()));
+    }
+    let raw = match fs::read(p) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(AppError::Io(e.to_string())),
+    };
+    Ok(Some(raw))
+}
+
 #[tauri::command]
 pub async fn blob_delete(app: AppHandle, path: String) -> AppResult<()> {
     let _guard = STORAGE_OPERATION.lock().map_err(|e| AppError::Io(e.to_string()))?;
@@ -386,6 +478,7 @@ pub async fn restore_db(app: AppHandle, src: String) -> AppResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = STORAGE_OPERATION.lock().map_err(|e|AppError::Io(e.to_string()))?;
         ensure_writable()?;
+        main_account_only(&app)?;
         let db = app.state::<Db>();
         let conn = db.0.lock().map_err(|e|AppError::Pool(e.to_string()))?;
         let stage = stage_database_restore(&app, &PathBuf::from(src))?;
@@ -458,7 +551,8 @@ fn backup_all_blocking(app: AppHandle, dest: String) -> AppResult<BackupResult> 
     let db = app.state::<Db>();
     let conn = db.0.lock().map_err(|e|AppError::Pool(e.to_string()))?;
     let key = file_key(!backup::contains_encrypted_files(&files_dir(&app)).map_err(AppError::Io)?).map_err(AppError::Io)?;
-    let dir = copy_workspace(&conn,&data_dir(&app),&PathBuf::from(dest))?;
+    // The open account's books: its database and its own files.
+    let dir = copy_workspace(&conn,&workspace_dir(&app),&PathBuf::from(dest))?;
     let recovery_code = backup::seal(&dir,&key).map_err(AppError::Io)?;
     Ok(BackupResult { path: dir.to_string_lossy().to_string(), recovery_code })
 }
@@ -475,6 +569,7 @@ pub async fn restore_all(app: AppHandle, src: String, recovery_code: Option<Stri
 fn restore_all_blocking(app: AppHandle, src: String, recovery_code: Option<String>) -> AppResult<()> {
     let _guard = STORAGE_OPERATION.lock().map_err(|e| AppError::Io(e.to_string()))?;
     ensure_writable()?;
+    main_account_only(&app)?;
     let dir = PathBuf::from(&src);
     if dir.canonicalize().ok() == data_dir(&app).canonicalize().ok() {
         return Err(AppError::Io("Choose a backup folder, not the active workspace.".into()));
@@ -505,6 +600,14 @@ pub fn apply_pending_restore(app: &AppHandle) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_ids_are_safe_folder_names() {
+        assert!(valid_account("48cc4e67-1b2c-4d5e-8f90-123456789abc"));
+        for bad in ["", "..", "../other", "a/b", "a\\b", "C:", "name with space", &"x".repeat(65)] {
+            assert!(!valid_account(bad), "{bad}");
+        }
+    }
 
     struct WorkspaceFixture(PathBuf);
     impl WorkspaceFixture {

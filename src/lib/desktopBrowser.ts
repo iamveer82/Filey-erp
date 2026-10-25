@@ -15,7 +15,15 @@ export interface BrowserTab {
   blockedPopupUrl?: string | null;
   warning?: string | null;
 }
-export interface DesktopBrowserResult { tabs: BrowserTab[]; tab?: BrowserTab | null }
+export interface DesktopBrowserResult {
+  tabs: BrowserTab[]; tab?: BrowserTab | null;
+  /** `read`: the page as text, controls numbered `[n]`. */
+  page?: string; elements?: number; hint?: string;
+  /** `read`: the character offset of this chunk, and where the next chunk starts (null at the end). */
+  offset?: number; next_offset?: number | null;
+  /** An action that triggered a navigation returns this instead of a stale page. */
+  loading?: boolean;
+}
 export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null; agentId: string | null; paused: boolean }
 let panel: BrowserPanelState = { open: false, tabs: [], activeId: null, agentId: null, paused: false };
 const panelListeners = new Set<() => void>();
@@ -73,10 +81,26 @@ export function layoutDesktopBrowser(bounds: BrowserBounds | null, tabId: string
   return result;
 }
 export interface DesktopBrowserRequest {
-  action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all";
+  action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all"
+    | "read" | "click" | "type" | "press" | "scroll" | "wait";
   url?: string;
   tab_id?: string;
+  /** click/type/scroll: a number from the latest `read`. */
+  element?: number;
+  text?: string;
+  key?: string;
+  /** read: start character offset; use `next_offset` from the previous read. */
+  offset?: number;
+  /** scroll: wheel up or down; defaults to down. */
+  direction?: "up" | "down";
+  /** scroll: wheel pages, 1-10. */
+  pages?: number;
+  /** wait: milliseconds, 100-5000. */
+  ms?: number;
 }
+
+const PRESS_KEYS = ["Enter", "Tab", "Escape", "Backspace", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight",
+  "PageDown", "PageUp", "Home", "End", "Space"];
 
 let generation = 0;
 let activeScope: string | null = null;
@@ -108,13 +132,55 @@ function profileKey(account: string): Promise<string> {
 function validate(args: DesktopBrowserRequest | Record<string, unknown>): DesktopBrowserRequest {
   const action = args.action;
   if (action === "list" || action === "close_all") return { action };
-  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close"].includes(String(action)))
+  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close", "read", "click", "type", "press", "scroll", "wait"].includes(String(action)))
     throw new Error("Unsupported browser action.");
   const result = { action } as DesktopBrowserRequest;
   if (action !== "open") {
     if (typeof args.tab_id !== "string" || !/^filey-browser-[a-f0-9-]{36}$/.test(args.tab_id))
       throw new Error("Choose an open Filey browser tab.");
     result.tab_id = args.tab_id;
+  }
+  const element = () => {
+    const value = Number(args.element);
+    if (!Number.isInteger(value) || value < 1 || value > 5000)
+      throw new Error("element must be a number from the latest read.");
+    return value;
+  };
+  if (action === "click" || action === "type") result.element = element();
+  if (action === "read" && args.offset !== undefined) {
+    const offset = Number(args.offset);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000)
+      throw new Error("offset must be a whole number from the previous next_offset.");
+    result.offset = offset;
+  }
+  if (action === "scroll") {
+    const direction = args.direction ?? "down";
+    if (direction !== "up" && direction !== "down")
+      throw new Error("direction must be up or down.");
+    const pages = args.pages === undefined ? 1 : Number(args.pages);
+    if (!Number.isInteger(pages) || pages < 1 || pages > 10)
+      throw new Error("pages must be a whole number from 1 to 10.");
+    result.direction = direction;
+    result.pages = pages;
+    if (args.element !== undefined) result.element = element();
+  }
+  if (action === "wait") {
+    const ms = Number(args.ms);
+    if (!Number.isInteger(ms) || ms < 100 || ms > 5000)
+      throw new Error("ms must be a whole number from 100 to 5000.");
+    result.ms = ms;
+  }
+  if (action === "type") {
+    const text = args.text;
+    if (typeof text !== "string" || [...text].length > 2000
+      || [...text].some((char) => { const c = char.charCodeAt(0); return (c < 32 && c !== 9 && c !== 10) || c === 127; }))
+      throw new Error("text must be at most 2000 characters without control codes.");
+    result.text = text;
+  }
+  if (action === "press") {
+    if (typeof args.key !== "string" || !PRESS_KEYS.includes(args.key))
+      throw new Error(`key must be one of ${PRESS_KEYS.join(", ")}.`);
+    result.key = args.key;
   }
   if (action === "open" || action === "navigate") {
     if (typeof args.url !== "string" || !args.url || args.url.length > 65_536
@@ -147,8 +213,9 @@ export function closeDesktopBrowserTabs(): Promise<void> {
   return closing;
 }
 
-/** Explicit browser management only. DOM extraction, eval, cookies and login
- * credentials are not exposed. Observation/input use computer_use separately. */
+/** Browser management, plus reading the page through its accessibility tree and acting on
+ * its numbered controls (native DevTools input in desktop_browser.rs). Page JavaScript is never
+ * evaluated; cookies are not exposed and password fields read back hidden. */
 export async function desktopBrowserCommand(
   args: DesktopBrowserRequest | Record<string, unknown>, signal?: AbortSignal, agentId?: string,
 ): Promise<DesktopBrowserResult> {

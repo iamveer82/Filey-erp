@@ -22,6 +22,7 @@ import {
   Truck,
   Send,
   Landmark,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   pos,
@@ -136,7 +137,9 @@ type Form = Omit<PoInput, "items"> & {
   signature?: StampSig;
   show_stamp?: boolean;
   show_signature?: boolean;
+  show_logo?: boolean;
   show_bank?: boolean;
+  logo?: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -192,6 +195,7 @@ function blankForm(
     customColumns: [],
     show_stamp: false,
     show_signature: false,
+    show_logo: false,
     show_bank: false,
     unit_price_formula: null,
   };
@@ -842,6 +846,7 @@ function poDocToForm(
     ),
     show_stamp: po.show_stamp ?? false,
     show_signature: po.show_signature ?? false,
+    show_logo: po.show_logo ?? false,
     show_bank: (po as any).show_bank ?? false,
     unit_price_formula: po.unit_price_formula || null,
     items: po.items.map((i) => {
@@ -1152,6 +1157,7 @@ function Editor({
         expected_date: form.expected_date || undefined,
         show_stamp: form.show_stamp ?? false,
         show_signature: form.show_signature ?? false,
+        show_logo: form.show_logo ?? false,
       } as PoInput;
       (payload as any).show_bank = form.show_bank ?? false;
       // Remove the in-memory aliases that don't exist on the DB model.
@@ -1901,68 +1907,63 @@ function Editor({
                 <button className="btn-ghost text-xs" onClick={addCustomColumn}>
                   <Plus size={12} /> Add field
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const on = !form.show_stamp;
-                    setForm({
-                      ...form,
-                      show_stamp: on,
-                      stamp:
-                        on && !form.stamp?.data && companyStampSig.stamp?.data
-                          ? { ...companyStampSig.stamp, opacity: 100 }
-                          : form.stamp,
-                    });
-                  }}
-                  className={`btn-ghost text-xs ${form.show_stamp ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!form.stamp?.data && !companyStampSig.stamp?.data}
-                >
-                  <Stamp size={13} /> Stamp: {form.show_stamp ? "On" : "Off"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const on = !form.show_signature;
-                    setForm({
-                      ...form,
-                      show_signature: on,
-                      signature:
-                        on && !form.signature?.data && companyStampSig.signature?.data
-                          ? { ...companyStampSig.signature, opacity: 100 }
-                          : form.signature,
-                    });
-                  }}
-                  className={`btn-ghost text-xs ${form.show_signature ? "!bg-brand-50 !text-ink" : ""}`}
-                  disabled={!form.signature?.data && !companyStampSig.signature?.data}
-                >
-                  <PenTool size={13} /> Signature: {form.show_signature ? "On" : "Off"}
-                </button>
               </div>
 
-              {(form.show_stamp || form.show_signature) &&
-                (form.stamp?.data || form.signature?.data || companyStampSig.stamp?.data || companyStampSig.signature?.data) && (
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl">
-                    {form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
-                      <StampSigAdjust
-                        label="Stamp"
-                        icon={<Stamp size={13} />}
-                        value={form.stamp?.data ? form.stamp : companyStampSig.stamp!}
-                        onChange={(v) => setForm({ ...form, stamp: v })}
-                      />
+              {/* Branding - matches invoicing */}
+              <Step title="Branding" subtitle="Logo, bank details, stamp and signature on the printed purchase order">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+                  <ToggleTile
+                    icon={ImageIcon}
+                    label="Logo"
+                    desc={form.logo ? "Show your logo in the PO header" : "Upload a logo in Settings first"}
+                    active={!!form.show_logo}
+                    onToggle={() => { if (form.logo) setForm({ ...form, show_logo: !form.show_logo }); }}
+                  />
+                  <ToggleTile
+                    icon={Landmark}
+                    label="Bank details"
+                    desc={hasBankInfo(form.show_bank ? bank : undefined) ? "Show payment bank details" : "Add bank details in Settings first"}
+                    active={!!form.show_bank}
+                    onToggle={() => { if (hasBankInfo(bank)) setForm({ ...form, show_bank: !form.show_bank }); }}
+                  />
+                  <ToggleTile
+                    icon={Stamp}
+                    label="Company stamp"
+                    desc={companyStampSig.stamp?.data ? "Show official stamp - adjust below" : "Upload a stamp in Settings first"}
+                    active={!!form.show_stamp}
+                    onToggle={() => {
+                      if (!form.stamp?.data && !companyStampSig.stamp?.data) return;
+                      const on = !form.show_stamp;
+                      setForm({
+                        ...form,
+                        show_stamp: on,
+                        stamp: on && !form.stamp?.data && companyStampSig.stamp?.data ? { ...companyStampSig.stamp, opacity: 100 } : form.stamp,
+                      });
+                    }}
+                    extra={form.show_stamp && (form.stamp?.data || companyStampSig.stamp?.data) && (
+                      <div className="mt-2"><StampSigAdjust label="Stamp" icon={<Stamp size={13} />} value={form.stamp?.data ? form.stamp : companyStampSig.stamp!} onChange={(v) => setForm({ ...form, stamp: v })} /></div>
                     )}
-                    {form.show_signature &&
-                      (form.signature?.data || companyStampSig.signature?.data) && (
-                        <StampSigAdjust
-                          label="Signature"
-                          icon={<PenTool size={13} />}
-                          value={
-                            form.signature?.data ? form.signature : companyStampSig.signature!
-                          }
-                          onChange={(v) => setForm({ ...form, signature: v })}
-                        />
-                      )}
-                  </div>
-                )}
+                  />
+                  <ToggleTile
+                    icon={PenTool}
+                    label="Signature"
+                    desc={companyStampSig.signature?.data ? "Show signature block - adjust below" : "Upload a signature in Settings first"}
+                    active={!!form.show_signature}
+                    onToggle={() => {
+                      if (!form.signature?.data && !companyStampSig.signature?.data) return;
+                      const on = !form.show_signature;
+                      setForm({
+                        ...form,
+                        show_signature: on,
+                        signature: on && !form.signature?.data && companyStampSig.signature?.data ? { ...companyStampSig.signature, opacity: 100 } : form.signature,
+                      });
+                    }}
+                    extra={form.show_signature && (form.signature?.data || companyStampSig.signature?.data) && (
+                      <div className="mt-2"><StampSigAdjust label="Signature" icon={<PenTool size={13} />} value={form.signature?.data ? form.signature : companyStampSig.signature!} onChange={(v) => setForm({ ...form, signature: v })} /></div>
+                    )}
+                  />
+                </div>
+              </Step>
 
               <datalist id="unit-suggestions">
                 <option value="pcs" />

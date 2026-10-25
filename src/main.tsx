@@ -29,6 +29,7 @@ import { agentStorageScope, AGENT_STORAGE_EVENT } from "./lib/agentStorage";
 import { quarantineLegacyCredentials } from "./lib/credentialStore";
 import { isNativeApp } from "./lib/nativePlatform";
 import { restoreNativeOwnership } from "./lib/deviceStorage";
+import { reconcileAccountStore } from "./lib/accountStores";
 
 applyTheme();
 applyAccent();
@@ -81,7 +82,8 @@ const renderApp = () => root.render(
     </ErrorBoundary>
   </React.StrictMode>
 );
-void restoreNativeOwnership().then(renderApp).catch(() => root.render(
+// The open account's identity must match the books the desktop opened before anything renders.
+void reconcileAccountStore().then(restoreNativeOwnership).then(renderApp).catch(() => root.render(
     <div className="min-h-dvh grid place-items-center p-6"><div className="card max-w-sm space-y-3" role="alert">
       <h1 className="text-lg font-semibold">Couldn't open your saved workspace</h1>
       <p>Your records are preserved. Restart Filey and try again.</p>

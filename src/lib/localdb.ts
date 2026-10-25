@@ -13,7 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { PUSH_SET } from "./syncTables";
 import { LOCAL_ID_MIN, nextLocalId } from "./recordId";
 import { validateNumberedCollection } from "./documentNumberRules";
-import { readDeviceValue, writeDeviceValue, compareDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
+import { readDeviceValue, readDeviceValueSince, writeDeviceValue, compareDeviceValues, transactionalDeviceStorage } from "./deviceStorage";
 
 const hasTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -53,7 +53,7 @@ function serializeWrite<T>(run: () => Promise<T>): Promise<T> {
 /** Reuse parsing/hydration only while the stored bytes still match. MCP and
  * another window can write the database independently of this process's queue.
  * These private rows never cross a caller boundary without an ownership copy. */
-const memo = new Map<string, { rows: Row[]; json: string | null }>();
+const memo = new Map<string, { rows: Row[]; json: string | null; stamp?: string }>();
 
 /** Copy mutable JSON containers, retaining large primitive strings such as
  * shared logos. A caller must not mutate a parsed memo or a captured payload.
@@ -267,16 +267,23 @@ async function hydrate(rows: Row[]): Promise<Row[]> {
 async function collectionSnapshot(coll: string): Promise<{ rows: Row[]; json: string | null }> {
   const key = "localdb:" + coll;
   try {
-    const v = await readDeviceValue(key);
     const hit = transactionalDeviceStorage ? memo.get(coll) : undefined;
-    if (hit && hit.json === v) return hit;
+    // Desktop answers "unchanged" for a collection this page already holds, without
+    // sending it again; everywhere else the stored bytes are compared as before.
+    const read = await readDeviceValueSince(key, hit?.stamp);
+    if (read.unchanged && hit) return hit;
+    const v = read.value;
+    if (hit && hit.json === v) {
+      hit.stamp = read.stamp;
+      return hit;
+    }
     const parsed: unknown = v ? JSON.parse(v) : [];
     if (!Array.isArray(parsed) || parsed.some((row) => !row || typeof row !== "object" || Array.isArray(row)))
       throw new Error("Stored records are not a valid collection");
     const rows = await hydrate(parsed as Row[]);
     // json stays the STORED form (markers, not payloads) so replaceColl keeps
     // comparing like with like.
-    const snapshot = { rows, json: v };
+    const snapshot = { rows, json: v, stamp: read.stamp };
     if (transactionalDeviceStorage) memo.set(coll, snapshot);
     return snapshot;
   } catch (error) {
@@ -331,13 +338,19 @@ export type SyncJournal = {
 const JOURNAL_KEY = "syncjournal";
 
 // Reuse journal parsing only after validating the persisted bytes.
-let journalMemo: { journal: SyncJournal; raw: string | null } | null = null;
+let journalMemo: { journal: SyncJournal; raw: string | null; stamp?: string } | null = null;
 
 async function journalState(): Promise<{ journal: SyncJournal; raw: string | null }> {
   try {
-    const raw = await readDeviceValue(JOURNAL_KEY);
-    if (transactionalDeviceStorage && journalMemo?.raw === raw)
-      return { journal: structuredClone(journalMemo.journal), raw };
+    const memoed = transactionalDeviceStorage ? journalMemo : null;
+    const read = await readDeviceValueSince(JOURNAL_KEY, memoed?.stamp);
+    if (read.unchanged && memoed)
+      return { journal: structuredClone(memoed.journal), raw: memoed.raw };
+    const raw = read.value;
+    if (memoed && memoed.raw === raw) {
+      memoed.stamp = read.stamp;
+      return { journal: structuredClone(memoed.journal), raw };
+    }
     const j = raw ? JSON.parse(raw) : null;
     if (j && Number.isSafeInteger(j.v) && j.v >= 0 && j.v < Number.MAX_SAFE_INTEGER && j.tables && typeof j.tables === "object" && !Array.isArray(j.tables)) {
       for (const t of Object.keys(j.tables)) {
@@ -349,16 +362,16 @@ async function journalState(): Promise<{ journal: SyncJournal; raw: string | nul
         }
         if (!Array.isArray(e.deleted)) e.deleted = [];
       }
-      journalMemo = { journal: j as SyncJournal, raw };
+      journalMemo = { journal: j as SyncJournal, raw, stamp: read.stamp };
       return { journal: structuredClone(journalMemo.journal), raw };
     }
     if (raw) throw new Error("Invalid pending-change journal");
+    journalMemo = { journal: { v: 0, tables: {} }, raw: null, stamp: read.stamp };
+    return { journal: structuredClone(journalMemo.journal), raw: null };
   } catch (error) {
     journalMemo = null;
     throw new Error(`Could not read pending local changes. Sync was stopped to preserve unsent records. ${error instanceof Error ? error.message : String(error)}`);
   }
-  journalMemo = { journal: { v: 0, tables: {} }, raw: null };
-  return { journal: structuredClone(journalMemo.journal), raw: null };
 }
 
 /** Mark rows dirty and notify the auto-sync scheduler. Bare call (no opts) or

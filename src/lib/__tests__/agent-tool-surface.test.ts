@@ -41,8 +41,13 @@ describe("what the model is offered", () => {
 
   it("names every domain up front, so hidden tools are never mistaken for missing ones", () => {
     const use = offeredTools({ isOwner: true } as Parameters<typeof offeredTools>[0], new Set()).find(t => t.name === "use_toolset");
-    expect(use?.description).toMatch(/sales: Invoice branding \(logo, bank details, stamp, signature/);
-    expect(use?.description).toMatch(/Never call an action unavailable or blocked/);
+    // Derived from TOOLSETS, not hand-copied: the index rides on every request,
+    // so it is kept terse, and a test that pinned the old wording would fail
+    // on a rewording without saying anything about the behaviour.
+    for (const [id, set] of Object.entries(TOOLSETS)) {
+      expect(use?.description).toContain(`${id}: ${set.about}`);
+    }
+    expect(use?.description).toMatch(/Never call a tool you have not loaded/);
   });
 
   it("lets a chat channel resend an invoice PDF without loading a domain first", () => {

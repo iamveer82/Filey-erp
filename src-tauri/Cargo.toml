@@ -19,11 +19,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["unstable"] }
+tauri = { version = "2", features = ["unstable", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Always-on agent: one running copy, desktop alerts. Pinned to releases that
+# accept tauri 2.11: newer ones require 2.12, which pulls webview2-com 0.39 and
+# breaks print.rs (and the npm @tauri-apps packages must move in step).
+tauri-plugin-single-instance = "~2.4"
+tauri-plugin-notification = "~2.4.0"
+# Filey Agent engine download: signature check with the release key, unpack. Both are
+# already in the build through tauri-plugin-updater.
+minisign-verify = "0.2"
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }

@@ -33,6 +33,16 @@ it("rejects forbidden reads and native powers even in an authenticated agent con
   await expect(requireToolModuleAccess("run_shell",{})).rejects.toThrow("administrator");
   await expect(requireToolModuleAccess("create_product",{})).resolves.toBeUndefined();
 });
+it("needs both sides for actions that cross modules", async () => {
+  rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["invoicing", "customers"] }, error: null });
+  // Converting reads the quote: an invoicing-only role cannot reach into Quoting through the agent.
+  await expect(requireToolModuleAccess("convert_quote_to_invoice", {})).rejects.toThrow("quoting");
+  await expect(requireToolModuleAccess("record_advance", { party: "customer" })).resolves.toBeUndefined();
+  await expect(requireToolModuleAccess("record_advance", { party: "supplier" })).rejects.toThrow("suppliers");
+  await expect(requireToolModuleAccess("record_po_payment", {})).rejects.toThrow("purchase-orders");
+  rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["invoicing", "quoting"] }, error: null });
+  await expect(requireToolModuleAccess("convert_quote_to_invoice", {})).resolves.toBeUndefined();
+});
 it("gates pending-save discovery by sales versus purchases and checks the exact retry target", async () => {
   rpc.mockResolvedValue({ data: { allowed: true, admin: false, modules: ["purchase-invoices"] }, error: null });
   await expect(requireToolModuleAccess("list_pending_invoice_saves", { doc_type: "purchase" })).resolves.toBeUndefined();

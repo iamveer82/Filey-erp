@@ -100,13 +100,15 @@ describe("aiAutonomous loop", () => {
   });
 
   it("stops at maxRounds if the model never finishes", async () => {
+    // Tool search is bookkeeping, so the stall check (same result twice) stays out of the way.
+    let round = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
         ok: true,
         json: async () =>
           oaMsg("thinking", [
-            { id: "x", type: "function", function: { name: "recall", arguments: "{}" } },
+            { id: `x${++round}`, type: "function", function: { name: "search_tools", arguments: JSON.stringify({ query: `step ${round}` }) } },
           ]),
       })) as unknown as typeof fetch
     );

@@ -5,9 +5,9 @@ import { getSmoothScroll, setSmoothScroll } from "../../lib/smoothScroll";
 import { Toggle } from "./PreferencesPanel";
 import { accentPalette, useAccent, type AccentKey } from "../../lib/accent";
 import { ORB_PRESETS, setPersona, type AiPersona } from "../../lib/ai";
-import { BOT_LOOKS, BOT_MOTIONS } from "../../lib/botAppearance";
+import BloubBot, { AgentFace, useBotSkin } from "../../components/BloubBot";
+import { BOT_LOOKS, BOT_MOTIONS, FILEY_MASCOTS } from "../../lib/botAppearance";
 import { useUI } from "../../lib/ui";
-import BloubBot, { useBotSkin } from "../../components/BloubBot";
 import { cn } from "../../lib/format";
 import { SettingsPanel, SettingsSection } from "../../components/SettingsLayout";
 
@@ -133,7 +133,7 @@ export default function AppearancePanel() {
    place shows up in the other. */
 
 function AssistantColor() {
-  const { color, shape, motion } = useBotSkin();
+  const { color, shape, motion, mascot } = useBotSkin();
   const { toast } = useUI();
 
   const pick = (patch: Partial<AiPersona>) => {
@@ -153,7 +153,7 @@ function AssistantColor() {
         <div className="flex items-center gap-5">
           {/* A live one, not a swatch: this is exactly what the chat will show. */}
           <div className="shrink-0">
-            <BloubBot size={64} state="idle" label="Assistant preview" ambient />
+            <AgentFace size={64} />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap gap-2">
@@ -190,6 +190,22 @@ function AssistantColor() {
               />
               Custom colour
             </label>
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-sm font-medium">OpenDots mascot</p>
+          <p className="mb-3 text-[13px] text-muted-foreground">Use one of these faces for Filey in chat. The orb stays available.</p>
+          <div role="group" aria-label="OpenDots mascot" className="grid grid-cols-2 min-[400px]:grid-cols-5 gap-2">
+            <button type="button" aria-pressed={mascot === ""} onClick={() => pick({ mascot: "" })} className={cn("flex min-w-0 flex-col items-center gap-1 rounded-xl border px-3 py-2 text-[13px] transition-colors hover:bg-hover", mascot === "" ? "border-foreground bg-hover" : "border-border")}>
+              <BloubBot size={48} shape={shape} motion="gentle" animate={false} />
+              Orb face
+            </button>
+            {FILEY_MASCOTS.map((item) => (
+              <button key={item.id} type="button" aria-label={`${item.name} mascot`} aria-pressed={mascot === item.id} onClick={() => pick({ mascot: item.id })} className={cn("flex min-w-0 flex-col items-center gap-1 rounded-xl border px-3 py-2 text-[13px] transition-colors hover:bg-hover", mascot === item.id ? "border-foreground bg-hover" : "border-border")}>
+                <img src={`/mascots/${item.id}.png`} alt="" width={48} height={48} className="h-12 w-12 object-contain" />
+                {item.name}
+              </button>
+            ))}
           </div>
         </div>
         <div>

@@ -8,7 +8,7 @@
 // What counts as a "write" is not a new flag on 100+ tools: capabilities.ts
 // already lists exactly the write/action tools (reads, navigation, memory and
 // skills are deliberately absent), so membership there IS the write set.
-import { isWriteTool } from "./capabilities";
+import { CAPABILITIES, isWriteTool, setCapabilityEnabled } from "./capabilities";
 import { readAgentStorage, writeAgentStorage } from "./agentStorage";
 
 export type AgentMode = "auto" | "accept_edits" | "manual" | "plan";
@@ -75,6 +75,28 @@ export function setAgentMode(mode: AgentMode): void {
   }
 }
 
+/** The owner's rule (2026-10-24): sending a document or an invoice out always waits
+ *  for their OK, Auto mode included. Plain messages stay on the mode's terms. */
+export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
+  "send_invoice", "send_invoice_whatsapp", "email_invoice", "share_document_link", "send_whatsapp_file",
+]);
+
+/** Full access is the in-app owner's pre-approval. WhatsApp and scheduled jobs
+ *  keep their own confirm callback and do not use this. */
+export function fullAccessPreapproved(mode: AgentMode = getAgentMode(), toolName?: string): boolean {
+  return mode === "auto" && !(toolName && ALWAYS_ASK_TOOLS.has(toolName));
+}
+
+/** Desktop dev session: Full access, every action group on, except the optional
+ *  per-conversation browser (that stays an explicit opt-in). */
+export function grantDesktopFullAccess(): void {
+  setAgentMode("auto");
+  for (const cap of CAPABILITIES) {
+    if (cap.id === "agent_computers") continue;
+    setCapabilityEnabled(cap.id, true);
+  }
+}
+
 /** run = go ahead, ask = get the user's approval first, block = refuse outright. */
 export type Gate = "run" | "ask" | "block";
 
@@ -94,7 +116,7 @@ export function gateFor(
   if (!writes) return "run"; // reads, navigation, memory, skills — always free
   switch (mode) {
     case "auto":
-      return "run";
+      return ALWAYS_ASK_TOOLS.has(toolName) ? "ask" : "run";
     case "plan":
       return "block";
     case "manual":
@@ -113,7 +135,7 @@ export function modeSystemNote(mode: AgentMode = getAgentMode()): string {
     case "manual":
       return "MANUAL MODE: every action that changes data needs the user's approval. Expect to be refused once, ask plainly for the go-ahead, and continue when they agree.";
     case "auto":
-      return "AUTO MODE: the user has pre-approved your actions, including sending and payments. Execute without asking — but say plainly what you did.";
+      return "AUTO MODE: the user has pre-approved your actions, including the terminal (run_shell), Windows apps (computer_use), messages and payments. Execute without asking — say plainly what you did. Sending a document or an invoice out still needs the user's OK: an approval card appears, so just make the call. If a command or click fails, read the result, adapt, and try a different step. Do not claim you have no terminal or no computer access.";
     case "accept_edits":
       return "";
   }

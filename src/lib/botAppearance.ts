@@ -19,11 +19,26 @@ export const BOT_MOTIONS = [
 ] as const;
 export type BotMotion = (typeof BOT_MOTIONS)[number]["id"];
 
+/** OpenDots mascots (MIT, CopilotKit/OpenDots). Empty keeps the Filey orb. */
+export const FILEY_MASCOTS = [
+  { id: "blue", name: "Blue" },
+  { id: "mint", name: "Mint" },
+  { id: "orange", name: "Orange" },
+  { id: "purple", name: "Purple" },
+] as const;
+export type FileyMascot = (typeof FILEY_MASCOTS)[number]["id"];
+
+/** The look the assistant is wearing. The return type is written out because
+ *  an inferred one widens the mascot to `string` (the ids are looked up
+ *  against an `unknown`), and `AiPersona` then refuses it. */
 export function botAppearance(value: {
   orbColor?: unknown;
   botShape?: unknown;
   botMotion?: unknown;
-}) {
+  mascot?: unknown;
+}): { orbColor: string; botShape: ShapeId; botMotion: BotMotion; mascot: FileyMascot | "" } {
+  const wanted = typeof value.mascot === "string" ? value.mascot : "";
+  const mascot = FILEY_MASCOTS.find((entry) => entry.id === wanted)?.id;
   return {
     orbColor:
       typeof value.orbColor === "string" && /^#[\da-f]{6}$/i.test(value.orbColor)
@@ -32,5 +47,6 @@ export function botAppearance(value: {
     botShape: BOT_LOOKS.find((look) => look.id === value.botShape)?.id ?? "cercle",
     botMotion:
       BOT_MOTIONS.find((motion) => motion.id === value.botMotion)?.id ?? "playful",
+    mascot: mascot ?? "",
   };
 }

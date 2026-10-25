@@ -57,7 +57,7 @@ it("offers the 14-day trial on this device and Pro for the cloud on startup", ()
   expect(localChoice).toHaveTextContent("14-day free trial");
   expect(localChoice).toHaveTextContent("try every app for 14 days on this device");
   expect(localChoice).toHaveTextContent("$1 of Filey AI to try the agent");
-  expect(localChoice).toHaveTextContent("Then Freedom: 999 AED once, yours for life");
+  expect(localChoice).toHaveTextContent("Then Freedom: 1499 AED once, yours for life");
   expect(screen.getByRole("button", { name: /Use Filey Cloud/ })).toHaveTextContent("Pro · 36 AED / month");
 });
 
@@ -65,11 +65,11 @@ it("offers the trial, Freedom for life and Pro in the cloud at their real prices
   mode.local = true;
   window.history.replaceState(null, "", "/#/settings?section=billing");
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
-  await waitFor(() => expect(screen.getByRole("button", { name: "Get Freedom - 999 AED" })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Get Freedom - 1499 AED" })).toBeEnabled());
   const plans = within(screen.getByRole("region", { name: "Available plans" }));
   expect(plans.getByText("Free")).toBeInTheDocument();
   expect(plans.getByText("36 AED")).toBeInTheDocument();
-  expect(plans.getByText("999 AED")).toBeInTheDocument();
+  expect(plans.getByText("1499 AED")).toBeInTheDocument();
   expect(plans.getByText("Filey on your computer for life. Pay once, own it.")).toBeInTheDocument();
   expect(plans.getByText("Regular updates and support")).toBeInTheDocument();
   expect(plans.getByText("On 2 computers, and move it to a new PC any time")).toBeInTheDocument();

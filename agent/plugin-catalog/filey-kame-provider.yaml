@@ -1,0 +1,17 @@
+name: filey-kame-provider
+repo: https://github.com/Kame696/kame-api-rotation-for-hermes
+sha: cab5372d18d233da905c9f84a343359d2bc26564
+subdir: filey-kame-provider
+description: "Companion to filey-kame-api-rotation (install both). A model-provider plugin that re-registers Filey' bundled API-key profiles unchanged except for create_client and create_messages_client, which return the rotation plugin's key-rotating client; otherwise None and Filey builds its own. Same endpoints as Filey, no third-party service, no core override."
+maintainer: Kame696
+tier: community
+category: models
+requires_filey: ">=0.21.4"
+version: "1.8.2.2"
+docs_url: https://github.com/Kame696/kame-api-rotation-for-hermes/tree/v1.8.2.2/hermes-kame-provider#readme
+readme: true
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

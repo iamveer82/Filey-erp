@@ -7,6 +7,9 @@ import { uiItemFromArgs, type GenUiItem } from "./genUi";
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
+  /** A message the person sent while the task was still running: it steered the
+   *  current turn instead of starting a new one. */
+  steering?: boolean;
   /** Files the agent produced on this turn, kept with the message that made
    *  them so they stay reachable instead of vanishing at the next question. */
   files?: { name: string; path?: string; url?: string; videoJobId?: string; mediaJobId?: string }[];

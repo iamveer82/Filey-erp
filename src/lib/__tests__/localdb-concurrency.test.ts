@@ -3,6 +3,8 @@ import { beforeEach, afterAll, describe, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({ values: new Map<string, string>(), beforeCommit: undefined as undefined | (() => void), commits: 0 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: async (command: string, args: any) => {
   if (command === "cache_get") return native.values.get(args.key) ?? null;
+  // A native layer without read stamps: every read takes the full cache_get path.
+  if (command === "cache_get_fresh") return null;
   if (command === "cache_set") { native.values.set(args.key, args.value); return; }
   if (command === "cache_compare_set_many") {
     native.commits++;

@@ -2,13 +2,15 @@
 // low-stock / overdue alerts) and delivers results to the owner over WhatsApp.
 // Everything runs on-device; nothing is sent unless the bridge is paired and
 // the owner's number resolves.
-import { aiAutonomous, aiReady, DENY_SENSITIVE } from "./ai";
+import { DENY_SENSITIVE } from "./ai";
+import { fileyAgentReply, fileyAgentStatus } from "./fileyAgent";
 import { creditChoice } from "./aiCredits";
 import { log } from "./log";
 import { bridgeState, getBridgeConfig, hasDesktop, onBridgeState, sendWa } from "./waBridge";
 import { loadReminders, nextOccurrence, saveReminders } from "./reminders";
 import { waFormat } from "./waAgent";
 import { agentStorageScope, readAgentStorage, requireAgentStorageScope, writeAgentStorage } from "./agentStorage";
+import { alwaysOnPaused } from "./alwaysOn";
 
 let started = false;
 
@@ -74,17 +76,20 @@ async function run(kind: "daily" | "alerts"): Promise<boolean> {
   if (!scope) return false;
   // Chat funding must not silently spend money or shared free quota in the background.
   if (creditChoice().funding !== "byok") return false;
-  if (!aiReady()) return false;
+  // Filey Agent answers; while it starts or restarts the sweep waits for its next slot.
+  if (fileyAgentStatus().state !== "ready") return false;
   try {
     const to = await ownerJid();
     if (!to || scope !== agentStorageScope()) return false;
     const text = (
-      await aiAutonomous(kind === "daily" ? DAILY_GOAL : ALERTS_GOAL, {
-        maxTokens: 900,
+      await fileyAgentReply(`proactive:${kind}`, kind === "daily" ? DAILY_GOAL : ALERTS_GOAL, {
         // This fires hourly with nobody watching, and its goal names overdue
         // invoices and low stock — i.e. it is holding a list of customers and
         // suppliers. It reports to the owner; it does not get to contact them.
         confirm: DENY_SENSITIVE,
+        confirmCommand: DENY_SENSITIVE,
+        isOwner: false,
+        agentId: `proactive:${kind}`,
       })
     ).trim();
     requireAgentStorageScope(scope);
@@ -157,7 +162,8 @@ export function startProactiveAgent(): void {
   const inFlight = new Set<string>();
   const throttled = async (kind: "daily" | "alerts", key: string, every: number) => {
     const scope = agentStorageScope();
-    if (!scope) return;
+    // Paused from the tray or Automations: no background agent runs.
+    if (!scope || alwaysOnPaused()) return;
     const active = `${scope}:${kind}`;
     if (inFlight.has(active)) return;
     const last = readStamp(key);

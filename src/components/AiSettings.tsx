@@ -123,14 +123,18 @@ const PRESETS: Preset[] = [
   {
     label: "OpenCode Zen",
     provider: "openai",
-    baseUrl: "https://opencode.ai/zen/v1",
-    model: "kimi-k2.7-code",
+    baseUrl: "https://opencode.ai/inference/v1",
+    model: "glm-5.3",
+    keyUrl: "https://opencode.ai/console",
+    note: "One OpenCode Zen key covers GLM, Kimi, DeepSeek, Qwen, MiniMax and the free models. Find models lists the live catalogue. GPT and Gemini models need their own provider preset because they use a different API format.",
   },
   {
     label: "OpenCode Zen · Claude",
     provider: "anthropic",
-    baseUrl: "https://opencode.ai/zen/v1",
-    model: "claude-sonnet-5",
+    baseUrl: "https://opencode.ai/inference/anthropic/v1",
+    model: "claude-sonnet-5-5",
+    keyUrl: "https://opencode.ai/console",
+    note: "Claude through OpenCode Zen uses the Anthropic format. Find models shows the Claude IDs available to this key.",
   },
   {
     label: "Cerebras",

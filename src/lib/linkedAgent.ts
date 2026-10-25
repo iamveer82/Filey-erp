@@ -24,7 +24,9 @@ const SILENCE_MS = 45_000;
 const HISTORY_CHARS = 60_000;
 const DETAIL_CHARS = 24_000;
 
-export interface LinkedTurnInput { chatId: string; goalText: string; history: AiMessage[]; auto: boolean }
+/** `userTurn`: the phone holds the whole chat and the history it sends is capped, so it
+ *  carries the real count for the desktop's memory-nudge cadence (agentTurn.ts). */
+export interface LinkedTurnInput { chatId: string; goalText: string; history: AiMessage[]; userTurn?: number; auto: boolean }
 
 // ---- desktop ---------------------------------------------------------------------
 
@@ -36,7 +38,8 @@ function parseTurn(params: Record<string, unknown>): LinkedTurnInput {
   if (!goalText) throw new Error("Nothing to do.");
   const history = (Array.isArray(params.history) ? params.history : []).flatMap((m): AiMessage[] =>
     m && (m.role === "user" || m.role === "assistant") && typeof m.text === "string" ? [{ role: m.role, text: m.text }] : []);
-  return { chatId: clip(params.chatId, 200) || "chat", goalText, history: fitHistory(history), auto: params.auto === true };
+  const userTurn = Number.isInteger(params.userTurn) && (params.userTurn as number) > 0 ? params.userTurn as number : undefined;
+  return { chatId: clip(params.chatId, 200) || "chat", goalText, history: fitHistory(history), ...(userTurn ? { userTurn } : {}), auto: params.auto === true };
 }
 
 /** Tool details are for the progress list; the computer keeps anything bulky. */
@@ -53,13 +56,18 @@ function compact(event: AgentEvent): AgentEvent {
 export function serveLinkedDevices(): void {
   registerLinkMethod("agent.turn", async (params, call) => {
     const input = parseTurn(params);
-    const [{ runAgentTurn }, { endTurn }] = await Promise.all([import("./agentTurn"), import("./aiTools")]);
+    const [{ runAgentTurn }, { endTurn }, { taskComputerSession }] = await Promise.all([
+      import("./agentTurn"), import("./aiTools"), import("./computerUse"),
+    ]);
     const agentId = linkAgentId(call.device.id, input.chatId);
     const turnId = `link-${call.id}`;
+    // A paired phone may ask the computer it is paired with to act on its screen.
+    // The first approved computer_use call opens the session; this turn closes it.
+    const computer = taskComputerSession(call.signal);
     // Approvals go to the phone; the desktop's own mode, capability switches
     // and module access still decide inside runTool.
     const stream = runAgentTurn({ ...input, chatId: agentId },
-      { isOwner: true, signal: call.signal, agentId, confirm: call.ask, turnId, maxTokens: 4096 });
+      { isOwner: true, signal: call.signal, agentId, confirm: call.ask, turnId, maxTokens: 4096, computerSession: computer.get });
     let text = "";
     try {
       for (;;) {
@@ -69,6 +77,7 @@ export function serveLinkedDevices(): void {
       }
     } finally {
       await stream.return("");
+      await computer.stop().catch(() => {});
     }
     const files = endTurn(turnId).map(f => ({ name: f.name, ...(typeof f.url === "string" && /^https:/.test(f.url) ? { url: f.url } : {}) }));
     return { text, files };
@@ -126,7 +135,7 @@ export async function* linkedAgentTurn(input: LinkedTurnInput, ctx: { confirm: C
   const host = linkedHost();
   if (!host) throw new LinkUnavailable("No connected computer is open.");
   const session = await openLinkSession(host.id, "agent.turn",
-    { chatId: input.chatId, goalText: input.goalText, history: fitHistory(input.history), auto: input.auto });
+    { chatId: input.chatId, goalText: input.goalText, history: fitHistory(input.history), ...(input.userTurn ? { userTurn: input.userTurn } : {}), auto: input.auto });
   const cancel = () => void session.send("cancel").catch(() => {});
   ctx.signal.addEventListener("abort", cancel, { once: true });
   try {

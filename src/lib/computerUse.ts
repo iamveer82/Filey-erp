@@ -23,6 +23,16 @@ export function subscribeComputerUse(listener: () => void): () => void {
 }
 function publish(state: ComputerUseState) { current = state; for (const listener of listeners) listener(); }
 
+const MASCOTS = ["blue", "mint", "orange", "purple"];
+async function cursorMascot(): Promise<string> {
+  try {
+    const { getPersona } = await import("./ai");
+    const id = getPersona().mascot;
+    if (MASCOTS.includes(id)) return id;
+  } catch { /* the overlay still shows a face */ }
+  return "blue";
+}
+
 /** Available by default in the signed-in chat. Actions still pass their approval checks.
  * The token is kept in this module, outside prompts, tool results and storage. */
 export async function enableComputerUse(durationSeconds: number | null = null, windowId?: string, browserTab?: string): Promise<number> {
@@ -45,7 +55,8 @@ export async function enableComputerUse(durationSeconds: number | null = null, w
     await stopping;
     await requireModuleAccess("browser", true);
     if (version !== generation || scope !== agentStorageScope()) throw new Error("Workspace changed before computer access started.");
-    const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, ...(windowId ? { windowId } : {}), ...(browserTab ? { browserTab } : {}) });
+    const mascot = await cursorMascot();
+    const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, mascot, ...(windowId ? { windowId } : {}), ...(browserTab ? { browserTab } : {}) });
     if (!result || typeof result.sessionToken !== "string" || (result.expiresAt !== null && !Number.isFinite(result.expiresAt)))
       throw new Error("The native computer permission response was invalid.");
     if (version !== generation || scope !== agentStorageScope()) {
@@ -80,6 +91,34 @@ export function computerUseSessionActive(sessionId: number): boolean {
     && grant.scope === agentStorageScope();
 }
 
+/** Computer access for a task that runs on this computer: the in-app chat, an
+ *  approved channel turn, or a paired device's request. The first tool call
+ *  opens the session; stop() closes it when the turn ends or the signal aborts. */
+export function taskComputerSession(signal?: AbortSignal): { get: () => Promise<number>; stop: () => Promise<void> } {
+  let session: number | undefined;
+  const stop = async () => {
+    const current = session;
+    session = undefined;
+    if (current !== undefined) await disableComputerUse(current);
+  };
+  const get = async () => {
+    signal?.throwIfAborted();
+    const scope = agentStorageScope();
+    if (!scope) throw new Error("Sign in before enabling computer access.");
+    session ??= await enableComputerUse();
+    if (signal?.aborted || scope !== agentStorageScope() || !computerUseSessionActive(session)) {
+      const stale = session;
+      session = undefined;
+      if (stale !== undefined) await disableComputerUse(stale);
+      signal?.throwIfAborted();
+      throw new DOMException("Computer access stopped.", "AbortError");
+    }
+    return session;
+  };
+  if (signal) signal.addEventListener("abort", () => { void stop().catch(() => {}); }, { once: true });
+  return { get, stop };
+}
+
 function validate(args: Record<string, unknown>): Record<string, unknown> {
   const action = args.action;
   if (action === "list_windows" || action === "apps") return { action };
@@ -87,7 +126,7 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
   if (typeof action === "string" && action.startsWith("app_")) {
     if (typeof args.app !== "string" || !args.app.trim() || args.app.length > 200) throw new Error("Name the app (or its pid) from apps.");
     const request: Record<string, unknown> = { action, app: args.app };
-    for (const key of ["element_index", "x", "y", "button", "double_click", "text", "keys", "value", "direction", "pages", "name"])
+    for (const key of ["element_index", "x", "y", "to_x", "to_y", "button", "double_click", "text", "keys", "value", "direction", "pages", "name", "text_limit", "max_tree_nodes", "max_tree_depth"])
       if (args[key] !== undefined) request[key] = args[key];
     return request;
   }

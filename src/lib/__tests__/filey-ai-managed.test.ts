@@ -15,6 +15,8 @@ beforeEach(() => {
   localStorage.clear();
   setDataMode("local");
   setCacheOrg("managed-qa", "managed-user");
+  // Reasoning is on until the person picks Fast; these fixtures start from Fast.
+  setFileyAiReasoning(false);
   vi.spyOn(supabase!.auth, "getSession").mockResolvedValue({
     data: { session: { user: { id: "managed-user" }, access_token: "fixture-managed-token" } }, error: null,
   } as never);
@@ -82,12 +84,12 @@ it("scopes the optional reasoning preference and honors explicit per-turn overri
   expect(invoke.mock.calls[1][1].body.request).toMatchObject({ reasoning_enabled: false });
   expect(invoke.mock.calls[1][1].body.request).not.toHaveProperty("reasoning_effort");
   setCacheOrg("other-workspace", "managed-user");
-  expect(getFileyAiReasoning()).toBe(false);
+  expect(getFileyAiReasoning()).toBe(true); // unset elsewhere: the default, on
   expect(() => setFileyAiReasoning(true, scope)).toThrow(/account changed/i);
   setCacheOrg("managed-qa", "managed-user");
   expect(getFileyAiReasoning()).toBe(true);
   setDataMode("cloud");
-  expect(getFileyAiReasoning()).toBe(false);
+  expect(getFileyAiReasoning()).toBe(true);
 });
 
 it("completes a quick tool run without any reasoning trace", async () => {

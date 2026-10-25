@@ -62,7 +62,10 @@ export default defineConfig(async ({ command }) => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // IPv4 loopback. `localhost` on this machine is IPv6-only when Vite's default
+    // is left alone, and WebView2 then opens 127.0.0.1 to a refused connection — a
+    // blank dev window. Not `true`: that also exposes the dev server to the LAN.
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",

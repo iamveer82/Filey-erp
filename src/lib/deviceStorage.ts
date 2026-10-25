@@ -301,6 +301,23 @@ function mobileDatabase(): Promise<IDBDatabase> {
   return database;
 }
 
+/** Desktop: the stored value only when it changed since `stamp` (storage.rs read stamps), so a
+ *  page that already holds a collection is not sent the whole collection again. Other
+ *  platforms, and a native layer without stamps, always return the value. */
+export async function readDeviceValueSince(key: string, stamp?: string): Promise<{ value: string | null; stamp?: string; unchanged: boolean }> {
+  if (hasTauri) {
+    try {
+      const read = await invoke<{ stamp?: unknown; unchanged?: unknown; value?: unknown } | null>("cache_get_fresh", { key, stamp: stamp ?? null });
+      if (read && typeof read.stamp === "string" && typeof read.unchanged === "boolean" && (read.value === null || read.value === undefined || typeof read.value === "string"))
+        return read.unchanged ? { value: null, stamp: read.stamp, unchanged: true } : { value: (read.value as string | null | undefined) ?? null, stamp: read.stamp, unchanged: false };
+    } catch (error) {
+      // Only a native layer without read stamps falls back; a real storage error surfaces.
+      if (!/not found|unknown command|not allowed/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    }
+  }
+  return { value: await readDeviceValue(key), unchanged: false };
+}
+
 export async function readDeviceValue(key: string): Promise<string | null> {
   if (hasTauri) return invoke<string | null>("cache_get", { key });
   if (!isNativeApp()) return readBrowserValue(key);

@@ -80,7 +80,7 @@ describe("planCardFor", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("Free");
     expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("36 AED");
     expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
-    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("999 AED");
+    expect(PLANS.find((p) => p.id === "lite")?.price).toBe("1499 AED");
     expect(PLANS.find((p) => p.id === "lite")?.name).toBe("Freedom");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
   });

@@ -355,8 +355,9 @@
     @apply tracking-tight;
   }
   ::selection {
-    background: hsl(var(--muted));
-    color: hsl(var(--foreground));
+    /* Warm highlighter yellow — the marker-pen look, not a gray OS default. */
+    background: hsl(48 92% 76%);
+    color: hsl(30 25% 8%);
   }
   /* Hide the up/down spinner on number inputs app-wide */
   input[type="number"]::-webkit-outer-spin-button,

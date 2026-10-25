@@ -26,6 +26,9 @@ export default defineConfig({
     // those with `deno test`, not vitest.
     // Worker path checks use Node's test runner, separately in CI.
     // agent/ is the Filey Agent (Hermes fork) with its own test runners.
-    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**", "agent/**"],
+    // filey-erp/ is an accidental full copy of this repo inside itself: its
+    // suites ran a second time against stale sources and reported failures
+    // that belonged to the copy, not to the app.
+    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**", "agent/**", "filey-erp/**"],
   },
 });

@@ -12,6 +12,11 @@ import { agentStorageScope } from "../../lib/agentStorage";
 
 const context = vi.hoisted(() => ({ build: vi.fn<(_name?: string, signal?: AbortSignal) => Promise<string>>() }));
 vi.mock("../../lib/aiContext", () => ({ buildAiContext: context.build }));
+// Filey Agent (Hermes) writes the chat's event stream on the desktop; the in-browser engine stands in here.
+vi.mock("../../lib/agentTurn", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../lib/agentTurn")>();
+  return { ...original, runAgentTurn: original.builtInAgentTurn };
+});
 vi.mock("../../components/BloubBot", async importOriginal => ({
   ...(await importOriginal<typeof import("../../components/BloubBot")>()), default: () => null,
 }));
@@ -45,26 +50,24 @@ it("stops during business-context preparation without starting a model request",
   expect(stream).not.toHaveBeenCalled();
 });
 
-it("starter prompts prepare editable drafts without running the agent or replacing typed text", () => {
-  const stream = vi.spyOn(ai, "aiAgentStream");
+it("opens on a quiet prompt, with no suggestion boxes", () => {
   showChat();
-  fireEvent.click(screen.getByRole("button", { name: "Create an invoice" }));
-  expect(input()).toHaveValue("Create a new draft invoice. Ask me for the customer and items you need.");
-  expect(input()).toHaveFocus();
+  expect(screen.getByRole("heading", { name: "What’s on your mind?" })).toBeInTheDocument();
+  expect(screen.getByText("A little space to think")).toBeInTheDocument();
   expect(screen.queryByRole("group", { name: "Conversation starters" })).not.toBeInTheDocument();
-  fireEvent.change(input(), { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: "Review payments" }));
-  expect(input()).toHaveValue("Show me unpaid and overdue invoices, with amounts grouped by currency.");
-  expect(stream).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Create an invoice" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Draft a letter" })).not.toBeInTheDocument();
 });
 
-it("the file starter opens the existing picker without starting a request", () => {
+it("adding a file still opens the existing picker without starting a request", () => {
   const stream = vi.spyOn(ai, "aiAgentStream");
   const { container } = showChat();
   const picker = container.querySelector<HTMLInputElement>('input[type="file"]')!;
   const click = vi.spyOn(picker, "click");
-  fireEvent.click(screen.getByRole("button", { name: "Work with a file" }));
-  expect(click).toHaveBeenCalledOnce(); expect(stream).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /Add files or photos/ }));
+  expect(click).toHaveBeenCalledOnce();
+  expect(stream).not.toHaveBeenCalled();
   expect(input()).toHaveValue("");
 });
 
@@ -107,15 +110,6 @@ it("restores image attachments and stops before inference when any image cannot 
   for (const file of files) expect(screen.getByRole("button", { name: `Remove ${file.name}` })).toBeInTheDocument();
   expect(screen.queryByText("Private decoder details")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
-});
-
-it("the letter starter prepares an editable draft prompt without a paid request", () => {
-  const stream = vi.spyOn(ai, "aiAgentStream");
-  showChat();
-  fireEvent.click(screen.getByRole("button", { name: "Draft a letter" }));
-  expect(input()).toHaveValue("Draft a company letter using my saved company details. Ask me for its purpose and wording, leave missing optional details editable, and save it as a draft.");
-  expect(input()).toHaveFocus();
-  expect(stream).not.toHaveBeenCalled();
 });
 
 it("offers an AI setup path before sending when no connection is configured", () => {

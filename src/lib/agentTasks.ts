@@ -1,11 +1,10 @@
-/* Automated agent tasks ("cron"). A task pairs a natural-language goal with a
- * schedule; the in-app scheduler (components/AgentScheduler) runs the goal via
- * aiAutonomous when due.
+/* Automated agent tasks. A task pairs a natural-language goal with a schedule,
+ * business events to watch, or both; the scheduler (components/AgentScheduler)
+ * runs the goal via aiAutonomous when due or when a watched event happens.
  *
- * ponytail: in-app scheduler — tasks fire only while the desktop app is open,
- * with minute-granularity preset schedules (not a full cron parser). Upgrade
- * path if needed: OS-level scheduling via Tauri autostart + a background worker,
- * and a real cron expression.
+ * Filey stays running in the tray after its window closes (lib/alwaysOn), so
+ * tasks keep firing until the owner quits from the tray. Schedules are presets
+ * at minute granularity, not a full cron parser.
  */
 
 import { readAgentStorage, writeAgentStorage } from "./agentStorage";
@@ -13,18 +12,39 @@ import { readAgentStorage, writeAgentStorage } from "./agentStorage";
 export type Schedule =
   | { type: "interval"; minutes: number }
   | { type: "daily"; time: string } // "HH:MM" 24h, local
-  | { type: "weekly"; day: number; time: string }; // day 0=Sun…6=Sat
+  | { type: "weekly"; day: number; time: string } // day 0=Sun…6=Sat
+  /** No clock: runs only when a watched business event happens. */
+  | { type: "events" };
+
+/** Business events a task can watch. Found by lib/agentWatches every 15 min. */
+export type WatchEvent = "invoice_overdue" | "invoice_paid" | "stock_low" | "follow_up_due";
+export const WATCH_EVENTS: Record<WatchEvent, string> = {
+  invoice_overdue: "an invoice becomes overdue",
+  invoice_paid: "an invoice is paid",
+  stock_low: "a product runs low",
+  follow_up_due: "a follow-up comes due",
+};
+export const isWatchEvent = (value: unknown): value is WatchEvent =>
+  typeof value === "string" && value in WATCH_EVENTS;
 
 export interface AgentTask {
   id: string;
   name: string;
   goal: string;
   schedule: Schedule;
+  /** Watched business events; each new one runs the goal with the details. */
+  on?: WatchEvent[];
   enabled: boolean;
   createdAt: number;
   lastRun?: number;
   lastResult?: string;
   lastError?: string;
+  /** Set while a background run is in progress; left behind if Filey closed mid-run. */
+  runningSince?: number;
+  /** A run was cut off. It waits for the owner to check and press Retry. */
+  interrupted?: boolean;
+  /** Newest watched event already handed to this task. */
+  lastEventAt?: number;
 }
 
 const KEY = "filey.agent.tasks";
@@ -45,8 +65,11 @@ export function saveTasks(tasks: AgentTask[]): void {
 }
 
 export function addTask(
-  t: Omit<AgentTask, "id" | "createdAt" | "enabled"> & { enabled?: boolean }
+  t: Pick<AgentTask, "name" | "goal" | "schedule"> & { on?: WatchEvent[]; enabled?: boolean }
 ): AgentTask {
+  const on = [...new Set((t.on ?? []).filter(isWatchEvent))];
+  if (t.schedule.type === "events" && !on.length)
+    throw new Error("Pick at least one thing to watch, or give the automation a schedule.");
   const task: AgentTask = {
     id: `task_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`,
     createdAt: Date.now(),
@@ -54,6 +77,7 @@ export function addTask(
     name: t.name,
     goal: t.goal,
     schedule: t.schedule,
+    ...(on.length ? { on } : {}),
   };
   saveTasks([...loadTasks(), task]);
   return task;
@@ -77,8 +101,9 @@ export function removeTask(id: string): void {
 
 /** Is the task due to run now? Time-based schedules fire once per occurrence. */
 export function isDue(task: AgentTask, now = Date.now()): boolean {
-  if (!task.enabled) return false;
+  if (!task.enabled || task.interrupted) return false;
   const s = task.schedule;
+  if (s.type === "events") return false;
   if (s.type === "interval") {
     const base = task.lastRun ?? task.createdAt;
     return now - base >= Math.max(1, s.minutes) * 60_000;
@@ -98,6 +123,7 @@ export function isDue(task: AgentTask, now = Date.now()): boolean {
 
 /** Human-readable schedule, e.g. "Every 30 min" / "Daily 09:00" / "Mon 08:30". */
 export function describeSchedule(s: Schedule): string {
+  if (s.type === "events") return "When something happens";
   if (s.type === "interval") {
     const m = s.minutes;
     if (m % 60 === 0) return `Every ${m / 60} h`;
@@ -106,4 +132,12 @@ export function describeSchedule(s: Schedule): string {
   if (s.type === "daily") return `Daily ${s.time}`;
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return `${days[s.day] ?? "?"} ${s.time}`;
+}
+
+/** Schedule plus watched events, e.g. "Daily 09:00 · when a product runs low". */
+export function describeTrigger(task: Pick<AgentTask, "schedule" | "on">): string {
+  const watch = (task.on ?? []).filter(isWatchEvent).map(kind => WATCH_EVENTS[kind]);
+  const when = watch.length ? `when ${watch.map(text => text.replace(/^an? /, "")).join(", ")}` : "";
+  if (task.schedule.type === "events") return when || "Never (nothing to watch)";
+  return [describeSchedule(task.schedule), when].filter(Boolean).join(" · ");
 }

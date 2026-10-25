@@ -28,6 +28,7 @@ it("keeps its default grant token outside public state and tool results", async 
   await expect(runComputerUse({ action: "list_windows" })).rejects.toThrow("Start a new task");
   expect(invoke).not.toHaveBeenCalled();
   await enableComputerUse();
+  expect(invoke).toHaveBeenCalledWith("computer_start", expect.objectContaining({ durationSeconds: null, mascot: expect.stringMatching(/^(blue|mint|orange|purple)$/) }));
   expect(getComputerUseState()).toEqual({ enabled: true, expiresAt: null, busy: false });
   expect(await runComputerUse({ action: "list_windows" })).toEqual({ ok: true });
   expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: { action: "list_windows" } });
@@ -90,6 +91,16 @@ it("passes screenshot-bound hover, drag and horizontal scroll through the existi
   expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: { action: "scroll", snapshot_id: "vertical-frame", x: 10, y: 20, delta: 1, axis: "vertical" } });
 });
 
+it("passes app_state tree limits and app_drag coordinates without arbitrary keys", async () => {
+  await enableComputerUse();
+  await runComputerUse({ action: "app_state", app: "Notepad", text_limit: 20000, max_tree_nodes: 3000, max_tree_depth: 96, cwd: "ignored" });
+  expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: {
+    action: "app_state", app: "Notepad", text_limit: 20000, max_tree_nodes: 3000, max_tree_depth: 96 } });
+  await runComputerUse({ action: "app_drag", app: "Notepad", x: 10, y: 20, to_x: 300, to_y: 150 });
+  expect(invoke).toHaveBeenLastCalledWith("computer_command", { sessionToken: "private-native-token", request: {
+    action: "app_drag", app: "Notepad", x: 10, y: 20, to_x: 300, to_y: 150 } });
+});
+
 it("revokes native access on workspace changes and prevents the next action", async () => {
   await enableComputerUse();
   identity.scope = "cloud:another:user:person";
@@ -135,7 +146,7 @@ it("revokes the grant when the native helper reports Escape was pressed", async 
 
 it("binds a task to its browser and prevents an old task from using or revoking a replacement grant", async () => {
   const previous = await enableComputerUse(300, "42");
-  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: 300, windowId: "42" });
+  expect(invoke).toHaveBeenCalledWith("computer_start", { durationSeconds: 300, windowId: "42", mascot: "blue" });
   const replacement = await enableComputerUse();
   vi.mocked(invoke).mockClear();
   await expect(runComputerUse({ action: "list_windows" }, undefined, previous)).rejects.toMatchObject({ name: "AbortError" });
