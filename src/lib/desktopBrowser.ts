@@ -19,6 +19,10 @@ export interface DesktopBrowserResult {
   tabs: BrowserTab[]; tab?: BrowserTab | null;
   /** `read`: the page as text, controls numbered `[n]`. */
   page?: string; elements?: number; hint?: string;
+  /** `read`: the character offset of this chunk, and where the next chunk starts (null at the end). */
+  offset?: number; next_offset?: number | null;
+  /** An action that triggered a navigation returns this instead of a stale page. */
+  loading?: boolean;
 }
 export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null; agentId: string | null; paused: boolean }
 let panel: BrowserPanelState = { open: false, tabs: [], activeId: null, agentId: null, paused: false };
@@ -78,13 +82,21 @@ export function layoutDesktopBrowser(bounds: BrowserBounds | null, tabId: string
 }
 export interface DesktopBrowserRequest {
   action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all"
-    | "read" | "click" | "type" | "press";
+    | "read" | "click" | "type" | "press" | "scroll" | "wait";
   url?: string;
   tab_id?: string;
-  /** click/type: a number from the latest `read`. */
+  /** click/type/scroll: a number from the latest `read`. */
   element?: number;
   text?: string;
   key?: string;
+  /** read: start character offset; use `next_offset` from the previous read. */
+  offset?: number;
+  /** scroll: wheel up or down; defaults to down. */
+  direction?: "up" | "down";
+  /** scroll: wheel pages, 1-10. */
+  pages?: number;
+  /** wait: milliseconds, 100-5000. */
+  ms?: number;
 }
 
 const PRESS_KEYS = ["Enter", "Tab", "Escape", "Backspace", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight",
@@ -120,7 +132,7 @@ function profileKey(account: string): Promise<string> {
 function validate(args: DesktopBrowserRequest | Record<string, unknown>): DesktopBrowserRequest {
   const action = args.action;
   if (action === "list" || action === "close_all") return { action };
-  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close", "read", "click", "type", "press"].includes(String(action)))
+  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close", "read", "click", "type", "press", "scroll", "wait"].includes(String(action)))
     throw new Error("Unsupported browser action.");
   const result = { action } as DesktopBrowserRequest;
   if (action !== "open") {
@@ -128,11 +140,35 @@ function validate(args: DesktopBrowserRequest | Record<string, unknown>): Deskto
       throw new Error("Choose an open Filey browser tab.");
     result.tab_id = args.tab_id;
   }
-  if (action === "click" || action === "type") {
-    const element = Number(args.element);
-    if (!Number.isInteger(element) || element < 1 || element > 5000)
+  const element = () => {
+    const value = Number(args.element);
+    if (!Number.isInteger(value) || value < 1 || value > 5000)
       throw new Error("element must be a number from the latest read.");
-    result.element = element;
+    return value;
+  };
+  if (action === "click" || action === "type") result.element = element();
+  if (action === "read" && args.offset !== undefined) {
+    const offset = Number(args.offset);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000)
+      throw new Error("offset must be a whole number from the previous next_offset.");
+    result.offset = offset;
+  }
+  if (action === "scroll") {
+    const direction = args.direction ?? "down";
+    if (direction !== "up" && direction !== "down")
+      throw new Error("direction must be up or down.");
+    const pages = args.pages === undefined ? 1 : Number(args.pages);
+    if (!Number.isInteger(pages) || pages < 1 || pages > 10)
+      throw new Error("pages must be a whole number from 1 to 10.");
+    result.direction = direction;
+    result.pages = pages;
+    if (args.element !== undefined) result.element = element();
+  }
+  if (action === "wait") {
+    const ms = Number(args.ms);
+    if (!Number.isInteger(ms) || ms < 100 || ms > 5000)
+      throw new Error("ms must be a whole number from 100 to 5000.");
+    result.ms = ms;
   }
   if (action === "type") {
     const text = args.text;

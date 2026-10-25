@@ -200,18 +200,36 @@ it("acts on numbered page controls and refuses anything the page did not offer",
   const tab_id = "filey-browser-00000000-0000-0000-0000-000000000000";
   await desktopBrowserCommand({ action: "read", tab_id });
   expect(lastCall().request).toEqual({ action: "read", tab_id });
+  await desktopBrowserCommand({ action: "read", tab_id, offset: 12_000 });
+  expect(lastCall().request).toEqual({ action: "read", tab_id, offset: 12_000 });
   await desktopBrowserCommand({ action: "click", tab_id, element: 3 });
   expect(lastCall().request).toEqual({ action: "click", tab_id, element: 3 });
   await desktopBrowserCommand({ action: "type", tab_id, element: 1, text: "hello" });
   expect(lastCall().request).toEqual({ action: "type", tab_id, element: 1, text: "hello" });
   await desktopBrowserCommand({ action: "press", tab_id, key: "Enter" });
   expect(lastCall().request).toEqual({ action: "press", tab_id, key: "Enter" });
+  await desktopBrowserCommand({ action: "scroll", tab_id, direction: "up", pages: 3, element: 2 });
+  expect(lastCall().request).toEqual({ action: "scroll", tab_id, direction: "up", pages: 3, element: 2 });
+  await desktopBrowserCommand({ action: "scroll", tab_id });
+  expect(lastCall().request).toEqual({ action: "scroll", tab_id, direction: "down", pages: 1 });
+  await desktopBrowserCommand({ action: "wait", tab_id, ms: 500 });
+  expect(lastCall().request).toEqual({ action: "wait", tab_id, ms: 500 });
   for (const bad of [
     { action: "click", tab_id, element: 0 },
     { action: "click", tab_id, element: 1.5 },
     { action: "type", tab_id, element: 1, text: "x".repeat(2001) },
     { action: "type", tab_id, element: 1, text: "badcode" },
     { action: "press", tab_id, key: "F13" },
+    { action: "read", tab_id, offset: -1 },
+    { action: "read", tab_id, offset: 1.5 },
+    { action: "scroll", tab_id, direction: "left" },
+    { action: "scroll", tab_id, pages: 0 },
+    { action: "scroll", tab_id, pages: 11 },
+    { action: "scroll", tab_id, pages: 1.5 },
+    { action: "scroll", tab_id, element: 0 },
+    { action: "wait", tab_id, ms: 50 },
+    { action: "wait", tab_id, ms: 5001 },
+    { action: "wait", tab_id, ms: 1.5 },
     { action: "read" },
   ]) await expect(desktopBrowserCommand(bad)).rejects.toThrow();
 });

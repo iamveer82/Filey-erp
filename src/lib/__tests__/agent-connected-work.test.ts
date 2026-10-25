@@ -271,15 +271,55 @@ describe("connected work discovery and permissions", () => {
     expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/no desktop session/) });
     expect(runComputerUse).not.toHaveBeenCalled();
   });
-  it("caps computer rounds per turn, and a new turn starts fresh", async () => {
+  it("counts only computer inputs per turn, so reads stay free", async () => {
     const session = vi.fn(async () => 42);
-    const args = { action: "list_windows" };
-    const run = (turnId?: string) => runTool("computer_use", args, () => true, true, turnId, undefined, session);
-    for (let i = 0; i < 10; i++) expect(await run("cap-turn")).toEqual({ windows: [] });
-    expect(await run("cap-turn")).toMatchObject({ error: expect.stringMatching(/computer-action limit/) });
-    expect(await run("other-turn")).toEqual({ windows: [] });
-    endTurn("cap-turn");
-    expect(await run("cap-turn")).toEqual({ windows: [] });
+    const run = (action: string, turnId = "input-turn") =>
+      runTool("computer_use", { action }, () => true, true, turnId, undefined, session);
+    try {
+      for (let i = 0; i < 20; i++) expect(await run("list_windows")).toEqual({ windows: [] });
+      for (let i = 0; i < 10; i++) expect(await run("app_click")).toEqual({ windows: [] });
+      expect(await run("app_click")).toMatchObject({ error: expect.stringMatching(/computer-input limit/) });
+      expect(await run("list_windows")).toEqual({ windows: [] });
+      expect(await run("app_click", "fresh-turn")).toEqual({ windows: [] });
+    } finally {
+      endTurn("input-turn");
+      endTurn("fresh-turn");
+    }
+    expect(await run("app_click")).toEqual({ windows: [] });
+  });
+  it("ends the computer window after 90 seconds, even for reads", async () => {
+    const session = vi.fn(async () => 42);
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const run = (turnId = "clock-turn") =>
+      runTool("computer_use", { action: "list_windows" }, () => true, true, turnId, undefined, session);
+    try {
+      expect(await run()).toEqual({ windows: [] });
+      now.mockReturnValue(1_090_001);
+      expect(await run()).toMatchObject({ error: expect.stringMatching(/90-second computer window/) });
+      expect(await run("new-clock-turn")).toEqual({ windows: [] });
+      endTurn("clock-turn");
+      expect(await run()).toEqual({ windows: [] });
+    } finally {
+      now.mockRestore();
+      endTurn("clock-turn");
+      endTurn("new-clock-turn");
+    }
+  });
+  it("caps browser steps per turn, and a new turn starts fresh", async () => {
+    setCapabilityEnabled("computer", true);
+    const tab_id = "filey-browser-00000000-0000-0000-0000-000000000000";
+    const run = (turnId = "browser-turn", action = "read") =>
+      runTool("workspace_browser", { action, tab_id }, () => true, true, turnId);
+    try {
+      for (let i = 0; i < 60; i++) expect(await run()).toHaveProperty("tabs");
+      expect(await run()).toMatchObject({ error: expect.stringMatching(/browser-step limit/) });
+      expect(await run("browser-turn", "stop")).toHaveProperty("tabs");
+      expect(await run("fresh-browser-turn")).toHaveProperty("tabs");
+    } finally {
+      endTurn("browser-turn");
+      endTurn("fresh-browser-turn");
+    }
+    expect(await run()).toHaveProperty("tabs");
   });
   const sensitive = ["prepare_invoice_whatsapp", "send_invoice_whatsapp", "workspace_browser"];
   const offered = (isOwner = true) => offeredTools({ isOwner }, new Set(["messaging", "web"])).map((tool) => tool.name);

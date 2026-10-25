@@ -16,8 +16,11 @@ const PREFIX: &str = "filey-browser-";
 /// ran the machine out of memory.
 const MAX_TABS: usize = 4;
 const MAX_URL: usize = 65_536;
-/// A page read is capped so one long page cannot flood the agent's context.
+/// A page read is capped so one long page cannot flood the agent's context. A
+/// larger page is returned in chunks through `offset`/`next_offset`.
 const MAX_READ: usize = 12_000;
+/// Hard ceiling on a rendered page. The agent pages through it in `MAX_READ` chunks.
+const MAX_PAGE: usize = 240_000;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +42,8 @@ struct Entry {
     bounds: Option<BrowserBounds>,
     /// The page elements numbered by the latest `read` (backend DOM node ids), cleared on navigation.
     elements: Vec<i64>,
+    /// Hash of the last rendered page, so an action can say whether it changed anything.
+    page_hash: u64,
 }
 static TABS: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
 fn tabs() -> &'static Mutex<HashMap<String, Entry>> {
@@ -330,8 +335,8 @@ fn render_page(nodes: &[Value]) -> (String, Vec<i64>) {
         } else {
             continue;
         };
-        if out.len() + line.len() + 1 > MAX_READ {
-            out += "\n… (page continues; scroll with press PageDown, then read again)";
+        if out.len() + line.len() + 1 > MAX_PAGE {
+            out += "\n… (page is too long to render; narrow the task)";
             break;
         }
         out += &line;
@@ -350,6 +355,107 @@ fn element(id: &str, request: &Value) -> Result<i64, String> {
         .ok_or_else(|| format!("Element {index} is not in the latest read of this page. Read it again."))
 }
 
+/// One context-sized chunk of the rendered page, counted in characters so
+/// `next_offset` is what the model sees. Element numbers stay global: a chunk
+/// never renumbers controls.
+fn page_slice(text: &str, offset: usize) -> (String, Option<usize>) {
+    let chars: Vec<char> = text.chars().collect();
+    let start = offset.min(chars.len());
+    let end = start.saturating_add(MAX_READ).min(chars.len());
+    let mut page: String = chars[start..end].iter().collect();
+    let next = (end < chars.len()).then_some(end);
+    if let Some(next) = next {
+        page.push_str(&format!("\n… (page continues at offset {next})"));
+    }
+    (page, next)
+}
+
+/// FNV-1a: compare rendered pages without keeping another copy of the text.
+fn page_hash(text: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn set_page_hash(id: &str, hash: u64) {
+    if let Ok(mut entries) = tabs().lock() {
+        if let Some(entry) = entries.get_mut(id) { entry.page_hash = hash; }
+    }
+}
+
+fn state_json(text: &str, count: usize, offset: usize) -> Value {
+    let (page, next) = page_slice(text, offset);
+    json!({
+        "page": page,
+        "elements": count,
+        "offset": offset,
+        "next_offset": next,
+        "hint": match next {
+            Some(next) => format!("Act by number. Read offset {next} for the rest of the page."),
+            None => "Act by number: click {element}, type {element, text}, press {key} or scroll.".to_owned(),
+        },
+    })
+}
+
+fn rendered_page(view: &Webview, id: &str) -> Result<(String, usize), String> {
+    let _ = cdp(view, "Accessibility.enable", json!({}));
+    let tree = cdp(view, "Accessibility.getFullAXTree", json!({}))?;
+    let (text, elements) = render_page(tree["nodes"].as_array().map(Vec::as_slice).unwrap_or_default());
+    let count = elements.len();
+    if let Ok(mut entries) = tabs().lock() {
+        if let Some(entry) = entries.get_mut(id) { entry.elements = elements; }
+    }
+    Ok((text, count))
+}
+
+fn read_state(view: &Webview, id: &str, offset: usize) -> Result<Value, String> {
+    let (text, count) = rendered_page(view, id)?;
+    set_page_hash(id, page_hash(&text));
+    Ok(state_json(&text, count, offset))
+}
+
+/// Return the new page after an action, the way a browser agent observes the
+/// result before choosing its next step. An unchanged page is reported without
+/// resending the same text; a navigation in flight is left to the agent.
+fn settle_and_read(view: &Webview, id: &str) -> Option<Value> {
+    std::thread::sleep(Duration::from_millis(120));
+    let loading = tabs().lock().ok()
+        .and_then(|entries| entries.get(id).map(|entry| entry.tab.loading))
+        .unwrap_or(false);
+    if loading { return None; }
+    let (text, count) = rendered_page(view, id).ok()?;
+    let hash = page_hash(&text);
+    let previous = tabs().lock().ok()
+        .and_then(|entries| entries.get(id).map(|entry| entry.page_hash))
+        .unwrap_or(0);
+    if previous != 0 && previous == hash {
+        return Some(json!({"changed": false, "elements": count,
+            "hint": "The page did not change. Read only if you need the current text."}));
+    }
+    set_page_hash(id, hash);
+    let mut state = state_json(&text, count, 0);
+    state["changed"] = json!(true);
+    Some(state)
+}
+
+fn with_state(mut out: Value, state: Option<Value>) -> Value {
+    match state {
+        Some(state) => {
+            if let (Some(out), Some(state)) = (out.as_object_mut(), state.as_object()) {
+                out.extend(state.clone());
+            }
+        }
+        None => {
+            out["loading"] = json!(true);
+            out["hint"] = json!("The page is still changing. Read again when it settles.");
+        }
+    }
+    out
+}
+
 fn key_event(view: &Webview, kind: &str, key: &str, code: u32, text: Option<&str>, modifiers: u32, commands: &[&str]) -> Result<(), String> {
     let mut event = json!({"type": kind, "key": key, "code": key, "windowsVirtualKeyCode": code, "modifiers": modifiers});
     if let Some(text) = text { event["text"] = json!(text); }
@@ -357,20 +463,12 @@ fn key_event(view: &Webview, kind: &str, key: &str, code: u32, text: Option<&str
     cdp(view, "Input.dispatchKeyEvent", event).map(|_| ())
 }
 
-/// read / click / type / press on a tab, through the page's accessibility tree.
+/// read / click / type / press / scroll / wait on a tab, through the page's
+/// accessibility tree. Every mutating action returns the new page when it has
+/// settled, so the agent's next step starts from a fresh observation.
 fn page_action(view: &Webview, id: &str, action: &str, request: &Value) -> Result<Value, String> {
     match action {
-        "read" => {
-            let _ = cdp(view, "Accessibility.enable", json!({}));
-            let tree = cdp(view, "Accessibility.getFullAXTree", json!({}))?;
-            let (text, elements) = render_page(tree["nodes"].as_array().map(Vec::as_slice).unwrap_or_default());
-            let count = elements.len();
-            if let Ok(mut entries) = tabs().lock() {
-                if let Some(entry) = entries.get_mut(id) { entry.elements = elements; }
-            }
-            Ok(json!({"page": text, "elements": count,
-                "hint": "Act by number: click {element}, type {element, text}, press {key}. Read again after the page changes."}))
-        }
+        "read" => read_state(view, id, request["offset"].as_u64().unwrap_or(0) as usize),
         "click" => {
             let node = element(id, request)?;
             let _ = cdp(view, "DOM.enable", json!({}));
@@ -385,7 +483,7 @@ fn page_action(view: &Webview, id: &str, action: &str, request: &Value) -> Resul
                 if let (Some(event), Some(extra)) = (event.as_object_mut(), extra.as_object()) { event.extend(extra.clone()); }
                 cdp(view, "Input.dispatchMouseEvent", event)?;
             }
-            Ok(json!({"clicked": request["element"]}))
+            Ok(with_state(json!({"clicked": request["element"]}), settle_and_read(view, id)))
         }
         "type" => {
             let node = element(id, request)?;
@@ -397,7 +495,7 @@ fn page_action(view: &Webview, id: &str, action: &str, request: &Value) -> Resul
             key_event(view, "rawKeyDown", "a", 65, None, 2, &["selectAll"])?;
             key_event(view, "keyUp", "a", 65, None, 2, &[])?;
             cdp(view, "Input.insertText", json!({"text": text}))?;
-            Ok(json!({"typed_into": request["element"]}))
+            Ok(with_state(json!({"typed_into": request["element"]}), settle_and_read(view, id)))
         }
         "press" => {
             let key = request["key"].as_str().unwrap_or_default();
@@ -410,7 +508,40 @@ fn page_action(view: &Webview, id: &str, action: &str, request: &Value) -> Resul
             };
             key_event(view, if text.is_some() { "keyDown" } else { "rawKeyDown" }, key, code, text, 0, &[])?;
             key_event(view, "keyUp", key, code, None, 0, &[])?;
-            Ok(json!({"pressed": key}))
+            Ok(with_state(json!({"pressed": key}), settle_and_read(view, id)))
+        }
+        "scroll" => {
+            let direction = request["direction"].as_str().unwrap_or("down");
+            if direction != "up" && direction != "down" { return Err("direction must be up or down.".into()); }
+            let pages = request["pages"].as_f64().unwrap_or(1.0);
+            if !(1.0..=10.0).contains(&pages) { return Err("pages must be between 1 and 10.".into()); }
+            let (x, y) = if request["element"].as_u64().is_some() {
+                let node = element(id, request)?;
+                let _ = cdp(view, "DOM.enable", json!({}));
+                let _ = cdp(view, "DOM.scrollIntoViewIfNeeded", json!({"backendNodeId": node}));
+                let model = cdp(view, "DOM.getBoxModel", json!({"backendNodeId": node}))?;
+                let quad: Vec<f64> = model["model"]["content"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+                if quad.len() != 8 { return Err("That element has no visible box. Read the page again.".into()); }
+                ((quad[0] + quad[2] + quad[4] + quad[6]) / 4.0, (quad[1] + quad[3] + quad[5] + quad[7]) / 4.0)
+            } else {
+                let metrics = cdp(view, "Page.getLayoutMetrics", json!({}))?;
+                let viewport = &metrics["cssLayoutViewport"];
+                (viewport["clientWidth"].as_f64().unwrap_or(800.0) / 2.0,
+                 viewport["clientHeight"].as_f64().unwrap_or(600.0) / 2.0)
+            };
+            let distance = y.max(1.0) * 0.9 * pages * if direction == "up" { -1.0 } else { 1.0 };
+            cdp(view, "Input.dispatchMouseEvent", json!({
+                "type": "mouseWheel", "x": x, "y": y, "deltaX": 0, "deltaY": distance,
+                "button": "none", "clickCount": 0, "modifiers": 0,
+            }))?;
+            Ok(json!({"scrolled": direction, "pages": pages,
+                "hint": "Read again, or take a screenshot when the layout matters."}))
+        }
+        "wait" => {
+            let ms = request["ms"].as_u64().filter(|ms| (100..=5000).contains(ms))
+                .ok_or("ms must be between 100 and 5000.")?;
+            std::thread::sleep(Duration::from_millis(ms));
+            Ok(with_state(json!({"waited_ms": ms}), settle_and_read(view, id)))
         }
         _ => Err("Unsupported browser action.".into()),
     }
@@ -468,6 +599,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
                 tab,
                 bounds: None,
                 elements: Vec::new(),
+                page_hash: 0,
             },
         );
     }
@@ -590,7 +722,7 @@ pub async fn desktop_browser_command(
             "list" => (),
             "close_all" => close_profile(&app, Some(&profile)),
             "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "read" | "click" | "type"
-            | "press" => {
+            | "press" | "scroll" | "wait" => {
                 let id = request["tab_id"]
                     .as_str()
                     .ok_or("Choose an open browser tab.")?;
@@ -610,7 +742,7 @@ pub async fn desktop_browser_command(
                             .map_err(|e| e.to_string())?;
                     }
                     "reload" => tab_window.reload().map_err(|e| e.to_string())?,
-                    "read" | "click" | "type" | "press" => {
+                    "read" | "click" | "type" | "press" | "scroll" | "wait" => {
                         page = Some(page_action(&tab_window, id, action, &request)?);
                     }
                     "focus" => {
@@ -782,6 +914,21 @@ mod tests {
         assert!(text.contains("Forgot password?"));
         assert_eq!(text.matches("Log in").count(), 2, "button text is not repeated: {text}");
         assert!(!text.contains("Hidden"));
+    }
+    #[test]
+    fn long_pages_are_read_in_stable_chunks() {
+        let text = "a".repeat(MAX_READ + 10);
+        let (page, next) = page_slice(&text, 0);
+        assert_eq!(next, Some(MAX_READ));
+        assert!(page.starts_with(&"a".repeat(MAX_READ)));
+        assert!(page.contains(&format!("offset {MAX_READ})")));
+        let (rest, next) = page_slice(&text, MAX_READ);
+        assert_eq!(next, None);
+        assert_eq!(rest, "a".repeat(10));
+        // Offsets are character-based, so a multi-byte code point is never split.
+        let (page, next) = page_slice("a漢b", 1);
+        assert_eq!(page, "漢b");
+        assert_eq!(next, None);
     }
     #[test]
     fn browser_bounds_stay_inside_the_app() {
