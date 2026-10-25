@@ -99,10 +99,10 @@ const AGENT_BLOCK: &str = "agent:\n  disabled_toolsets:\n    - cronjob\n";
 /// tool-search bridge instead of riding every request (Hermes' own defaults, plus the browser,
 /// kanban, speech and connector tools, and the Filey tools that are not everyday: their
 /// schemas alone were ~11K tokens a request). Always visible: pdf, word, sheet,
-/// filey_computer, list_my_files, read_attached_document, filey_tools and filey_run.
+/// filey_computer, workspace_browser, list_my_files, read_attached_document, filey_tools and filey_run.
 const TOOLS_BLOCK: &str = "tools:\n  tool_search:\n    listing_max_tokens: 1500\n    defer:\n\
 \x20     - slides\n      - design\n      - fig\n      - vector\n      - agent_computer\n\
-\x20     - workspace_browser\n      - open_page\n      - show_ui\n      - use_saved_file\n\
+\x20     - open_page\n      - show_ui\n      - use_saved_file\n\
 \x20     - list_file_tools\n      - run_file_tool\n      - get_stats\n      - financial_summary\n\
 \x20     - find_customers\n      - find_products\n      - list_invoices\n      - get_invoice\n\
 \x20     - create_invoice_draft\n      - export_invoice_pdf\n      - create_quote\n\

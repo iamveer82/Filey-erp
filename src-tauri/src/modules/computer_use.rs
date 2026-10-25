@@ -2,8 +2,9 @@
 //! persisted permission, arbitrary script, executable, or shell command input.
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::process::{Child, Command, Stdio};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Manager, Webview};
@@ -13,15 +14,114 @@ const SNAPSHOT_LIFETIME: Duration = Duration::from_secs(120);
 const HELPER: &str = include_str!("computer_use.ps1");
 /// open-computer-use's Windows runtime: any app through UI Automation, by element index.
 const OCU_RUNTIME: &str = include_str!("ocu_runtime.ps1");
-/// Runs the runtime in memory, dot-sourced so its `$script:` state works. Stdin is the operation
-/// JSON and the script, each base64 (ASCII, so the console code page can't garble them).
-const OCU_BOOTSTRAP: &str = r#"$ErrorActionPreference = 'Stop'
-$parts = [Console]::In.ReadToEnd().Split("`n")
-$utf8 = [Text.UTF8Encoding]::new($false)
-$operation = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGuid() + ".json")
-[IO.File]::WriteAllText($operation, $utf8.GetString([Convert]::FromBase64String($parts[0].Trim())), $utf8)
-try { . ([scriptblock]::Create($utf8.GetString([Convert]::FromBase64String($parts[1].Trim())))) -OperationPath $operation }
-finally { Remove-Item -LiteralPath $operation -ErrorAction SilentlyContinue }"#;
+/// One PowerShell per computer session, like open-computer-use's persistent runtime. The first
+/// two stdin lines are the helper and the OCU runtime (base64), loaded once: their C# Add-Type
+/// compiles once per session instead of on every action (seconds of CPU and a compiler process
+/// each time). Then one request per line, `helper|ocu<TAB>base64(json)`; one reply per line,
+/// base64 of `{ok, out}` or `{ok:false, error}`. When Filey goes away stdin closes and the loop
+/// ends, so no helper outlives the app. Each request is dot-sourced in a fresh child scope, so the
+/// scripts run with script semantics and nothing leaks from one request into the next.
+const HOST: &str = r#"$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$fileyUtf8 = [Text.UTF8Encoding]::new($false)
+function FileyDecode([string]$text) { $fileyUtf8.GetString([Convert]::FromBase64String(($text -replace '[^A-Za-z0-9+/=]', ''))) }
+$fileyHelper = [scriptblock]::Create((FileyDecode ([Console]::In.ReadLine())))
+$fileyOcu = [scriptblock]::Create((FileyDecode ([Console]::In.ReadLine())))
+while ($null -ne ($fileyLine = [Console]::In.ReadLine())) {
+  $fileyParts = $fileyLine.Split("`t", 2)
+  $fileyJson = FileyDecode $fileyParts[1]
+  try {
+    if ($fileyParts[0] -eq 'ocu') {
+      $fileyOp = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGuid() + ".json")
+      [IO.File]::WriteAllText($fileyOp, $fileyJson, $fileyUtf8)
+      try { $fileyOut = (& { . $fileyOcu -OperationPath $fileyOp }) -join "`n" }
+      finally { Remove-Item -LiteralPath $fileyOp -ErrorAction SilentlyContinue }
+    } else {
+      $FileyRequest = $fileyJson
+      # Dot-sourced inside a fresh child scope: script semantics ([ref] locals work) and
+      # nothing one request sets leaks into the next.
+      $fileyOut = (& { . $fileyHelper }) -join "`n"
+    }
+    $fileyReply = @{ ok = $true; out = "$fileyOut".Trim() }
+  } catch {
+    $fileyReply = @{ ok = $false; error = $_.Exception.Message }
+  }
+  [Console]::Out.WriteLine([Convert]::ToBase64String($fileyUtf8.GetBytes(($fileyReply | ConvertTo-Json -Compress -Depth 3))))
+  [Console]::Out.Flush()
+}"#;
+
+/// computer_use.ps1 was written to run once per process. In the host it runs as a script block:
+/// the request comes from `$FileyRequest`, and `exit` (which would end the host) becomes `return`,
+/// or `break` in the trap so the error reaches the host's catch with its message.
+fn host_helper() -> String {
+    HELPER
+        .replace("$request = [Console]::In.ReadToEnd() | ConvertFrom-Json", "$request = $FileyRequest | ConvertFrom-Json")
+        .replace("trap { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }", "trap { break }")
+        .lines()
+        .map(|line| if line.trim() == "exit" { line.replace("exit", "return") } else { line.to_owned() })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+struct Host {
+    child: Arc<Mutex<Child>>,
+    stdin: ChildStdin,
+    replies: Arc<Mutex<Receiver<String>>>,
+}
+
+fn spawn_host() -> Result<Host, String> {
+    use base64::Engine;
+    let b64 = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
+    let encoded = base64::engine::general_purpose::STANDARD
+        .encode(HOST.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>());
+    let system_root = std::env::var_os("SystemRoot").ok_or("Windows system directory is unavailable.")?;
+    let executable = std::path::PathBuf::from(system_root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let mut command = Command::new(executable);
+    command
+        .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", &encoded])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Errors travel in the reply; an unread stderr pipe could fill and stall the host.
+        .stderr(Stdio::null());
+    for flag in OCU_OFF {
+        command.env_remove(flag);
+    }
+    for flag in OCU_ON {
+        command.env(flag, "1");
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut process = command.spawn().map_err(|e| format!("Could not start native computer helper: {e}"))?;
+    let mut stdin = process.stdin.take().ok_or("Computer helper input unavailable.")?;
+    let stdout = process.stdout.take().ok_or("Computer helper output unavailable.")?;
+    if let Err(error) = writeln!(stdin, "{}\n{}", b64(&host_helper()), b64(OCU_RUNTIME)).and_then(|_| stdin.flush()) {
+        let _ = process.kill();
+        return Err(error.to_string());
+    }
+    let (send, replies) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if send.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    Ok(Host { child: Arc::new(Mutex::new(process)), stdin, replies: Arc::new(Mutex::new(replies)) })
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 /// Real-pointer clicks can land on any window, including Filey's own approval prompts, so that
 /// fallback stays off no matter what the environment says. Launch, focus and text entry are on:
 /// an app the task names can be opened and typed into. Launch itself only starts an installed
@@ -54,6 +154,7 @@ struct Session {
 struct State {
     session: Option<Session>,
     job: Option<(String, Arc<Mutex<Child>>)>,
+    host: Option<Host>,
 }
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
 fn state() -> &'static Mutex<State> {
@@ -81,6 +182,7 @@ fn revoke(current: &mut State) {
             let _ = child.kill();
         }
     }
+    current.host = None; // the session's helper goes with it
     super::agent_overlay::hide();
 }
 
@@ -563,13 +665,32 @@ pub async fn computer_command(
         .map_err(|e| e.to_string())?
 }
 
+/// Where on screen a pointer action lands, for the glide (None for typing, keys and reads).
+/// ponytail: app coordinates are taken as physical pixels; on a scaled display the glide may
+/// end a little off and the helper's own move corrects it.
+fn glide_target(prepared: &Value) -> Option<(i64, i64)> {
+    if let (Some(x), Some(y)) = (prepared["screen_x"].as_i64(), prepared["screen_y"].as_i64()) {
+        return Some((x, y));
+    }
+    let frame = &prepared["element"]["frame"];
+    if let (Some(x), Some(y), Some(w), Some(h)) =
+        (frame["x"].as_f64(), frame["y"].as_f64(), frame["width"].as_f64(), frame["height"].as_f64())
+    {
+        return Some(((x + w / 2.0) as i64, (y + h / 2.0) as i64));
+    }
+    let origin = &prepared["windowBounds"];
+    let x = prepared["x"].as_i64().or_else(|| prepared["from_x"].as_i64())?;
+    let y = prepared["y"].as_i64().or_else(|| prepared["from_y"].as_i64())?;
+    Some((origin["x"].as_i64()? + x, origin["y"].as_i64()? + y))
+}
+
 fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value, String> {
     if !cfg!(windows) {
         return Err("Native computer control currently requires Windows.".into());
     }
     let action = request["action"].as_str().unwrap_or_default().to_owned();
     let ocu = action == "apps" || action.starts_with("app_");
-    let (id, child, mut stdout, mut stderr) = {
+    let (id, child, replies) = {
         let mut current = state()
             .lock()
             .map_err(|_| "Computer access is unavailable.")?;
@@ -591,130 +712,59 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
         if prepared["action"] == "list_windows" {
             prepared["browser_windows"] = json!(super::desktop_browser::computer_windows(&app));
         }
+        // One helper per session (see HOST); start it on first use or after it went away.
+        let alive = current.host.as_ref().is_some_and(|host| {
+            host.child.lock().is_ok_and(|mut child| matches!(child.try_wait(), Ok(None)))
+        });
+        if !alive {
+            current.host = None;
+            current.host = Some(spawn_host()?);
+        }
+        // Show the user where the agent is about to act: the pointer glides there first.
+        if let Some((x, y)) = glide_target(&prepared) {
+            super::agent_overlay::glide_to(x, y);
+        }
         use base64::Engine;
-        let b64 = |text: &str| base64::engine::general_purpose::STANDARD.encode(text);
-        let input_text = if ocu { format!("{}\n{}", b64(&prepared.to_string()), b64(OCU_RUNTIME)) } else { prepared.to_string() };
-        let encoded = base64::engine::general_purpose::STANDARD.encode(
-            if ocu { OCU_BOOTSTRAP } else { HELPER }
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>(),
+        let line = format!(
+            "{}\t{}\n",
+            if ocu { "ocu" } else { "helper" },
+            base64::engine::general_purpose::STANDARD.encode(prepared.to_string())
         );
-        let system_root =
-            std::env::var_os("SystemRoot").ok_or("Windows system directory is unavailable.")?;
-        let executable = std::path::PathBuf::from(system_root)
-            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
-        let mut command = Command::new(executable);
-        command
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-EncodedCommand",
-                &encoded,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for flag in OCU_OFF {
-            command.env_remove(flag);
+        let Some(host) = current.host.as_mut() else { return Err("Computer helper unavailable.".into()) };
+        if let Err(error) = host.stdin.write_all(line.as_bytes()).and_then(|_| host.stdin.flush()) {
+            current.host = None;
+            return Err(format!("Could not reach the computer helper: {error}"));
         }
-        for flag in OCU_ON {
-            command.env(flag, "1");
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
-        let mut process = command
-            .spawn()
-            .map_err(|e| format!("Could not start native computer helper: {e}"))?;
-        let mut input = process
-            .stdin
-            .take()
-            .ok_or("Computer helper input unavailable.")?;
-        if let Err(error) = input.write_all(input_text.as_bytes()) {
-            let _ = process.kill();
-            return Err(error.to_string());
-        }
-        drop(input);
-        let stdout = process
-            .stdout
-            .take()
-            .ok_or("Computer helper output unavailable.")?;
-        let stderr = process
-            .stderr
-            .take()
-            .ok_or("Computer helper error output unavailable.")?;
-        let child = Arc::new(Mutex::new(process));
+        let (child, replies) = (host.child.clone(), host.replies.clone());
         let id = uuid::Uuid::new_v4().to_string();
         current.job = Some((id.clone(), child.clone()));
-        (id, child, stdout, stderr)
+        (id, child, replies)
     };
-    let output = std::thread::spawn(move || {
-        let mut data = Vec::new();
-        stdout
-            .by_ref()
-            .take(MAX_OUTPUT + 1)
-            .read_to_end(&mut data)
-            .map(|_| data)
-    });
-    let errors = std::thread::spawn(move || {
-        let mut data = Vec::new();
-        stderr
-            .by_ref()
-            .take(64_000)
-            .read_to_end(&mut data)
-            .map(|_| data)
-    });
     let started = Instant::now();
-    let status = loop {
+    // A large app's UI tree can take the runtime longer to read than a screenshot.
+    let limit = Duration::from_secs(if ocu { 30 } else { 20 });
+    let reply = loop {
         let allowed = {
             let mut current = state()
                 .lock()
                 .map_err(|_| "Computer access is unavailable.")?;
             session(&mut current, &token).is_ok()
         };
-        // A large app's UI tree can take the runtime longer to read than a screenshot.
-        if !allowed || started.elapsed() > Duration::from_secs(if ocu { 30 } else { 20 }) {
-            let _ = child
-                .lock()
-                .map_err(|_| "Computer helper unavailable.")?
-                .kill();
-            break Err(if allowed {
-                "Computer action timed out."
-            } else {
-                "Computer action stopped."
-            }
-            .to_string());
+        if !allowed || started.elapsed() > limit {
+            break Err(if allowed { "Computer action timed out." } else { "Computer action stopped." }.to_string());
         }
-        match child
+        match replies
             .lock()
             .map_err(|_| "Computer helper unavailable.")?
-            .try_wait()
+            .recv_timeout(Duration::from_millis(20))
         {
-            Ok(Some(status)) => break Ok(status),
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(error) => break Err(error.to_string()),
+            Ok(line) => break Ok(line),
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => {
+                break Err("The computer helper stopped. Try the action again.".to_string())
+            }
         }
     };
-    // Kill/reap before joining pipe readers so stop never leaves a helper alive.
-    if let Ok(mut process) = child.lock() {
-        if status.is_err() {
-            let _ = process.kill();
-        }
-        let _ = process.wait();
-    }
-    let output = output
-        .join()
-        .map_err(|_| "Computer output reader failed.")?
-        .map_err(|e| e.to_string())?;
-    let errors = errors
-        .join()
-        .map_err(|_| "Computer error reader failed.")?
-        .map_err(|e| e.to_string())?;
     let mut current = state()
         .lock()
         .map_err(|_| "Computer access is unavailable.")?;
@@ -725,17 +775,35 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
     {
         current.job = None;
     }
-    let status = status?;
-    if !status.success() {
-        let message = String::from_utf8_lossy(&errors)
-            .chars()
-            .take(1200)
-            .collect::<String>();
+    let line = match reply {
+        Ok(line) => line,
+        Err(error) => {
+            // A stuck or stopped action takes its helper with it; the next action starts fresh.
+            if let Ok(mut process) = child.lock() {
+                let _ = process.kill();
+            }
+            if current.host.as_ref().is_some_and(|host| Arc::ptr_eq(&host.child, &child)) {
+                current.host = None;
+            }
+            return Err(error);
+        }
+    };
+    let reply: Value = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(line.trim())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .ok_or("Computer helper returned invalid output.")?
+    };
+    if reply["ok"] != json!(true) {
+        let message = reply["error"].as_str().unwrap_or("unknown error").chars().take(1200).collect::<String>();
         if message.contains("Computer action stopped by Escape") {
             revoke(&mut current);
         }
         return Err(format!("Computer action failed: {message}"));
     }
+    let output = reply["out"].as_str().unwrap_or_default().as_bytes().to_vec();
     let active = session(&mut current, &token)?;
     if output.len() as u64 > MAX_OUTPUT {
         return Err("Computer response exceeded its size limit.".into());
@@ -803,6 +871,24 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn host_helper_never_exits_the_host() {
+        let helper = host_helper();
+        assert!(helper.contains("$request = $FileyRequest | ConvertFrom-Json"));
+        assert!(helper.contains("trap { break }"));
+        assert!(!helper.contains("[Console]::In.ReadToEnd()"));
+        assert!(!helper.lines().any(|line| line.trim() == "exit" || line.contains("exit 1")));
+    }
+    #[test]
+    fn glide_targets_pointer_actions_only() {
+        assert_eq!(glide_target(&json!({"screen_x":10,"screen_y":20})), Some((10, 20)));
+        let element = json!({"element":{"frame":{"x":100.0,"y":50.0,"width":40.0,"height":20.0}},"windowBounds":{"x":0,"y":0}});
+        assert_eq!(glide_target(&element), Some((120, 60)));
+        assert_eq!(glide_target(&json!({"windowBounds":{"x":5,"y":7},"x":10,"y":20})), Some((15, 27)));
+        assert_eq!(glide_target(&json!({"windowBounds":{"x":5,"y":7},"from_x":1,"from_y":2})), Some((6, 9)));
+        assert_eq!(glide_target(&json!({"windowBounds":{"x":5,"y":7},"tool":"type_text","text":"hi"})), None);
+        assert_eq!(glide_target(&json!({"tool":"get_app_state"})), None);
+    }
     fn active() -> Session {
         Session {
             token: "session".into(),
@@ -824,6 +910,7 @@ mod tests {
         let mut current = State {
             session: Some(active()),
             job: None,
+            host: None,
         };
         assert!(session(&mut current, "wrong-token").is_err());
         assert!(session(&mut current, "session").unwrap().expires.is_none());
@@ -926,6 +1013,7 @@ mod tests {
         let mut expired_state = State {
             session: Some(expired),
             job: None,
+            host: None,
         };
         assert!(session(&mut expired_state, "session").is_err());
         assert!(expired_state.session.is_none());

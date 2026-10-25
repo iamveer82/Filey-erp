@@ -15,7 +15,11 @@ export interface BrowserTab {
   blockedPopupUrl?: string | null;
   warning?: string | null;
 }
-export interface DesktopBrowserResult { tabs: BrowserTab[]; tab?: BrowserTab | null }
+export interface DesktopBrowserResult {
+  tabs: BrowserTab[]; tab?: BrowserTab | null;
+  /** `read`: the page as text, controls numbered `[n]`. */
+  page?: string; elements?: number; hint?: string;
+}
 export interface BrowserPanelState { open: boolean; tabs: BrowserTab[]; activeId: string | null; agentId: string | null; paused: boolean }
 let panel: BrowserPanelState = { open: false, tabs: [], activeId: null, agentId: null, paused: false };
 const panelListeners = new Set<() => void>();
@@ -73,10 +77,18 @@ export function layoutDesktopBrowser(bounds: BrowserBounds | null, tabId: string
   return result;
 }
 export interface DesktopBrowserRequest {
-  action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all";
+  action: "open" | "list" | "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "close_all"
+    | "read" | "click" | "type" | "press";
   url?: string;
   tab_id?: string;
+  /** click/type: a number from the latest `read`. */
+  element?: number;
+  text?: string;
+  key?: string;
 }
+
+const PRESS_KEYS = ["Enter", "Tab", "Escape", "Backspace", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight",
+  "PageDown", "PageUp", "Home", "End", "Space"];
 
 let generation = 0;
 let activeScope: string | null = null;
@@ -108,13 +120,31 @@ function profileKey(account: string): Promise<string> {
 function validate(args: DesktopBrowserRequest | Record<string, unknown>): DesktopBrowserRequest {
   const action = args.action;
   if (action === "list" || action === "close_all") return { action };
-  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close"].includes(String(action)))
+  if (!["open", "navigate", "back", "forward", "reload", "stop", "focus", "close", "read", "click", "type", "press"].includes(String(action)))
     throw new Error("Unsupported browser action.");
   const result = { action } as DesktopBrowserRequest;
   if (action !== "open") {
     if (typeof args.tab_id !== "string" || !/^filey-browser-[a-f0-9-]{36}$/.test(args.tab_id))
       throw new Error("Choose an open Filey browser tab.");
     result.tab_id = args.tab_id;
+  }
+  if (action === "click" || action === "type") {
+    const element = Number(args.element);
+    if (!Number.isInteger(element) || element < 1 || element > 5000)
+      throw new Error("element must be a number from the latest read.");
+    result.element = element;
+  }
+  if (action === "type") {
+    const text = args.text;
+    if (typeof text !== "string" || [...text].length > 2000
+      || [...text].some((char) => { const c = char.charCodeAt(0); return (c < 32 && c !== 9 && c !== 10) || c === 127; }))
+      throw new Error("text must be at most 2000 characters without control codes.");
+    result.text = text;
+  }
+  if (action === "press") {
+    if (typeof args.key !== "string" || !PRESS_KEYS.includes(args.key))
+      throw new Error(`key must be one of ${PRESS_KEYS.join(", ")}.`);
+    result.key = args.key;
   }
   if (action === "open" || action === "navigate") {
     if (typeof args.url !== "string" || !args.url || args.url.length > 65_536
@@ -147,8 +177,9 @@ export function closeDesktopBrowserTabs(): Promise<void> {
   return closing;
 }
 
-/** Explicit browser management only. DOM extraction, eval, cookies and login
- * credentials are not exposed. Observation/input use computer_use separately. */
+/** Browser management, plus reading the page through its accessibility tree and acting on
+ * its numbered controls (native DevTools input in desktop_browser.rs). Page JavaScript is never
+ * evaluated; cookies are not exposed and password fields read back hidden. */
 export async function desktopBrowserCommand(
   args: DesktopBrowserRequest | Record<string, unknown>, signal?: AbortSignal, agentId?: string,
 ): Promise<DesktopBrowserResult> {

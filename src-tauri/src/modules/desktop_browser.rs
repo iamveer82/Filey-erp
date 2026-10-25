@@ -12,8 +12,12 @@ use tauri::{
 };
 
 const PREFIX: &str = "filey-browser-";
-const MAX_TABS: usize = 8;
+/// Each tab is a full WebView2 page; on an 8 GB laptop eight of them (plus the app and the agent)
+/// ran the machine out of memory.
+const MAX_TABS: usize = 4;
 const MAX_URL: usize = 65_536;
+/// A page read is capped so one long page cannot flood the agent's context.
+const MAX_READ: usize = 12_000;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +37,8 @@ struct Entry {
     profile: String,
     tab: BrowserTab,
     bounds: Option<BrowserBounds>,
+    /// The page elements numbered by the latest `read` (backend DOM node ids), cleared on navigation.
+    elements: Vec<i64>,
 }
 static TABS: OnceLock<Mutex<HashMap<String, Entry>>> = OnceLock::new();
 fn tabs() -> &'static Mutex<HashMap<String, Entry>> {
@@ -204,6 +210,212 @@ fn native_control(_: &Webview, _: &str) -> Result<(bool, bool), String> {
     Err("The built-in browser currently requires Windows.".into())
 }
 
+/// One DevTools-protocol call on a tab. Accessibility, DOM geometry and input only: the page's
+/// own JavaScript is never evaluated, the same line as native_control.
+#[cfg(windows)]
+fn cdp(view: &Webview, method: &str, params: Value) -> Result<Value, String> {
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+    use windows_core::{HSTRING, PCWSTR};
+    let (method, params) = (HSTRING::from(method), HSTRING::from(params.to_string()));
+    let (send, receive) = std::sync::mpsc::sync_channel::<Result<String, String>>(1);
+    view.with_webview(move |platform| {
+        let failed = send.clone();
+        let started = (|| unsafe {
+            let core = platform.controller().CoreWebView2().map_err(|e| e.to_string())?;
+            let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, json| {
+                let _ = send.send(result.map(|_| json).map_err(|e| e.to_string()));
+                Ok(())
+            }));
+            core.CallDevToolsProtocolMethod(PCWSTR(method.as_ptr()), PCWSTR(params.as_ptr()), &handler)
+                .map_err(|e| e.to_string())
+        })();
+        if let Err(error) = started {
+            let _ = failed.send(Err(error));
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    let json = receive
+        .recv_timeout(Duration::from_secs(10))
+        .map_err(|_| "The page did not respond. Try again.".to_string())??;
+    serde_json::from_str(&json).map_err(|_| "The page returned unreadable data.".into())
+}
+#[cfg(not(windows))]
+fn cdp(_: &Webview, _: &str, _: Value) -> Result<Value, String> {
+    Err("The built-in browser currently requires Windows.".into())
+}
+
+/// Hidden tabs ask WebView2 to trim memory; the visible tab runs normally.
+#[cfg(windows)]
+fn memory_level(view: &Webview, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows_core::Interface;
+    let _ = view.with_webview(move |platform| unsafe {
+        if let Ok(core) = platform.controller().CoreWebView2().and_then(|core| core.cast::<ICoreWebView2_19>()) {
+            let _ = core.SetMemoryUsageTargetLevel(if low {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+            } else {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+            });
+        }
+    });
+}
+#[cfg(not(windows))]
+fn memory_level(_: &Webview, _: bool) {}
+
+const INTERACTIVE: [&str; 17] = [
+    "button", "link", "textbox", "searchbox", "combobox", "checkbox", "radio", "menuitem", "menuitemcheckbox",
+    "menuitemradio", "tab", "option", "switch", "slider", "spinbutton", "listbox", "treeitem",
+];
+
+/// The page as the agent reads it: headings and text in order, and every control numbered
+/// `[n] role "name" = "value"`. Returns the text and the backend node id of each number.
+fn render_page(nodes: &[Value]) -> (String, Vec<i64>) {
+    let field = |node: &Value, key: &str| -> String {
+        let text = node[key]["value"].as_str().map(str::to_owned)
+            .or_else(|| node[key]["value"].as_f64().map(|n| n.to_string())).unwrap_or_default();
+        text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect()
+    };
+    let role = |node: &Value| node["role"]["value"].as_str().unwrap_or_default().to_owned();
+    let mut parent: HashMap<&str, &str> = HashMap::new();
+    let mut by_id: HashMap<&str, &Value> = HashMap::new();
+    for node in nodes {
+        let Some(id) = node["nodeId"].as_str() else { continue };
+        by_id.insert(id, node);
+        for child in node["childIds"].as_array().into_iter().flatten() {
+            if let Some(child) = child.as_str() { parent.insert(child, id); }
+        }
+    }
+    // Text inside a numbered control repeats its name; leave it out.
+    let inside_control = |id: &str| {
+        let mut at = id;
+        for _ in 0..4 {
+            let Some(up) = parent.get(at) else { return false };
+            if by_id.get(up).is_some_and(|node| INTERACTIVE.contains(&role(node).as_str())) { return true; }
+            at = up;
+        }
+        false
+    };
+    let (mut out, mut elements, mut last_text) = (String::new(), Vec::new(), String::new());
+    for node in nodes {
+        if node["ignored"].as_bool() == Some(true) { continue; }
+        let kind = role(node);
+        let name = field(node, "name");
+        let line = if INTERACTIVE.contains(&kind.as_str()) {
+            let Some(backend) = node["backendDOMNodeId"].as_i64() else { continue };
+            let mut line = format!("[{}] {kind} \"{name}\"", elements.len() + 1);
+            let value = field(node, "value");
+            if !value.is_empty() {
+                // Password fields come through masked; never echo even that.
+                let masked = value.chars().all(|c| matches!(c, '•' | '*' | '●'));
+                line += &if masked { " = (hidden)".to_owned() } else { format!(" = \"{value}\"") };
+            }
+            for property in node["properties"].as_array().into_iter().flatten() {
+                let (key, on) = (property["name"].as_str().unwrap_or_default(), property["value"]["value"].clone());
+                match key {
+                    "disabled" | "focused" | "required" if on == json!(true) => line += &format!(" ({key})"),
+                    "checked" | "expanded" | "selected" | "pressed" if on == json!(true) || on == json!("true") => line += &format!(" ({key})"),
+                    _ => {}
+                }
+            }
+            elements.push(backend);
+            line
+        } else if kind == "heading" && !name.is_empty() {
+            format!("# {name}")
+        } else if kind == "StaticText" && !name.is_empty()
+            && node["nodeId"].as_str().is_some_and(|id| !inside_control(id)) && name != last_text {
+            last_text = name.clone();
+            name
+        } else {
+            continue;
+        };
+        if out.len() + line.len() + 1 > MAX_READ {
+            out += "\n… (page continues; scroll with press PageDown, then read again)";
+            break;
+        }
+        out += &line;
+        out.push('\n');
+    }
+    (out, elements)
+}
+
+fn element(id: &str, request: &Value) -> Result<i64, String> {
+    let index = request["element"].as_u64().filter(|n| *n >= 1).ok_or("element must be a number from the latest read.")?;
+    tabs()
+        .lock()
+        .map_err(|_| "Browser state unavailable.")?
+        .get(id)
+        .and_then(|entry| entry.elements.get(index as usize - 1).copied())
+        .ok_or_else(|| format!("Element {index} is not in the latest read of this page. Read it again."))
+}
+
+fn key_event(view: &Webview, kind: &str, key: &str, code: u32, text: Option<&str>, modifiers: u32, commands: &[&str]) -> Result<(), String> {
+    let mut event = json!({"type": kind, "key": key, "code": key, "windowsVirtualKeyCode": code, "modifiers": modifiers});
+    if let Some(text) = text { event["text"] = json!(text); }
+    if !commands.is_empty() { event["commands"] = json!(commands); }
+    cdp(view, "Input.dispatchKeyEvent", event).map(|_| ())
+}
+
+/// read / click / type / press on a tab, through the page's accessibility tree.
+fn page_action(view: &Webview, id: &str, action: &str, request: &Value) -> Result<Value, String> {
+    match action {
+        "read" => {
+            let _ = cdp(view, "Accessibility.enable", json!({}));
+            let tree = cdp(view, "Accessibility.getFullAXTree", json!({}))?;
+            let (text, elements) = render_page(tree["nodes"].as_array().map(Vec::as_slice).unwrap_or_default());
+            let count = elements.len();
+            if let Ok(mut entries) = tabs().lock() {
+                if let Some(entry) = entries.get_mut(id) { entry.elements = elements; }
+            }
+            Ok(json!({"page": text, "elements": count,
+                "hint": "Act by number: click {element}, type {element, text}, press {key}. Read again after the page changes."}))
+        }
+        "click" => {
+            let node = element(id, request)?;
+            let _ = cdp(view, "DOM.enable", json!({}));
+            let _ = cdp(view, "DOM.scrollIntoViewIfNeeded", json!({"backendNodeId": node}));
+            let model = cdp(view, "DOM.getBoxModel", json!({"backendNodeId": node}))?;
+            let quad: Vec<f64> = model["model"]["content"].as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+            if quad.len() != 8 { return Err("That element has no visible box. Read the page again.".into()); }
+            let (x, y) = ((quad[0] + quad[2] + quad[4] + quad[6]) / 4.0, (quad[1] + quad[3] + quad[5] + quad[7]) / 4.0);
+            for (kind, extra) in [("mouseMoved", json!({})), ("mousePressed", json!({"button": "left", "clickCount": 1})),
+                ("mouseReleased", json!({"button": "left", "clickCount": 1}))] {
+                let mut event = json!({"type": kind, "x": x, "y": y});
+                if let (Some(event), Some(extra)) = (event.as_object_mut(), extra.as_object()) { event.extend(extra.clone()); }
+                cdp(view, "Input.dispatchMouseEvent", event)?;
+            }
+            Ok(json!({"clicked": request["element"]}))
+        }
+        "type" => {
+            let node = element(id, request)?;
+            let text = request["text"].as_str()
+                .filter(|t| t.chars().count() <= 2000 && !t.chars().any(|c| c.is_control() && c != '\n' && c != '\t'))
+                .ok_or("text must be at most 2000 characters without control codes.")?;
+            cdp(view, "DOM.focus", json!({"backendNodeId": node}))?;
+            // Replace what is there: select all, then insert.
+            key_event(view, "rawKeyDown", "a", 65, None, 2, &["selectAll"])?;
+            key_event(view, "keyUp", "a", 65, None, 2, &[])?;
+            cdp(view, "Input.insertText", json!({"text": text}))?;
+            Ok(json!({"typed_into": request["element"]}))
+        }
+        "press" => {
+            let key = request["key"].as_str().unwrap_or_default();
+            let (code, text) = match key {
+                "Enter" => (13, Some("\r")), "Tab" => (9, None), "Escape" => (27, None), "Backspace" => (8, None),
+                "ArrowDown" => (40, None), "ArrowUp" => (38, None), "ArrowLeft" => (37, None), "ArrowRight" => (39, None),
+                "PageDown" => (34, None), "PageUp" => (33, None), "Home" => (36, None), "End" => (35, None),
+                "Space" => (32, Some(" ")),
+                _ => return Err("key must be Enter, Tab, Escape, Backspace, an arrow, PageUp, PageDown, Home, End or Space.".into()),
+            };
+            key_event(view, if text.is_some() { "keyDown" } else { "rawKeyDown" }, key, code, text, 0, &[])?;
+            key_event(view, "keyUp", key, code, None, 0, &[])?;
+            Ok(json!({"pressed": key}))
+        }
+        _ => Err("Unsupported browser action.".into()),
+    }
+}
+
 fn read_tabs(app: &AppHandle, profile: &str) -> Result<Vec<BrowserTab>, String> {
     let mut result: Vec<_> = tabs()
         .lock()
@@ -246,7 +458,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
         let mut entries = tabs().lock().map_err(|_| "Browser state unavailable.")?;
         if entries.len() >= MAX_TABS {
             return Err(
-                "Close a browser tab before opening another. Filey supports up to 8 tabs.".into(),
+                "Close a browser tab before opening another. Filey supports up to 4 tabs.".into(),
             );
         }
         entries.insert(
@@ -255,6 +467,7 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
                 profile: profile.into(),
                 tab,
                 bounds: None,
+                elements: Vec::new(),
             },
         );
     }
@@ -300,6 +513,12 @@ fn open(app: &AppHandle, profile: &str, url: Url) -> Result<String, String> {
                     if allowed_url(payload.url()) { tab.url = display_url(payload.url()); }
                     tab.loading = matches!(payload.event(), PageLoadEvent::Started);
                 });
+                // A new page: element numbers from the last read no longer point anywhere.
+                if matches!(payload.event(), PageLoadEvent::Started) {
+                    if let Ok(mut entries) = tabs().lock() {
+                        if let Some(entry) = entries.get_mut(window.label()) { entry.elements.clear(); }
+                    }
+                }
             });
         let parent = app
             .get_window("main")
@@ -363,13 +582,15 @@ pub async fn desktop_browser_command(
             .as_str()
             .ok_or("Choose a browser action.")?;
         let mut selected = None;
+        let mut page = None;
         match action {
             "open" => {
                 selected = Some(open(&app, &profile, parse_url(&request["url"])?)?);
             }
             "list" => (),
             "close_all" => close_profile(&app, Some(&profile)),
-            "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" => {
+            "navigate" | "back" | "forward" | "reload" | "stop" | "focus" | "close" | "read" | "click" | "type"
+            | "press" => {
                 let id = request["tab_id"]
                     .as_str()
                     .ok_or("Choose an open browser tab.")?;
@@ -389,6 +610,9 @@ pub async fn desktop_browser_command(
                             .map_err(|e| e.to_string())?;
                     }
                     "reload" => tab_window.reload().map_err(|e| e.to_string())?,
+                    "read" | "click" | "type" | "press" => {
+                        page = Some(page_action(&tab_window, id, action, &request)?);
+                    }
                     "focus" => {
                         tab_window.set_focus().map_err(|e| e.to_string())?;
                     }
@@ -414,7 +638,11 @@ pub async fn desktop_browser_command(
         }
         let tabs = read_tabs(&app, &profile)?;
         let tab = selected.and_then(|id| tabs.iter().find(|tab| tab.id == id).cloned());
-        Ok(json!({ "tabs": tabs, "tab": tab }))
+        let mut result = json!({ "tabs": tabs, "tab": tab });
+        if let (Some(result), Some(Value::Object(page))) = (result.as_object_mut(), page) {
+            result.extend(page);
+        }
+        Ok(result)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -495,6 +723,7 @@ pub async fn desktop_browser_layout(
             if let Ok(mut entries) = tabs().lock() { if let Some(entry) = entries.get_mut(id) { entry.bounds = None; } }
             if let Some(view) = app.get_webview(id) {
                 view.hide().map_err(|e| e.to_string())?;
+                memory_level(&view, true);
             }
         }
         let Some(bounds) = bounds else {
@@ -520,6 +749,7 @@ pub async fn desktop_browser_layout(
         })
         .map_err(|e| e.to_string())?;
         view.show().map_err(|e| e.to_string())?;
+        memory_level(&view, false);
         if let Ok(mut entries) = tabs().lock() { if let Some(entry) = entries.get_mut(&id) { entry.bounds = Some(bounds); } }
         Ok(())
     })
@@ -530,6 +760,29 @@ pub async fn desktop_browser_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn page_read_numbers_controls_and_hides_passwords() {
+        let nodes = json!([
+            {"nodeId":"1","role":{"value":"RootWebArea"},"name":{"value":"Instagram"},"childIds":["2","3","4","5","7"]},
+            {"nodeId":"2","role":{"value":"heading"},"name":{"value":"Log in"}},
+            {"nodeId":"3","role":{"value":"textbox"},"name":{"value":"Username"},"value":{"value":"veer"},"backendDOMNodeId":11},
+            {"nodeId":"4","role":{"value":"textbox"},"name":{"value":"Password"},"value":{"value":"••••••"},"backendDOMNodeId":12,
+             "properties":[{"name":"required","value":{"value":true}}]},
+            {"nodeId":"5","role":{"value":"button"},"name":{"value":"Log in"},"backendDOMNodeId":13,"childIds":["6"]},
+            {"nodeId":"6","role":{"value":"StaticText"},"name":{"value":"Log in"}},
+            {"nodeId":"7","role":{"value":"StaticText"},"name":{"value":"Forgot   password?"}},
+            {"nodeId":"8","ignored":true,"role":{"value":"button"},"name":{"value":"Hidden"},"backendDOMNodeId":99}
+        ]);
+        let (text, elements) = render_page(nodes.as_array().unwrap());
+        assert_eq!(elements, vec![11, 12, 13]);
+        assert!(text.contains("# Log in\n"));
+        assert!(text.contains("[1] textbox \"Username\" = \"veer\""));
+        assert!(text.contains("[2] textbox \"Password\" = (hidden) (required)"));
+        assert!(text.contains("[3] button \"Log in\""));
+        assert!(text.contains("Forgot password?"));
+        assert_eq!(text.matches("Log in").count(), 2, "button text is not repeated: {text}");
+        assert!(!text.contains("Hidden"));
+    }
     #[test]
     fn browser_bounds_stay_inside_the_app() {
         let valid = BrowserBounds {

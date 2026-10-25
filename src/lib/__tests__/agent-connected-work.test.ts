@@ -271,6 +271,16 @@ describe("connected work discovery and permissions", () => {
     expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/no desktop session/) });
     expect(runComputerUse).not.toHaveBeenCalled();
   });
+  it("caps computer rounds per turn, and a new turn starts fresh", async () => {
+    const session = vi.fn(async () => 42);
+    const args = { action: "list_windows" };
+    const run = (turnId?: string) => runTool("computer_use", args, () => true, true, turnId, undefined, session);
+    for (let i = 0; i < 10; i++) expect(await run("cap-turn")).toEqual({ windows: [] });
+    expect(await run("cap-turn")).toMatchObject({ error: expect.stringMatching(/computer-action limit/) });
+    expect(await run("other-turn")).toEqual({ windows: [] });
+    endTurn("cap-turn");
+    expect(await run("cap-turn")).toEqual({ windows: [] });
+  });
   const sensitive = ["prepare_invoice_whatsapp", "send_invoice_whatsapp", "workspace_browser"];
   const offered = (isOwner = true) => offeredTools({ isOwner }, new Set(["messaging", "web"])).map((tool) => tool.name);
 

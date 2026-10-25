@@ -12,7 +12,7 @@
 }
 
 /* Filey AI is working in this browser: a light blue edge, drawn outside the panel so the native
-   page area (which covers anything inside it) cannot hide it. Matches agent-overlay.html. */
+   page area (which covers anything inside it) cannot hide it. */
 .filey-agent-working {
   outline: 3px solid #38bdf8;
   box-shadow: 0 0 26px rgba(56, 189, 248, 0.45);

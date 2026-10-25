@@ -195,3 +195,23 @@ it("cancels polling without closing the user's browser windows", async () => {
   await desktopBrowserCommand({ action: "list" });
   expect(lastCall().request.action).toBe("list");
 });
+
+it("acts on numbered page controls and refuses anything the page did not offer", async () => {
+  const tab_id = "filey-browser-00000000-0000-0000-0000-000000000000";
+  await desktopBrowserCommand({ action: "read", tab_id });
+  expect(lastCall().request).toEqual({ action: "read", tab_id });
+  await desktopBrowserCommand({ action: "click", tab_id, element: 3 });
+  expect(lastCall().request).toEqual({ action: "click", tab_id, element: 3 });
+  await desktopBrowserCommand({ action: "type", tab_id, element: 1, text: "hello" });
+  expect(lastCall().request).toEqual({ action: "type", tab_id, element: 1, text: "hello" });
+  await desktopBrowserCommand({ action: "press", tab_id, key: "Enter" });
+  expect(lastCall().request).toEqual({ action: "press", tab_id, key: "Enter" });
+  for (const bad of [
+    { action: "click", tab_id, element: 0 },
+    { action: "click", tab_id, element: 1.5 },
+    { action: "type", tab_id, element: 1, text: "x".repeat(2001) },
+    { action: "type", tab_id, element: 1, text: "badcode" },
+    { action: "press", tab_id, key: "F13" },
+    { action: "read" },
+  ]) await expect(desktopBrowserCommand(bad)).rejects.toThrow();
+});
