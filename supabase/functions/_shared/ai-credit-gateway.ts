@@ -2,12 +2,12 @@
  * Old gateway/model configuration cannot select a route or become a fallback. */
 export function creditGateway(free = false) {
   if (free) return null;
-  const key = Deno.env.get("FILEY_AI_GLM_KEY")?.trim();
+  const key = Deno.env.get("FILEY_AI_DEEPSEEK_KEY")?.trim();
   if (!key) return null;
   return {
-    kind: "zai" as const,
-    // Z.ai's pay-as-you-go API (the account's API credit), not the Coding Plan endpoint.
-    url: "https://api.z.ai/api/paas/v4/chat/completions",
+    kind: "deepseek" as const,
+    // DeepSeek's pay-as-you-go chat API (the account's API credit).
+    url: "https://api.deepseek.com/chat/completions",
     key,
   };
 }

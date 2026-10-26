@@ -52,8 +52,11 @@ requests never switch provider or funding method.
 ## Server provider and pricing
 
 Managed inference uses only `https://api.deepseek.com/chat/completions` and the
-verified API model `deepseek-flash` (DeepSeek V4.1 Flash as of 3 October 2026).
-Client requests contain only `filey-ai`; the server fixes the upstream model.
+official Flash model `deepseek-flash` (DeepSeek-V4.1-Flash-1017, verified
+26 October 2026). The retired `deepseek-v4-flash` legacy alias is still served
+at the Flash price and is accepted by usage settlement, but the server always
+sends the official name. Client requests contain only `filey-ai`; the server
+fixes the upstream model.
 Old OpenRouter/OmniRoute chat configuration cannot create a fallback.
 No master key, provider URL or upstream model identifier is shipped to clients.
 
@@ -95,7 +98,7 @@ These source changes remain **unpublished** until the coordinated deployment
 and live readback succeed. On 4 October the user authorized web and matching
 backend publishing for their mobile wallet test; desktop publishing remains held.
 The supplied key authenticated successfully against the read-only model list,
- which includes `deepseek-flash`. No paid inference or checkout was performed.
+ which includes `deepseek-v4-flash`. No paid inference or checkout was performed.
 The credential is staged
  outside the repository with Windows user encryption and owner-only access.
 

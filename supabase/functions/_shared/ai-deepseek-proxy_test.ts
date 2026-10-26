@@ -21,7 +21,7 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
   const env = {
     SUPABASE_URL: "https://fixture.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
-    FILEY_AI_GLM_KEY: "fixture-key",
+    FILEY_AI_DEEPSEEK_KEY: "fixture-key",
     FILEY_AI_OPENROUTER_KEY: "fixture-old-key",
     FILEY_AI_GATEWAY: "omniroute",
     DODO_AI_CREDIT_PRODUCT_ID: "pdt_fixture",
@@ -62,16 +62,16 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
       }
       return Response.json({ balance_micros: 1_000_000, reserved_micros: 0 });
     }
-    if (url === "https://api.z.ai/api/paas/v4/chat/completions") {
+    if (url === "https://api.deepseek.com/chat/completions") {
       providers++;
       events.push("provider");
       const request = JSON.parse(String(init?.body));
       providerRequests.push(request);
       assert(
-        request.user_id === id,
+        request.user === id,
         "Provider isolation must override forged request identity",
       );
-      assert(request.model === "glm-5.3-flash");
+      assert(request.model === "deepseek-flash");
       assert(
         !request.provider && !request.usage && !request.baseURL &&
           !request.api_key,
@@ -82,7 +82,7 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
       );
       return Response.json({
         id: "chatcmpl-fixture",
-        model: "glm-5.3-flash",
+        model: "deepseek-flash",
         choices: [{
           index: 0,
           message: {
@@ -182,9 +182,9 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
     const response = await call();
     const body = await response.json();
     assert(
-      (providerRequests[0].thinking as { type: string }).type === "enabled" &&
+      !("thinking" in providerRequests[0]) &&
         providerRequests[0].reasoning_effort === "low",
-      "Hosted Filey AI thinks as little as GLM allows when reasoning is off",
+      "Hosted Filey AI thinks as little as DeepSeek V4-Flash allows when reasoning is off",
     );
     assert(
       response.status === 200 && body.charged_micros === 38 &&
@@ -233,7 +233,7 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
     assert(
       reasoningResponse.status === 200 && Number(providers) === 3 &&
         events.join(",") === "reserve,provider,settle" &&
-        (enabled.thinking as { type: string }).type === "enabled" &&
+        !("thinking" in enabled) &&
         enabled.reasoning_effort === "high" &&
         !("reasoning_enabled" in enabled),
       "An explicit reasoning toggle must reach the fixed hosted provider contract",
@@ -243,7 +243,7 @@ Deno.test("Filey hosted chat verifies session, MFA, email and funding before its
         reasoningBody.completion.choices[0].message.reasoning_content === "Fixture",
       "Reasoning-on tool requests retain real reasoning and the verified usage tariff",
     );
-    values.delete("FILEY_AI_GLM_KEY");
+    values.delete("FILEY_AI_DEEPSEEK_KEY");
     assert(
       (await call()).status === 503 && events.length === 0 &&
         Number(providers) === 3,
@@ -259,7 +259,7 @@ Deno.test("wallet status only publishes Filey AI and requires verified payments 
   const env = {
     SUPABASE_URL: "https://fixture.supabase.co",
     SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
-    FILEY_AI_GLM_KEY: "fixture-key",
+    FILEY_AI_DEEPSEEK_KEY: "fixture-key",
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "fixture-webhook-key",
     DODO_AI_CREDIT_PRODUCT_ID: "pdt_fixture",
@@ -313,7 +313,7 @@ Deno.test("wallet status only publishes Filey AI and requires verified payments 
       "Managed AI can remain available while unverifiable new purchases are disabled",
     );
     values.set("DODO_PAYMENTS_WEBHOOK_KEY", "fixture-webhook-key");
-    values.delete("FILEY_AI_GLM_KEY");
+    values.delete("FILEY_AI_DEEPSEEK_KEY");
     values.set("HF_API_KEY_ID", "fixture-video-id");
     values.set("HF_API_KEY_SECRET", "fixture-video-secret");
     const second = await status();

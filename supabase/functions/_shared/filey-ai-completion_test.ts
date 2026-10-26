@@ -23,7 +23,7 @@ function rejects(run: () => unknown) {
   assert(rejected);
 }
 function fixtureEnvironment(
-  initial: Record<string, string> = { FILEY_AI_GLM_KEY: "fixture-key" },
+  initial: Record<string, string> = { FILEY_AI_DEEPSEEK_KEY: "fixture-key" },
 ) {
   const original = Deno.env.get;
   const values = new Map(Object.entries(initial));
@@ -55,7 +55,7 @@ const request = {
 function completion() {
   return {
     id: "chatcmpl-fixture",
-    model: "glm-5.3-flash",
+    model: "deepseek-flash",
     choices: [{
       index: 0,
       message: {
@@ -101,12 +101,12 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
     max_tokens: 393216,
   });
   assert(
-    prepared.request.model === "glm-5.3-flash" &&
+    prepared.request.model === "deepseek-flash" &&
       prepared.request.max_tokens === 8192,
   );
   assert(
     prepared.request.reasoning_effort === "high" &&
-      prepared.request.thinking.type === "enabled",
+      !("thinking" in prepared.request),
   );
   assert(JSON.stringify(prepared.request.tools) === JSON.stringify(tools));
   assert(
@@ -114,9 +114,9 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
       !JSON.stringify(prepared.request).includes("temperature") &&
       !JSON.stringify(prepared.request).includes("cost"),
   );
-  // GLM-5.3-Flash cannot switch thinking off: reasoning off is the least of it.
+  // DeepSeek V4-Flash cannot switch thinking off: reasoning off is the least of it.
   const off = prepareFileyAIRequest({ ...request, model: undefined }).request;
-  assert(off.thinking.type === "enabled" && off.reasoning_effort === "low");
+  assert(!("thinking" in off) && off.reasoning_effort === "low");
   assert(
     prepareFileyAIRequest({ ...request, reasoning_enabled: true, reasoning_effort: "max" }).request
       .reasoning_effort === "max",
@@ -143,7 +143,7 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
     FILEY_AI_MODEL.input === 0.25 / 1_000_000 &&
       FILEY_AI_MODEL.output === 0.50 * 5 / 3 / 1_000_000,
   );
-  // GLM has no peak hours, so the hold is the published tariff on the largest bound.
+  // The hold is the unchanged server tariff on the largest bound.
   assert(
     prepareFileyAIRequest(request).reserve === prepareCreditRequest(request, FILEY_AI_MODEL).reserve,
     "The hold must use the server tariff",
@@ -153,12 +153,12 @@ Deno.test("managed chat only accepts Filey's fixed alias and strips caller routi
 Deno.test("reasoning defaults off, cannot be enabled by effort alone, and validates explicit boolean switches", () => {
   for (const reasoning_enabled of [undefined, false]) {
     const prepared = prepareFileyAIRequest({ ...request, reasoning_enabled, reasoning_effort: "max", thinking: { type: "enabled" } });
-    assert(prepared.request.thinking.type === "enabled" && prepared.request.reasoning_effort === "low");
+    assert(!("thinking" in prepared.request) && prepared.request.reasoning_effort === "low");
     assert(!("reasoning_enabled" in prepared.request), "Internal toggle was forwarded to the provider");
   }
   for (const [effort, expected] of [[undefined, "high"], ["auto", "high"], ["low", "low"], ["medium", "high"], ["xhigh", "high"], ["max", "max"]]) {
     const prepared = prepareFileyAIRequest({ ...request, reasoning_enabled: true, reasoning_effort: effort });
-    assert(prepared.request.thinking.type === "enabled" && prepared.request.reasoning_effort === expected);
+    assert(!("thinking" in prepared.request) && prepared.request.reasoning_effort === expected);
     assert(prepared.reserve === prepareFileyAIRequest(request).reserve, "Toggle changed the safe reservation tariff");
   }
   for (const reasoning_enabled of [null, "true", "false", 0, 1, [], {}]) {
@@ -178,7 +178,7 @@ Deno.test("earlier turns need no reasoning trace, and a given trace passes throu
   }, { role: "tool", tool_call_id: "call-fixture", content: "[]" }];
   for (const reasoning_enabled of [true, false]) {
     const bare = prepareFileyAIRequest({ ...request, reasoning_enabled, messages });
-    assert(bare.request.thinking.type === "enabled" && bare.request.thinking.clear_thinking === true);
+    assert(!("thinking" in bare.request) && bare.request.reasoning_effort === (reasoning_enabled ? "high" : "low"));
     assert(bare.request.messages[2].tool_call_id === "call-fixture");
     const traced = prepareFileyAIRequest({ ...request, reasoning_enabled, messages: messages.map((m, i) => i === 1 ? { ...m, reasoning_content: "Exact prior reasoning" } : m) });
     assert(traced.request.messages[1].reasoning_content === "Exact prior reasoning", "A trace was altered");
@@ -200,7 +200,7 @@ Deno.test("managed tool and plain replies settle without traces when OFF and pre
           globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
             providerCalls++;
             const sent = JSON.parse(String(init?.body));
-            assert(sent.thinking.type === "enabled");
+            assert(!("thinking" in sent));
             assert(sent.reasoning_effort === (reasoningEnabled ? "high" : "low"));
             return Response.json({ ...completion(), choices: [{
               finish_reason: toolCall ? "tool_calls" : "stop",
@@ -347,7 +347,7 @@ Deno.test("missing, inconsistent, unsafe or substituted token receipts cannot de
     rejects(() => fileyAIUsage(raw, 2048));
   }
   for (
-    const model of [undefined, "filey-ai", "deepseek-flash", "deepseek-v4-pro", "openai/gpt-4.1"]
+    const model of [undefined, "filey-ai", "deepseek-chat", "deepseek-v4-pro", "openai/gpt-4.1"]
   ) {
     rejects(() => fileyAIUsage({ ...completion(), model }, 2048));
   }
@@ -361,19 +361,19 @@ Deno.test("missing, inconsistent, unsafe or substituted token receipts cannot de
 
 Deno.test("managed gateway ignores all previous provider configuration and offers no hosted free route", () => {
   const { values: env, restore } = fixtureEnvironment({
-    FILEY_AI_GLM_KEY: "fixture-key",
+    FILEY_AI_DEEPSEEK_KEY: "fixture-key",
     FILEY_AI_GATEWAY: "omniroute",
     FILEY_AI_OPENROUTER_KEY: "fixture-old-key",
     FILEY_AI_OMNIROUTE_URL: "https://attacker.invalid/v1",
   });
   try {
     assert(
-      creditGateway()?.url === "https://api.z.ai/api/paas/v4/chat/completions",
+      creditGateway()?.url === "https://api.deepseek.com/chat/completions",
     );
     assert(
       creditGateway()?.key === "fixture-key" && creditGateway(true) === null,
     );
-    env.delete("FILEY_AI_GLM_KEY");
+    env.delete("FILEY_AI_DEEPSEEK_KEY");
     assert(
       creditGateway() === null,
       "No old-provider fallback without DeepSeek key",
@@ -402,19 +402,19 @@ Deno.test("shared completion authenticates, reserves once, settles precise usage
     return { balance_micros: 1_000_000, reserved_micros: 0 };
   };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    assert(String(input) === "https://api.z.ai/api/paas/v4/chat/completions");
+    assert(String(input) === "https://api.deepseek.com/chat/completions");
     assert(
       init?.redirect === "error" &&
         new Headers(init.headers).get("Authorization") === "Bearer fixture-key",
     );
     const sent = JSON.parse(String(init?.body));
     assert(
-      sent.user_id === user.id,
+      sent.user === user.id,
       "Provider isolation belongs to the verified account",
     );
     assert(
-      sent.model === "glm-5.3-flash" && !sent.provider &&
-        sent.thinking.type === "enabled" && sent.reasoning_effort === "low",
+      sent.model === "deepseek-flash" && !sent.provider &&
+        !("thinking" in sent) && sent.reasoning_effort === "low",
     );
     assert(
       calls.at(-1)?.action === "reserve",

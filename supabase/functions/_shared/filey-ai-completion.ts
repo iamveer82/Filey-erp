@@ -2,12 +2,19 @@ import { creditGateway } from "./ai-credit-gateway.ts";
 import { type CreditModel, prepareCreditRequest, UUID } from "./ai-credits.ts";
 
 export const FILEY_AI_MODEL_ID = "filey-ai";
-export const FILEY_AI_UPSTREAM_MODEL = "glm-5.3-flash";
+/** Official Flash model name (DeepSeek-V4.1-Flash-1017) per
+ * api-docs.deepseek.com/quick_start/pricing. The legacy ``deepseek-v4-flash``
+ * alias is retired but still served at the Flash price; settlement verifies
+ * either id in case the provider echoes the requested legacy name. */
+export const FILEY_AI_UPSTREAM_MODEL = "deepseek-flash";
+export const FILEY_AI_UPSTREAM_ECHO = "deepseek-v4-flash";
 
-/** Z.ai GLM-5.3-Flash, official rates verified 2026-10-17 (docs.z.ai/guides/overview/pricing):
- * $0.15/M input, $0.03/M cached input, $0.50/M output. Filey's fixed 5/3 tariff makes that
- * $0.25/M, $0.05/M and $0.8333/M; there is no peak pricing, so the hold uses the tariff.
- * The model has a 1M context and 128K output; Filey keeps its own, smaller safety caps. */
+/** DeepSeek V4.1-Flash-1017 (official Flash model, api.deepseek.com). Verified
+ * off-peak rates 2026-10-26: $0.003/M cached, $0.15/M uncached input, $0.60/M
+ * output; peak hours bill 2x and Filey absorbs the premium. The customer
+ * tariff is unchanged from the previous provider — the public rates and the
+ * per-token accounting below keep the same fixed values, so Coin charges are
+ * identical across the swap. Filey keeps its own context/output safety caps. */
 export const FILEY_AI_MODEL: Readonly<CreditModel> = Object.freeze({
   id: FILEY_AI_MODEL_ID,
   name: "Filey AI",
@@ -89,9 +96,9 @@ export function prepareFileyAIRequest(payload: Record<string, unknown>) {
       ...(prepared.request.tools ? { tools: prepared.request.tools } : {}),
       stream: false,
       max_tokens: prepared.request.max_tokens,
-      // GLM-5.3-Flash always thinks and takes only low, high or max ("cannot be disabled; please
-      // use low, high, or max"). Reasoning off thinks least; earlier turns' thinking isn't replayed.
-      thinking: { type: "enabled", clear_thinking: true },
+      // DeepSeek V4-Flash always thinks and is scaled by reasoning_effort (low,
+      // medium, high or max). Reasoning off thinks least; earlier turns'
+      // thinking isn't replayed.
       reasoning_effort: !reasoningEnabled ? "low" : effort === "max" || effort === "low" ? effort : "high",
     },
   };
@@ -110,7 +117,8 @@ function tokenCount(value: unknown): value is number {
 export function fileyAIUsage(completion: unknown, maxTokens: number) {
   if (
     !record(completion) || completion.error ||
-    completion.model !== FILEY_AI_UPSTREAM_MODEL ||
+    (completion.model !== FILEY_AI_UPSTREAM_MODEL &&
+      completion.model !== FILEY_AI_UPSTREAM_ECHO) ||
     typeof completion.id !== "string" ||
     !/^[A-Za-z0-9_-]{1,200}$/.test(completion.id) ||
     !record(completion.usage)
@@ -290,7 +298,7 @@ export async function fileyAICompletion(
       },
       // Provider KV-cache/scheduling isolation is bound to the verified account,
       // never a caller-supplied identity, email, or another workspace's owner.
-      body: JSON.stringify({ ...prepared.request, user_id: user.id }),
+      body: JSON.stringify({ ...prepared.request, user: user.id }),
       signal: AbortSignal.timeout(timeoutMs),
       redirect: "error",
     });
