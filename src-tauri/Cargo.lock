@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "filey-erp"
-version = "3.0.29"
+version = "3.0.30"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",

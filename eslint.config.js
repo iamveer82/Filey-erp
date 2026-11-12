@@ -11,6 +11,7 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      "dist-engine", // scripts/build-engine.ps1 output: a staged copy of agent/
       "output", // disposable local QA artifacts; never shipped
       "node_modules",
       ".agents", // vendored agent-skill scripts, not part of the app

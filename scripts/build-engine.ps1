@@ -58,7 +58,9 @@ if ($probe.ExitCode -ne 64) { throw "engine smoke test failed (exit $($probe.Exi
 Write-Host "== Archive"
 $zip = Join-Path $outDir "filey-engine-windows-x64.zip"
 Remove-Item $zip, "$zip.sig" -ErrorAction SilentlyContinue
-tar -a -c -f $zip -C $stage python agent engine.json
+# Windows' own tar (bsdtar) writes a zip from the file name. Git's GNU tar, which is ahead of it
+# on some PATHs, cannot write zip at all and reads "C:" as a remote host.
+& "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $stage python agent engine.json
 if ($LASTEXITCODE -ne 0) { throw "archiving failed" }
 
 if ($env:TAURI_SIGNING_PRIVATE_KEY) {

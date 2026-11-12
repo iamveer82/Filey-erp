@@ -29,6 +29,6 @@ export default defineConfig({
     // filey-erp/ is an accidental full copy of this repo inside itself: its
     // suites ran a second time against stale sources and reported failures
     // that belonged to the copy, not to the app.
-    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**", "agent/**", "filey-erp/**"],
+    exclude: [...configDefaults.exclude, "supabase/**", "worker/**", "output/**", "agent/**", "dist-engine/**", "filey-erp/**"],
   },
 });
