@@ -19,6 +19,7 @@ import PersistentAgentChat from "./PersistentAgentChat";
 import { DeviceLinkHost } from "./LinkedDevices";
 
 const CustomerDetail = lazy(() => import("../pages/CustomerDetail"));
+const ProductPage = lazy(() => import("../pages/ProductPage"));
 const SupplierDetail = lazy(() => import("../pages/SupplierDetail"));
 const PayslipPage = lazy(() => import("../pages/PayslipPage"));
 const EmployeeDetail = lazy(() => import("../pages/EmployeeDetail"));
@@ -39,12 +40,12 @@ function Splash() {
   return <FileyLoader />;
 }
 
-function ModuleDisabled({ name }: { name: string }) {
+function ModuleDisabled({ name, hint }: { name: string; hint?: string }) {
   return (
     <div className="card max-w-md mx-auto mt-10 text-center">
       <p className="text-lg font-medium text-ink">{name} is unavailable</p>
       <p className="text-sm text-brand-500 mt-2">
-        Ask your workspace administrator to review your access and enabled apps.
+        {hint ?? "Ask your workspace administrator to review your access and enabled apps."}
       </p>
     </div>
   );
@@ -74,6 +75,8 @@ function AppRoutes() {
             />
           );
         })}
+        {/* The pharmacy counter is the sales counter in Pharma mode. */}
+        <Route path="/pharmacy" element={<Navigate to="/counter" replace />} />
         <Route path="/help" element={<KnowledgeCenter />} />
         <Route path="/docs" element={<KnowledgeCenter />} />
         <Route path="/letters" element={<LegacyLetters />} />
@@ -86,6 +89,7 @@ function AppRoutes() {
             resolves to the directory page */}
         <Route path="/integrations/:app" element={isEnabled("integrations") ? <IntegrationConnect /> : <ModuleDisabled name="Integrations" />} />
         <Route path="/customers/:id" element={isEnabled("customers") ? <CustomerDetail /> : <ModuleDisabled name="Customers" />} />
+        <Route path="/inventory/:id" element={isEnabled("inventory") ? <ProductPage key={location.pathname} /> : <ModuleDisabled name="Inventory" />} />
         <Route path="/suppliers/:id" element={isEnabled("suppliers") ? <SupplierDetail /> : <ModuleDisabled name="Suppliers" />} />
         {/* payslip is declared first so it isn't swallowed by /people/:id */}
         <Route path="/people/:id/payslip" element={isEnabled("people") ? <PayslipPage /> : <ModuleDisabled name="People" />} />

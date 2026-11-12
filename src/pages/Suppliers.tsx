@@ -280,13 +280,13 @@ export default function Suppliers() {
           changeTone="up"
         />
         <MetricCard
-          label="Sourcing Value"
+          label="Sourcing value"
           value={aed(totalValue)}
           change="Stock on hand at cost"
           changeTone="up"
         />
         <MetricCard
-          label="At Reorder"
+          label="At reorder"
           value={num(totalLow)}
           change={totalLow > 0 ? "SKUs at/below reorder level" : "All stocked"}
           changeTone={totalLow > 0 ? "warn" : "up"}

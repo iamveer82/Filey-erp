@@ -111,14 +111,77 @@ describe("the office apps answer the commands the agent sends", () => {
     expect(res.error ?? "").toMatch(/ending in/i);
   });
 
-  it("puts the letterhead image at the top of the Word tab, never in another program", async () => {
+  it("puts the full-page letterhead behind the text of the Word tab, never in another program", async () => {
     settings.length = 0;
     settings.push({ key: "company_letterhead", value: JSON.stringify({ background: "data:image/png;base64," + btoa("png") }) });
     const res = (await tool("word").run({ action: "insert_letterhead", query: "dune letterhead" })) as { ok?: boolean; letterhead?: string };
     expect(res.ok).toBe(true);
     expect(res.letterhead).toBe("letterhead.png");
+    const commands = calls.map((c) => (c.params as { command?: string }).command).filter((c) => c !== "document.inspect" && c !== "document.layout");
+    expect(commands).toEqual([
+      "layout.pageSetup", "select.all", "select.collapse", "insert.picture",
+      "arrange.bounds", "arrange.wrap", "arrange.sendBackward", "arrange.moveWithText", "select.collapse",
+    ]);
+    const step = (command: string) => (calls.find((c) => (c.params as { command?: string }).command === command)?.params as { params?: unknown }).params;
+    expect(step("arrange.bounds")).toEqual({ x: 0, y: 0, width: 595.28, height: 841.89 });
+    expect(step("arrange.wrap")).toEqual({ wrap: "behindText" });
+  });
+
+  it("puts the letterhead on every page when asked", async () => {
+    settings.length = 0;
+    settings.push({ key: "company_letterhead", value: JSON.stringify({ background: "data:image/png;base64," + btoa("png") }) });
+    const res = (await tool("word").run({ action: "insert_letterhead", all_pages: true })) as { ok?: boolean; all_pages?: boolean };
+    expect(res.ok).toBe(true);
+    expect(res.all_pages).toBe(true);
     const commands = calls.map((c) => (c.params as { command?: string }).command);
-    expect(commands).toEqual(["select.all", "select.collapse", "insert.picture"]);
+    expect(commands).toContain("insert.createHeader");
+    expect(commands.indexOf("insert.closeHeader")).toBeGreaterThan(commands.indexOf("insert.picture"));
+  });
+
+  it("places any number of images in one call", async () => {
+    const images = Array.from({ length: 35 }, (_, i) => ({ name: `photo-${i}.png`, data: btoa(`img${i}`), width: 100, height: 80 }));
+    const res = (await tool("office_image").run({ app: "word", action: "place_image", images, anchor: "top-left" })) as { ok?: boolean; placed?: unknown[] };
+    expect(res.ok).toBe(true);
+    expect(res.placed).toHaveLength(35);
+    expect(calls.filter((c) => (c.params as { command?: string }).command === "insert.picture")).toHaveLength(35);
+  });
+
+  it("starts new Word documents on A4 and reads a page size sent in twips as points", async () => {
+    await tool("word").run({ action: "new" });
+    const setup = calls.find((c) => (c.params as { command?: string }).command === "layout.pageSetup");
+    expect((setup?.params as { params?: unknown }).params).toEqual({ section: { pageW: 595.28, pageH: 841.89 } });
+
+    calls.length = 0;
+    await tool("word").run({ action: "run", requests: [{ method: "engine.execute", params: { command: "layout.pageSetup", params: { section: { pageH: 16838, pageW: 11906 } } } }] });
+    const sent = calls.find((c) => (c.params as { command?: string }).command === "layout.pageSetup");
+    expect((sent?.params as { params?: unknown }).params).toEqual({ section: { pageW: 595.3, pageH: 841.9 } });
+  });
+
+  it("puts the saved company signature and stamp in the open Word document", async () => {
+    settings.length = 0;
+    settings.push(
+      { key: "company_signature", value: JSON.stringify({ data: "data:image/png;base64," + btoa("sign") }) },
+      { key: "company_stamp", value: JSON.stringify({ data: "data:image/png;base64," + btoa("stamp") }) },
+    );
+    const sign = (await tool("word").run({ action: "insert_sign", align: "right" })) as { ok?: boolean; width?: number };
+    expect(sign.ok).toBe(true);
+    expect(sign.width).toBe(120);
+    let picture = calls.find((c) => (c.params as { command?: string }).command === "insert.picture");
+    expect((picture?.params as { params?: Record<string, unknown> }).params).toMatchObject({ width: 120, alt: "signature" });
+    expect(calls.some((c) => (c.params as { command?: string }).command === "para.set")).toBe(true);
+
+    calls.length = 0;
+    const stamp = (await tool("word").run({ action: "insert_stamp", width: 90 })) as { ok?: boolean; width?: number };
+    expect(stamp.ok).toBe(true);
+    expect(stamp.width).toBe(90);
+    picture = calls.find((c) => (c.params as { command?: string }).command === "insert.picture");
+    expect((picture?.params as { params?: Record<string, unknown> }).params).toMatchObject({ width: 90, alt: "stamp" });
+  });
+
+  it("says which company image is missing instead of inserting nothing", async () => {
+    settings.length = 0;
+    const res = (await tool("word").run({ action: "insert_stamp" })) as { error?: string };
+    expect(res.error ?? "").toMatch(/company stamp/i);
   });
 
   it("runs a request and reports which step failed", async () => {

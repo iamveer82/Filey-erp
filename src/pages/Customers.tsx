@@ -27,6 +27,8 @@ import { Skeleton } from "../components/ui";
 import { CustomFieldsManager } from "../components/CustomFieldsManager";
 import { inputTypeFor, validateCustomValue, type CustomFieldDef } from "../lib/customFields";
 import { SelectMenu } from "../components/ui-menu";
+import SubdivisionField from "../components/SubdivisionField";
+import { fillStateFromGstin, gstinError } from "../lib/gst";
 import {
   PageHeader,
   Modal,
@@ -244,7 +246,7 @@ export default function Customers() {
           changeTone={rows.length - withTrn > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="With Email"
+          label="With email"
           value={num(withEmail)}
           change={
             rows.length - withEmail > 0
@@ -646,7 +648,7 @@ function customerQuickView(
       value: c.opening_balance != null ? (
         <span className={cn(c.opening_balance > 0 ? "text-success" : c.opening_balance < 0 ? "text-danger" : "text-foreground")}>
           {num(Math.abs(c.opening_balance))}
-          {c.opening_balance !== 0 && <span className="ml-2 text-xs">{c.opening_balance > 0 ? "Credit / Receivable" : "Debit / Payable"}</span>}
+          {c.opening_balance !== 0 && <span className="ml-2 text-xs">{c.opening_balance > 0 ? "Credit / receivable" : "Debit / payable"}</span>}
         </span>
       ) : undefined,
     },
@@ -843,11 +845,11 @@ function CustomerModal({
             placeholder="Company name"
           />
         </Field>
-        <Field label={taxRegimeFor(undefined, f.country_code).trnLabel}>
+        <Field label={taxRegimeFor(undefined, f.country_code).trnLabel} hint={f.country_code === "IN" ? gstinError(f.trn) || undefined : undefined}>
           <input
             className="input"
             value={f.trn}
-            onChange={(e) => setF({ ...f, trn: e.target.value })}
+            onChange={(e) => setF(fillStateFromGstin({ ...f, trn: e.target.value }))}
             placeholder={taxRegimeFor(undefined, f.country_code).trnLabel}
           />
         </Field>
@@ -890,17 +892,8 @@ function CustomerModal({
             />
           </Field>
           <Field label={subdivisionLabel(f.country_code)}>
-            {f.country_code === "AE" ? <SelectMenu
-              ariaLabel={subdivisionLabel(f.country_code)}
-              value={f.country_subdivision}
-              onChange={(country_subdivision) =>
-                setF({ ...f, country_subdivision })
-              }
-              options={[
-                { value: "", label: "Select…" },
-                ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
-              ]}
-            /> : <input className="input" value={f.country_subdivision} onChange={e => setF({...f, country_subdivision: e.target.value})} />}
+            <SubdivisionField country={f.country_code} value={f.country_subdivision}
+              onChange={(country_subdivision) => setF({ ...f, country_subdivision })} />
           </Field>
           <Field label="Country">
             <SelectMenu

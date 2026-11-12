@@ -36,22 +36,22 @@ export default function FinancialTab({ data }: { data: ReportsData }) {
 
   const kpis = [
     {
-      label: "Net Profit",
+      label: "Net profit",
       value: aed(fin.netProfit),
       hint: "Revenue − Expenses",
     },
     {
-      label: "Total Revenue",
+      label: "Total revenue",
       value: aed(fin.revenue),
       hint: `${plRows.revenueAccts.length} accounts`,
     },
     {
-      label: "Total Expenses",
+      label: "Total expenses",
       value: aed(fin.expensesTotal),
       hint: `${plRows.expenseAccts.length} accounts`,
     },
     {
-      label: "Cash Position",
+      label: "Cash position",
       value: aed(fin.cashSummary.net),
       hint: `In: ${aed(fin.cashSummary.inflow)} · Out: ${aed(fin.cashSummary.outflow)}`,
     },

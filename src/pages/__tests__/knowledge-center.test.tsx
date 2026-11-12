@@ -28,11 +28,11 @@ it("searches trimmed queries and exposes an empty result on narrow screens too",
 it("opens a guide from the shared mobile picker and keeps its section link", async () => {
   open();
   fireEvent.click(screen.getByRole("button", { name: "Choose a help article" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: /Cloud, offline mode and backups/ }));
-  expect(screen.getByRole("heading", { name: "Cloud, offline mode and backups" })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Storage, offline mode and backups/ }));
+  expect(screen.getByRole("heading", { name: "Storage, offline mode and backups" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=datamode");
-  expect(screen.getByText(/turn Store in my Filey account on to upload/)).toBeInTheDocument();
-  expect(screen.getByText(/Turn the switch off to save the latest cloud records and files/)).toBeInTheDocument();
+  expect(screen.getByText(/Cloud mode is coming soon/)).toBeInTheDocument();
+  expect(screen.getByText(/nothing is uploaded/)).toBeInTheDocument();
 });
 
 it("describes the real browser availability and distinguishes XML export from submission", () => {
@@ -51,12 +51,12 @@ it("explains desktop credential storage and the browser key lifetime", () => {
   expect(screen.queryByText(/without application-level encryption/)).toBeNull();
 });
 
-it("explains the trial, Freedom and Pro, and that data stays viewable after the trial", () => {
+it("explains the trial and Freedom, and that data stays viewable after the trial", () => {
   open("/docs?article=local-editions");
-  expect(screen.getByRole("heading", { name: "Free trial, Freedom and Pro" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Free trial and Freedom" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open section" })).toHaveAttribute("href", "/settings?section=billing");
   expect(screen.getByText(/Basic is a 14-day free trial/)).toHaveTextContent("per account and per computer");
   expect(screen.getByText(/Freedom is a one-time payment of 1499 AED/)).toHaveTextContent("regular updates and support");
-  expect(screen.getByText(/Pro is 36 AED a month/)).toHaveTextContent("Cancel any time");
+  expect(screen.queryByText(/Pro is 36 AED a month/)).toBeNull();
   expect(screen.getByText(/When the trial ends without a plan/)).toHaveTextContent("to view, print and export");
 });

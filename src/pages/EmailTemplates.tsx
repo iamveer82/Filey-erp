@@ -199,7 +199,7 @@ function EmailTemplatesWorkspace({ scope }: { scope: string | null }) {
   return (
     <div className="">
       <PageHeader
-        title="Email Templates"
+        title="Email templates"
         subtitle="Reusable email templates with placeholders"
         action={
           <div className="flex flex-wrap gap-2">

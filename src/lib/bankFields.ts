@@ -11,6 +11,7 @@
 // whether an account is real or active must be confirmed with the bank.
 
 import { EU_COUNTRIES } from "./taxRegimes";
+import { upiError } from "./upi";
 
 export type BankFieldKey =
   | "bank_name"
@@ -20,7 +21,9 @@ export type BankFieldKey =
   | "iban"
   | "ifsc"
   | "routing_code"
-  | "swift";
+  | "swift"
+  /** UPI ID (VPA) — India; also printed as a Scan-to-pay QR. */
+  | "upi_id";
 
 export interface BankFieldSpec {
   key: BankFieldKey;
@@ -119,6 +122,7 @@ export function bankFieldsFor(countryCode?: string | null): BankFieldSpec[] {
       return [
         { key: "ifsc", label: "IFSC Code", placeholder: "HDFC0001234", wide: true, validate: ifscError },
         { key: "swift", label: "SWIFT / BIC", placeholder: "HDFCINBBXXX", validate: swiftError },
+        { key: "upi_id", label: "UPI ID", placeholder: "yourbusiness@okhdfcbank", wide: true, validate: upiError },
       ];
     const routing = ROUTING[code];
     if (routing)
@@ -148,6 +152,7 @@ const ALL_IDENTIFIERS: BankFieldSpec[] = [
   { key: "ifsc", label: "IFSC Code", placeholder: "HDFC0001234", wide: true, validate: ifscError },
   { key: "routing_code", label: "Routing / Sort Code", placeholder: "", wide: true, validate: () => "" },
   { key: "swift", label: "SWIFT / BIC", placeholder: "EBILAEAD", validate: swiftError },
+  { key: "upi_id", label: "UPI ID", placeholder: "yourbusiness@okhdfcbank", wide: true, validate: upiError },
 ];
 
 /** Validates one saved value. Unknown keys and empty values pass. */

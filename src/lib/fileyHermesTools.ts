@@ -12,6 +12,7 @@ import { TOOLS } from "./aiTools";
 /** App tool name → the name Hermes knows it by (renamed only where Hermes has its own tool). */
 export const HERMES_NATIVE_TOOLS: Record<string, string> = {
   word: "word", sheet: "sheet", pdf: "pdf", slides: "slides", design: "design", fig: "fig", vector: "vector",
+  office_image: "office_image",
   computer_use: "filey_computer", agent_computer: "agent_computer", workspace_browser: "workspace_browser",
   open_page: "open_page", show_ui: "show_ui",
   list_my_files: "list_my_files", use_saved_file: "use_saved_file", read_attached_document: "read_attached_document",

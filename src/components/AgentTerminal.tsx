@@ -116,7 +116,7 @@ export default function AgentTerminal({ active }: { active: boolean }) {
 
   /** Sensitive actions ask right here, with the same card as the chat. */
   const askApproval = useCallback((name: string, args: Record<string, unknown>) => {
-    if (fullAccessPreapproved(undefined, name)) return Promise.resolve(true);
+    if (fullAccessPreapproved(undefined, name, args)) return Promise.resolve(true);
     return new Promise<boolean>(resolve => {
       pendingRef.current?.resolve(false);
       const request = { id: ++seq.current, name, args, resolve };
@@ -196,7 +196,7 @@ export default function AgentTerminal({ active }: { active: boolean }) {
     setSuggestions([]);
     if (text === "/clear") { setLines([]); return; }
     if (busy && !text.startsWith("/")) {
-      // Mid-task: this steers the running task, as in Hermes.
+      // Mid-task: this redirects the running task, so Filey changes course.
       steerRef.current.push(text);
       append("user", `${text}  ↳ steering`);
       return;

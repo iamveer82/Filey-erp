@@ -9,7 +9,7 @@ import { savePackagingList } from "../../lib/packagingLists";
 import DocumentMessageDialog from "../../components/DocumentMessageDialog";
 import PackagingList from "../PackagingList";
 
-vi.mock("../../lib/api", () => ({ getCacheScope: () => "org:user:owner", billing: { getCompany: vi.fn(async () => null), listDocs: vi.fn(async () => []), saveDoc: vi.fn() }, crm: { customers: vi.fn(async () => []) } }));
+vi.mock("../../lib/api", () => ({ getCacheScope: () => "org:user:owner", billing: { getCompany: vi.fn(async () => null), listDocs: vi.fn(async () => []), getDoc: vi.fn(), saveDoc: vi.fn() }, crm: { customers: vi.fn(async () => []) } }));
 vi.mock("../../lib/agentStorage", () => ({ AGENT_STORAGE_EVENT: "filey:agent-storage", agentStorageScope: () => "local:org:user:owner", requireAgentStorageScope: () => "local:org:user:owner" }));
 vi.mock("../../lib/numberFormat", () => ({ loadDocFormats: vi.fn(async () => ({})), pickDocNumber: vi.fn(() => "PL-0001") }));
 vi.mock("../../lib/documentNumbers", () => ({ allocateDocumentNumber: async (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args), nextDocumentNumber: (...args: Parameters<typeof pickDocNumber>) => pickDocNumber(...args) }));
@@ -46,6 +46,26 @@ it("distinguishes missing shipment totals from zero and shares the exact saved v
   expect(totals.getByText("0 packages")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Add item" }));
   expect(totals.getByText(/Totals include entered values/)).toBeInTheDocument();
+});
+
+it("copies a linked invoice's lines and recipient into the packing list", async () => {
+  vi.mocked(billing.listDocs).mockResolvedValueOnce([{ id: 7, number: "INV-7", customer_name: "Mary Traders" } as InvoiceDocSummary]);
+  vi.mocked(billing.getDoc).mockResolvedValueOnce({ number: "INV-7", customer_name: "Mary Traders", customer_address: "Dubai", items: [
+    { description: "Engine oil 5L", qty: 40, unit: "can", unit_price: 10 }, { description: "", qty: 1, unit_price: 0 }, { description: "Grease 1kg", qty: 12, unit_price: 5 },
+  ] } as unknown as Awaited<ReturnType<typeof billing.getDoc>>);
+  render(<MemoryRouter><UIProvider><PackagingList /></UIProvider></MemoryRouter>);
+  const create = await screen.findByRole("button", { name: "New packaging list" });
+  await waitFor(() => expect(create).toBeEnabled());
+  await act(async () => { fireEvent.click(create); });
+  await waitFor(() => expect(screen.getByLabelText("Optional invoice reference")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("Optional invoice reference"), { target: { value: "7" } });
+  fireEvent.click(screen.getByRole("button", { name: "Copy items from this invoice" }));
+  await waitFor(() => expect(billing.getDoc).toHaveBeenCalledWith(7));
+  expect(await screen.findByText(/Copied 2 lines from INV-7/)).toBeInTheDocument();
+  expect(screen.getByLabelText(/^Recipient name/)).toHaveValue("Mary Traders");
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Items" }), { button: 0, ctrlKey: false });
+  const descriptions = screen.getAllByLabelText(/^Description/).map((el) => (el as HTMLTextAreaElement).value);
+  expect(descriptions).toEqual(["Engine oil 5L", "Grease 1kg"]);
 });
 
 it("keeps a failed standalone draft and updates the saved record by ID and revision", async () => {

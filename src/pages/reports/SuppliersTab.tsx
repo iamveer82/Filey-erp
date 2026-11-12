@@ -42,10 +42,10 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
   );
 
   const kpis = [
-    { label: "Total Suppliers", value: num(totalSuppliers), hint: "in directory" },
-    { label: "Active Suppliers", value: num(activeSuppliers), hint: "with purchase orders" },
+    { label: "Total suppliers", value: num(totalSuppliers), hint: "in directory" },
+    { label: "Active suppliers", value: num(activeSuppliers), hint: "with purchase orders" },
     {
-      label: "Open Payables",
+      label: "Open payables",
       value: aed(totalPayables),
       hint: "posted supplier bills, net of payments",
     },
@@ -104,7 +104,7 @@ export default function SuppliersTab({ data }: { data: ReportsData }) {
                 xFormatter={(s) => (s.length > 14 ? `${s.slice(0, 12)}…` : s)}
                 valueFormatter={(v) => aed(v)}
                 barColors={c.series}
-                series={[{ key: "total", label: "PO Value", color: c.series[0] }]}
+                series={[{ key: "total", label: "PO value", color: c.series[0] }]}
               />
               )}
             </div>

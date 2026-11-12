@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 
 import { FileySpinner as Loader2 } from "./FileySpinner";
+import { Switch } from "./ui";
 import BrandIcon from "./BrandIcon";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
 import { AGENT_STORAGE_EVENT } from "../lib/agentStorage";
 import { waLogList } from "../lib/waLog";
+import { proactiveWhatsAppEnabled, setProactiveWhatsAppEnabled } from "../lib/proactiveAgent";
 import {
   hasDesktop,
   getBridgeConfig,
@@ -30,6 +32,8 @@ export default function WhatsAppConnection() {
   const [st, setSt] = useState<BridgeState>({ state: "stopped" });
   const [msg, setMsg] = useState("");
   const [ownerNumber, setOwnerNumber] = useState(cfg.ownerNumber);
+  // Scheduled reports are off until the owner opts in here.
+  const [reports, setReports] = useState(() => proactiveWhatsAppEnabled());
   // What the bridge actually saw, newest first — "is it receiving my
   // messages, is it answering" answered by evidence instead of guesswork.
   const [activity, setActivity] = useState(() => waLogList({ limit: 4 }).reverse());
@@ -87,6 +91,25 @@ export default function WhatsAppConnection() {
   const pairedPhone = st.me?.split("@")[0].split(":")[0] ?? "";
   const separateOwner = !!cfg.ownerNumber && cfg.ownerNumber !== pairedPhone;
   const pairing = st.state === "starting" || st.state === "connecting";
+  const saveNumber = () => void run(async () => {
+    setCfg(setBridgeConfig({ ownerNumber: ownerNumber.trim() }));
+    if (connected || pairing || st.state === "reconnecting") await startBridge();
+  });
+  // The number lives beside the QR while linking and stays editable from
+  // preferences afterwards; the same control, one place at a time.
+  const ownerNumberForm = (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      if (locked || busy || ownerNumber.trim() === cfg.ownerNumber) return;
+      saveNumber();
+    }}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="min-w-0 flex-1"><span className="label">My WhatsApp number</span><input className="input mt-1" placeholder="Country code + phone number" inputMode="tel" type="tel" disabled={locked || busy} value={ownerNumber} onChange={e => setOwnerNumber(e.target.value)} aria-describedby="whatsapp-owner-help" /></label>
+        <button className="btn-ghost" disabled={locked || busy || ownerNumber.trim() === cfg.ownerNumber}>Save number</button>
+      </div>
+      <p id="whatsapp-owner-help" className="mt-2 text-xs leading-relaxed text-muted-foreground">Leave empty when you paired your own phone. Only set a number when you want to send tasks from a different phone.</p>
+    </form>
+  );
   const label: Record<string, string> = locked
     ? { stopped: "Needs desktop app" }
     : {
@@ -171,6 +194,11 @@ export default function WhatsAppConnection() {
               <p className="max-w-48 text-xs leading-relaxed text-muted-foreground">Keep this code private. It links your WhatsApp account to Filey on this computer.</p>
             </div>
           )}
+          {!locked && !connected && (
+            <div className="mt-4 max-w-md">
+              {ownerNumberForm}
+            </div>
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
           className="btn-primary"
@@ -206,6 +234,16 @@ export default function WhatsAppConnection() {
           Re-pair
         </button>
           </div>
+          <div className="mt-3 flex items-start gap-3">
+            <Switch checked={cfg.autoStart} disabled={locked || busy} label="Start with Filey" onChange={(next) => {
+              try { setCfg(setBridgeConfig({ autoStart: next })); setMsg(""); }
+              catch (error) { setMsg(error instanceof Error ? error.message : String(error)); }
+            }} />
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium">Start with Filey</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">Enable this to start the gateway.</p>
+            </div>
+          </div>
           {(msg || st.error) && (
             <p role="status" className="mt-3 text-[13px] leading-relaxed text-danger">{whatsAppError(msg || st.error || "")}</p>
           )}
@@ -225,27 +263,17 @@ export default function WhatsAppConnection() {
       <div className="grid gap-4 border-t border-border p-5 md:grid-cols-[200px_minmax(0,1fr)]">
         <div><h3 className="text-[13px] font-medium">Connection preferences</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Choose who can reach your agent.</p></div>
         <div className="min-w-0 space-y-4">
-          <label className="flex min-h-10 items-center gap-2 text-[13px]">
-            <input type="checkbox" disabled={locked || busy} checked={cfg.autoStart} onChange={(e) => {
-              try { setCfg(setBridgeConfig({ autoStart: e.target.checked })); setMsg(""); }
-              catch (error) { setMsg(error instanceof Error ? error.message : String(error)); }
-            }} />
-            Start with Filey
-          </label>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            if (locked || busy || ownerNumber.trim() === cfg.ownerNumber) return;
-            void run(async () => {
-              setCfg(setBridgeConfig({ ownerNumber: ownerNumber.trim() }));
-              if (connected || pairing || st.state === "reconnecting") await startBridge();
-            });
-          }}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <label className="min-w-0 flex-1"><span className="label">My WhatsApp number</span><input className="input mt-1" placeholder="Country code + phone number" inputMode="tel" type="tel" disabled={locked || busy} value={ownerNumber} onChange={e => setOwnerNumber(e.target.value)} aria-describedby="whatsapp-owner-help" /></label>
-              <button className="btn-ghost" disabled={locked || busy || ownerNumber.trim() === cfg.ownerNumber}>Save number</button>
-            </div>
-            <p id="whatsapp-owner-help" className="mt-2 text-xs leading-relaxed text-muted-foreground">Leave empty when you paired your own phone. Only set a number when you want to send tasks from a different phone.</p>
-          </form>
+          <div>
+            <label className="flex min-h-10 items-center gap-2 text-[13px]">
+              <input type="checkbox" disabled={locked || busy} checked={reports} onChange={(e) => {
+                try { setProactiveWhatsAppEnabled(e.target.checked); setReports(e.target.checked); setMsg(""); }
+                catch (error) { setMsg(error instanceof Error ? error.message : String(error)); }
+              }} />
+              Send daily summary and stock alerts here
+            </label>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Off by default. Reminders you add yourself still arrive.</p>
+          </div>
+          {connected && ownerNumberForm}
         </div>
       </div>
       {!locked && activity.length > 0 && (

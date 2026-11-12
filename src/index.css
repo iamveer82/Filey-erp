@@ -627,15 +627,7 @@
   isolation: isolate;
 }
 
-/* ── AI briefing pulse — neutralized (minimal theme: no attention animations). ── */
-.animate-pulse-gold {
-  animation: none;
-}
 
-/* ── Empty-state background — flat quiet surface (minimal theme). ── */
-.empty-gradient {
-  background: hsl(var(--muted) / 0.5);
-}
 
 @layer components {
   .stat-label {
@@ -789,11 +781,6 @@
   .glass {
     @apply bg-card border border-border;
   }
-  /* Brand emphasis text — solid accent ink, no gradients (minimal theme). */
-  .text-gradient,
-  .text-gradient-animated {
-    @apply text-primary-700 dark:text-primary-300;
-  }
 
 
   /* ── Tables — reference: quiet 12px header, 13px cells, px-5, hairline
@@ -943,97 +930,6 @@
   color: #475569;
 }
 
-/* ── ColorOrb (AI copilot icon) ─────────────────────────────────────────────
-   Animated conic-gradient orb. Colours/blur fed via inline CSS vars from the
-   ColorOrb component. Spin is disabled under prefers-reduced-motion below. */
-@property --angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-.color-orb {
-  display: grid;
-  grid-template-areas: "stack";
-  overflow: hidden;
-  border-radius: 50%;
-  position: relative;
-  transform: scale(1.1);
-}
-.color-orb::before,
-.color-orb::after {
-  content: "";
-  display: block;
-  grid-area: stack;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  transform: translateZ(0);
-}
-.color-orb::before {
-  background: conic-gradient(
-      from calc(var(--angle) * 2) at 25% 70%,
-      var(--accent3),
-      transparent 20% 80%,
-      var(--accent3)
-    ),
-    conic-gradient(
-      from calc(var(--angle) * 2) at 45% 75%,
-      var(--accent2),
-      transparent 30% 60%,
-      var(--accent2)
-    ),
-    conic-gradient(
-      from calc(var(--angle) * -3) at 80% 20%,
-      var(--accent1),
-      transparent 40% 60%,
-      var(--accent1)
-    ),
-    conic-gradient(
-      from calc(var(--angle) * 1) at 20% 80%,
-      var(--accent1),
-      transparent 10% 90%,
-      var(--accent1)
-    ),
-    conic-gradient(
-      from calc(var(--angle) * -2) at 85% 10%,
-      var(--accent3),
-      transparent 20% 80%,
-      var(--accent3)
-    );
-  box-shadow: inset var(--base) 0 0 var(--shadow) calc(var(--shadow) * 0.2);
-  filter: blur(var(--blur)) contrast(var(--contrast));
-  animation: orb-spin var(--spin-duration) linear infinite;
-}
-.color-orb::after {
-  background-image: radial-gradient(
-    circle at center,
-    var(--base) var(--dot),
-    transparent var(--dot)
-  );
-  background-size: calc(var(--dot) * 2) calc(var(--dot) * 2);
-  backdrop-filter: blur(calc(var(--blur) * 2)) contrast(calc(var(--contrast) * 2));
-  mix-blend-mode: overlay;
-}
-.color-orb:not([style*="--mask: 0%"])::after {
-  mask-image: radial-gradient(black var(--mask), transparent 75%);
-}
-@keyframes orb-spin {
-  to {
-    --angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .color-orb::before {
-    animation: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .color-orb {
-    animation: none !important;
-  }
-}
 
 /* ===== Invoice / quote print → PDF =====
    the sidebar) — when printing we collapse all of that and pin the

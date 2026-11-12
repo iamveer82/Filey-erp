@@ -76,6 +76,17 @@ it("keeps phone Enter for a new line and sends using the arrow, with a compact c
   expect(screen.getByRole("menuitem", { name: "Coin wallet" })).toBeInTheDocument();
 });
 
+it("keeps the composer outside the conversation scroller so messages scroll behind it", () => {
+  const { container } = render(<MemoryRouter><AgentChat /></MemoryRouter>);
+  const scroller = container.querySelector<HTMLElement>(".filey-conversation-scroll");
+  const composer = container.querySelector<HTMLElement>(".filey-composer-dock");
+  const chat = container.querySelector<HTMLElement>(".filey-chat");
+  expect(scroller).not.toBeNull();
+  expect(composer).not.toBeNull();
+  expect(scroller).not.toContainElement(composer);
+  expect(composer!.parentElement).toBe(chat);
+});
+
 it("keeps the draft and offers the wallet when Coin cannot cover the request", async () => {
   vi.spyOn(ai, "aiReady").mockReturnValue(true);
   const stream = vi.spyOn(ai, "aiAgentStream").mockImplementation(async function* () {

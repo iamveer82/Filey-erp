@@ -239,7 +239,7 @@ export default function DeclarationLetter() {
   return (
     <div className="">
       <PageHeader
-        title="Declaration Letters"
+        title="Declaration letters"
         subtitle="Create and save business declarations using your company details"
         action={
           <button
@@ -590,7 +590,7 @@ function DeclarationEditor({
     <div>
       <PageHeader
         title={letterName(form) === "DECLARATION LETTER" ? (isNew ? "New declaration letter" : "Declaration letter") : letterName(form)}
-        subtitle="Add the details, review the wording, and download your letter."
+        subtitle="Add the details, review the wording, and download your letter"
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button className="btn-ghost" disabled={saving || downloading} onClick={onBack}>

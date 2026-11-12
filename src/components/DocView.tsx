@@ -13,6 +13,9 @@ import InvoiceTransactionSummary from "./InvoiceTransactionSummary";
 import { InvoicePartyDetails, InvoicePartyLocation, InvoiceLineDetails, InvoiceAdditionalDetails, supportsInvoiceDetails } from "./InvoiceElectronicDetails";
 import { BankDetailsBlock, EMPTY_BANK, type BankInfo } from "./BankDetails";
 import { taxRegimeFor } from "../lib/taxRegimes";
+import { gstDocTitle, gstEndorsement, gstSupply, gstTaxRows, placeOfSupplyLabel } from "../lib/gst";
+import { isCreditNote } from "../lib/money";
+import UpiQr from "./UpiQr";
 import {
   INVOICE_TYPE_CODES,
   PAYMENT_MEANS_CODES,
@@ -198,6 +201,18 @@ export default function DocView({
   const taxLbl = regime.taxLabel;
   const trnLbl = regime.trnLabel;
   const m = (v: number) => money(v, ccy);
+  // India: the tax line prints as CGST + SGST within a state, IGST between states.
+  const india = regime.id === "in-gst";
+  const supply = india ? gstSupply({
+    taxCountry: "IN", sellerState: form.seller_country_subdivision, sellerGstin: form.seller_trn,
+    buyerState: form.buyer_country_subdivision, buyerGstin: form.customer_trn, buyerCountry: form.buyer_country_code,
+  }) : undefined;
+  const taxRows = (tax: number) => india ? gstTaxRows(tax, form.tax_rate || 0, supply, taxLbl) : [{ label: `${taxLbl} (${form.tax_rate}%)`, amount: tax }];
+  const placeOfSupply = placeOfSupplyLabel(supply);
+  // Indian rupee invoices print a Scan-to-pay UPI QR for the amount due, beside the bank details.
+  const upiQr = india && ccy === "INR" && suppliedBank?.upi_id && !isCreditNote(form.invoice_type_code ?? "") && resolveTemplateId(form.template) !== "receipt"
+    ? <UpiQr vpa={suppliedBank.upi_id} name={form.seller_name} amount={Math.max(0, t.total - (Number(form.advance_applied) || 0))} note={form.number ? `Invoice ${form.number}` : ""} />
+    : null;
   const itemsToRender = pageItems ?? form.items;
 
   const resolvedLayout = resolveTemplateId(form.template);
@@ -226,7 +241,9 @@ export default function DocView({
   const a = resolvedAccent;
   const accentText = printTextOn(a);
 
-  const docTitle = labels?.docTitle || form.doc_title || "INVOICE";
+  const credit = isCreditNote(form.invoice_type_code ?? "");
+  const docTitle = labels?.docTitle || (india ? gstDocTitle(form.doc_title, supply, t.tax, credit) : form.doc_title) || "INVOICE";
+  const endorsement = india ? gstEndorsement(supply, t.tax) : "";
   const partyLabel = labels?.partyLabel || "Bill To";
   const issuedLabel = labels?.issuedLabel || "Issued";
   const dueLabel = labels?.dueLabel || "Due";
@@ -277,9 +294,9 @@ export default function DocView({
       <div className={compact ? "ml-auto w-full text-[10px]" : "ml-auto w-72 max-w-full mt-4 text-sm"}>
         <Row k="Subtotal" v={m(t.subtotal)} />
         {(t.discount || 0) > 0 && <Row k="Discount" v={`- ${m(t.discount)}`} />}
-        {customTemplate?.showTax !== false && (form.tax_rate || 0) > 0 && (
-          <Row k={`${taxLbl} (${form.tax_rate}%)`} v={m(t.tax)} />
-        )}
+        {placeOfSupply && <Row k="Place of supply" v={placeOfSupply} />}
+        {customTemplate?.showTax !== false && (form.tax_rate || 0) > 0 &&
+          taxRows(t.tax).map((row) => <Row key={row.label} k={row.label} v={m(row.amount)} />)}
         {t.round_off !== 0 && (
           <Row k="Round off" v={`${t.round_off > 0 ? "+" : ""}${m(t.round_off)}`} />
         )}
@@ -319,6 +336,7 @@ export default function DocView({
     <>
       <InvoiceAdditionalDetails form={form} omit={additionalOmit} hideTax={customTemplate?.showTax === false} />
       <InvoiceTransactionSummary form={form} />
+      {endorsement && <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">{endorsement}</p>}
       {(form.notes || form.terms || freeWatermark) && (
         <div className="mt-4 pt-2 border-t border-neutral-200 text-xs text-neutral-500 space-y-1">
           {form.notes && <p dir="auto" className="whitespace-pre-line">{form.notes}</p>}
@@ -329,6 +347,7 @@ export default function DocView({
         </div>
       )}
       {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
+      {bank && upiQr}
     </>
   ) : null;
 
@@ -482,6 +501,7 @@ export default function DocView({
           {form.notes && <p dir="auto" className="whitespace-pre-line text-[10px] text-neutral-600">{form.notes}</p>}
           {form.terms && <p dir="auto" className="text-[9px] text-neutral-400 mt-0.5">{form.terms}</p>}
           {bank && <BankDetailsBlock bank={bank} countryCode={form.tax_country_code} />}
+          {bank && upiQr}
           {freeWatermark && (
             <p className="text-[8px] text-neutral-400 mt-0.5">Made with Filey — the free plan</p>
           )}
@@ -1092,10 +1112,17 @@ export default function DocView({
                   <span>- {m(discount)}</span>
                 </div>
               )}
-              <div className="flex justify-between py-1">
-                <span className="text-neutral-500">{taxLbl}</span>
-                <span>{m(vat)}</span>
-              </div>
+              {india ? taxRows(vat).map((row) => (
+                <div key={row.label} className="flex justify-between py-1">
+                  <span className="text-neutral-500">{row.label}</span>
+                  <span>{m(row.amount)}</span>
+                </div>
+              )) : (
+                <div className="flex justify-between py-1">
+                  <span className="text-neutral-500">{taxLbl}</span>
+                  <span>{m(vat)}</span>
+                </div>
+              )}
               {Math.abs(roundOffAmt) >= 0.005 && (
                 <div className="flex justify-between py-1">
                   <span className="text-neutral-500">Round off</span>
@@ -1330,12 +1357,12 @@ export default function DocView({
                 <span className="opacity-60">Subtotal</span>
                 <span>{m(t.subtotal)}</span>
               </div>
-              {(form.tax_rate || 0) > 0 && (
-                <div className="flex justify-between">
-                  <span className="opacity-60">{taxLbl} ({form.tax_rate}%)</span>
-                  <span>{m(t.tax)}</span>
+              {(form.tax_rate || 0) > 0 && taxRows(t.tax).map((row) => (
+                <div key={row.label} className="flex justify-between">
+                  <span className="opacity-60">{row.label}</span>
+                  <span>{m(row.amount)}</span>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         </div>

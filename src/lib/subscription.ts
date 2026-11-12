@@ -25,9 +25,28 @@ export interface PlanCard {
   features: string[];
 }
 
-/* Display names: Basic (id "free", the 14-day trial), Pro (id "cloud"), Freedom (id "lite").
- * The ids are what the database, the webhook and licence tokens store, so they never follow
- * a rename. Prices are what Dodo charges: Pro 36 AED a month, Freedom 1499 AED once. */
+/* Display names: Basic (id "free", the 14-day trial), Pro (id "cloud") and
+ * Freedom (id "lite"). The ids are what the database, the webhook and licence
+ * tokens store, so they never follow a rename. Pro is not on sale for now, but
+ * its card stays here for existing subscribers. Freedom is 1499 AED once. */
+const CLOUD_CARD: PlanCard = {
+  id: "cloud",
+  kind: "subscription",
+  name: "Pro",
+  price: "36 AED",
+  period: " / month",
+  blurb: "Your workspace in the cloud, on every device you use.",
+  features: [
+    `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} devices`,
+    "Filey on the web at app.gofiley.com",
+    "Team members share one workspace",
+    "Backed up off your machine",
+    "Every app, unlimited invoices",
+    "Cancel any time from Billing",
+  ],
+};
+
+/** What the app offers for sale right now. Pro is deliberately absent. */
 export const PLANS: PlanCard[] = [
   {
     id: "free",
@@ -41,22 +60,6 @@ export const PLANS: PlanCard[] = [
       "Your data saved on your computer",
       "$1 of Filey AI to try the agent",
       "Keep everything you made when you get Freedom",
-    ],
-  },
-  {
-    id: "cloud",
-    kind: "subscription",
-    name: "Pro",
-    price: "36 AED",
-    period: " / month",
-    blurb: "Your workspace in the cloud, on every device you use.",
-    features: [
-      `Cloud sync on up to ${CLOUD_DEVICE_LIMIT} devices`,
-      "Filey on the web at app.gofiley.com",
-      "Team members share one workspace",
-      "Backed up off your machine",
-      "Every app, unlimited invoices",
-      "Cancel any time from Billing",
     ],
   },
   {
@@ -91,15 +94,19 @@ export const PLANS: PlanCard[] = [
   },
 ];
 
-/* Legacy Pro and Business values remain readable for existing organizations.
- * Display-card mapping does not change their resolveTier() entitlements. */
+/* Legacy Pro, Cloud and Business values remain readable for existing
+ * organizations. Display-card mapping does not change their resolveTier()
+ * entitlements. */
+const LEGACY_CARDS: Record<string, PlanCard> = {
+  cloud: CLOUD_CARD,
+  pro: CLOUD_CARD,
+  business: CLOUD_CARD,
+};
 
 /** Map an org's stored plan value onto its display card. A plan that is no
- *  longer sold has no card of its own, so it shows as Freedom — the closest
- *  thing still on the menu, and never a downgrade in what it implies. */
+ *  longer sold still shows the plan the customer is actually on, never Basic. */
 export function planCardFor(orgPlan: string | null | undefined): PlanCard {
-  if (orgPlan === "pro" || orgPlan === "business")
-    return PLANS.find((p) => p.id === "lite")!;
+  if (orgPlan && LEGACY_CARDS[orgPlan]) return LEGACY_CARDS[orgPlan];
   return PLANS.find((p) => p.id === orgPlan) ?? PLANS[0];
 }
 

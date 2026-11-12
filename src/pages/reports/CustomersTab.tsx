@@ -10,6 +10,7 @@ import {
   ReportsData,
   useTopCustomers,
   useReceivablesAging,
+  paymentSpeed,
 } from "./useReportsData";
 
 export default function CustomersTab({ data }: { data: ReportsData }) {
@@ -17,6 +18,7 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
   const c = cs.c;
   const topCustomers = useTopCustomers(data.invoices);
   const aging = useReceivablesAging(data.invoices);
+  const speed = useMemo(() => paymentSpeed(data.invoices, data.invoicePayments), [data.invoices, data.invoicePayments]);
 
   /* Receivables aging bar chart data */
   const agingData = [
@@ -43,15 +45,15 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
   );
 
   const kpis = [
-    { label: "Total Customers", value: num(totalCustomers), hint: "in directory" },
-    { label: "Active Customers", value: num(activeCustomers), hint: "with invoices" },
+    { label: "Total customers", value: num(totalCustomers), hint: "in directory" },
+    { label: "Active customers", value: num(activeCustomers), hint: "with invoices" },
     {
       label: "Outstanding",
       value: aed(totalOutstanding),
       hint: "across all open invoices",
     },
     {
-      label: "Avg per Customer",
+      label: "Avg per customer",
       value: totalCustomers > 0 ? aed(totalOutstanding / totalCustomers) : aed(0),
       hint: "outstanding per customer",
     },
@@ -134,6 +136,37 @@ export default function CustomersTab({ data }: { data: ReportsData }) {
               />
             )}
           </div>
+        </div>
+      </div>
+
+      {/* How fast customers pay */}
+      <div className="border border-border rounded-xl overflow-hidden bg-card">
+        <div className="px-5 pt-4 pb-3">
+          <div className="text-[14px] font-semibold text-foreground">Slow payers</div>
+          <div className="text-[12.5px] text-muted-foreground mt-0.5">Average days from invoice to full payment, slowest first</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <th className="px-5 py-2.5 font-medium text-[12px]">Customer</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] text-right">Paid invoices</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] text-right">Avg days to pay</th>
+                <th className="px-5 py-2.5 font-medium text-[12px] text-right">Avg days late</th>
+              </tr>
+            </thead>
+            <tbody>
+              {speed.length === 0 && <tr><td colSpan={4} className="px-5 py-8 text-center text-muted-foreground">Appears once invoices are paid with recorded payment dates</td></tr>}
+              {speed.slice(0, 10).map((s) => (
+                <tr key={s.name} className="border-b border-border last:border-0 hover:bg-hover transition-colors">
+                  <td className="px-5 py-3 text-foreground">{s.name}</td>
+                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">{s.paidInvoices}</td>
+                  <td className="px-5 py-3 text-right text-foreground tabular-nums font-medium">{s.avgDays}</td>
+                  <td className={cn("px-5 py-3 text-right tabular-nums", (s.avgDaysLate ?? 0) > 0 ? "text-danger" : "text-muted-foreground")}>{s.avgDaysLate ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

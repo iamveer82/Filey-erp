@@ -61,7 +61,7 @@ import QueuedApprovals from "../components/QueuedApprovals";
 import SkillsDrawer from "../components/SkillsDrawer";
 import CapabilitiesDrawer from "../components/CapabilitiesDrawer";
 import { buildAiContext } from "../lib/aiContext";
-import { fullAccessPreapproved, getAgentMode, grantDesktopFullAccess, setAgentMode, type AgentMode } from "../lib/agentMode";
+import { computerControlPreapproved, fullAccessPreapproved, getAgentMode, grantDesktopFullAccess, grantsFullAccess, setAgentMode, type AgentMode } from "../lib/agentMode";
 import { isToolAllowed } from "../lib/capabilities";
 import { runAgentTurn } from "../lib/agentTurn";
 import { linkedAgentTurn, preferLinked } from "../lib/linkedAgent";
@@ -127,6 +127,13 @@ const coinFailures = new Set([COIN_FAILURE,
   `${COIN_FAILURE} Nothing was executed from that response. Check any earlier changes or files before asking me to continue.`]);
 const needsCoin = (text: string) => coinFailures.has(text);
 
+const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}K` : String(n));
+/** "15K in · 97% cached · 210 out · 3 calls": what one reply cost, under the reply. */
+function usageLine(u: { input: number; output: number; calls: number; cachedPct?: number }): string {
+  return [`${tokens(u.input)} in`, u.cachedPct ? `${u.cachedPct}% cached` : "", `${tokens(u.output)} out`,
+    u.calls > 1 ? `${u.calls} calls` : ""].filter(Boolean).join(" · ");
+}
+
 type PendingApproval = {
   id: number;
   name: string;
@@ -181,7 +188,6 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     active && location.pathname === "/agent" && typeof location.state?.draft === "string" && (!location.state.draftScope || location.state.draftScope === scope) ? location.state.draft.slice(0, 4000) : ""
   );
   const [busy, setBusy] = useState(false);
-  const [iteration, setIteration] = useState(0);
   const [auto, setAuto] = useState(() => import.meta.env.DEV && "__TAURI_INTERNALS__" in window && !!scope);
   const [err, setErr] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
@@ -195,8 +201,8 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   /** Stable bridge for the shell's bar: `send` is rebuilt every render. */
   const sendRef = useRef<(text: string) => void>(() => {});
   const shellSend = useCallback((text: string) => { void sendRef.current(text); }, []);
-  /** Messages typed while a turn is running. The harness drains these between
-   *  rounds, so they steer the current task instead of being dropped. */
+  /** Messages typed while a turn is running. They redirect the running task, so
+   *  they change the work instead of being dropped or waiting for it to finish. */
   const steerRef = useRef<string[]>([]);
   const [memOpen, setMemOpen] = useState(false);
   const [mems, setMems] = useState<Memory[]>([]);
@@ -507,7 +513,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
   const requestConfirm = useCallback((name: string, args: Record<string, unknown>) => {
     // Full access already approved this desktop session. A caller-supplied
     // confirm on WhatsApp still asks; this callback is only the in-app card.
-    if (fullAccessPreapproved(undefined, name)) return Promise.resolve(true);
+    if (fullAccessPreapproved(undefined, name, args)) return Promise.resolve(true);
+    // The desktop app starts computer use as part of the task. Ask only in Manual,
+    // where the owner asked to approve every change; Plan is blocked before here.
+    if (name === "computer_use" && computerControlPreapproved()) return Promise.resolve(true);
     return new Promise<boolean>((resolve) => {
       if (!scope || scope !== agentStorageScope() || abortRef.current?.signal.aborted) { resolve(false); return; }
       pendingRef.current?.resolve(false);
@@ -670,16 +679,15 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       return;
     }
     if (busy) {
-      // The turn is already running: this is steering, not a new task. The
-      // harness delivers it at the next round so the work so far is kept.
+      // The turn is already running: this is guidance, not a new task. The
+      // running turn is redirected so it changes course while keeping its work.
       if (!q || command) return;
       if (!scope || scope !== agentStorageScope()) { setErr("Your workspace changed. Start a new task in the current workspace."); return; }
       steerRef.current.push(q);
       setChat(c => ({ ...c, turns: [...c.turns, { role: "user", text: q, steering: true }] }));
       setErr(null);
       setInput("");
-      setIteration(n => n + 1);
-      toast.info(`Redirected current run (iteration ${iteration + 1}). I'll adjust using your correction.`);
+      toast.info("Sent to the running task. Filey will adjust as it works.");
       return;
     }
     if (command?.kind === "new") {
@@ -695,6 +703,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
       return;
     }
     if (!scope || scope !== agentStorageScope()) { setErr("Your workspace changed. Start a new task in the current workspace."); return; }
+    // "You have full permissions": the owner grants Full access in words. Switch it for real
+    // (the mode picker shows it) so the agent finishes the task instead of asking at each step.
+    if (grantsFullAccess(q) && getAgentMode() !== "auto") {
+      grantDesktopFullAccess();
+      setMode(getAgentMode());
+      toast.info("Full access is on. Filey will only ask before sending a document or invoice, or a command that could wipe data.");
+    }
     if (!ready) {
       setErr(
         modelConfig.billing ? "Choose Filey AI to pay with Coin, or use your own API key below." : "Choose a local model or connect your provider in AI settings to start this conversation."
@@ -709,7 +724,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setInput("");
     attach(null); // clears the files AND revokes the preview object URL
 
-    const names = attached.map((f) => `📎 ${f.name}`).join("\n");
+    const names = attached.map((f) => `Attached: ${f.name}`).join("\n");
     const shownText = attached.length ? `${q}${q ? "\n\n" : ""}${names}` : display ?? q;
     // Explicit hint so the agent knows it can work on the attached files via
     // tools — several at once, in attachment order.
@@ -732,7 +747,6 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
     setShowJumpToLatest(false);
     setChat(withUser);
     setBusy(true);
-    setIteration(0);
     setRunProgress(undefined);
     void enqueueFinancialAssistantTurn(shownText).catch(() => {});
     setStreaming(auto ? "Planning…" : "");
@@ -849,6 +863,13 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
             );
           } else if (ev.type === "done") {
             trace.outcome = ev.reason;
+          } else if (ev.type === "usage") {
+            // A turn with follow-ups reports more than once: add them up.
+            const was = trace.usage;
+            const input = (was?.input ?? 0) + ev.input;
+            const cachedIn = (was ? ((was.cachedPct ?? 0) * was.input) / 100 : 0) + ((ev.cachedPct ?? 0) * ev.input) / 100;
+            trace.usage = { input, output: (was?.output ?? 0) + ev.output, calls: (was?.calls ?? 0) + ev.calls,
+              ...(cachedIn > 0 ? { cachedPct: Math.round((100 * cachedIn) / input) } : {}) };
           }
           setRunProgress({ ...trace });
         }
@@ -1279,10 +1300,10 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
                 ref={textareaRef}
                 aria-label="Message Filey AI"
                 aria-describedby="filey-message-hint"
-                data-ph={busy ? `Steer this task (iteration ${iteration})…` : auto ? "Describe a task…" : "Ask Filey… (/help)"}
+                data-ph={busy ? "Steer this task…" : auto ? "Describe a task…" : "Ask Filey… (/help)"}
                 rows={1}
                 value={input}
-                placeholder={busy ? `Steer this task (iteration ${iteration})…` : auto ? "Describe a task…" : "Ask Filey… (/help)"}
+                placeholder={busy ? "Steer this task…" : auto ? "Describe a task…" : "Ask Filey… (/help)"}
                 onChange={(e) => { if (busy) followUpEditedRef.current = true; setInput(e.target.value); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !(typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches)) {
@@ -1474,7 +1495,7 @@ function AgentWorkspace({ scope, active, onStatusChange }: AgentChatProps & { sc
               </div>
             </div>
             <p id="filey-message-hint" className="filey-composer-hint mt-2 px-1 text-center text-[11px] text-muted-foreground">
-              {busy ? `Iteration ${iteration}. Enter to steer the task while Filey works.` : <><span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
+              {busy ? "Filey is working. Type to steer it while it works." : <><span className="filey-keyboard-hint">Enter to send · Shift+Enter for a new line</span>
               <span className="filey-touch-hint">Tap the arrow to send</span></>}
             </p>
           </div>
@@ -1640,8 +1661,9 @@ function Bubble({ turn, pending, active = true, onPrompt }: { turn: ChatTurn; pe
         <AgentRunProgress run={turn.run} pending={pending} />
         {!pending && needsCoin(turn.text) && <Link to="/settings?section=credits" className="btn-ghost mt-2"><CoinMark />Add Coin</Link>}
         {!pending && turn.text.trim() && (
-          <div className="mt-1 flex">
+          <div className="mt-1 flex items-center gap-2">
             <CopyButton text={turn.text} />
+            {turn.run?.usage && <span className="text-[11px] tabular-nums text-muted-foreground" title="Tokens this reply used">{usageLine(turn.run.usage)}</span>}
           </div>
         )}
         {!!turn.files?.length && (

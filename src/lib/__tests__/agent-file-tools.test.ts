@@ -50,6 +50,29 @@ describe("the agent's view of the document toolbox", () => {
       expect(endTurn("file-tool-chain").map(file => file.name)).toEqual(["unlocked.pdf", "compressed.pdf"]);
     } finally { decrypt.mockRestore(); compress.mockRestore(); extract.mockRestore(); read.mockRestore(); endTurn("file-tool-chain"); setCacheOrg(null); }
   });
+  it("redoes an encryption from the pre-password file when the password is corrected", async () => {
+    setDataMode("local"); setCacheOrg("file-tool-redo", "fixture-user");
+    const original = new File([new Uint8Array([10, 11])], "contract.pdf", { type: "application/pdf" });
+    setTurnFile("file-tool-redo", original);
+    vi.mocked(deliverFile).mockReset().mockImplementation(async output => ({ name: output.name, url: `blob:${output.name}` }));
+    const seen: string[] = [];
+    const encrypt = vi.spyOn(PDF_TOOLS.find(t => t.id === "encrypt")!, "run").mockImplementation(async (files, p) => {
+      // A correction must start from the file that existed before the first password,
+      // never from the already-encrypted output.
+      expect(files[0]).toBe(original);
+      seen.push(String(p.userPassword));
+      return [{ name: "contract-encrypted.pdf", bytes: new Uint8Array([p.userPassword === "Veersingh@82" ? 2 : 1]) }];
+    });
+    try {
+      expect(await runTool("run_file_tool", { tool_id: "encrypt", options: { userPassword: "veersingh82" } }, () => true, true, "file-tool-redo"))
+        .toMatchObject({ ok: true });
+      expect(await runTool("run_file_tool", { tool_id: "encrypt", options: { userPassword: "Veersingh@82" } }, () => true, true, "file-tool-redo"))
+        .toMatchObject({ ok: true, redone_from: "the file before the previous encryption" });
+      expect(seen).toEqual(["veersingh82", "Veersingh@82"]);
+      // The chat carries only the corrected file, not the old password-protected one.
+      expect(endTurn("file-tool-redo").map(file => file.name)).toEqual(["contract-encrypted.pdf"]);
+    } finally { encrypt.mockRestore(); endTurn("file-tool-redo"); setCacheOrg(null); }
+  });
   it("never replaces original working files with a partially successful batch", async () => {
     setDataMode("local"); setCacheOrg("file-tool-chain-partial", "fixture-user");
     const originals = [new File(["first"], "first.pdf"), new File(["second"], "second.pdf")];

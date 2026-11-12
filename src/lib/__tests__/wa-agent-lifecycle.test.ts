@@ -4,7 +4,7 @@ const state = vi.hoisted(() => ({
   scope: "local:org:user:owner" as string | null,
   message: (_m: { id: string; bridgeSession: string; from: string; text: string; chatJid?: string; attachment?: { name: string; mimetype: string; b64: string } }) => {},
   voice: (_m: { id: string; bridgeSession: string; from: string; b64: string }) => {},
-  bridge: (_state: { state: string }) => {},
+  bridge: (_state: { state: string; sessionId?: string | null }) => {},
 }));
 const mocks = vi.hoisted(() => ({
   agent: vi.fn(),
@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../fileyAgent", () => ({
   fileyAgentReply: (_chatId: string, text: string, ctx: unknown) => mocks.agent([{ role: "user", text }], ctx),
   forgetFileyAgentSession: mocks.forget,
+  refreshIdleFileyAgentSession: () => false,
+  chatRecap: () => "",
 }));
 vi.mock("../agentStorage", () => ({
   agentStorageScope: () => state.scope,
@@ -115,6 +117,43 @@ it("cancels active and queued work when the WhatsApp connection closes", async (
   expect(signal?.aborted).toBe(true);
   expect(mocks.agent).toHaveBeenCalledOnce();
   expect(mocks.sendFile).not.toHaveBeenCalled();
+});
+
+it("keeps answering through a reconnect inside the same bridge session", async () => {
+  let release!: (text: string) => void;
+  let signal: AbortSignal | undefined;
+  mocks.agent.mockImplementationOnce((_messages, opts) => {
+    signal = opts.signal;
+    return new Promise<string>(resolve => { release = resolve; });
+  });
+  send("answering", "Prepare a summary");
+  await vi.waitFor(() => expect(signal).toBeDefined());
+
+  // WhatsApp reconnects constantly; the phone is still paired and the sidecar
+  // keeps the same session, so the queued answer must survive it.
+  state.bridge({ state: "reconnecting", sessionId: "session-one" });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(signal?.aborted).toBe(false);
+
+  release("Here is the summary");
+  await answered("answering");
+  expect(mocks.reply).toHaveBeenCalledWith(
+    "answering",
+    expect.stringContaining("Here is the summary"),
+    "session-one"
+  );
+});
+
+it("cancels work when the bridge starts a different session", async () => {
+  let signal: AbortSignal | undefined;
+  mocks.agent.mockImplementationOnce((_messages, opts) => {
+    signal = opts.signal;
+    return new Promise(() => {});
+  });
+  send("replaced", "Work on my file");
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  state.bridge({ state: "connected", sessionId: "session-two" });
+  await vi.waitFor(() => expect(signal?.aborted).toBe(true));
 });
 
 it("attaches an owner's document to a unique turn and returns its generated PDF to the original LID chat", async () => {
@@ -250,6 +289,24 @@ it("consumes approval for exactly one matching call", async () => {
   });
   send("approval", "YES");
   await answered("approval");
+});
+
+it("approves the same call even when the model reorders its arguments", async () => {
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => {
+    opts.confirm("send_whatsapp_file", { file: "signed.pdf", caption: "Signed", to: "971500000009" });
+    return "Approve sending the signed copy?";
+  });
+  send("ordered-proposal", "send the signed copy");
+  await answered("ordered-proposal");
+  mocks.agent.mockImplementationOnce(async (_messages, opts) => {
+    expect(
+      opts.confirm("send_whatsapp_file", { to: "971500000009", caption: "Signed", file: "signed.pdf" })
+    ).toBe(true);
+    return "Sent.";
+  });
+  send("ordered-yes", "YES");
+  await answered("ordered-yes");
+  expect(mocks.reply).toHaveBeenCalledWith("ordered-yes", expect.stringContaining("Sent."), "session-one");
 });
 
 it("clears outstanding approval across sign-out and sign-in to the same workspace", async () => {

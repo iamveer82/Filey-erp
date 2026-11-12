@@ -1,6 +1,6 @@
 import { FileySpinner as Loader2 } from "../components/FileySpinner";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus,
   Trash2,
@@ -17,6 +17,7 @@ import {
   ShoppingCart,
   ClipboardList,
   ChevronDown,
+  Layers,
 } from "lucide-react";
 import {
   RowActions,
@@ -40,7 +41,8 @@ import { useUI } from "../lib/ui";
 import { downloadCsv } from "../lib/csv";
 import ImportCsvModal from "../components/ImportCsvModal";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { aed, num, numInput, cn, getDisplayCurrency, fmtDate, todayYmd, errMsg } from "../lib/format";
+import BatchesModal from "../components/BatchesModal";
+import { aed, num, numInput, cn, fmtDate, todayYmd, errMsg } from "../lib/format";
 import {
   PageHeader,
   MetricCard,
@@ -70,8 +72,6 @@ export default function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Product | null>(null);
   const [issueFor, setIssueFor] = useState<Product | null>(null);
   const [issues, setIssues] = useState<Record<string, StockMovement[]>>({});
   const [importOpen, setImportOpen] = useState(false);
@@ -79,17 +79,17 @@ export default function Inventory() {
   const [batchFilter, setBatchFilter] = useState("");
   const [draftingPo, setDraftingPo] = useState(false);
   const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [batchesFor, setBatchesFor] = useState<Product | null>(null);
   const [startingStocktake, setStartingStocktake] = useState(false);
   const [quickView, setQuickView] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  // ⌘K "New product" deep link: the product page.
   useEffect(() => {
-    if (params.get("new") === "1") {
-      setOpen(true);
-      setParams({}, { replace: true });
-    }
-  }, [params, setParams]);
+    if (params.get("new") === "1") navigate("/inventory/new", { replace: true });
+  }, [params, navigate]);
 
   const draftPoFromLowStock = async () => {
     const ok = await confirm({
@@ -135,10 +135,7 @@ export default function Inventory() {
   };
 
   // ---- Row actions (DEMO parity) ----
-  const editProduct = (p: Product) => {
-    setEditing(p);
-    setOpen(true);
-  };
+  const editProduct = (p: Product) => navigate(`/inventory/${p.id}`);
 
   const deleteProduct = async (p: Product) => {
     if (
@@ -307,10 +304,10 @@ export default function Inventory() {
                     { key: "sku", label: "SKU" },
                     { key: "name", label: "Name" },
                     { key: "category", label: "Category" },
-                    { key: "unit_price", label: "Unit Price" },
-                    { key: "cost_price", label: "Cost Price" },
+                    { key: "unit_price", label: "Unit price" },
+                    { key: "cost_price", label: "Cost price" },
                     { key: "quantity", label: "Quantity" },
-                    { key: "reorder_level", label: "Reorder Level" },
+                    { key: "reorder_level", label: "Reorder level" },
                     { key: "batch_number", label: "Batch" },
                     { key: "expiry_date", label: "Expiry" },
                   ]
@@ -330,7 +327,7 @@ export default function Inventory() {
             >
               <ClipboardList size={15} /> Stocktake
             </button>
-            <button className="btn-primary" aria-label="Add item" onClick={() => setOpen(true)}>
+            <button className="btn-primary" aria-label="Add item" onClick={() => navigate("/inventory/new")}>
               <Plus size={16} /> Add item
             </button>
           </div>
@@ -345,19 +342,19 @@ export default function Inventory() {
           changeTone="up"
         />
         <MetricCard
-          label="Stock Value"
+          label="Stock value"
           value={aed(invValue)}
           change="At cost"
           changeTone="up"
         />
         <MetricCard
-          label="Low Stock"
+          label="Low stock"
           value={num(lowStock.length)}
           change={lowStock.length > 0 ? "Needs reorder" : "All good"}
           changeTone={lowStock.length > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Out of Stock"
+          label="Out of stock"
           value={num(outOfStock.length)}
           change={outOfStock.length > 0 ? "Restock needed" : "None"}
           changeTone={outOfStock.length > 0 ? "down" : "up"}
@@ -371,7 +368,7 @@ export default function Inventory() {
       )}
 
       {showAlerts && (
-        <InfoCard title="Stock Alerts" className="mb-4">
+        <InfoCard title="Stock alerts" className="mb-4">
           <div className="flex items-center gap-2 mb-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl bg-danger/10">
               <AlertTriangle size={18} className="text-danger" />
@@ -394,7 +391,7 @@ export default function Inventory() {
             {lowStock.slice(0, 6).map((p) => (
               <Card key={p.id} className="p-3 flex items-center justify-between gap-3 transition-[border-color] duration-200 hover:border-muted-foreground/40" hover>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink truncate tracking-tight">
+                  <p className="text-sm font-semibold text-ink truncate">
                     {p.name}
                   </p>
                   <p className="text-[11px] text-muted-foreground font-medium">
@@ -402,7 +399,7 @@ export default function Inventory() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-semibold text-ink tabular-nums tracking-tight">
+                  <span className="text-sm font-semibold text-ink tabular-nums">
                     {p.quantity}
                   </span>
                   {p.quantity === 0 ? (
@@ -495,7 +492,7 @@ export default function Inventory() {
               onChange={setBatchFilter}
             />
           )}
-          <span className="ml-auto text-[11px] font-medium text-brand-500 tracking-tight">
+          <span className="ml-auto text-xs text-muted-foreground tabular-nums">
             {filtered.length} shown
           </span>
         </div>
@@ -674,6 +671,17 @@ export default function Inventory() {
                   >
                     <PackageMinus className="h-3.5 w-3.5" />
                   </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setBatchesFor(p);
+                    }}
+                    className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-hover border border-transparent hover:border-border transition-colors"
+                    title="Batches and expiry"
+                    aria-label={`Batches for ${p.name}`}
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                  </button>
                   <RowActions
                     onView={() => setQuickView(p)}
                     onEdit={() => editProduct(p)}
@@ -693,15 +701,6 @@ export default function Inventory() {
         />
       </div>
 
-      <ProductModal
-        open={open}
-        product={editing}
-        onClose={() => {
-          setOpen(false);
-          setEditing(null);
-        }}
-        onSaved={load}
-      />
 
       <QuickViewModal
         open={!!quickView}
@@ -767,6 +766,8 @@ export default function Inventory() {
         }
       />
 
+      <BatchesModal product={batchesFor ? products.find((x) => x.id === batchesFor.id) ?? batchesFor : null} onClose={() => setBatchesFor(null)} onSaved={() => { void load(); }} />
+
       <IssueStockModal
         product={issueFor}
         history={issueFor ? issues[String(issueFor.id)] ?? [] : []}
@@ -791,7 +792,7 @@ export default function Inventory() {
           setScanOpen(false);
           toast.info(`Searching for barcode: ${code}`);
         }}
-        title="Scan Product Barcode"
+        title="Scan product barcode"
       />
 
       <ImportCsvModal
@@ -847,10 +848,10 @@ export default function Inventory() {
           { key: "sku", label: "SKU" },
           { key: "name", label: "Name", required: true },
           { key: "category", label: "Category" },
-          { key: "unit_price", label: "Unit Price" },
-          { key: "cost_price", label: "Cost Price" },
+          { key: "unit_price", label: "Unit price" },
+          { key: "cost_price", label: "Cost price" },
           { key: "quantity", label: "Quantity" },
-          { key: "reorder_level", label: "Reorder Level" },
+          { key: "reorder_level", label: "Reorder level" },
         ]}
       />
     </div>
@@ -917,330 +918,6 @@ function BatchFilter({
         )}
       </MenuPopover>
     </div>
-  );
-}
-
-function ProductModal({
-  open,
-  product,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  product?: Product | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useUI();
-  const [saving, setSaving] = useState(false);
-  const [touched, setTouched] = useState(false);
-  const [customFields, setCustomFields] = useState<
-    { key: string; value: string }[]
-  >([]);
-  const addField = () =>
-    setCustomFields((cf) => [...cf, { key: "", value: "" }]);
-  const updateField = (i: number, patch: Partial<{ key: string; value: string }>) =>
-    setCustomFields((cf) => cf.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
-  const removeField = (i: number) =>
-    setCustomFields((cf) => cf.filter((_, idx) => idx !== i));
-  const [f, setF] = useState({
-    sku: "",
-    name: "",
-    category: "",
-    unit_price: 0,
-    cost_price: 0,
-    quantity: 0,
-    reorder_level: 0,
-    batch_number: "",
-    expiry_date: "",
-    purchase_date: "",
-    barcode: "",
-    warehouse: "",
-    is_serialized: false,
-  });
-  const nameErr = !f.name.trim();
-  const skuErr = !f.sku.trim();
-  const valid = !nameErr && !skuErr;
-
-  // Populate (edit) or reset (new) the form whenever the modal opens.
-  useEffect(() => {
-    if (!open) return;
-    setTouched(false);
-    if (product) {
-      setF({
-        sku: product.sku ?? "",
-        name: product.name ?? "",
-        category: product.category ?? "",
-        unit_price: product.unit_price ?? 0,
-        cost_price: product.cost_price ?? 0,
-        quantity: product.quantity ?? 0,
-        reorder_level: product.reorder_level ?? 0,
-        batch_number: product.batch_number ?? "",
-        expiry_date: product.expiry_date ?? "",
-        purchase_date: String(product.custom_fields?.purchase_date ?? ""),
-        barcode: product.barcode ?? "",
-        warehouse: product.warehouse ?? "",
-        is_serialized: product.is_serialized ?? false,
-      });
-      setCustomFields(
-        Object.entries(product.custom_fields ?? {})
-          .filter(([key]) => key !== "purchase_date")
-          .map(([key, value]) => ({
-            key,
-            value: String(value),
-          }))
-      );
-    } else {
-      setF({
-        sku: "",
-        name: "",
-        category: "",
-        unit_price: 0,
-        cost_price: 0,
-        quantity: 0,
-        reorder_level: 0,
-        batch_number: "",
-        expiry_date: "",
-        purchase_date: "",
-        barcode: "",
-        warehouse: "",
-        is_serialized: false,
-      });
-      setCustomFields([]);
-    }
-  }, [open, product]);
-
-  const save = async () => {
-    if (saving) return;
-    setTouched(true);
-    if (!valid) return;
-    setSaving(true);
-    try {
-      // purchase_date isn't a products column — it rides in custom_fields.
-      const { purchase_date, ...fCols } = f;
-      const custom: Record<string, string> = Object.fromEntries(
-        customFields
-          .filter((c) => c.key.trim())
-          .map((c) => [c.key.trim(), c.value])
-      );
-      if (purchase_date) custom.purchase_date = purchase_date;
-      const payload = {
-        ...fCols,
-        batch_number: fCols.batch_number || undefined,
-        expiry_date: fCols.expiry_date || undefined,
-        barcode: fCols.barcode || undefined,
-        warehouse: fCols.warehouse || undefined,
-        // Send {} (not undefined) when editing so clearing all fields persists.
-        custom_fields: Object.keys(custom).length
-          ? custom
-          : product
-          ? {}
-          : undefined,
-      };
-      if (product) {
-        // Existing stock is adjusted through Stocktake, which checks concurrent
-        // changes and retains the exact request across acknowledgement failures.
-        const { quantity: _q, ...rest } = payload;
-        await erp.updateProduct(
-          product.id,
-          rest as Partial<Omit<Product, "id" | "created_at">>
-        );
-        toast.success("Product updated.");
-      } else {
-        await erp.createProduct({
-          ...payload,
-          description: "",
-        } as Omit<Product, "id" | "created_at">);
-        toast.success("Product added.");
-      }
-      onSaved();
-      setCustomFields([]);
-      onClose();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={() => { if (!saving) onClose(); }}
-      title={product ? "Edit product" : "New product"}
-    >
-      <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="SKU *">
-          <input
-            className={cn("input", touched && skuErr && "border-danger")}
-            required
-            aria-invalid={touched && skuErr}
-            aria-describedby={touched && skuErr ? "product-sku-error" : undefined}
-            value={f.sku}
-            onChange={(e) => setF({ ...f, sku: e.target.value })}
-          />
-          {touched && skuErr && (
-            <p id="product-sku-error" className="text-xs text-danger mt-1">SKU is required.</p>
-          )}
-        </Field>
-        <Field label="Name *">
-          <input
-            className={cn("input", touched && nameErr && "border-danger")}
-            required
-            aria-invalid={touched && nameErr}
-            aria-describedby={touched && nameErr ? "product-name-error" : undefined}
-            value={f.name}
-            onChange={(e) => setF({ ...f, name: e.target.value })}
-          />
-          {touched && nameErr && (
-            <p id="product-name-error" className="text-xs text-danger mt-1">Name is required.</p>
-          )}
-        </Field>
-        <Field label="Category">
-          <input
-            className="input"
-            value={f.category}
-            onChange={(e) => setF({ ...f, category: e.target.value })}
-          />
-        </Field>
-        <Field label="Barcode / EAN">
-          <input
-            className="input"
-            placeholder="Scan or type"
-            value={f.barcode}
-            onChange={(e) => setF({ ...f, barcode: e.target.value })}
-          />
-        </Field>
-        <Field label="Warehouse / Location">
-          <input
-            className="input"
-            placeholder="Main Warehouse"
-            value={f.warehouse}
-            onChange={(e) => setF({ ...f, warehouse: e.target.value })}
-          />
-        </Field>
-        <Field label={`Unit Price (${getDisplayCurrency()})`}>
-          <input
-            type="number"
-            className="input"
-            placeholder="0"
-            value={f.unit_price || ""}
-            onChange={(e) => setF({ ...f, unit_price: numInput(e.target.value) })}
-          />
-        </Field>
-        <Field label={`Cost Price (${getDisplayCurrency()})`}>
-          <input
-            type="number"
-            className="input"
-            placeholder="0"
-            value={f.cost_price || ""}
-            onChange={(e) => setF({ ...f, cost_price: numInput(e.target.value) })}
-          />
-        </Field>
-        <Field label="Quantity">
-          <input
-            type="number"
-            className="input"
-            readOnly={!!product}
-            placeholder="0"
-            value={f.quantity || ""}
-            onChange={(e) => setF({ ...f, quantity: numInput(e.target.value) })}
-          />
-          {product && <p className="mt-1 text-xs text-muted-foreground">Use Stocktake to adjust existing stock safely.</p>}
-        </Field>
-        <Field label="Reorder Level">
-          <input
-            type="number"
-            className="input"
-            placeholder="0"
-            value={f.reorder_level || ""}
-            onChange={(e) => setF({ ...f, reorder_level: numInput(e.target.value) })}
-          />
-        </Field>
-        <Field label="Batch / Lot Number">
-          <input
-            className="input"
-            placeholder="LOT-2026-001"
-            value={f.batch_number}
-            onChange={(e) => setF({ ...f, batch_number: e.target.value })}
-          />
-        </Field>
-        <Field label="Expiry Date">
-          <DateField
-            value={f.expiry_date}
-            onChange={(v) => setF({ ...f, expiry_date: v })}
-          />
-        </Field>
-        <Field label="Date of purchase">
-          <DateField
-            value={f.purchase_date}
-            onChange={(v) => setF({ ...f, purchase_date: v })}
-          />
-        </Field>
-      </div>
-
-      <div className="mt-4 border-t border-brand-100 dark:border-white/10 pt-4">
-        <div className="flex items-center justify-between mb-2">
-          <label className="text-[13px] font-medium text-brand-500">Custom fields</label>
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={addField}
-          >
-            <Plus size={13} /> Add field
-          </button>
-        </div>
-        {customFields.length === 0 ? (
-          <p className="text-[11px] text-brand-500">
-            Add your own attributes (e.g. Color, Material, Voltage, Origin).
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {customFields.map((cf, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input
-                  className="input flex-1"
-                  placeholder="Field name"
-                  aria-label={`Custom field ${i + 1} name`}
-                  value={cf.key}
-                  onChange={(e) => updateField(i, { key: e.target.value })}
-                />
-                <input
-                  className="input flex-1"
-                  placeholder="Value"
-                  aria-label={`Custom field ${i + 1} value`}
-                  value={cf.value}
-                  onChange={(e) => updateField(i, { value: e.target.value })}
-                />
-                <button
-                  type="button"
-                  aria-label="Remove field"
-                  className="btn-ghost w-10 !px-0 shrink-0 text-danger"
-                  onClick={() => removeField(i)}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap justify-end gap-2 mt-5 border-t border-border pt-4">
-        <button className="btn-ghost" onClick={onClose}>
-          Cancel
-        </button>
-        <button
-          className="btn-primary"
-          disabled={saving || (touched && !valid)}
-          onClick={save}
-        >
-          {saving ? "Saving…" : product ? "Save changes" : "Create product"}
-        </button>
-      </div>
-      </fieldset>
-    </Modal>
   );
 }
 

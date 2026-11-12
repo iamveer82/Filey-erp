@@ -47,13 +47,31 @@ const CURRENCY_WORDS: Record<string, { main: string; sub: string }> = {
   SAR: { main: "Saudi Riyals", sub: "Halalas" },
 };
 
-/** "UAE Dirhams Three Thousand Three Hundred Twenty and Fils Ten Only" */
+/** Indian grouping: 1,23,45,678 = "One Crore Twenty Three Lakh Forty Five Thousand Six Hundred Seventy Eight". */
+export function indianNumberToWords(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  n = Math.floor(Math.abs(n));
+  if (n === 0) return "Zero";
+  const crore = Math.floor(n / 1e7);
+  const rest = n % 1e7;
+  const parts = [
+    crore ? `${crore >= 1000 ? indianNumberToWords(crore) : threeDigits(crore)} Crore` : "",
+    Math.floor(rest / 1e5) ? `${threeDigits(Math.floor(rest / 1e5))} Lakh` : "",
+    Math.floor((rest % 1e5) / 1000) ? `${threeDigits(Math.floor((rest % 1e5) / 1000))} Thousand` : "",
+    rest % 1000 ? threeDigits(rest % 1000) : "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
+/** "UAE Dirhams Three Thousand Three Hundred Twenty and Fils Ten Only".
+ *  Rupees use lakh and crore, as Indian invoices print them. */
 export function amountInWords(amount: number, currency = "AED"): string {
   if (!Number.isFinite(amount)) return "";
   const cur = CURRENCY_WORDS[currency] ?? { main: currency, sub: "" };
+  const words = currency === "INR" ? indianNumberToWords : numberToWords;
   const whole = Math.floor(Math.abs(amount));
   const frac = Math.round((Math.abs(amount) - whole) * 100);
-  let out = `${cur.main} ${numberToWords(whole)}`;
-  if (frac > 0 && cur.sub) out += ` and ${cur.sub} ${numberToWords(frac)}`;
+  let out = `${cur.main} ${words(whole)}`;
+  if (frac > 0 && cur.sub) out += ` and ${cur.sub} ${words(frac)}`;
   return `${out} Only`;
 }

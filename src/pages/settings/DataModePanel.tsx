@@ -1,33 +1,21 @@
 import { FileySpinner } from "../../components/FileySpinner";
 import { useEffect, useRef, useState } from "react";
-import { Cloud, Check, Download, FolderOpen, ShieldCheck } from "lucide-react";
+import { Cloud, Download, FolderOpen, ShieldCheck } from "lucide-react";
 import { effectiveDataMode, type DataMode } from "../../lib/dataMode";
 import { cloudConfigured, supabase } from "../../lib/supabase";
 import { switchWorkspace, WorkspaceTransferError } from "../../lib/switchWorkspace";
 import { useAuth } from "../../lib/auth";
 import {
-  cloudSignIn,
-  cloudSignUp,
-  cloudSignOut,
-} from "../../lib/sync";
-import {
   migrateCloudToLocal,
   normalizeLocalEmirates,
   type MigrateResult,
 } from "../../lib/migrate";
-import { setMigrating, isMigrating, getSyncStatus, syncStatusMessage, type SyncStatus } from "../../lib/sync";
+import { setMigrating, isMigrating } from "../../lib/sync";
 import {
-  CLOUD_COPY_EVENT,
-  cloudCopyAllowed,
-  cloudCopyOwner,
-  resolveCloudCopyConflicts,
-  runCloudCopy,
-  setCloudCopy,
   DEVICE_COPY_EVENT,
   deviceCopyAt,
   deviceCopyInFlight,
 } from "../../lib/cloudCopy";
-import SyncConflictReview from "../../components/SyncConflictReview";
 import {
   hasTauri,
   pickFolder,
@@ -53,273 +41,6 @@ import { useUI } from "../../lib/ui";
 
 const RETRY_MESSAGE = "Couldn't finish the transfer. Your saved data is safe.";
 
-// A connected identity does not authorize storage of local business records.
-function AccountConnectionCard() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [signup, setSignup] = useState(false);
-  const [connected, setConnected] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const [info, setInfo] = useState("");
-  /** Sign-in failed in the way that usually means "no cloud account yet". */
-  const [offerSignup, setOfferSignup] = useState(false);
-  useEffect(() => {
-    // Includes the initial session and renewal failure/sign-out, so an expired
-    // connection offers sign-in immediately instead of a stale Connected label.
-    const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
-      setConnected(session?.user.email ?? null);
-    });
-    return () => { subscription?.data.subscription.unsubscribe(); };
-  }, []);
-
-  const connect = async () => {
-    setBusy(true);
-    setErr("");
-    setInfo("");
-    try {
-      if (signup) {
-        const r = await cloudSignUp(email.trim(), password);
-        if (r === "confirm") {
-          setInfo("Account created - confirm it from the email we sent, then connect.");
-          setSignup(false);
-          return;
-        }
-      } else {
-        await cloudSignIn(email.trim(), password);
-      }
-      setConnected(email.trim());
-      setPassword("");
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      // Auth deliberately does not reveal whether an email is registered.
-      if (!signup && /invalid login credentials|invalid email or password/i.test(msg)) {
-        setErr(
-          "That email and password didn't match a Filey account. Check your verified account details, or create an account. Your device records stay here."
-        );
-        setOfferSignup(true);
-      } else {
-        setErr(msg);
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const disconnect = async () => {
-    setCloudCopy(null);
-    await cloudSignOut();
-    setConnected(null);
-  };
-
-  return (
-    <SettingsSection
-      title="Account connection"
-      description="Use your verified account when you choose to upgrade to cloud storage."
-    >
-      <p className="text-sm leading-relaxed text-muted-foreground">
-        Connecting verifies your account. Your local records and files stay on this device,
-        even while online. To upload them, turn on “Store in my Filey account” and confirm the transfer.
-      </p>
-
-      {connected ? (
-        <>
-          <div className="flex items-center gap-2 flex-wrap text-sm">
-            <span className="inline-flex min-w-0 items-start gap-1 text-success">
-              <Check size={14} className="mt-0.5 shrink-0" />{" "}
-              <span className="min-w-0 break-words">Connected as {connected}</span>
-            </span>
-            <button className="btn-ghost shrink-0" disabled={busy} onClick={disconnect}>
-              Disconnect
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="min-w-0 text-sm text-foreground">
-              <span className="block text-xs text-brand-500 mb-1">Email</span>
-              <input
-                className="input"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-              />
-            </label>
-            <label className="min-w-0 text-sm text-foreground">
-              <span className="block text-xs text-brand-500 mb-1">Password</span>
-              <input
-                className="input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete={signup ? "new-password" : "current-password"}
-              />
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              className="btn-primary"
-              disabled={busy || !email || !password}
-              onClick={connect}
-            >
-              {busy ? "Working…" : signup ? "Create account" : "Connect"}
-            </button>
-            <button
-              className="text-xs text-brand-500 underline cursor-pointer"
-              onClick={() => {
-                setSignup((s) => !s);
-                setErr("");
-                setOfferSignup(false);
-              }}
-            >
-              {signup
-                ? "Have an account? Sign in"
-                : "New to Filey Cloud? Create an account"}
-            </button>
-          </div>
-        </>
-      )}
-      {info && (
-        <p
-          role="status"
-          className="text-sm text-foreground bg-hover rounded-lg px-3 py-2"
-        >
-          {info}
-        </p>
-      )}
-      {err && (
-        <div
-          role="alert"
-          className="text-sm text-danger bg-danger/10 rounded-lg px-3 py-2 space-y-2"
-        >
-          <p>{err}</p>
-          {offerSignup && (
-            <button
-              className="btn-ghost"
-              onClick={() => {
-                setSignup(true);
-                setErr("");
-                setOfferSignup(false);
-              }}
-            >
-              Create a cloud account for {email.trim()}
-            </button>
-          )}
-        </div>
-      )}
-    </SettingsSection>
-  );
-}
-
-// Mixed mode (Pro/Freedom): records stay on this device and a copy follows to the
-// account, so turning the cloud off later never loses anything.
-function CloudCopySection() {
-  const { confirm } = useUI();
-  const [uid, setUid] = useState<string | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
-  const [owner, setOwner] = useState(cloudCopyOwner());
-  const [allowed, setAllowed] = useState<boolean | null>(null);
-  const [status, setStatus] = useState<SyncStatus>(getSyncStatus());
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    const checkPlan = () => void cloudCopyAllowed().then(ok => { if (active) setAllowed(ok); });
-    const onStatus = () => setStatus(getSyncStatus());
-    const onCopy = () => setOwner(cloudCopyOwner());
-    checkPlan();
-    window.addEventListener("filey:entitlement", checkPlan);
-    window.addEventListener("filey:sync-status", onStatus);
-    window.addEventListener(CLOUD_COPY_EVENT, onCopy);
-    const sub = supabase?.auth.onAuthStateChange((_event, session) => {
-      if (!active) return;
-      setUid(session?.user.id ?? null);
-      setEmail(session?.user.email ?? null);
-    });
-    return () => {
-      active = false;
-      sub?.data.subscription.unsubscribe();
-      window.removeEventListener("filey:entitlement", checkPlan);
-      window.removeEventListener("filey:sync-status", onStatus);
-      window.removeEventListener(CLOUD_COPY_EVENT, onCopy);
-    };
-  }, []);
-
-  const on = !!uid && owner === uid;
-  const toggle = async (next: boolean) => {
-    setErr("");
-    if (!next) return setCloudCopy(null);
-    if (!uid || busy) return;
-    setBusy(true);
-    try {
-      if (await confirm({
-        title: "Keep a copy in your Filey account?",
-        message: `Your device records and files will be uploaded to ${email ?? "your Filey account"} now. After that, only what changes is sent: invoices, payments and other key records about 15 seconds after you save, other edits within 2 minutes. Everything stays on this device too.`,
-        confirmLabel: "Upload and keep in sync",
-      })) setCloudCopy(uid);
-    } finally { setBusy(false); }
-  };
-  const syncNow = async () => {
-    setBusy(true); setErr("");
-    try { await runCloudCopy(); }
-    catch (error) { setErr(error instanceof Error ? error.message : RETRY_MESSAGE); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <SettingsSection
-      title="Automatic cloud copy"
-      description="Work on this device, offline or online, and keep a copy in your Filey account. Pro and Freedom."
-    >
-      {allowed === false ? (
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <p>Available on Pro and Freedom.</p>
-          <a className="btn-ghost" href="#/settings?section=billing">See plans</a>
-        </div>
-      ) : allowed && (
-        <>
-          <div className="flex items-start gap-3 rounded-xl border border-border p-4">
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">Keep a copy in my Filey account</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                {!uid
-                  ? "Connect your Filey account below first."
-                  : on
-                    ? "On. Only changed records are sent: key records about 15 seconds after you save, other edits within 2 minutes. Changes from your other devices arrive when you open Filey and every few minutes while it is open."
-                    : "Off. Your records stay only on this device."}
-              </p>
-            </div>
-            <Switch
-              checked={on}
-              busy={busy}
-              disabled={!uid}
-              onChange={(next) => void toggle(next)}
-              label="Keep a copy in my Filey account"
-              className="mt-1"
-            />
-          </div>
-          {on && (
-            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-              <p role="status" className="text-muted-foreground">
-                {status.state === "syncing" ? "Syncing…"
-                  : status.state === "error" ? syncStatusMessage(status)
-                  : status.at ? `Last synced ${new Date(status.at).toLocaleString()}` : "Waiting for the first sync."}
-              </p>
-              <button className="btn-ghost" disabled={busy || status.state === "syncing"} onClick={() => void syncNow()}>
-                Sync now
-              </button>
-            </div>
-          )}
-          {on && <SyncConflictReview resolve={resolveCloudCopyConflicts} />}
-          {err && <p role="alert" className="text-sm text-danger">{err}</p>}
-        </>
-      )}
-    </SettingsSection>
-  );
-}
 
 // Where the user's records live. One switch: off keeps everything on this
 // device, on puts it in their Filey account so it follows them between devices.
@@ -576,49 +297,64 @@ export default function DataModePanel() {
     <SettingsPanel>
       <SettingsSection
         title="Data and storage"
-        description="Keep your records private on this device, or store them in your Filey account to use them on every device."
+        description={cloudOn
+          ? "Your records are in your Filey account. Turn this off to bring them back to this computer."
+          : "Your records stay on this computer. Cloud mode is coming soon."}
       >
-        <div className="flex items-start gap-3 rounded-xl border border-border p-4">
-          <span
-            aria-hidden="true"
-            className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-muted-foreground"
-          >
-            {cloudOn ? <Cloud size={18} /> : <ShieldCheck size={18} />}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-medium text-foreground">Store in my Filey account</p>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {cloudOn ? (
-                <>
+        {cloudOn ? (
+          <>
+            <div className="flex items-start gap-3 rounded-xl border border-border p-4">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-muted-foreground"
+              >
+                <Cloud size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-foreground">Store in my Filey account</p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
                   On. Your records live in {cloudSession || user?.email || "your Filey account"} and
                   follow you to every device you sign in to. Needs internet to make changes.
                   {hasTauri && <>
                     {" "}This computer keeps an up-to-date copy too{copiedAt ? ` (updated ${new Date(copiedAt).toLocaleString()})` : ""},
                     so turning this off continues from your latest records.
                   </>}
-                </>
-              ) : (
-                <>
-                  Off. You're working with the records saved on this device, available offline.
-                   Your business records stay here even while connected to the internet.
-                </>
-              )}
+                </p>
+              </div>
+              <Switch
+                checked
+                busy={busy}
+                disabled={!cloudConfigured}
+                onChange={() => void toggleStorage(false)}
+                label="Store my data in my Filey account"
+                className="mt-1"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Turn off to save the latest cloud data and files on this device, then work offline. Your cloud copy stays safe.
             </p>
+          </>
+        ) : (
+          <div className="flex items-start gap-3 rounded-xl border border-dashed border-border p-4">
+            <span
+              aria-hidden="true"
+              className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-hover text-muted-foreground"
+            >
+              <ShieldCheck size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium text-foreground">Filey Cloud</p>
+                <span className="rounded-full bg-hover px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  Coming soon
+                </span>
+              </div>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Cloud mode is coming soon. Until then your records stay on this computer and work offline.
+              </p>
+            </div>
           </div>
-          <Switch
-            checked={cloudOn}
-            busy={busy}
-            disabled={!cloudConfigured}
-            onChange={(next) => void toggleStorage(next)}
-            label="Store my data in my Filey account"
-            className="mt-1"
-          />
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {cloudOn
-            ? "Turn off to save the latest cloud data and files on this device, then work offline. Your cloud copy stays safe."
-            : "Turn on to save your device changes to your account and continue in Filey Cloud. Your edited versions are kept if the same record changed in both places."}
-        </p>
+        )}
         {err && (
           <div
             role="alert"
@@ -651,8 +387,6 @@ export default function DataModePanel() {
           </div>
         )}
       </SettingsSection>
-      {mode === "local" && cloudConfigured && <CloudCopySection />}
-      {mode === "local" && cloudConfigured && <AccountConnectionCard />}
 
       {hasTauri && (
         <>
@@ -768,10 +502,10 @@ export default function DataModePanel() {
         </>
       )}
 
-      {cloudConfigured && (
+      {cloudConfigured && cloudOn && (
         <SettingsSection
           title="Transfer data"
-          description="Copy records between this device and your cloud account. Review replacement details before starting."
+          description="Copy your Filey Cloud records onto this computer before turning cloud storage off."
         >
           {/* While a transfer runs, the card becomes ONE spinning circle —
               no per-table narration, no counts. People don't act on which of

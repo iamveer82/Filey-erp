@@ -60,21 +60,21 @@ type Section =
   | "license";
 
 const ALL_NAV: { id: Section; label: string; icon: typeof Building2 }[] = [
-  { id: "company", label: "Company Details", icon: Building2 },
-  { id: "account", label: "Account & Profile", icon: UserCircle },
-  { id: "ai", label: "AI Assistant", icon: Sparkles },
+  { id: "company", label: "Company details", icon: Building2 },
+  { id: "account", label: "Account & profile", icon: UserCircle },
+  { id: "ai", label: "AI assistant", icon: Sparkles },
   { id: "email", label: "Email", icon: Mail },
   { id: "credits", label: "Coin wallet", icon: Wallet },
   { id: "teams", label: "Teams", icon: UsersIcon },
-  { id: "apps", label: "Apps & Modules", icon: Grid3x3 },
+  { id: "apps", label: "Apps & modules", icon: Grid3x3 },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { id: "billing", label: "Billing & Subscription", icon: CreditCard },
+  { id: "billing", label: "Billing & subscription", icon: CreditCard },
   { id: "devices", label: "Devices", icon: Monitor },
   { id: "security", label: "Security", icon: Lock },
   { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "backup", label: "Backup & Restore", icon: DatabaseBackup },
-  { id: "datamode", label: "Data & Storage", icon: HardDrive },
+  { id: "backup", label: "Backup & restore", icon: DatabaseBackup },
+  { id: "datamode", label: "Data & storage", icon: HardDrive },
 ];
 
 // Offline edition has no cloud account/org/billing — hide those tabs so the

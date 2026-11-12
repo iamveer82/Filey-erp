@@ -136,6 +136,15 @@ it("mounts AI only on its first visit and retains its draft/task while section a
   expect(fixture.unmounted).not.toHaveBeenCalled();
 });
 
+it("gives the agent a flex-filling view so the conversation scrolls without moving the composer", async () => {
+  const { container } = open("/agent");
+  const chat = await screen.findByRole("region", { name: "Generated chat fixture" });
+  const view = container.querySelector(".filey-agent-view");
+  expect(view).not.toBeNull();
+  expect(view).not.toHaveAttribute("hidden");
+  expect(view).toContainElement(chat);
+});
+
 it("keeps approval pending off-route and settles it from the bar's permission section", async () => {
   open("/agent");
   fireEvent.click(await screen.findByRole("button", { name: "Request generated approval" }));

@@ -48,11 +48,11 @@ it("keeps drafts across horizontal tabs and follows keyboard and URL navigation"
   expect(screen.getByLabelText("Unsaved company name")).not.toBeVisible();
   act(() => appearance.focus());
   fireEvent.keyDown(appearance, { key: "Home" });
-  await waitFor(() => expect(screen.getByRole("tab", { name: "Company Details" })).toHaveAttribute("aria-selected", "true"));
+  await waitFor(() => expect(screen.getByRole("tab", { name: "Company details" })).toHaveAttribute("aria-selected", "true"));
   expect(screen.getByLabelText("Unsaved company name")).toHaveValue("Unsaved draft");
   fireEvent.mouseDown(appearance, { button: 0, ctrlKey: false });
   fireEvent.click(screen.getByRole("button", { name: "Settings home" }));
-  expect(screen.getByRole("tab", { name: "Company Details" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tab", { name: "Company details" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByLabelText("Unsaved company name")).toHaveValue("Unsaved draft");
 });
 

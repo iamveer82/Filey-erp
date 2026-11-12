@@ -420,7 +420,7 @@ export default function Letter() {
         <>
           <PageHeader
             title="Letter"
-            subtitle="Create company letters and keep every issued document together."
+            subtitle="Create company letters and keep every issued document together"
             action={
               <button
                 type="button"

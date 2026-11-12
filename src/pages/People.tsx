@@ -7,7 +7,9 @@ import {
   FileText,
   Banknote,
   UsersRound,
+  Wallet,
 } from "lucide-react";
+import RunPayrollModal from "../components/RunPayrollModal";
 import { format } from "date-fns";
 import { hr, Employee, HrSummary } from "../lib/api";
 import { useLiveSync } from "../lib/realtime";
@@ -49,6 +51,7 @@ export default function People() {
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [wpsOpen, setWpsOpen] = useState(false);
+  const [payrollOpen, setPayrollOpen] = useState(false);
   const [editFor, setEditFor] = useState<Employee | null>(null);
   const [leaveFor, setLeaveFor] = useState<Employee | null>(null);
   const [quickViewFor, setQuickViewFor] = useState<Employee | null>(null);
@@ -142,6 +145,9 @@ export default function People() {
         subtitle="Employees and contacts on your team"
         action={
           <div className="flex gap-2 flex-wrap">
+            <button className="btn-ghost" disabled={!emps.length} onClick={() => setPayrollOpen(true)}>
+              <Wallet size={15} /> Run payroll
+            </button>
             <button className="btn-ghost" onClick={() => setWpsOpen(true)}>
               <Banknote size={15} /> WPS file
             </button>
@@ -155,6 +161,7 @@ export default function People() {
         }
       />
       <WpsExportModal open={wpsOpen} employees={emps} onClose={() => setWpsOpen(false)} />
+      <RunPayrollModal open={payrollOpen} employees={emps} onClose={() => setPayrollOpen(false)} onDone={() => { void load(); }} />
 
       <CustomFieldsManager
         open={manageOpen}
@@ -176,19 +183,18 @@ export default function People() {
           changeTone="up"
         />
         <MetricCard
-          label="Present Today"
+          label="Present today"
           value={num(sum?.present_today ?? 0)}
           change={sum?.present_today ? "Checked in" : "None yet"}
-          changeTone={sum?.present_today ? "up" : "warn"}
         />
         <MetricCard
-          label="On Leave"
+          label="On leave"
           value={num(sum?.on_leave ?? 0)}
           change={emps.length === 0 ? "No employees yet" : sum?.on_leave ? "Leave recorded today" : "No leave recorded today"}
           changeTone={sum?.on_leave ? "warn" : "neutral"}
         />
         <MetricCard
-          label="Monthly Payroll"
+          label="Monthly payroll"
           value={aed(sum?.monthly_payroll ?? 0)}
           change="Total cost"
           changeTone="up"
@@ -477,7 +483,7 @@ function EmployeeModal({
     >
       <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Employee Code">
+        <Field label="Employee code">
           <input
             className="input"
             value={f.employee_code}
@@ -537,7 +543,7 @@ function EmployeeModal({
             onChange={(e) => setF({ ...f, salary: numInput(e.target.value) })}
           />
         </Field>
-        <Field label="Hire Date">
+        <Field label="Hire date">
           <DateField
             value={f.hire_date}
             onChange={(v) => setF({ ...f, hire_date: v })}

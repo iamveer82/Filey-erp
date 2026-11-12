@@ -70,7 +70,7 @@ export default function Comms() {
     <div className="mx-auto max-w-[1320px]">
       <PageHeader
         title="Comms log"
-        subtitle="Every email this workspace sent, and every call you record against a customer."
+        subtitle="Every email this workspace sent, and every call you record against a customer"
         action={tab === "calls" && (
           <button className="btn-primary" onClick={() => setLogging(true)}>
             <Plus size={15} /> Log a call

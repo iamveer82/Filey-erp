@@ -64,9 +64,9 @@ export default function IntegrationConnect() {
 const CHANNEL_SUBTITLE: Record<GatewayConnect["id"], string> = {
   whatsapp: "Pair WhatsApp in the desktop app — QR linked device, no API key",
   telegram: "Chat with Filey AI from Telegram with a free BotFather token",
-  slack: "Post Filey messages to Slack with a free incoming webhook",
-  discord: "Post Filey messages to Discord with a free channel webhook",
-  teams: "Post Filey messages to Teams with a free incoming webhook",
+  slack: "Authorize Filey in Slack, or post one-way notifications with a free webhook",
+  discord: "Authorize Filey in Discord, or post one-way notifications with a free webhook",
+  teams: "Authorize Filey in Microsoft Teams, or post one-way notifications with a free webhook",
   email: "Send Filey messages from your own mailbox",
 };
 
@@ -85,8 +85,9 @@ function ChannelConnectPage({ id }: { id: GatewayConnect["id"] }) {
       />
       <ChannelConnection id={id} />
       <p className="text-xs text-brand-500">
-        Every channel connects with a free link you own — no paid channel key. The
-        connection is saved on this computer, inside this workspace.
+        WhatsApp pairs a phone, Telegram takes a free bot token, Slack, Discord and
+        Teams authorize through the provider, and Email uses your own mailbox — no
+        paid channel key. The connection is saved inside this workspace.
       </p>
     </div>
   );

@@ -18,6 +18,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_KEY = "filey.proactive.daily";
 const ALERTS_KEY = "filey.proactive.alerts";
+/** Automatic reports are opt-in. A background sweep must never message the
+ *  owner's chat unless they asked for it in Integrations — silence is the
+ *  safe default for something nobody triggered. */
+const WHATSAPP_REPORTS_KEY = "filey.proactive.whatsapp";
 /** After a failed run, wait this long before trying again — short enough that
  *  a transient outage isn't a full-day blackout, long enough that a WhatsApp
  *  reconnect storm can't fire an agent run per flap. */
@@ -40,6 +44,21 @@ function writeStamp(key: string, at: number, scope: string): void {
   }
 }
 
+/** Whether the owner wants the scheduled daily summary and hourly alerts
+ *  delivered over WhatsApp. Default off: these run without a request, so they
+ *  need an explicit yes. Reminders the owner created are not affected. */
+export function proactiveWhatsAppEnabled(): boolean {
+  try {
+    return readAgentStorage(WHATSAPP_REPORTS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setProactiveWhatsAppEnabled(enabled: boolean): void {
+  writeAgentStorage(WHATSAPP_REPORTS_KEY, enabled ? "1" : null);
+}
+
 /** The JID to notify: the CONNECTED account's own chat.
  *
  *  The company profile's WhatsApp number is deliberately not used. That is the
@@ -53,6 +72,19 @@ async function ownerJid(): Promise<string | null> {
   if (!me) return null;
   const own = digits(getBridgeConfig().ownerNumber);
   return own ? `${own}@s.whatsapp.net` : me;
+}
+
+/** A line to the owner's own WhatsApp chat, only when they switched WhatsApp reports on.
+ *  For news they are waiting on but are not at the computer to see: a long task finishing
+ *  or stopping to ask them something. */
+export async function tellOwnerOnWhatsApp(text: string): Promise<void> {
+  try {
+    if (!hasDesktop || !proactiveWhatsAppEnabled()) return;
+    const to = await ownerJid();
+    if (to) await sendWa(to, waFormat(text));
+  } catch (e) {
+    log.warn("agent", "owner WhatsApp note failed", e);
+  }
 }
 
 /** Same house style as the WhatsApp replies — WhatsApp markup, not markdown.
@@ -78,6 +110,9 @@ async function run(kind: "daily" | "alerts"): Promise<boolean> {
   if (creditChoice().funding !== "byok") return false;
   // Filey Agent answers; while it starts or restarts the sweep waits for its next slot.
   if (fileyAgentStatus().state !== "ready") return false;
+  // Re-check before starting: the owner may have turned reports off since the
+  // scheduler queued this sweep.
+  if (!proactiveWhatsAppEnabled()) return true;
   try {
     const to = await ownerJid();
     if (!to || scope !== agentStorageScope()) return false;
@@ -95,6 +130,8 @@ async function run(kind: "daily" | "alerts"): Promise<boolean> {
     requireAgentStorageScope(scope);
     if (!text) return true; // nothing worth sending — done, don't retry
     if (kind === "alerts" && text.toUpperCase() === "NONE") return true;
+    // The owner may have switched reports off while the agent was working.
+    if (!proactiveWhatsAppEnabled()) return true;
     await sendWa(to, waFormat(text));
     return true;
   } catch (e) {
@@ -164,6 +201,8 @@ export function startProactiveAgent(): void {
     const scope = agentStorageScope();
     // Paused from the tray or Automations: no background agent runs.
     if (!scope || alwaysOnPaused()) return;
+    // Reports are opt-in; without that, only owner-created reminders go out.
+    if (!proactiveWhatsAppEnabled()) return;
     const active = `${scope}:${kind}`;
     if (inFlight.has(active)) return;
     const last = readStamp(key);

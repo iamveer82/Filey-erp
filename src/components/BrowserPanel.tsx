@@ -163,7 +163,7 @@ export default function BrowserPanel() {
       <button type="button" className="btn-ghost w-9 !px-0" onClick={() => setBrowserPanelOpen(false)} aria-label="Collapse browser" title="Collapse browser"><PanelRightClose size={16} /></button>
     </div>
     {state.tabs.length > 0 && <div role="tablist" aria-label="Browser tabs" className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1.5">
-      {state.tabs.map(tab => <div key={tab.id} className={`flex max-w-[190px] shrink-0 items-center rounded-lg ${tab.id === state.activeId ? "bg-hover" : ""}`}>
+      {state.tabs.map(tab => <div key={tab.id} className={`flex max-w-[192px] shrink-0 items-center rounded-lg ${tab.id === state.activeId ? "bg-hover" : ""}`}>
         <button type="button" role="tab" aria-selected={tab.id === state.activeId} disabled={busy} onClick={() => void act({ action: "focus", tab_id: tab.id })} className="min-w-0 truncate py-2 pl-2.5 pr-1 text-xs" title={tab.title}>{tab.title || "Website"}</button>
         <button type="button" disabled={busy} onClick={() => void act({ action: "close", tab_id: tab.id })} aria-label={`Close ${tab.title || "website"}`} className="shrink-0 rounded-full p-1.5 hover:bg-background"><X size={12} /></button>
       </div>)}

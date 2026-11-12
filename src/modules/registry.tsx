@@ -18,6 +18,7 @@ const ModernOverview = page(() => import("../pages/ModernOverview"));
 const AgentChat = page(() => import("../pages/AgentChat"));
 const WorkspaceBrowser = page(() => import("../pages/WorkspaceBrowser"));
 const Inventory = page(() => import("../pages/Inventory"));
+const Counter = page(() => import("../pages/Counter"));
 const Orders = page(() => import("../pages/Orders"));
 const Invoicing = page(() => import("../pages/Invoicing"));
 const PackagingList = page(() => import("../pages/PackagingList"));
@@ -138,8 +139,18 @@ export const MODULES: AppModule[] = [
     Component: Invoicing,
   },
   {
+    // Pharma mode shows it as "Pharmacy" (see lib/modules.tsx).
+    id: "counter",
+    label: "Counter",
+    short: "Counter",
+    desc: "Quick sales at the till: scan, bill, print receipt",
+    icon: "counter",
+    to: "/counter",
+    Component: Counter,
+  },
+  {
     id: "packaging-list",
-    label: "Packaging List",
+    label: "Packaging list",
     short: "Packing",
     desc: "Independent packing lists, shipment weights and optional invoice references",
     icon: "packing",
@@ -220,7 +231,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "purchase-orders",
-    label: "Purchase Orders",
+    label: "Purchase orders",
     short: "POs",
     desc: "Order from suppliers & receive stock",
     icon: "po",
@@ -229,7 +240,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "purchase-invoices",
-    label: "Purchase Invoices",
+    label: "Purchase invoices",
     short: "Bills",
     desc: "Record supplier bills — receives stock & posts to Inventory & Payables",
     icon: "purchaseInvoice",
@@ -321,7 +332,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "payment-receipts",
-    label: "Payment Receipts",
+    label: "Payment receipts",
     short: "Receipts",
     desc: "Issue payment receipts to customers & suppliers",
     icon: "payment",
@@ -330,7 +341,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "declaration",
-    label: "Declaration Letter",
+    label: "Declaration letter",
     short: "Declaration",
     desc: "VAT supply declaration letters in the standard UAE format",
     icon: "declaration",
@@ -348,7 +359,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "bank-accounts",
-    label: "Bank Accounts",
+    label: "Bank accounts",
     short: "Bank",
     desc: "Manage company bank accounts & balances",
     icon: "bank",
@@ -357,7 +368,7 @@ export const MODULES: AppModule[] = [
   },
   {
     id: "email-templates",
-    label: "Email Templates",
+    label: "Email templates",
     short: "Emails",
     desc: "Reusable email templates with placeholders",
     icon: "email",
@@ -366,7 +377,7 @@ export const MODULES: AppModule[] = [
   },
   /* {
     id: "sms-templates",
-    label: "SMS Templates",
+    label: "SMS templates",
     short: "SMS",
     desc: "Reusable SMS templates with placeholders + 6-digit OTP",
     icon: "email",

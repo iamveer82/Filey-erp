@@ -12,6 +12,10 @@ const ICONS: Record<string, { src: string; dark?: string; alt: string }> = {
   pdf: { src: "/icons/pdf.svg", alt: "PDF" },
   twilio: { src: "/icons/twilio.svg", alt: "Twilio" },
   whatsapp: { src: "/icons/whatsapp-icon.svg", alt: "WhatsApp" },
+  telegram: { src: "/icons/telegram-icon.svg", alt: "Telegram" },
+  slack: { src: "/icons/slack-icon.svg", alt: "Slack" },
+  discord: { src: "/icons/discord-icon.svg", alt: "Discord" },
+  teams: { src: "/icons/teams-icon.svg", alt: "Microsoft Teams" },
 };
 
 function useIsDark() {

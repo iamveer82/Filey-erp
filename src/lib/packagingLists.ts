@@ -17,6 +17,12 @@ export interface PackagingItem {
   /** Weight of one item; totals multiply by qty. Package count is per line. */
   net_weight: number | null;
   gross_weight: number | null;
+  /** Export details, optional so lists saved before them still load. */
+  hs_code?: string;
+  /** Size of one package in cm; volume = L x W x H x packages. */
+  length_cm?: number | null;
+  width_cm?: number | null;
+  height_cm?: number | null;
 }
 
 export type PackagingStatus = "draft" | "issued" | "dispatched" | "cancelled";
@@ -56,6 +62,13 @@ export interface PackagingForm {
   show_signature: boolean;
   stamp?: StampSig;
   signature?: StampSig;
+  port_of_loading?: string;
+  port_of_discharge?: string;
+  country_of_origin?: string;
+  vessel?: string;
+  container_number?: string;
+  seal_number?: string;
+  marks?: string;
   items: PackagingItem[];
 }
 
@@ -84,14 +97,49 @@ export function blankPackagingForm(number: string): PackagingForm {
   };
 }
 
+/** Packing lines from an invoice's lines: description, quantity and unit. Weights and
+ *  packages stay blank, because an invoice does not know them. */
+export function itemsFromInvoice(lines: { description?: string | null; qty?: number | null; unit?: string | null }[]): PackagingItem[] {
+  return lines.filter((line) => line.description?.trim()).map((line) => ({
+    id: crypto.randomUUID(), description: line.description!.trim().slice(0, 2000), qty: Number(line.qty) || 0,
+    unit: line.unit?.trim() || "pcs", package_type: "", package_count: null, net_weight: null, gross_weight: null,
+  }));
+}
+
+/** The form with the invoice's lines added; an untouched starting line is replaced. */
+export function withInvoiceItems(form: PackagingForm, lines: Parameters<typeof itemsFromInvoice>[0]): PackagingForm {
+  const blank = form.items.length === 1 && !form.items[0].description.trim();
+  return { ...form, items: [...(blank ? [] : form.items), ...itemsFromInvoice(lines)].slice(0, 500) };
+}
+
+/** Export shipping details printed in the header when filled in. */
+export const EXPORT_FIELDS = [
+  ["port_of_loading", "Port of loading"], ["port_of_discharge", "Port of discharge"], ["country_of_origin", "Country of origin"],
+  ["vessel", "Vessel / flight"], ["container_number", "Container number"], ["seal_number", "Seal number"], ["marks", "Marks & numbers"],
+] as const;
+
+export const exportDetails = (form: PackagingForm): [string, string][] =>
+  EXPORT_FIELDS.filter(([key]) => form[key]?.trim()).map(([key, label]) => [label, form[key]!.trim()]);
+
+/** Cubic metres for one line: package size x package count (one package when not counted). */
+export const itemVolume = (item: PackagingItem) =>
+  item.length_cm && item.width_cm && item.height_cm ? item.length_cm * item.width_cm * item.height_cm / 1e6 * (item.package_count ?? 1) : 0;
+
+/** The small line under a description: HS code and package size. */
+export const itemDetail = (item: PackagingItem) => [
+  item.hs_code?.trim() ? `HS ${item.hs_code.trim()}` : "",
+  item.length_cm && item.width_cm && item.height_cm ? `${item.length_cm} × ${item.width_cm} × ${item.height_cm} cm` : "",
+].filter(Boolean).join(" · ");
+
 export function packagingTotals(items: PackagingItem[]) {
-  const totals = { packages: 0, net: 0, gross: 0, quantities: Object.create(null) as Record<string, number> };
+  const totals = { packages: 0, net: 0, gross: 0, volume: 0, quantities: Object.create(null) as Record<string, number> };
   for (const item of items) {
     const unit = item.unit.trim() || "pcs";
     totals.quantities[unit] = (totals.quantities[unit] ?? 0) + item.qty;
     totals.packages += item.package_count ?? 0;
     totals.net += item.qty * (item.net_weight ?? 0);
     totals.gross += item.qty * (item.gross_weight ?? 0);
+    totals.volume += itemVolume(item);
   }
   return totals;
 }
@@ -125,6 +173,7 @@ export function validatePackagingForm(form: PackagingForm): void {
   }
   for (const key of ["company_email", "recipient_email"] as const) text(form[key], key.replace(/_/g, " "), 254);
   text(form.notes, "Notes", 10000, false, true);
+  for (const [key, label] of EXPORT_FIELDS) if (form[key] !== undefined) text(form[key], label, 120);
   text(form.company_logo, "Company logo", 5_000_000, false, true);
   text(form.template, "Template", 100, true);
   if (!/^#[0-9a-f]{6}$/i.test(form.accent)) throw new Error("Choose a valid accent color.");
@@ -157,6 +206,9 @@ export function validatePackagingForm(form: PackagingForm): void {
     for (const weight of [item.net_weight, item.gross_weight])
       if (weight !== null && (!Number.isFinite(weight) || weight < 0)) throw new Error("Weights must be numbers of zero or more.");
     if (item.net_weight !== null && item.gross_weight !== null && item.net_weight > item.gross_weight) throw new Error("Net weight cannot exceed gross weight.");
+    if (item.hs_code !== undefined) text(item.hs_code, "HS code", 20);
+    for (const size of [item.length_cm, item.width_cm, item.height_cm])
+      if (size != null && (!Number.isFinite(size) || size < 0 || size > 100000)) throw new Error("Package sizes must be numbers of zero or more, in cm.");
   }
   const totals = packagingTotals(form.items);
   if (!Number.isSafeInteger(totals.packages) || ![totals.net, totals.gross, ...Object.values(totals.quantities)].every(Number.isFinite)) throw new Error("Packaging list totals are too large.");

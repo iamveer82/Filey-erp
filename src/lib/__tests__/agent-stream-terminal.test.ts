@@ -14,7 +14,8 @@ vi.mock("../agentHarness", () => ({ runAgentStream: vi.fn() }));
 vi.mock("../aiContext", () => ({ buildAiContext: async () => "" }));
 // Channel turns run on Filey Agent (Hermes); only its reply call is faked.
 const engine = vi.hoisted(() => ({ reply: vi.fn() }));
-vi.mock("../fileyAgent", () => ({ fileyAgentReply: engine.reply, forgetFileyAgentSession: vi.fn() }));
+vi.mock("../fileyAgent", () => ({ fileyAgentReply: engine.reply, forgetFileyAgentSession: vi.fn(),
+  refreshIdleFileyAgentSession: () => false, chatRecap: () => "" }));
 
 const output = { name: "demo-invoice.pdf", path: "C:/Filey/demo-invoice.pdf" };
 const toolCall = { type: "tool_call" as const, id: "export-demo", name: "export_invoice_pdf", args: { number: "INV-DEMO" } };
@@ -73,8 +74,12 @@ it("returns files already produced to the remote transport when the engine fails
   expect(result.files).toEqual([output]);
   expect(result.text).not.toContain("Private provider response detail");
   // One engine session per channel conversation, as the owner, under the channel's agent id.
+  // The owner's own words ride separately: they are what the chat remembers for its next fresh session.
+  // The channel's standing rules ride separately too: they open an engine session once.
   expect(engine.reply).toHaveBeenCalledWith("whatsapp:demo-owner", expect.stringContaining("Export INV-DEMO"),
-    expect.objectContaining({ isOwner: true, agentId: "whatsapp:demo-owner" }));
+    expect.objectContaining({ isOwner: true, agentId: "whatsapp:demo-owner" }), "Export INV-DEMO",
+    expect.stringContaining("chat with the authenticated owner"));
+  expect(engine.reply.mock.calls[0][1]).not.toContain("chat with the authenticated owner");
   result.delivered();
   result.delivered();
 });

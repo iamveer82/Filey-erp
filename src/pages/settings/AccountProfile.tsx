@@ -291,7 +291,7 @@ export default function AccountProfile() {
         <p className="text-sm text-muted-foreground">Coin is optional on Basic, Pro and Freedom. Purchased plan benefits activate automatically on your account.</p>
       </SettingsSection>
       <SettingsSection
-        title="Profile Information"
+        title="Profile information"
         description="Your personal details and profile photo."
         actions={
           <button
@@ -352,7 +352,7 @@ export default function AccountProfile() {
             />
           </div>
           <div className="w-full min-w-0 flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Full Name" error={fieldErrors.name} required>
+            <FormField label="Full name" error={fieldErrors.name} required>
               <input
                 className="input"
                 value={p.name}
@@ -362,10 +362,10 @@ export default function AccountProfile() {
                 }}
               />
             </FormField>
-            <FormField label="Email Address" hint="Contact admin to change">
+            <FormField label="Email address" hint="Contact admin to change">
               <input className="input bg-muted" value={profile?.email ?? ""} disabled />
             </FormField>
-            <FormField label="Phone Number" hint="+971 50 123 4567">
+            <FormField label="Phone number" hint="+971 50 123 4567">
               <input
                 className="input"
                 placeholder="+971 50 123 4567"
@@ -382,7 +382,7 @@ export default function AccountProfile() {
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Login Credentials"
+        title="Login credentials"
         description="Manage your username, email and sign-in methods."
       >
         {cloudChecked && !cloudAccount && (
@@ -564,7 +564,7 @@ export default function AccountProfile() {
               ].map((t) => ({ value: t, label: t }))}
             />
           </FormField>
-          <FormField label="Date Format">
+          <FormField label="Date format">
             <SelectMenu
               value={p.date_format}
               onChange={(v) => set("date_format", v)}
@@ -574,7 +574,7 @@ export default function AccountProfile() {
               }))}
             />
           </FormField>
-          <FormField label="Time Format">
+          <FormField label="Time format">
             <SelectMenu
               value={p.time_format}
               onChange={(v) => set("time_format", v)}
@@ -611,11 +611,11 @@ export default function AccountProfile() {
       </SettingsSection>
       {cloudAccount && (
         <SettingsSection
-          title="Change Password"
+          title="Change password"
           description="Verify your current password to choose a new one."
         >
           <div className="max-w-lg space-y-4">
-            <FormField label="Current Password">
+            <FormField label="Current password">
               <PwInput
                 val={cur}
                 onChange={setCur}
@@ -623,7 +623,7 @@ export default function AccountProfile() {
                 toggle={() => setShow({ ...show, c: !show.c })}
               />
             </FormField>
-            <FormField label="New Password">
+            <FormField label="New password">
               <PwInput
                 val={npw}
                 onChange={setNpw}
@@ -654,7 +654,7 @@ export default function AccountProfile() {
                   : pwVerdict.problem}
               </p>
             )}
-            <FormField label="Confirm New Password">
+            <FormField label="Confirm new password">
               <PwInput
                 val={cpw}
                 onChange={setCpw}

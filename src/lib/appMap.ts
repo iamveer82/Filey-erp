@@ -6,6 +6,7 @@
  *    hand instead of the model guessing from the core set;
  *  - tests that keep it complete: every section placed, every tool real, every phrase routed.
  * Static and local: it needs no network, so offline (local mode) agents get the same map. */
+import { pharmaModeCached } from "./pharmaMode";
 
 export interface AppArea {
   /** What users see: the section name in the sidebar, or the kind of work. */
@@ -64,9 +65,15 @@ export const APP_MAP: AppArea[] = [
   { name: "Purchase", page: "purchase", does: "expenses: fuel, rent, petty cash",
     // "fuel 200", "rent paid", "salik 50": the thing paid for is often the whole request.
     words: /\bexpenses?\b|\bspen[dt]\w*\b|\bpetty cash\b|\bpaid for\b|\b(?:fuel|petrol|diesel|salik|parking|taxi|rent|dewa|electricity bill|water bill|internet bill|phone bill)\b|مصروف|مصاريف|نفقات|بنزين|ايجار|إيجار/i, tools: ["log_expense", "list_expenses"] },
-  { name: "Inventory", page: "inventory", does: "products, stock, adjustments",
-    words: /\bproducts?\b|\bstock\b|\binventory\b|\bSKUs?\b|\breorder\b|\brestock\b|\bhow many\b[^.?!\n]{0,30}\bleft\b|\brunning low\b|مخزون|منتج|بضاع|كم باقي/i,
-    tools: ["find_products", "create_product", "update_product", "adjust_stock", "stock_history", "reorder_low_stock"] },
+  { name: "Inventory", page: "inventory", does: "products, barcodes, stock, batches, expiry",
+    words: /\bproducts?\b|\bstock\b|\binventory\b|\bSKUs?\b|\bbarcodes?\b|\bbatch(?:es)?\b|\bexpir\w*|\bMRP\b|\breorder\b|\brestock\b|\bhow many\b[^.?!\n]{0,30}\bleft\b|\brunning low\b|مخزون|منتج|بضاع|كم باقي/i,
+    tools: ["find_products", "create_product", "update_product", "adjust_stock", "stock_history", "reorder_low_stock", "expiry_report", "receive_batch", "write_off_batch"] },
+  { name: "Counter", page: "counter", does: "till sales, receipts",
+    words: /\bcounter\b|\btill\b|\bPOS\b|\bpoint of sale\b|\bwalk-?in\b|\bcash ?memo\b|كاشير|نقطة البيع/i,
+    tools: ["find_products", "counter_sell"] },
+  { name: "Pharmacy", page: "counter", does: "medical counter sales, batches, expiry",
+    words: /\bpharmacy\b|\bchemist\b|\bmedicines?\b|\bmedication\b|\btablets?\b|\bsyrup\b|\bcapsules?\b|\bprescription\b|صيدلي|دواء|أدوية|ادوية|وصفة|انتهاء الصلاحية/i,
+    tools: ["find_products", "expiry_report", "counter_sell", "receive_batch", "write_off_batch"] },
   { name: "Accounting", page: "accounting", does: "ledger, P&L, balance sheet, cash flow",
     words: /\bledger\b|\bjournal\b|\bchart of accounts\b|\btrial balance\b|\bP&L\b|\bprofit (?:and|&) loss\b|\bbalance sheet\b|\bcash ?flow\b|\btransactions?\b|قيود|دفتر الأستاذ|الميزانية|قائمة الدخل|أرباح وخسائر|ارباح وخسائر|كشف حساب|معاملات/i,
     tools: ["financial_statements", "list_transactions", "financial_summary", "create_account", "post_journal_entry"] },
@@ -105,8 +112,9 @@ export const APP_MAP: AppArea[] = [
   { name: "CRM", page: "crm", does: "leads, deals, pipeline",
     words: /\bleads?\b|\bdeals?\b|\bpipeline\b|\bprospects?\b|\bopportunit\w*|\b(?:add (?:a )?)?note (?:on|about|for|that)\b|عميل محتمل|عملاء محتملين|صفق|ملاحظة/i,
     tools: ["create_lead", "find_leads", "create_deal", "set_deal_stage", "list_deals", "crm_pipeline", "add_crm_note"] },
-  { name: "Follow-ups", page: "follow-ups", does: "reminders, to-dos, notifications, automations",
-    words: /\bremind\w*|\bfollow[- ]?ups?\b|\bto-?dos?\b|\bdon'?t (?:let me )?forget\b|\bcall (?:\w+ )?(?:back|later|tomorrow)\b|\breschedul\w*|\bpostpone\w*|\bpush (?:it|this|that) to\b|\bnotifications?\b|\bunread\b|\b(?:anything|what'?s) new\b|\bautomat\w*|\b(?:every|each) (?:morning|evening|day|week|hour|month|mon|tue|wed|thu|fri|sat|sun)\w*|\bwhenever\b|\bkeep an eye\b|\bwatch (?:for|out)\b|ذكرني|تذكير|متابعة|إشعارات|اشعارات|أجّل|كل يوم|كل صباح|تلقائي/i,
+  { name: "Follow-ups", page: "follow-ups", does: "reminders, to-dos, notifications, automations, long tasks",
+    // "keep working until it's done", "do this overnight": a long task (create_automation until_done).
+    words: /\buntil (?:it(?:'?s| is) |all (?:is |are )?)?(?:done|finished|complete)\b|\bkeep (?:working|going)\b|\blong (?:task|job)\b|\bovernight\b|\bin the background\b|حتى (?:ينتهي|تنتهي|يكتمل)|طوال الليل|\bremind\w*|\bfollow[- ]?ups?\b|\bto-?dos?\b|\bdon'?t (?:let me )?forget\b|\bcall (?:\w+ )?(?:back|later|tomorrow)\b|\breschedul\w*|\bpostpone\w*|\bpush (?:it|this|that) to\b|\bnotifications?\b|\bunread\b|\b(?:anything|what'?s) new\b|\bautomat\w*|\b(?:every|each) (?:morning|evening|day|week|hour|month|mon|tue|wed|thu|fri|sat|sun)\w*|\bwhenever\b|\bkeep an eye\b|\bwatch (?:for|out)\b|ذكرني|تذكير|متابعة|إشعارات|اشعارات|أجّل|كل يوم|كل صباح|تلقائي/i,
     tools: ["add_reminder", "list_follow_ups", "complete_follow_up", "reschedule_follow_up", "list_notifications", "create_automation", "list_automations", "update_automation"] },
   { name: "Projects and Helpdesk", page: "projects", does: "projects, tasks, time, tickets",
     words: /\bprojects?\b|\btasks?\b|\btickets?\b|\btime (?:entry|entries|sheet)\b|مشروع|مشاريع|مهمة|مهام|تذكرة/i, tools: ["list_work_items", "save_work_item"] },
@@ -125,7 +133,7 @@ export const APP_MAP: AppArea[] = [
     tools: ["search_web", "read_web_page", "read_rss", "read_github"] },
   { name: "Reports and Overview", page: "reports", does: "sales, stock, finance reports",
     // "how much did we sell", "sales this month", "profit?", "how's business".
-    words: /\breports?\b|\bdashboard\b|\bKPIs?\b|\bsales\b(?! orders?\b)|\brevenue\b|\bturnover\b|\bprofits?\b|\bhow (?:much|many) (?:did|have) (?:we|i)\b|\bhow(?:'s| is) business\b|تقرير|تقارير|مبيعات|أرباح|ارباح/i, tools: ["financial_summary", "get_stats"] },
+    words: /\breports?\b|\bdashboard\b|\bKPIs?\b|\bsales\b(?! orders?\b)|\brevenue\b|\bturnover\b|\bprofits?\b|\bhow (?:much|many) (?:did|have) (?:we|i)\b|\bhow(?:'s| is) business\b|تقرير|تقارير|مبيعات|أرباح|ارباح/i, tools: ["financial_summary", "get_stats", "profit_report"] },
   { name: "Settings", page: "settings", does: "company, numbering, users", words: /\bsettings?\b|\bnumbering\b/i, tools: ["get_company_profile", "update_company_profile"] },
   { name: "Integrations", page: "integrations", does: "Slack, Teams, Discord, Gmail, Outlook and the other connected apps",
     words: /\bintegrations?\b|\bconnect(?:ed)? apps?\b|\b(?:slack|discord|teams|notion|hubspot|outlook|gmail|google drive|google calendar|calendly|mailchimp|typeform)\b/i,
@@ -141,9 +149,12 @@ export const APP_MAP: AppArea[] = [
 /** Sections the agent is in or that need no routing. */
 export const APP_MAP_EXEMPT = ["agent", "overview", "browser", "sms-templates", "helpdesk"];
 
+/** Areas this workspace uses: the pharmacy side of the counter only in Pharma mode. */
+const liveAreas = () => APP_MAP.filter(area => area.name !== "Pharmacy" || pharmaModeCached());
+
 /** The tools a request's words point to, for the first round. */
 export function toolsForRequest(text: string): string[] {
-  return [...new Set(APP_MAP.filter(area => area.words.test(text)).flatMap(area => area.tools))];
+  return [...new Set(liveAreas().filter(area => area.words.test(text)).flatMap(area => area.tools))];
 }
 
 /** APP MAP for the system prompt: one terse line per SECTION.
@@ -157,7 +168,7 @@ export function toolsForRequest(text: string): string[] {
 export function appMapPrompt(): string {
   // ponytail: every byte here rides on every request; the size gate counts ~2 tokens a byte.
   const byPage = new Map<string, AppArea[]>();
-  for (const area of APP_MAP) {
+  for (const area of liveAreas()) {
     const key = area.page || area.name;
     const group = byPage.get(key);
     if (group) group.push(area);

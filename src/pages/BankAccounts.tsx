@@ -199,7 +199,7 @@ export default function BankAccounts() {
   return (
     <div className="">
       <PageHeader
-        title="Bank Accounts"
+        title="Bank accounts"
         subtitle="Manage your company bank accounts & balances"
         action={
           <div className="flex gap-2 flex-wrap">
@@ -226,7 +226,6 @@ export default function BankAccounts() {
           label="Accounts"
           value={String(accounts.length)}
           change={accounts.length > 0 ? "Connected" : "None yet"}
-          changeTone={accounts.length > 0 ? "up" : "warn"}
         />
         {currencies === 0 ? (
           <MetricCard label="Total balance" value="—" change="No accounts yet" />
@@ -372,7 +371,7 @@ export default function BankAccounts() {
                     value: quickView.account_number || "—",
                   },
                   ...(quickView.iban ? [{ label: "IBAN", value: quickView.iban }] : []),
-                  ...(quickView.ifsc ? [{label: "IFSC Code", value: quickView.ifsc}] : []),
+                  ...(quickView.ifsc ? [{label: "IFSC code", value: quickView.ifsc}] : []),
                   ...(quickView.routing_code ? [{label: "Routing code", value: quickView.routing_code}] : []),
                   ...(quickView.swift ? [{label: "SWIFT / BIC", value: quickView.swift}] : []),
                   { label: "Currency", value: quickView.currency },
@@ -670,7 +669,7 @@ function BankModal({
             placeholder="Current Account"
           />
         </Field>
-        <Field label="Account Number">
+        <Field label="Account number">
           <input
             className="input"
             value={f.account_number}
@@ -699,7 +698,7 @@ function BankModal({
             options={CURRENCIES.map(c => ({value: c.code, label: `${c.code} — ${c.name}`}))}
           />
         </Field>
-        <Field label="Opening Balance">
+        <Field label="Opening balance">
           <input
             type="number"
             className="input"

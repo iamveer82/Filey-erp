@@ -147,9 +147,9 @@ export function errMsg(e: unknown): string {
           )
         : String(e);
   // The database's refusal reads like a crash. On a cloud workspace it almost
-  // always means the plan does not include cloud saves.
+  // always means the plan or workspace does not include cloud saves.
   if (/row-level security/i.test(msg))
-    return "This workspace can't save that. Cloud saves need Filey Pro (Settings → Billing), or switch to this device for free in Settings → Data & Storage.";
+    return "This workspace can't save that. Check your plan and workspace in Settings → Billing, or switch to this device for free in Settings → Data & Storage.";
   return msg;
 }
 

@@ -17,7 +17,7 @@ export default function CustomerOpeningBalanceFields({
       <legend className="text-sm font-medium text-foreground">Opening balance (AED)</legend>
       <p id={`${id}-hint`} className="mt-1 text-xs text-muted-foreground">Amount carried in from before Filey. Enter one side only.</p>
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Debit / Payable">
+        <Field label="Debit / payable">
           <input
             className="input border-danger focus:border-danger focus:ring-danger/20"
             type="text"
@@ -33,7 +33,7 @@ export default function CustomerOpeningBalanceFields({
           />
           <p id={`${id}-payable-hint`} className="mt-1 text-xs text-muted-foreground">Money to pay out. You owe the customer.</p>
         </Field>
-        <Field label="Credit / Receivable">
+        <Field label="Credit / receivable">
           <input
             className="input border-success focus:border-success focus:ring-success/20"
             type="text"

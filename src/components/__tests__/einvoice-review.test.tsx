@@ -94,7 +94,7 @@ it("keeps registered identities and bank details empty until an explicit edit or
   fireEvent.mouseDown(screen.getByRole("tab", { name: /^Seller/ }), { button: 0, ctrlKey: false });
   expect(screen.getByRole("textbox", { name: "Electronic invoicing TIN" })).toHaveValue("");
   expect(screen.getByRole("textbox", { name: "Own FTA-issued TRN" })).toHaveValue("");
-  fireEvent.mouseDown(screen.getByRole("tab", { name: /^Tax & Payment/ }), { button: 0, ctrlKey: false });
+  fireEvent.mouseDown(screen.getByRole("tab", { name: /^Tax & payment/ }), { button: 0, ctrlKey: false });
   expect(screen.getByRole("textbox", { name: "Bank account / IBAN" })).toHaveValue("");
   fireEvent.click(screen.getByRole("button", { name: "Use saved bank account" }));
   expect(changed).toHaveBeenLastCalledWith({ seller: {}, buyer: {}, payment_account_id: "AE-DEMO-ACCOUNT", payment_account_name: "Demo account" });

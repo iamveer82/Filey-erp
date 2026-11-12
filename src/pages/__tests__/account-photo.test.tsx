@@ -21,7 +21,7 @@ it("bounds a large avatar before saving and preserves other fields edited while 
   });
   const { container } = render(<MemoryRouter><AccountProfile /></MemoryRouter>);
   fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["photo"], "photo.png", { type: "image/png" })] } });
-  fireEvent.change(screen.getByLabelText(/Full Name/), { target: { value: "Updated name" } });
+  fireEvent.change(screen.getByLabelText(/Full name/), { target: { value: "Updated name" } });
   resolve(bitmap);
   await waitFor(() => expect(screen.getByAltText("Profile photo")).toHaveAttribute("src", "data:image/webp;base64,small"));
   fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));

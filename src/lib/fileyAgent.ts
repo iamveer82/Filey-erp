@@ -45,7 +45,8 @@ export interface AppRequestContext {
   confirm: ConfirmFn;
   /** Approval for the engine's own terminal and file commands, when it differs from confirm. */
   confirmCommand?: ConfirmFn;
-  /** Messages the person typed while this turn runs: they steer it (Hermes /steer). */
+  /** Messages the person typed while this turn runs: they redirect the live turn, and a
+   *  message that misses it becomes the next turn in the same stream. */
   drainSteer?: () => string[];
   /** Steering the engine could not take (the turn was finishing): hand it back, never drop it. */
   returnSteer?: (texts: string[]) => void;
@@ -54,6 +55,9 @@ export interface AppRequestContext {
   turnId?: string;
   signal?: AbortSignal;
   agentId?: string;
+  /** Any sign of life from the engine for this turn (an event, a tool request). An unattended
+   *  run uses it to tell a long-running tool from an engine that has hung. */
+  onActivity?: () => void;
 }
 
 const summary = (text: string) => {
@@ -112,14 +116,14 @@ export async function stopTurnComputer(signal?: AbortSignal): Promise<void> {
   await session?.stop().catch(() => {});
 }
 
-async function answerFileyTool(params: Record<string, unknown>, ctx: AppRequestContext): Promise<unknown> {
+async function answerFileyTool(params: Record<string, unknown>, ctx: AppRequestContext, signal = ctx.signal): Promise<unknown> {
   const op = params.op;
   const name = typeof params.name === "string" ? params.name : undefined;
   const args = params.args && typeof params.args === "object" && !Array.isArray(params.args)
     ? params.args as Record<string, unknown> : {};
   if (op === "catalog") return fileyToolCatalog(name, typeof args.query === "string" ? args.query : undefined);
   if (op === "run" && name)
-    return runTool(name, args, ctx.confirm, ctx.isOwner, ctx.turnId, ctx.signal, turnComputer(ctx.signal)?.get, ctx.agentId);
+    return runTool(name, args, ctx.confirm, ctx.isOwner, ctx.turnId, signal, turnComputer(ctx.signal)?.get, ctx.agentId);
   return { error: `Unsupported filey.tool request: ${String(op)}` };
 }
 
@@ -144,6 +148,9 @@ export class FileyAgentClient {
    *  an automation can run at once; a tool call must be answered with ITS turn's approvals,
    *  owner status and signal, never with whichever turn started last. */
   readonly contexts = new Map<string, AppRequestContext>();
+  /** Tool requests still running here. The engine gives up on one (its deadline, a stop) with
+   *  `request.cancel`; aborting it then means an approval clicked afterwards runs nothing. */
+  private running = new Map<string, AbortController>();
   private contextFor(params: Record<string, unknown>): AppRequestContext {
     return (typeof params.session_id === "string" && this.contexts.get(params.session_id)) || this.context;
   }
@@ -156,6 +163,7 @@ export class FileyAgentClient {
       try { frame = JSON.parse(line); } catch { return; }
       if (frame.method === "event") {
         const ev = frame.params as unknown as GatewayEvent;
+        if (ev?.type === "request.cancel") this.running.get(String(ev.payload?.id))?.abort();
         if (ev?.type === "gateway.ready") {
           // Announce that this client answers server→client requests (filey.tool, approval).
           void this.request("client.capabilities", { server_requests: true }).finally(markReady);
@@ -189,6 +197,8 @@ export class FileyAgentClient {
 
   close() {
     this.stop();
+    for (const cancel of this.running.values()) cancel.abort();
+    this.running.clear();
     for (const w of this.pending.values()) w.reject(new Error("Filey Agent disconnected"));
     this.pending.clear();
   }
@@ -201,10 +211,22 @@ export class FileyAgentClient {
     const params = frame.params ?? {};
     const id = frame.id as string | number;
     const ctx = this.contextFor(params);
+    ctx.onActivity?.();
     try {
       if (frame.method === "filey.tool") {
-        const out = await answerFileyTool(params, ctx);
-        return this.reply(id, { result: { value: JSON.stringify(out ?? null) } });
+        // Stops with its turn too (no AbortSignal.any: jsdom and older WebView2 lack it).
+        const cancel = new AbortController();
+        const withTurn = () => cancel.abort(ctx.signal?.reason);
+        if (ctx.signal?.aborted) withTurn();
+        else ctx.signal?.addEventListener("abort", withTurn, { once: true });
+        this.running.set(String(id), cancel);
+        try {
+          const out = await answerFileyTool(params, ctx, cancel.signal);
+          return this.reply(id, { result: { value: JSON.stringify(out ?? null) } });
+        } finally {
+          this.running.delete(String(id));
+          ctx.signal?.removeEventListener("abort", withTurn);
+        }
       }
       if (frame.method === "approval") {
         // The engine's own risky commands (terminal, files). A turn with nobody watching
@@ -453,6 +475,13 @@ async function syncEngineModel(): Promise<boolean> {
   return invoke<boolean>("filey_agent_model", { own });
 }
 
+/** Stop an engine that has hung. Its exit ends every turn still waiting on it (they see the
+ *  error and unwind), and the usual restart follows. */
+export async function restartFileyAgentEngine(): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("filey_agent_stop").catch(() => {});
+}
+
 /** A changed model applies on a fresh engine; restart it once no turn is running. */
 let restartWhenIdle = false;
 async function restartIfIdle(): Promise<void> {
@@ -505,6 +534,81 @@ let connection: Promise<FileyAgentClient> | undefined;
 const liveSessions = new Map<string, Promise<string>>();
 /** Chat id → the engine's stored session id: survives restarts of the engine and the app. */
 const SESSIONS_KEY = "filey.agent.hermesSessions";
+/** Chat id → when its engine session was last used (ms). */
+const SESSIONS_AT_KEY = "filey.agent.hermesSessionsAt";
+/** A chat idle this long starts a fresh engine session: resuming resent the whole old history
+ *  uncached (34K tokens on average for a first message, 150K at worst). The visible chat stays,
+ *  and the new session gets a short recap.
+ *  ponytail: one cut-off for every surface; raise it if owners resume long tasks after hours. */
+export const SESSION_IDLE_MS = 4 * 60 * 60 * 1000;
+/** Chat id → idempotency key for its next session.create after a deliberate fresh start: the
+ *  engine hands back the same session for a reused key for five minutes. */
+const freshKeys = new Map<string, string>();
+
+function sessionTimes(): Record<string, number> {
+  try {
+    const value: unknown = JSON.parse(readAgentStorage(SESSIONS_AT_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, number> : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionTimes(times: Record<string, number>) {
+  try {
+    const keys = Object.keys(times);
+    for (const old of keys.slice(0, Math.max(0, keys.length - 300))) delete times[old];
+    writeAgentStorage(SESSIONS_AT_KEY, JSON.stringify(times));
+  } catch {
+    // Signed out: timing is a saving, never a requirement.
+  }
+}
+
+function touchSession(chatId: string, now = Date.now()) {
+  writeSessionTimes({ ...sessionTimes(), [chatId]: now });
+}
+
+/** Drop this chat's engine session when it sat idle past SESSION_IDLE_MS, so the next turn
+ *  starts small. Returns true when it did; the caller then sends a short recap (chatRecap).
+ *  A session never timed (made before this existed) counts as fresh until its next turn. */
+export function refreshIdleFileyAgentSession(chatId: string, now = Date.now()): boolean {
+  if (!(chatId in storedSessions())) return false;
+  const at = sessionTimes()[chatId];
+  if (!at || now - at < SESSION_IDLE_MS) return false;
+  forgetFileyAgentSession(chatId);
+  return true;
+}
+
+type UsageTotals = { prompt: number; output: number; calls: number; cacheRead: number };
+/** Session id → its usage totals at the last finished turn (the engine reports session totals). */
+const usageSeen = new Map<string, UsageTotals>();
+
+/** This turn's own share of the session's usage totals, as an AgentEvent for the chat. */
+export function turnUsage(sessionId: string, usage: unknown): AgentEvent | null {
+  if (!usage || typeof usage !== "object") return null;
+  const u = usage as Record<string, unknown>;
+  const n = (key: string) => Number(u[key]) || 0;
+  const now: UsageTotals = { prompt: n("prompt") || n("input"), output: n("output"), calls: n("calls"), cacheRead: n("cache_read") };
+  const before = usageSeen.get(sessionId);
+  usageSeen.set(sessionId, now);
+  // A restarted engine counts from zero again: then the totals are this turn's alone.
+  const base = !before || now.prompt < before.prompt ? { prompt: 0, output: 0, calls: 0, cacheRead: 0 } : before;
+  const input = now.prompt - base.prompt;
+  const output = now.output - base.output;
+  if (input <= 0 && output <= 0) return null;
+  const cached = now.cacheRead - base.cacheRead;
+  return { type: "usage", input, output, calls: Math.max(0, now.calls - base.calls),
+    ...(input > 0 && cached > 0 ? { cachedPct: Math.min(100, Math.round((100 * cached) / input)) } : {}) };
+}
+
+/** The last few lines of a visible conversation, for a session that restarted fresh. */
+export function chatRecap(messages: { role: string; text: string }[], max = 6): string {
+  const lines = messages
+    .filter(m => (m.role === "user" || m.role === "assistant") && m.text?.trim())
+    .slice(-max)
+    .map(m => `${m.role === "user" ? "Owner" : "Filey"}: ${m.text.replace(/\s+/g, " ").trim().slice(0, 280)}`);
+  return lines.length ? `[Earlier in this chat (a fresh session; ask if you need more):\n${lines.join("\n")}]` : "";
+}
 
 function storedSessions(): Record<string, string> {
   try {
@@ -529,6 +633,9 @@ function rememberSession(chatId: string, storedId: string) {
 /** Start this chat over: the next turn gets a new engine session. */
 export function forgetFileyAgentSession(chatId: string): void {
   liveSessions.delete(chatId);
+  freshKeys.set(chatId, `${chatId}#${crypto.randomUUID()}`);
+  const times = sessionTimes();
+  if (chatId in times) { delete times[chatId]; writeSessionTimes(times); }
   try {
     const all = storedSessions();
     if (!(chatId in all)) return;
@@ -555,7 +662,7 @@ function sessionFor(client: FileyAgentClient, chatId: string): Promise<string> {
         }
       }
       const created = await client.request<{ session_id: string; stored_session_id?: string }>("session.create",
-        { source: "filey", idempotency_key: chatId });
+        { source: "filey", idempotency_key: freshKeys.get(chatId) ?? chatId });
       if (created.stored_session_id) rememberSession(chatId, created.stored_session_id);
       return created.session_id;
     })();
@@ -597,18 +704,113 @@ async function readyClient(signal?: AbortSignal): Promise<FileyAgentClient> {
   }
 }
 
-/** One chat turn on Filey Agent: one engine session per Filey chat, kept across restarts.
- *  Photos ride with the message (the engine queues them for its next prompt). */
-export async function* fileyAgentTurn(chatId: string, text: string, ctx: AppRequestContext, images: AiImage[] = []): AsyncGenerator<AgentEvent, string> {
-  const client = await readyClient(ctx.signal);
-  const sessionId = await sessionFor(client, chatId);
-  for (const image of images) {
-    ctx.signal?.throwIfAborted();
-    await client.request("image.attach_bytes", {
-      session_id: sessionId, content_base64: image.dataBase64, ext: image.mediaType.split("/")[1] ?? "png",
-    });
+/* ── Memory across fresh sessions ──────────────────────────────────────────
+ * A chat's engine session ends on /new, after hours idle, or when it grows past what the model
+ * accepts. Each chat's last few exchanges are kept here, so the next session starts with a short
+ * recap instead of a blank slate. A new chat in the app picks up the owner's previous app chat;
+ * channel and automation chats only ever see their own. */
+const RECENT_KEY = "filey.agent.recentTurns";
+type RecentTurns = Record<string, { at: number; msgs: { role: "user" | "assistant"; text: string }[] }>;
+
+function recentTurns(): RecentTurns {
+  try {
+    const value: unknown = JSON.parse(readAgentStorage(RECENT_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value as RecentTurns : {};
+  } catch {
+    return {};
   }
-  return yield* fileyAgentStream(client, sessionId, text, ctx);
+}
+
+/** Keep this exchange (trimmed) as the chat's memory for its next fresh session. */
+export function rememberFileyAgentTurn(chatId: string, user: string, reply: string, now = Date.now()): void {
+  if (/^(automation|proactive):/.test(chatId) || !user.trim() || !reply.trim()) return;
+  try {
+    const all = recentTurns();
+    const msgs = [...(all[chatId]?.msgs ?? []),
+      { role: "user" as const, text: user.trim().slice(0, 600) }, { role: "assistant" as const, text: reply.trim().slice(0, 600) }].slice(-8);
+    all[chatId] = { at: now, msgs };
+    const ids = Object.keys(all).sort((a, b) => all[a].at - all[b].at);
+    for (const old of ids.slice(0, Math.max(0, ids.length - 100))) delete all[old];
+    writeAgentStorage(RECENT_KEY, JSON.stringify(all));
+  } catch {
+    // Signed out or storage full: the chat still answers, it just starts the next session cold.
+  }
+}
+
+/** The recap a fresh session of this chat starts with ("" when there is nothing to carry). */
+export function carryRecap(chatId: string): string {
+  const all = recentTurns();
+  const own = all[chatId]?.msgs;
+  if (own?.length) return chatRecap(own);
+  // Channel (whatsapp:…, telegram:…) and automation chats never borrow another chat's memory.
+  if (chatId.includes(":")) return "";
+  const previous = Object.entries(all)
+    .filter(([id]) => id !== chatId && !id.includes(":"))
+    .sort((a, b) => b[1].at - a[1].at)[0];
+  return previous ? chatRecap(previous[1].msgs).replace("[Earlier in this chat (a fresh session", "[From the owner's previous chat (a new chat") : "";
+}
+
+const hasRecap = (text: string) => text.includes("[Earlier in this chat") || text.includes("[From the owner's previous chat");
+/** The model provider refused the conversation as too large for its window, or the engine says
+ *  so in its own words after its compression failed ("has grown too long for…"). */
+const overflowed = (text: string) =>
+  /conversation is too large|too large for the selected model|larger-context model|context (?:length|window) (?:exceeded|is too)|prompt is too long|maximum context length|has grown too (?:long|large)|couldn't shrink it enough/i.test(text);
+
+/** One chat turn on Filey Agent: one engine session per Filey chat, kept across restarts.
+ *  Photos ride with the message (the engine queues them for its next prompt). A session that
+ *  outgrew the model is replaced once by a fresh one that starts with the chat's recap, so the
+ *  owner never has to type /new. `userText` is the owner's own words, kept as memory. `brief`
+ *  (a channel's standing rules) opens each engine session once: the engine keeps a session's
+ *  first messages through compression and restarts, so repeating it on every message only
+ *  spent the small window the Coin route allows. */
+export async function* fileyAgentTurn(chatId: string, text: string, ctx: AppRequestContext, images: AiImage[] = [], userText?: string, brief?: string): AsyncGenerator<AgentEvent, string> {
+  return yield* fileyAgentTurnOn(await readyClient(ctx.signal), chatId, text, ctx, images, userText, brief);
+}
+
+/** fileyAgentTurn on a connected client (tests drive it with a scripted engine). */
+export async function* fileyAgentTurnOn(client: FileyAgentClient, chatId: string, text: string, ctx: AppRequestContext, images: AiImage[] = [], userText?: string, brief?: string): AsyncGenerator<AgentEvent, string> {
+  const withRecap = (body: string) => {
+    const recap = hasRecap(body) ? "" : carryRecap(chatId);
+    return [brief, recap, body].filter(Boolean).join("\n\n");
+  };
+  // A chat with no engine session yet starts one: it gets the brief and the recap.
+  let prompt = !liveSessions.has(chatId) && !(chatId in storedSessions()) ? withRecap(text) : text;
+  for (let attempt = 0; ; attempt++) {
+    const sessionId = await sessionFor(client, chatId);
+    touchSession(chatId);
+    for (const image of images) {
+      ctx.signal?.throwIfAborted();
+      await client.request("image.attach_bytes", {
+        session_id: sessionId, content_base64: image.dataBase64, ext: image.mediaType.split("/")[1] ?? "png",
+      });
+    }
+    const stream = fileyAgentStream(client, sessionId, prompt, ctx);
+    let reset = false;
+    let answer = "";
+    let reason: string | undefined;
+    try {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done) { answer = step.value; break; }
+        const ev = step.value;
+        if (ev.type === "done") {
+          reason = ev.reason;
+          // Held back: a fresh session answers instead of this refusal.
+          if (attempt === 0 && ev.reason === "error" && overflowed(ev.text)) { reset = true; continue; }
+        }
+        yield ev;
+      }
+    } catch (error) {
+      if (attempt === 0 && overflowed(error instanceof Error ? error.message : String(error))) reset = true;
+      else throw error;
+    }
+    if (!reset) {
+      if (reason === "answered") rememberFileyAgentTurn(chatId, userText ?? text, answer);
+      return answer;
+    }
+    forgetFileyAgentSession(chatId);
+    prompt = withRecap(text);
+  }
 }
 
 function unwrapFileyRun(p: Record<string, unknown>): { name: string; args: Record<string, unknown> } {
@@ -635,6 +837,7 @@ export async function* fileyAgentStream(
   let wake: (() => void) | undefined;
   const off = client.onEvent(ev => {
     if (ev.session_id && ev.session_id !== sessionId) return;
+    ctx.onActivity?.();
     queue.push(ev);
     wake?.();
   });
@@ -645,57 +848,147 @@ export async function* fileyAgentStream(
   client.contexts.set(sessionId, ctx);
   const interrupt = () => { void client.request("session.interrupt", { session_id: sessionId }).catch(() => {}); };
   ctx.signal?.addEventListener("abort", interrupt, { once: true });
-  // Steering: a message typed mid-run reaches the engine after its next tool call, exactly
-  // as Hermes' /steer does. One that arrives as the turn finishes is handed back.
+  // Steering: words typed while this turn runs join the live turn (session.redirect replaces
+  // the model request that is still answering, and yields tools mid-action), so Filey changes
+  // course now instead of finishing the old plan first. A steer that arrives as the answer is
+  // already out is submitted as the next prompt and streamed in this same turn — the person
+  // sees the reply to it, never a message that silently became a new turn elsewhere.
   let steering: Promise<void> | null = null;
+  const pendingSteer: string[] = [];
+  /** An older engine took /steer without telling us whether its own follow-up turn is queued. */
+  let steeredWithoutContinuation = false;
+  const collectSteer = () => { if (ctx.drainSteer) pendingSteer.push(...ctx.drainSteer()); };
   const steer = () => {
-    if (steering || !ctx.drainSteer) return;
-    const texts = ctx.drainSteer();
-    if (!texts.length) return;
+    if (steering) return;
+    collectSteer();
+    if (!pendingSteer.length) return;
+    const batch = pendingSteer.splice(0);
     steering = (async () => {
       const refused: string[] = [];
-      for (const text of texts) {
+      for (const text of batch) {
+        const status = await client.request<{ status?: string }>("session.redirect", { session_id: sessionId, text })
+          .then(result => result?.status)
+          // An engine older than active-turn redirect still knows Hermes' /steer.
+          .catch(() => undefined);
+        if (status === "redirected") continue;
+        if (status === "queued") {
+          // The server queued it (compression or the turn-build window) and will run it.
+          steeredWithoutContinuation = true;
+          continue;
+        }
+        if (status === "rejected") { refused.push(text); continue; }
         const result = await client.request<{ type?: string }>("command.dispatch", { session_id: sessionId, name: "steer", arg: text })
           .catch(() => null);
-        if (result?.type !== "exec") refused.push(text);
+        if (result?.type === "exec") steeredWithoutContinuation = true;
+        else refused.push(text);
       }
-      if (refused.length) ctx.returnSteer?.(refused);
+      // The turn was between model requests: keep it for the follow-up decided at message.complete.
+      if (refused.length) pendingSteer.unshift(...refused);
     })().finally(() => { steering = null; });
   };
-  const steerTimer = ctx.drainSteer ? setInterval(steer, 500) : undefined;
+  const steerTimer = ctx.drainSteer ? setInterval(steer, 400) : undefined;
+  /** Answers already sealed when a late steer started another turn in this stream. */
+  const completed: string[] = [];
+  let followUps = 0;
+  /** A follow-up is queued: stay on the session, but never wait forever for it to start. */
+  let continuingUntil = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await client.request("prompt.submit", { session_id: sessionId, text });
     for (;;) {
-      if (!queue.length) await new Promise<void>(resolve => { wake = resolve; });
-      wake = undefined;
+      if (!queue.length) {
+        await new Promise<void>(resolve => {
+          wake = resolve;
+          // Only a promised follow-up gets a deadline: a running turn may legitimately think
+          // for minutes, but a queued follow-up that never starts must not hold the chat open.
+          if (continuingUntil) timer = setTimeout(resolve, Math.max(0, continuingUntil - Date.now()));
+        });
+        if (timer) { clearTimeout(timer); timer = undefined; }
+        wake = undefined;
+      }
       const ev = queue.shift();
-      if (!ev) continue;
+      if (!ev) break; // a promised follow-up never started
       const p = ev.payload ?? {};
       if (ev.type === "message.delta" && typeof p.text === "string" && p.text) {
+        continuingUntil = 0;
         // Token by token into the chat bubble as the engine writes it.
         yield { type: "delta", text: p.text };
       } else if (ev.type === "message.interim" && typeof p.text === "string" && p.text.trim()) {
+        continuingUntil = 0;
         yield { type: "text", text: p.text };
+      } else if (ev.type === "message.start") {
+        continuingUntil = 0;
       } else if (ev.type === "tool.start") {
+        continuingUntil = 0;
         // filey_run carries the real business action; show that and ITS arguments, not the
         // wrapper's: the chat builds cards (show_ui, show_view…) from them.
         const { name, args } = unwrapFileyRun(p);
         yield { type: "tool_call", id: String(p.tool_id), name, args };
       } else if (ev.type === "tool.complete") {
+        continuingUntil = 0;
         const { name } = unwrapFileyRun(p);
         yield { type: "tool_result", id: String(p.tool_id), name, result: parse(p.result ?? p.result_text) };
       } else if (ev.type === "error") {
         throw new Error(String(p.message || "Filey Agent error"));
       } else if (ev.type === "message.complete") {
+        const used = turnUsage(sessionId, p.usage);
+        if (used) yield used;
         const reply = typeof p.text === "string" ? p.text : JSON.stringify(p.text ?? "");
         const reason = p.status === "interrupted" ? "stopped" : p.status === "error" ? "error" : "answered";
-        yield { type: "done", text: reply, reason };
-        return reply;
+        // Words that arrived while this answer was written still get read: submit them as the
+        // next prompt only after the turn's own answer is sealed, so they change the work rather
+        // than being folded into a model request that has already finished.
+        collectSteer();
+        await (steering as Promise<void> | null);
+        if (reason === "answered" && pendingSteer.length && followUps < 3) {
+          const next = pendingSteer.splice(0).join("\n\n");
+          completed.push(reply);
+          followUps++;
+          continuingUntil = Date.now() + 5_000;
+          // Keep the two answers visually separate while the follow-up streams.
+          yield { type: "delta", text: "\n\n" };
+          try {
+            await client.request("prompt.submit", { session_id: sessionId, text: next, queued: true });
+          } catch (error) {
+            pendingSteer.unshift(next); // the finally hands it back rather than losing it
+            throw error;
+          }
+          continue;
+        }
+        // The engine queued a follow-up itself (a steer accepted during compression or the
+        // build window, or a leftover /steer): stay on the session and render its turn too.
+        if (p.continuing === true && followUps < 3) {
+          completed.push(reply);
+          followUps++;
+          steeredWithoutContinuation = false;
+          continuingUntil = Date.now() + 5_000;
+          continue;
+        }
+        // An older engine accepted a steer and will start it as the next turn, but cannot say
+        // so: give that turn a moment to appear before closing the chat turn.
+        if (steeredWithoutContinuation && followUps < 3) {
+          steeredWithoutContinuation = false;
+          completed.push(reply);
+          followUps++;
+          continuingUntil = Date.now() + 2_000;
+          continue;
+        }
+        const answer = [...completed, reply].filter(Boolean).join("\n\n");
+        if (pendingSteer.length) ctx.returnSteer?.(pendingSteer.splice(0));
+        yield { type: "done", text: answer, reason };
+        return answer;
       }
     }
+    // The promised follow-up never arrived (the engine dropped it): hand the words back.
+    if (pendingSteer.length) ctx.returnSteer?.(pendingSteer.splice(0));
+    const answer = completed.filter(Boolean).join("\n\n");
+    yield { type: "done", text: answer, reason: "answered" };
+    return answer;
   } finally {
     if (steerTimer) clearInterval(steerTimer);
     await (steering as Promise<void> | null); // a steer in flight settles (or is handed back) first
+    collectSteer();
+    if (pendingSteer.length) ctx.returnSteer?.(pendingSteer.splice(0));
     ctx.signal?.removeEventListener("abort", interrupt);
     if (client.contexts.get(sessionId) === ctx) client.contexts.delete(sessionId);
     off();
@@ -764,11 +1057,11 @@ export async function fileyAgentComplete(chatId: string, text: string): Promise<
 }
 
 /** A whole turn's final reply, for callers that do not show progress (channels, automations). */
-export async function fileyAgentReply(chatId: string, text: string, ctx: AppRequestContext): Promise<string> {
+export async function fileyAgentReply(chatId: string, text: string, ctx: AppRequestContext, userText?: string, brief?: string): Promise<string> {
   // Each automation run starts clean, as Hermes' own cron jobs do: resuming one session
   // every run resent all earlier runs with each request (33K tokens and growing).
   if (/^(automation|proactive):/.test(chatId)) forgetFileyAgentSession(chatId);
-  const stream = fileyAgentTurn(chatId, text, ctx);
+  const stream = fileyAgentTurn(chatId, text, ctx, [], userText, brief);
   for (;;) {
     const step = await stream.next();
     if (step.done) return step.value;

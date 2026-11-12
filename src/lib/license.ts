@@ -669,7 +669,7 @@ export async function checkFreeInvoiceCap(
     offerUpgrade("invoices");
     throw new Error(
       `Basic plan limit reached (${FREE_LIMITS.invoicesPerMonth} cloud invoices this month). ` +
-        `Editing existing invoices is unlimited. Pro is 36 AED/month, or get Freedom once for unlimited invoicing on your computer — Settings → Billing.`
+        `Editing existing invoices is unlimited. Get Freedom once for unlimited invoicing on your computer — Settings → Billing.`
     );
   }
 }

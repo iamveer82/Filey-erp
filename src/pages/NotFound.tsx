@@ -6,7 +6,7 @@ export default function NotFound() {
   const nav = useNavigate();
   return (
     <div className="max-w-[1320px] mx-auto px-4 sm:px-6 py-4">
-      <PageHeader title="Page not found" subtitle="That route doesn't exist in Filey." />
+      <PageHeader title="Page not found" subtitle="That route doesn't exist in Filey" />
       <Card className="!p-8 text-center max-w-md mx-auto mt-8">
         <p className="text-5xl font-bold text-brand-200">404</p>
         <p className="mt-4 text-ink font-medium">We couldn't find the page you requested.</p>

@@ -13,10 +13,9 @@ const fmt = (v: unknown, unit?: string) =>
   typeof v === "number" ? `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unit ? ` ${unit}` : ""}` : String(v ?? "");
 const color = (i: number) => P[i % P.length];
 
-/** The thin colour strip and title every card and widget opens with. */
-export function GenUiHeader({ title, seed = 0, children }: { title?: string; seed?: number; children?: React.ReactNode }) {
+/** The title row every card and widget opens with. */
+export function GenUiHeader({ title, children }: { title?: string; seed?: number; children?: React.ReactNode }) {
   return <>
-    <div className="h-1" style={{ background: `linear-gradient(90deg, ${color(seed)}, ${color(seed + 3)}, ${color(seed + 5)})` }} />
     {(title || children) && (
       <div className="flex items-center gap-1 border-b border-border py-1.5 pl-3.5 pr-1.5">
         <div className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{title}</div>

@@ -169,14 +169,14 @@ export function StampSignatureSettings({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <UploadCard
-        label="Company Stamp"
+        label="Company stamp"
         icon={<Stamp size={15} />}
         value={value.stamp}
         onChange={(v) => onChange({ ...value, stamp: v })}
         defaults={STAMP_DEFAULT}
       />
       <UploadCard
-        label="Company Signature"
+        label="Company signature"
         icon={<PenTool size={15} />}
         value={value.signature}
         onChange={(v) => onChange({ ...value, signature: v })}

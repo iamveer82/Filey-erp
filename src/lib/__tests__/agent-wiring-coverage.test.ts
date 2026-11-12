@@ -30,7 +30,7 @@ function dataLayer(): Map<string, string[]> {
 
 /** Everything the agent runs: the tool table and the agent-side modules it calls into. */
 const agentCode = readdirSync(lib)
-  .filter(f => /^(aiTools|agent\w*|ai[A-Z]\w*|appMap|computerUse|desktopBrowser|officeWord|work\w*)\.tsx?$/.test(f))
+  .filter(f => /^(aiTools|agent\w*|ai[A-Z]\w*|appMap|computerUse|desktopBrowser|officeWord|productForm|work\w*)\.tsx?$/.test(f))
   .map(read)
   .join("\n");
 
@@ -106,6 +106,7 @@ const LEFT_OUT: Record<string, string> = {
   "billing.publicLink": SHARE,
   "billing.revokePublicLink": SHARE,
   "billing.allPayments": "list_invoice_payments per invoice; receivables_aging for the whole book",
+  "fin.moveTds": "follows a TDS payment row in the payments screen; the agent records TDS with post_journal_entry",
   "recurrences.generateDue": "the scheduler makes due invoices; the agent sets and cancels repeats",
   "quotes.saveDoc": "create_quote calls it imported as quoteApi",
   "quotes.deleteDoc": DELETE,

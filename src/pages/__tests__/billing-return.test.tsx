@@ -2,22 +2,23 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HashRouter } from "react-router-dom";
 import { UIProvider } from "../../lib/ui";
-import { awaitCloudPlan, getSubscription, openBillingPortal, startCheckout, type Subscription } from "../../lib/subscription";
+import { awaitCloudPlan, getSubscription, openBillingPortal, type Subscription } from "../../lib/subscription";
 import BillingPanel from "../settings/BillingPanel";
-import { licensePurchased, claimPurchasedLicense } from "../../lib/license";
+import { licensePurchased, claimPurchasedLicense, startFreedomCheckout } from "../../lib/license";
 import SetupNotice from "../SetupNotice";
 
 const mode = vi.hoisted(() => ({ local: false, count: vi.fn(async () => 2) }));
 
 vi.mock("../../lib/subscription", async (original) => ({
   ...await original<typeof import("../../lib/subscription")>(),
-  getSubscription: vi.fn(), awaitCloudPlan: vi.fn(), openBillingPortal: vi.fn(), startCheckout: vi.fn(),
+  getSubscription: vi.fn(), awaitCloudPlan: vi.fn(), openBillingPortal: vi.fn(),
 }));
 vi.mock("../../lib/license", () => ({
   CLOUD_DEVICE_LIMIT: 20,
   verifyStoredLicense: async () => ({ valid: false }), entitlement: async () => "free",
   cloudAccess: async () => ({ reason: "free" }), FREE_LIMITS: { invoicesPerMonth: 5 },
   licensePurchased: vi.fn(async () => false), claimPurchasedLicense: vi.fn(),
+  startFreedomCheckout: vi.fn(),
 }));
 vi.mock("../../lib/api", () => ({
   erp: { products: async () => [], orders: async () => [] },
@@ -51,24 +52,27 @@ it("shows unlimited local usage from the first render without fetching a monthly
   expect(mode.count).not.toHaveBeenCalled();
 });
 
-it("offers the 14-day trial on this device and Pro for the cloud on startup", () => {
+it("offers the 14-day trial on this device and marks cloud mode as coming soon", () => {
   render(<SetupNotice />);
   const localChoice = screen.getByRole("button", { name: /Use on this device/ });
   expect(localChoice).toHaveTextContent("14-day free trial");
   expect(localChoice).toHaveTextContent("try every app for 14 days on this device");
   expect(localChoice).toHaveTextContent("$1 of Filey AI to try the agent");
   expect(localChoice).toHaveTextContent("Then Freedom: 1499 AED once, yours for life");
-  expect(screen.getByRole("button", { name: /Use Filey Cloud/ })).toHaveTextContent("Pro · 36 AED / month");
+  expect(screen.queryByRole("button", { name: /Use Filey Cloud/ })).toBeNull();
+  expect(screen.getByText("Filey Cloud")).toBeInTheDocument();
+  expect(screen.getByText("Coming soon")).toBeInTheDocument();
+  expect(screen.getByText("Cloud mode is coming soon. Until then your records stay on this computer.")).toBeInTheDocument();
 });
 
-it("offers the trial, Freedom for life and Pro in the cloud at their real prices", async () => {
+it("offers the trial and Freedom for life at its real price", async () => {
   mode.local = true;
   window.history.replaceState(null, "", "/#/settings?section=billing");
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
   await waitFor(() => expect(screen.getByRole("button", { name: "Get Freedom - 1499 AED" })).toBeEnabled());
   const plans = within(screen.getByRole("region", { name: "Available plans" }));
   expect(plans.getByText("Free")).toBeInTheDocument();
-  expect(plans.getByText("36 AED")).toBeInTheDocument();
+  expect(plans.queryByText("36 AED")).not.toBeInTheDocument();
   expect(plans.getByText("1499 AED")).toBeInTheDocument();
   expect(plans.getByText("Filey on your computer for life. Pay once, own it.")).toBeInTheDocument();
   expect(plans.getByText("Regular updates and support")).toBeInTheDocument();
@@ -131,15 +135,15 @@ it("re-enables billing controls when the desktop portal opens in another browser
 
 it("opens a review section before contacting the payment provider", async () => {
   window.history.replaceState(null, "", "/#/settings?section=billing");
-  vi.mocked(startCheckout).mockResolvedValue("browser");
+  vi.mocked(startFreedomCheckout).mockResolvedValue("browser");
   render(<HashRouter><UIProvider><BillingPanel /></UIProvider></HashRouter>);
-  const get = await screen.findByRole("button", { name: "Get Pro" });
+  const get = await screen.findByRole("button", { name: "Get Freedom - 1499 AED" });
   await waitFor(() => expect(get).toBeEnabled());
   fireEvent.click(get);
-  await screen.findByRole("heading", { name: "Get Filey Pro" });
-  expect(startCheckout).not.toHaveBeenCalled();
-  expect(window.location.hash).toContain("purchase=cloud");
+  await screen.findByRole("heading", { name: "Get Filey Freedom" });
+  expect(startFreedomCheckout).not.toHaveBeenCalled();
+  expect(window.location.hash).toContain("purchase=lite");
   fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
   await screen.findByText(/Your secure payment page is open/);
-  expect(startCheckout).toHaveBeenCalledExactlyOnceWith("cloud");
+  expect(startFreedomCheckout).toHaveBeenCalledTimes(1);
 });

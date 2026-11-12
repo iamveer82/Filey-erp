@@ -44,13 +44,13 @@ describe("planCardFor", () => {
     expect(basic.features).toContain("$1 of Filey AI to try the agent");
     expect(basic.features).toContain("Your data saved on your computer");
   });
-  // Pro and Enterprise were withdrawn from sale. Orgs still carry those plan
-  // values, so the mapping must keep answering for them — a card lookup that
-  // returned undefined would crash the billing panel of the very customers who
-  // paid the most.
+  // Pro is off sale for now. Orgs still carry those plan values, so the mapping
+  // must keep answering for them — a card lookup that returned undefined would
+  // crash the billing panel of the very customers who paid the most.
   it("still answers for plans that are no longer sold", () => {
-    for (const legacy of ["pro", "business"]) {
-      expect(planCardFor(legacy).id).toBe("lite");
+    for (const legacy of ["cloud", "pro", "business"]) {
+      expect(planCardFor(legacy).id).toBe("cloud");
+      expect(planCardFor(legacy).name).toBe("Pro");
     }
   });
 
@@ -60,14 +60,14 @@ describe("planCardFor", () => {
     expect(planCardFor(null).id).toBe("free");
   });
 
-  it("maps the Cloud plan to its own card", () => {
+  it("keeps the legacy Cloud card out of the plans on sale", () => {
     expect(planCardFor("cloud").id).toBe("cloud");
     expect(planCardFor("enterprise").id).toBe("enterprise");
+    expect(PLANS.some((p) => p.id === "cloud")).toBe(false);
   });
 
-  it("sells Free, Cloud monthly, Freedom as a one-time licence, and Enterprise contact-sales", () => {
-    expect(PLANS.map((p) => p.id)).toEqual(["free", "cloud", "lite", "enterprise"]);
-    expect(PLANS.find((p) => p.id === "cloud")?.kind).toBe("subscription");
+  it("sells Free, Freedom as a one-time licence, and Enterprise contact-sales", () => {
+    expect(PLANS.map((p) => p.id)).toEqual(["free", "lite", "enterprise"]);
     expect(PLANS.find((p) => p.id === "lite")?.kind).toBe("license");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
     expect(PLANS.find((p) => p.id === "enterprise")?.kind).toBe("contact");
@@ -78,11 +78,12 @@ describe("planCardFor", () => {
   // find out about from a customer.
   it("carries the current prices", () => {
     expect(PLANS.find((p) => p.id === "free")?.price).toBe("Free");
-    expect(PLANS.find((p) => p.id === "cloud")?.price).toBe("36 AED");
-    expect(PLANS.find((p) => p.id === "cloud")?.period).toBe(" / month");
     expect(PLANS.find((p) => p.id === "lite")?.price).toBe("1499 AED");
     expect(PLANS.find((p) => p.id === "lite")?.name).toBe("Freedom");
     expect(PLANS.find((p) => p.id === "lite")?.period).toBe(" one-time");
+    // Existing Pro subscribers still see the price they pay.
+    expect(planCardFor("cloud").price).toBe("36 AED");
+    expect(planCardFor("cloud").period).toBe(" / month");
   });
 });
 

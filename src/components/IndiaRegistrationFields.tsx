@@ -1,4 +1,5 @@
 import { FormField } from "./ui";
+import { SelectMenu } from "./ui-menu";
 import { tools } from "../lib/api";
 
 const KEY = "company_registration_in";
@@ -8,7 +9,14 @@ const fields = [
   { key: "udyam", label: "Udyam registration", placeholder: "UDYAM-MH-01-1234567", pattern: /^UDYAM-[A-Z]{2}-\d{2}-\d{7}$/, hint: "Optional MSME registration" },
   { key: "aadhaar_last4", label: "Aadhaar reference (last 4 digits)", placeholder: "1234", pattern: /^\d{4}$/, hint: "Optional personal reference only. Never enter the full Aadhaar number; this is not printed on invoices." },
 ] as const;
-export type IndiaRegistration = Partial<Record<typeof fields[number]["key"], string>>;
+/** GST scheme: "regular" (default) or "composition" (Bill of Supply, tax paid on turnover). */
+const schemeKeys = ["gst_scheme", "composition_rate"] as const;
+export type IndiaRegistration = Partial<Record<typeof fields[number]["key"] | typeof schemeKeys[number], string>>;
+const COMPOSITION_RATES = [
+  { value: "1", label: "1% - manufacturers and traders" },
+  { value: "5", label: "5% - restaurants" },
+  { value: "6", label: "6% - service providers" },
+];
 
 export function registrationError(value: IndiaRegistration): string {
   const invalid = fields.find(f => value[f.key]?.trim() && !f.pattern.test(value[f.key]!.trim()));
@@ -21,13 +29,13 @@ export async function loadIndiaRegistration(): Promise<IndiaRegistration> {
   if (!row?.value) return {};
   const parsed = JSON.parse(row.value);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Could not read Indian registration details.");
-  return Object.fromEntries(fields.map(f => [f.key, typeof parsed[f.key] === "string" ? parsed[f.key] : ""]));
+  return Object.fromEntries([...fields.map(f => f.key), ...schemeKeys].map(k => [k, typeof parsed[k] === "string" ? parsed[k] : ""]));
 }
 
 export async function saveIndiaRegistration(value: IndiaRegistration): Promise<void> {
   const error = registrationError(value);
   if (error) throw new Error(error);
-  await tools.setSetting(KEY, JSON.stringify(Object.fromEntries(fields.map(f => [f.key, value[f.key]?.trim() || ""]))));
+  await tools.setSetting(KEY, JSON.stringify(Object.fromEntries([...fields.map(f => f.key), ...schemeKeys].map(k => [k, value[k]?.trim() || ""]))));
 }
 
 export default function IndiaRegistrationFields({value, onChange}: {
@@ -43,5 +51,13 @@ export default function IndiaRegistrationFields({value, onChange}: {
         inputMode={f.key === "aadhaar_last4" ? "numeric" : "text"}
         onChange={e => onChange({...value, [f.key]: e.target.value.toUpperCase().trim()})} />
     </FormField>)}
+    <FormField label="GST scheme" hint="Composition dealers issue a Bill of Supply and charge no GST on it">
+      <SelectMenu ariaLabel="GST scheme" value={value.gst_scheme === "composition" ? "composition" : "regular"}
+        onChange={v => onChange({...value, gst_scheme: v, composition_rate: v === "composition" ? value.composition_rate || "1" : ""})}
+        options={[{ value: "regular", label: "Regular" }, { value: "composition", label: "Composition scheme" }]} />
+    </FormField>
+    {value.gst_scheme === "composition" && <FormField label="Composition rate" hint="Tax paid each quarter on CMP-08">
+      <SelectMenu ariaLabel="Composition rate" value={value.composition_rate || "1"} onChange={v => onChange({...value, composition_rate: v})} options={COMPOSITION_RATES} />
+    </FormField>}
   </div>;
 }

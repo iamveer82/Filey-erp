@@ -47,10 +47,10 @@ export default function InventoryTab({ data }: { data: ReportsData }) {
   const maxCat = categoryDist[0]?.[1] || 1;
 
   const kpiCards = [
-    { label: "Total Products", value: num(kpis.totalProducts) },
-    { label: "Inventory Value", value: aed(kpis.inventoryValue) },
-    { label: "Low Stock Items", value: num(kpis.lowStock) },
-    { label: "Out of Stock", value: num(kpis.outOfStock) },
+    { label: "Total products", value: num(kpis.totalProducts) },
+    { label: "Inventory value", value: aed(kpis.inventoryValue) },
+    { label: "Low stock items", value: num(kpis.lowStock) },
+    { label: "Out of stock", value: num(kpis.outOfStock) },
   ];
 
   return (

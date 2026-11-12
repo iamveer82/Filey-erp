@@ -10,7 +10,7 @@ const routes: Record<string, string> = {
   orders: "orders", invoicing: "invoices", "packaging-list": "packing-lists", quoting: "quotes",
   crm: "crm", customers: "directories", "follow-ups": "follow-ups", marketing: "marketing",
   suppliers: "suppliers", purchase: "purchase", "purchase-orders": "purchasing",
-  "purchase-invoices": "supplier-invoices", inventory: "inventory", people: "people",
+  "purchase-invoices": "supplier-invoices", inventory: "inventory", counter: "counter", pharmacy: "counter", people: "people",
   accounting: "accounting", "bank-accounts": "bank-cheques", cheques: "cheques",
   "payment-receipts": "receipts", declaration: "declaration", projects: "projects-support",
   helpdesk: "helpdesk", team: "team", comms: "communications",

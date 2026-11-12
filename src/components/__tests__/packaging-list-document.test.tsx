@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { blankPackagingForm, type PackagingForm } from "../../lib/packagingLists";
+import { blankPackagingForm, packagingTotals, validatePackagingForm, type PackagingForm } from "../../lib/packagingLists";
 import { STAMP_DEFAULT, SIGN_DEFAULT } from "../StampSignature";
 import PackagingListDocument, { PACKAGING_TEMPLATES, paginatePackagingItems } from "../PackagingListDocument";
 
@@ -22,6 +22,28 @@ const documentFor = (form: PackagingForm, pageIndex?: number) => {
   host.innerHTML = renderToStaticMarkup(<PackagingListDocument form={form} pageIndex={pageIndex} />);
   return host;
 };
+
+describe("packing list export details", () => {
+  it("prints ports, container, marks, each line's HS code and size, and the total volume", () => {
+    const form: PackagingForm = {
+      ...example(), port_of_loading: "Jebel Ali", port_of_discharge: "Nhava Sheva", container_number: "MSKU1234567", seal_number: "SL-88", marks: "DUNE/NSA/1-5",
+      items: [
+        { ...example().items[0], hs_code: "9401.61", length_cm: 50, width_cm: 50, height_cm: 100 }, // 4 cartons of 0.25 m³
+        example().items[1],
+      ],
+    };
+    validatePackagingForm(form);
+    const text = documentFor(form).textContent ?? "";
+    for (const value of ["Port of loading", "Jebel Ali", "Nhava Sheva", "MSKU1234567", "SL-88", "Marks & numbers", "DUNE/NSA/1-5", "HS 9401.61", "50 × 50 × 100 cm", "Total volume", "1 m³"])
+      expect(text).toContain(value);
+    expect(packagingTotals(form.items).volume).toBe(1);
+  });
+
+  it("still reads lists saved before the export fields existed", () => {
+    expect(() => validatePackagingForm(example())).not.toThrow();
+    expect(documentFor(example()).textContent).not.toContain("Total volume");
+  });
+});
 
 describe("packing list documents", () => {
   it("keeps an ordinary eight-row manifest together when its layout has room for the full summary", () => {

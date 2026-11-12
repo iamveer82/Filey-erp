@@ -323,6 +323,37 @@ export function useTopCustomers(invoices: InvoiceDocSummary[]) {
   }, [invoices]);
 }
 
+/** How fast each customer pays: days from invoice date to the day its payments covered
+ *  the invoice, and days past the due date. Invoices marked paid with no dated payment
+ *  are left out, since when they were paid is unknown. Slowest first. */
+export function paymentSpeed(invoices: InvoiceDocSummary[], payments: InvoicePayment[]) {
+  const day = (ymd?: string) => ymd ? Date.parse(ymd.slice(0, 10) + "T00:00:00Z") : NaN;
+  const byInvoice = new Map<number, InvoicePayment[]>();
+  for (const p of payments) byInvoice.set(p.invoice_id, [...(byInvoice.get(p.invoice_id) ?? []), p]);
+  const rows = new Map<string, { name: string; paid: number; days: number; late: number; lateCount: number }>();
+  for (const invoice of invoices) {
+    if (!isPostedStatus(invoice.status) || !(invoice.total > 0)) continue;
+    let covered = 0, paidOn = NaN;
+    for (const p of [...(byInvoice.get(invoice.id) ?? [])].sort((a, b) => a.paid_at.localeCompare(b.paid_at))) {
+      covered += Number(p.amount) || 0;
+      if (covered >= invoice.total - 0.01) { paidOn = day(p.paid_at); break; }
+    }
+    const issued = day(invoice.issue_date);
+    if (!Number.isFinite(paidOn) || !Number.isFinite(issued)) continue;
+    const name = invoice.customer_name || "—";
+    const row = rows.get(name) ?? { name, paid: 0, days: 0, late: 0, lateCount: 0 };
+    row.paid += 1;
+    row.days += Math.max(0, Math.round((paidOn - issued) / 86400000));
+    const due = day(invoice.due_date);
+    if (Number.isFinite(due)) { row.late += Math.max(0, Math.round((paidOn - due) / 86400000)); row.lateCount += 1; }
+    rows.set(name, row);
+  }
+  return [...rows.values()].map((r) => ({
+    name: r.name, paidInvoices: r.paid, avgDays: Math.round(r.days / r.paid),
+    avgDaysLate: r.lateCount ? Math.round(r.late / r.lateCount) : null,
+  })).sort((a, b) => b.avgDays - a.avgDays || b.paidInvoices - a.paidInvoices);
+}
+
 /** Outstanding posted documents, aged by due date in calendar days. Input
  * amounts have already been normalized with the document's frozen FX rate. */
 export function invoiceAging(invoices: InvoiceDocSummary[], today = todayYmd()) {

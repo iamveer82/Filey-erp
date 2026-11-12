@@ -19,7 +19,7 @@ export default function Step({
   const heading = <>
     {n != null && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-medium tabular-nums text-muted-foreground">{n}</span>}
     <div className="min-w-0 flex-1">
-      <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       {subtitle && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{subtitle}</p>}
     </div>
   </>;

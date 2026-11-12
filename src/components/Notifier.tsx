@@ -88,6 +88,19 @@ async function check(toast: Toast, firstPass: boolean) {
     localStorage.setItem("notif.lowstock.day", today);
   }
 
+  // Batches expiring within 30 days (or already expired) — once per day, with the stock alerts.
+  if (on("notif.lowstock") && localStorage.getItem("notif.expiry.day") !== today) {
+    const { expiringBatches } = await import("../lib/batches");
+    const soon = expiringBatches(await erp.products().catch(() => []), today, 30);
+    if (soon.length > 0)
+      toast.notify({
+        title: "Expiring stock",
+        message: `${soon.length} batch${soon.length > 1 ? "es expire" : " expires"} within 30 days or ${soon.length > 1 ? "have" : "has"} expired.`,
+        to: "/counter",
+      });
+    localStorage.setItem("notif.expiry.day", today);
+  }
+
   // Weekly summary — at most once per week, on/after Monday.
   if (on("notif.weekly") && new Date().getDay() === 1) {
     const week = isoWeek(new Date());

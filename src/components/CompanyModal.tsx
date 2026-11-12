@@ -110,11 +110,11 @@ export default function CompanyModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Company Profile">
+    <Modal open={open} onClose={onClose} title="Company profile">
       <div className="space-y-3">
         {templateError && <p role="alert" className="text-xs text-danger">Could not load saved templates: {templateError}</p>}
         <CountryTaxFields company={c} onChange={setC} />
-        <Field label="Company Name">
+        <Field label="Company name">
           <input
             className="input"
             value={c.name}
@@ -159,7 +159,7 @@ export default function CompanyModal({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Default Template">
+          <Field label="Default template">
             <SelectMenu
               value={c.default_template}
               onChange={(v) => setC({ ...c, default_template: v })}
@@ -169,7 +169,7 @@ export default function CompanyModal({
               ].map((t) => ({ value: t.id, label: t.name }))}
             />
           </Field>
-          <Field label="Default Accent">
+          <Field label="Default accent">
             <input
               type="color"
               className="input h-[38px] p-1"

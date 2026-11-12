@@ -491,7 +491,7 @@ export default function Work() {
       <div className="space-y-5">
         <PageHeader
           title={label}
-          subtitle="Customer work, tasks, and time in one workspace."
+          subtitle="Customer work, tasks, and time in one workspace"
         />
         <section className="border-y border-border py-6 space-y-3 max-w-2xl" role="alert">
           <h2 className="text-base font-semibold">

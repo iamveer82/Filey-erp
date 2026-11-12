@@ -14,6 +14,7 @@ import {
   type WatchEvent,
 } from "../lib/agentTasks";
 import { fileyAgentEnabled, fileyAgentReply } from "../lib/fileyAgent";
+import { isLongTask, longTaskState } from "../lib/longTask";
 import { useUI } from "../lib/ui";
 import { cn } from "../lib/format";
 import { SelectMenu } from "./ui-menu";
@@ -131,7 +132,7 @@ export default function AutomationsDrawer({
   const decided = requests.filter(r => r.status !== "pending").slice(-4).reverse();
 
   const buildSchedule = (): Schedule => {
-    if (type === "events") return { type };
+    if (type === "events" || type === "until_done") return { type };
     if (type === "interval") return { type, minutes: Math.max(1, minutes) };
     if (type === "weekly") return { type, day, time };
     return { type: "daily", time };
@@ -147,7 +148,7 @@ export default function AutomationsDrawer({
         name: name.trim() || goal.trim().slice(0, 40),
         goal: goal.trim(),
         schedule: buildSchedule(),
-        on: watch,
+        on: type === "until_done" ? [] : watch,
       });
     } catch (e) {
       toastRef.current?.error(e instanceof Error ? e.message : String(e));
@@ -157,7 +158,7 @@ export default function AutomationsDrawer({
     setGoal("");
     setWatch([]);
     refresh();
-    toastRef.current?.success("Automation added");
+    toastRef.current?.success(type === "until_done" ? "Long task started" : "Automation added");
   };
 
   const runNow = async (t: AgentTask) => {
@@ -370,6 +371,7 @@ export default function AutomationsDrawer({
                   { value: "weekly", label: "Weekly" },
                   { value: "interval", label: "Every…" },
                   { value: "events", label: "When something happens" },
+                  { value: "until_done", label: "Until it's done" },
                 ]}
               />
               {type === "interval" ? (
@@ -383,7 +385,7 @@ export default function AutomationsDrawer({
                   />
                   <span className="text-sm text-brand-500">min</span>
                 </span>
-              ) : type !== "events" ? (
+              ) : type !== "events" && type !== "until_done" ? (
                 <>
                   {type === "weekly" && (
                     <SelectMenu
@@ -402,10 +404,15 @@ export default function AutomationsDrawer({
                 </>
               ) : null}
             </div>
-            <p className="mt-2 text-[11px] font-medium text-brand-500">
+            {type === "until_done" && (
+              <p className="mt-2 text-xs text-brand-500">
+                A long task starts now and keeps working by itself, for hours or days, until it is finished. It carries on after a crash, a lost connection or Filey being closed, and keeps this computer awake while it works.
+              </p>
+            )}
+            <p className={cn("mt-2 text-[11px] font-medium text-brand-500", type === "until_done" && "hidden")}>
               {type === "events" ? "Run when" : "Also run when"}
             </p>
-            <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-1">
+            <div className={cn("mt-1 grid grid-cols-2 gap-x-2 gap-y-1", type === "until_done" && "hidden")}>
               {WATCH_KINDS.map(kind => (
                 <label key={kind} className="flex items-center gap-1.5 text-xs text-brand-700">
                   <input
@@ -439,6 +446,7 @@ export default function AutomationsDrawer({
                       <p className="truncate text-xs text-brand-400">{t.goal}</p>
                       <p className="mt-1 inline-flex flex-wrap items-center gap-1 text-[11px] font-medium text-primary-600">
                         <Timer size={11} /> {describeTrigger(t)}
+                        {isLongTask(t) && <span className="text-brand-400"> · {longTaskState(t)}</span>}
                         {t.lastRun && (
                           <span className="text-brand-400">
                             {" "}
@@ -456,12 +464,30 @@ export default function AutomationsDrawer({
                       }}
                     />
                   </div>
+                  {isLongTask(t) && (t.blocked || t.note || t.lastResult) && (
+                    <p className={cn("mt-1.5 line-clamp-3 text-xs", t.blocked ? "text-amber-600" : "text-brand-500")}>
+                      {t.blocked || (t.done ? t.lastResult : t.note)}
+                    </p>
+                  )}
                   {t.lastError && (
-                    <p className={cn("mt-1.5 flex items-center gap-1 text-[11px]", t.interrupted ? "text-amber-600" : "text-danger")}>
-                      <AlertTriangle size={11} /> {t.lastError}
+                    <p className={cn("mt-1.5 flex items-center gap-1 text-[11px]", t.interrupted || isLongTask(t) ? "text-amber-600" : "text-danger")}>
+                      <AlertTriangle size={11} /> {isLongTask(t) ? `Retrying by itself. ${t.lastError}` : t.lastError}
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-2">
+                    {isLongTask(t) ? t.blocked && (
+                      <button
+                        onClick={async () => {
+                          const answer = await ui.prompt({ title: `Resume "${t.name}"`, label: t.blocked, placeholder: "Your answer (optional)", confirmLabel: "Resume" });
+                          if (answer === null) return;
+                          updateTask(t.id, { blocked: undefined, answer: answer.trim() || undefined, idleTurns: 0, failures: 0, retryAt: undefined, enabled: true });
+                          refresh();
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg border border-brand-200 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:hover:bg-white/10"
+                      >
+                        <RotateCcw size={12} /> Resume
+                      </button>
+                    ) : (
                     <button
                       onClick={() => runNow(t)}
                       disabled={running === t.id}
@@ -476,6 +502,7 @@ export default function AutomationsDrawer({
                       )}
                       {t.interrupted ? "Retry" : "Run now"}
                     </button>
+                    )}
                     <button
                       onClick={() => {
                         removeTask(t.id);

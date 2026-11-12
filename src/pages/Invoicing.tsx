@@ -7,11 +7,11 @@ import { COUNTRY_OPTIONS, taxIdError } from "../lib/taxRegimes";
 import DocumentMessageDialog, { type DocumentMessageProps } from "../components/DocumentMessageDialog";
 import { invoicePublicLink, publicAppBase, type MessageChannel } from "../lib/documentMessage";
 import { assertWorkspaceCurrent, isLocalMode } from "../lib/dataMode";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DocumentPreviewControls from "../components/DocumentPreviewControls";
 import Step from "../components/DocumentStep";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/Tabs";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
 import {
   Plus,
@@ -44,7 +44,9 @@ import {
   Landmark,
   SeparatorHorizontal,
   FileCode,
+  Truck,
   ChevronDown,
+  BadgeIndianRupee,
 } from "lucide-react";
 import {
   advances,
@@ -53,7 +55,9 @@ import {
   getCacheScope,
   crm,
   erp,
+  fin,
   recurrences,
+  tools,
   InvoiceDocSummary,
   type InvoiceDoc,
   InvoiceDocInput,
@@ -82,7 +86,7 @@ import {
 } from "../lib/format";
 import { getExchangeRates, docAmountInAed, unratedCurrency } from "../lib/exchange-rates"
 import { defaultTaxRate, taxRegimeFor, isUaeRegime } from "../lib/taxRegimes";
-import { customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
+import { companyCountry, customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
 import ColorPicker from "../components/ColorPicker";
 import CompanyModal from "../components/CompanyModal";
 import { startingTemplate } from "../components/DocPresetBar";
@@ -90,6 +94,8 @@ import { invoiceLineAmount, r2, applyRoundOff } from "../lib/money";
 import { docLineAmount, docTotals, storedLineAmount } from "../lib/docItems";
 import { DateField } from "../components/DatePicker";
 import { SelectMenu } from "../components/ui-menu";
+import SubdivisionField from "../components/SubdivisionField";
+import EwayBillDialog from "../components/EwayBillDialog";
 import {
   pickDocNumber,
   loadDocFormats,
@@ -98,6 +104,12 @@ import {
 import { allocateDocumentNumber } from "../lib/documentNumbers";
 import { sendEmail, emailShell, esc, bytesToBase64 } from "../lib/email";
 import InvoiceExportSheet from "../components/InvoiceExportSheet";
+import { GST_COPIES_KEY, GST_COPY_SETS } from "../lib/gstCopies";
+import { COMPOSITION_DECLARATION } from "../lib/gst";
+import { loadAlertState } from "../lib/paymentAlerts";
+import { fefoBatch, onlyExpired } from "../lib/batches";
+import { TCS_SECTIONS, TDS_SECTIONS, isTcsLine, isTdsMethod, tdsAmount, tdsMethod, withTcs } from "../lib/tds";
+import { loadIndiaRegistration, type IndiaRegistration } from "../components/IndiaRegistrationFields";
 import { reactToPdfBytes } from "../lib/reactPdf";
 import FitPreview from "../components/FitPreview";
 import DocView from "../components/DocView";
@@ -152,7 +164,6 @@ import {
   PAYMENT_MEANS_CODES,
   TAX_CATEGORY_CODES,
   TRANSACTION_TYPE_FLAGS,
-  EMIRATES,
   DEFAULT_INVOICE_TYPE_CODE,
   DEFAULT_PAYMENT_MEANS_CODE,
   DEFAULT_TRANSACTION_TYPE,
@@ -185,6 +196,7 @@ import {
 } from "../components/RowActions";
 import TeamShareModal from "../components/TeamShareModal";
 import { useAuth } from "../lib/auth";
+const PaymentCheckModal = lazy(() => import("../components/PaymentCheckModal"));
 
 type CustomColumn = { key: string; label: string };
 type Item = {
@@ -285,7 +297,7 @@ const lineTaxRate = (
 
 // Payment-terms presets — picking one autofills Due Date from Invoice Date.
 const PAYMENT_TERMS: { id: string; label: string; days: number }[] = [
-  { id: "receipt", label: "Due on Receipt", days: 0 },
+  { id: "receipt", label: "Due on receipt", days: 0 },
   { id: "net7", label: "Net 7", days: 7 },
   { id: "net15", label: "Net 15", days: 15 },
   { id: "net30", label: "Net 30", days: 30 },
@@ -390,7 +402,8 @@ function blankForm(
         tax_category: DEFAULT_TAX_CATEGORY,
       },
     ],
-    customColumns: [],
+    // GST invoices print each line's HSN (goods) or SAC (services) code.
+    customColumns: companyCountry(c) === "IN" ? [{ key: "hsn", label: "HSN/SAC" }] : [],
     show_stamp: false,
     show_signature: false,
     show_logo: false,
@@ -433,6 +446,13 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
   const [importOpen, setImportOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [payFor, setPayFor] = useState<InvoiceDocSummary | null>(null);
+  // India: UPI payments seen in bank alerts, waiting to be matched to invoices.
+  const [payCheckOpen, setPayCheckOpen] = useState(false);
+  const [paymentsWaiting, setPaymentsWaiting] = useState(0);
+  useEffect(() => {
+    if (!isPurchase && company && companyCountry(company) === "IN")
+      loadAlertState().then((s) => setPaymentsWaiting(s.pending.length)).catch(() => {});
+  }, [company, isPurchase]);
   const [recurs, setRecurs] = useState<Recurrence[]>([]);
   const [search, setSearch] = useState("");
   // DEMO parity: status filter chips (All/Draft/Sent/Paid/Overdue).
@@ -506,6 +526,10 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
       const currentCompany = await billing.getCompany(true);
       const f = blankForm(currentCompany, docs.map((d) => d.number), mode, numFmt);
       f.template = await startingTemplate("invoice", currentCompany.default_template, f.template);
+      // Composition dealers bill on a Bill of Supply: no GST charged, declaration printed.
+      if (mode === "sales" && companyCountry(currentCompany) === "IN"
+        && (await loadIndiaRegistration().catch(() => ({} as IndiaRegistration))).gst_scheme === "composition")
+        Object.assign(f, { doc_title: "Bill of Supply", tax_rate: 0, notes: COMPOSITION_DECLARATION });
       requireAgentStorageScope(scope ?? "signed-out");
       if (request !== editorRequest.current || currentForm.current !== original) return;
       setCompany(currentCompany);
@@ -1188,6 +1212,9 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         }
         action={
           <div className="flex flex-wrap gap-2">
+            {company && companyCountry(company) === "IN" && <Link className="btn-ghost" to="/reports?tab=gst"><Landmark size={16} /> GST returns</Link>}
+            {company && companyCountry(company) === "IN" && !isPurchase && <button className="btn-ghost" onClick={() => setPayCheckOpen(true)} title="Match UPI payments in bank alerts to unpaid invoices">
+              <BadgeIndianRupee size={16} /> Payment check{paymentsWaiting > 0 && <span className="ml-1 rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">{paymentsWaiting}</span>}</button>}
             <button className="btn-ghost" disabled={!company} onClick={() => setImportOpen(true)}><FileCode size={16} /> {isPurchase ? "Import supplier invoice" : "Import invoices"}</button>
             <button className="btn-ghost" onClick={() => setScanOpen(true)}>
               <Sparkles size={16} /> Scan with AI
@@ -1247,7 +1274,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
 
       {recurs.filter((r) => r.active).length > 0 && (
         <div className="card mb-4">
-          <div className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink tracking-tight">
+          <div className="mb-2 flex items-center gap-2 font-semibold text-sm text-ink">
             <div className="grid h-7 w-7 place-items-center rounded-lg bg-primary-100">
               <Repeat size={14} className="text-primary-700" />
             </div>
@@ -1357,7 +1384,7 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
 
       {search && filteredDocs.length > 0 && (
         <div className="mb-4">
-          <p className="mb-2 text-sm text-brand-500 tracking-tight">
+          <p className="mb-2 text-sm text-brand-500">
             Totals for <span className="font-semibold text-ink">“{search}”</span>
           </p>
           <StatStrip
@@ -1614,7 +1641,8 @@ export default function Invoicing({ mode = "sales" }: { mode?: DocMode } = {}) {
         />
       )}
 
-      <PaymentsModal doc={payFor} onClose={() => setPayFor(null)} onSaved={loadDocs} />
+      <PaymentsModal doc={payFor} purchase={isPurchase} onClose={() => setPayFor(null)} onSaved={loadDocs} />
+      {payCheckOpen && <Suspense fallback={null}><PaymentCheckModal open onClose={() => { setPayCheckOpen(false); void loadAlertState().then((s) => setPaymentsWaiting(s.pending.length)).catch(() => {}); }} onRecorded={() => { void loadDocs(); }} /></Suspense>}
 
       <QuickViewModal
         open={!!quickView}
@@ -1640,14 +1668,22 @@ export function PaymentsModal({
   doc,
   onClose,
   onSaved,
+  purchase = false,
 }: {
   doc: InvoiceDocSummary | null;
   onClose: () => void;
   onSaved: () => void;
+  /** A supplier bill: TDS kept back is owed to the government, not claimed. */
+  purchase?: boolean;
 }) {
   const { toast, confirm } = useUI();
   const [rows, setRows] = useState<InvoicePayment[]>([]);
   const [amount, setAmount] = useState(0);
+  // India: tax deducted at source, kept back from this payment.
+  const [india, setIndia] = useState(false);
+  const [tds, setTds] = useState(0);
+  const [tdsSection, setTdsSection] = useState("194C");
+  useEffect(() => { billing.getCompany().then((c) => setIndia(!!c && companyCountry(c) === "IN")).catch(() => setIndia(false)); }, []);
   const [method, setMethod] = useState("bank transfer");
   const [paidAt, setPaidAt] = useState(todayYmd());
   const [busy, setBusy] = useState(false);
@@ -1675,16 +1711,27 @@ export function PaymentsModal({
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
   const balance = Math.max(0, total - paid);
 
+  const showTds = india && (doc?.currency || "INR") === "INR";
+  const tdsNote = (section: string) => `${tdsMethod(section)} on ${purchase ? "bill" : "invoice"} ${doc?.number ?? ""}`.trim();
   const add = async () => {
-    if (!doc || amount <= 0 || busy || paymentsLoading || paymentError) return;
+    const kept = showTds ? tds : 0;
+    if (!doc || (amount <= 0 && kept <= 0) || busy || paymentsLoading || paymentError) return;
     setBusy(true);
     try {
-      await billing.addPayment(doc.id, amount, method || null, paidAt);
+      if (amount > 0) await billing.addPayment(doc.id, amount, method || null, paidAt);
+      if (kept > 0) {
+        await billing.addPayment(doc.id, kept, tdsMethod(tdsSection), paidAt);
+        try { await fin.moveTds(kept, purchase, paidAt, tdsNote(tdsSection)); }
+        catch (e) { throw new Error(`TDS recorded on the ${purchase ? "bill" : "invoice"}, but moving it out of Cash & Bank failed (${errMsg(e)}). Post that journal in Accounting.`); }
+      }
       setAmount(0);
+      setTds(0);
       load();
       onSaved();
-      toast.success("Payment recorded.");
+      toast.success(kept > 0 ? "Payment and TDS recorded." : "Payment recorded.");
     } catch (e) {
+      load();
+      onSaved();
       toast.error(errMsg(e));
     } finally {
       setBusy(false);
@@ -1699,8 +1746,11 @@ export function PaymentsModal({
       }))
     )
       return;
+    const row = rows.find((p) => p.id === id);
     try {
       await billing.removePayment(id);
+      // A TDS row also moved its amount out of Cash & Bank: put that back.
+      if (row && isTdsMethod(row.method)) await fin.moveTds(Number(row.amount), purchase, todayYmd(), tdsNote(row.method!.replace(/^TDS\s*/, "")), true);
       load();
       onSaved();
     } catch (e) {
@@ -1710,6 +1760,7 @@ export function PaymentsModal({
 
   if (!doc) return null;
   const ccy = doc.currency || "AED";
+  const net = doc.net_total ?? doc.total;
   return (
     <Modal open={!!doc} onClose={onClose} title={`Payments - ${doc.number}`}>
       {paymentError && <div className="mb-3 space-y-2"><ErrorBanner message={paymentError} /><button className="btn-secondary" onClick={load}>Reload payments</button></div>}
@@ -1782,10 +1833,27 @@ export function PaymentsModal({
             ]}
           />
         </Field>
-        <button className="btn-primary" disabled={busy || paymentsLoading || !!paymentError || amount <= 0} onClick={add}>
+        <button className="btn-primary" disabled={busy || paymentsLoading || !!paymentError || (amount <= 0 && !(showTds && tds > 0))} onClick={add}>
           <Plus size={15} /> Add
         </button>
       </div>
+      {showTds && (
+        <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2 items-end">
+          <Field label={purchase ? "TDS you kept back" : "TDS kept back by customer"}>
+            <input aria-label="TDS amount" type="number" className="input" placeholder="0" value={tds || ""} onChange={(e) => setTds(numInput(e.target.value))} />
+          </Field>
+          <Field label="Section">
+            <SelectMenu ariaLabel="TDS section" value={tdsSection} onChange={(v) => {
+              setTdsSection(v);
+              const rate = TDS_SECTIONS.find((s) => s.value === v)?.rate ?? 0;
+              if (rate) setTds(tdsAmount(net, rate));
+            }} options={TDS_SECTIONS.map((s) => ({ value: s.value, label: s.label }))} />
+          </Field>
+          <p className="col-span-2 text-[11px] text-muted-foreground">
+            Settles the {purchase ? "bill" : "invoice"} with the amount paid. TDS goes to {purchase ? "TDS Deducted (to deposit), owed to the government" : "TDS Credit (Form 26AS), claimed against income tax"}, not to cash. Picking a section fills it at that rate of {money(net, ccy)} before GST.
+          </p>
+        </div>
+      )}
       <Field label="Date">
         <div className="mt-2">
           <DateField value={paidAt} onChange={setPaidAt} clearable={false} />
@@ -1822,7 +1890,7 @@ function InventoryImportModal({
       p.sku.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal open={open} onClose={onClose} title="Add from Inventory">
+    <Modal open={open} onClose={onClose} title="Add from inventory">
       <SearchInput
         value={q}
         onChange={setQ}
@@ -1956,7 +2024,7 @@ function Editor({
       if (!form.id || savedDetailsPending) {
         const saved = await onSave();
         if (!saved) return;
-        const pdf = await reactToPdfBytes(<InvoiceExportSheet form={saved} companyStampSig={companyStampSig} bank={bank} />, saved.number);
+        const pdf = await reactToPdfBytes(<InvoiceExportSheet form={saved} companyStampSig={companyStampSig} bank={bank} copies={copyLabels} />, saved.number);
         await saveBytes(`${saved.number}.pdf`, pdf.bytes, "application/pdf");
         return;
       }
@@ -2061,6 +2129,32 @@ function Editor({
     });
   const removeItem = (idx: number) =>
     setForm({ ...form, items: form.items.filter((_, i) => i !== idx) });
+
+  // India TCS: a line outside GST priced at its rate of the rest of the invoice, kept current as lines change.
+  useEffect(() => {
+    if (!form.items.some(isTcsLine)) return;
+    const next = withTcs(form.items, Number(form.discount) || 0, Number(form.tax_rate) || 0, form.unit_price_formula);
+    if (next.some((it, i) => it !== form.items[i])) setForm({ ...form, items: next });
+    // form is the whole dependency; setForm is stable for this editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+  const addTcs = async () => {
+    const picked = (await prompt({
+      title: "Add TCS",
+      label: `TCS rate (%). ${TCS_SECTIONS.map((s) => s.label).join("; ")}.`,
+      placeholder: "1",
+      confirmLabel: "Add TCS",
+    }))?.trim();
+    const rate = Number(picked || "1");
+    if (picked == null || !(rate > 0 && rate <= 20)) return;
+    setForm({
+      ...form,
+      items: withTcs([...form.items, {
+        description: `TCS @ ${rate}% u/s 206C`, qty: 1, unit_price: 0, unit: "", custom: { tcs: String(rate) },
+        pageBreakBefore: false, calcMode: "auto", amount: 0, itemFormula: null, tax_category: "O",
+      }], Number(form.discount) || 0, Number(form.tax_rate) || 0, form.unit_price_formula),
+    });
+  };
 
   const setItemCustom = (idx: number, key: string, value: string) => {
     // reserved meta keys are persisted through split/merge helpers, not as custom columns
@@ -2184,8 +2278,14 @@ function Editor({
   // unit price); drops a leftover empty row so the first import replaces it.
   const addItemFromProduct = (p: Product) => {
     const desc = [p.name, p.description?.trim()].filter(Boolean).join(" - ");
+    // Batch-tracked stock (medicines): the line carries the batch that expires first.
+    const batch = fefoBatch(p, todayYmd());
+    if (!batch && onlyExpired(p, todayYmd())) toast.error(`Only expired stock of ${p.name} is left. Write it off under Inventory → Batches.`);
+    const cols = form.customColumns || [];
+    const batchCols = batch ? [{ key: "batch", label: "Batch" }, { key: "exp", label: "Exp." }].filter((c) => !cols.some((x) => x.key === c.key)) : [];
     setForm({
       ...form,
+      customColumns: batchCols.length ? [...cols, ...batchCols] : form.customColumns,
       items: [
         ...form.items.filter((it) => it.description.trim() || it.unit_price),
         {
@@ -2193,7 +2293,7 @@ function Editor({
           qty: 1,
           unit_price: p.unit_price,
           unit: "",
-          custom: {},
+          custom: batch ? { batch: batch.no, exp: batch.exp.slice(0, 7) } : {},
           product_id: p.id,
           calcMode: "auto",
           amount: 0,
@@ -2273,6 +2373,20 @@ function Editor({
   const [zoom, setZoom] = useState(100);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [viewOpen, setViewOpen] = useState(false);
+  const [ewayOpen, setEwayOpen] = useState(false);
+  // Indian sales invoices: goods moving above Rs 50,000 need an e-way bill.
+  const indiaSale = partyLabel !== "Supplier" && taxRegimeFor(form.currency, form.tax_country_code).id === "in-gst";
+  // GST invoice copies for the downloaded PDF (Original / Duplicate / Triplicate), a company setting.
+  const [gstCopies, setGstCopies] = useState("1");
+  useEffect(() => {
+    if (!indiaSale) return;
+    tools.settings().then((rows) => { const v = rows.find((r) => r.key === GST_COPIES_KEY)?.value; if (v && GST_COPY_SETS[v]) setGstCopies(v); }).catch(() => {});
+  }, [indiaSale]);
+  const copyLabels = indiaSale ? GST_COPY_SETS[gstCopies] : undefined;
+  const chooseCopies = (value: string) => {
+    setGstCopies(value);
+    tools.setSetting(GST_COPIES_KEY, value).catch((e) => toast.error(errMsg(e)));
+  };
   const [viewPage, setViewPage] = useState(1);
   // Paginate for the full-screen "View" modal the same way as live preview/PDF.
   const viewPages = paginateItems(form.items);
@@ -2415,6 +2529,14 @@ function Editor({
           <button data-guide="invoice-preview" className="btn-ghost" onClick={() => setViewOpen(true)}>
             <Maximize2 size={15} /> Preview
           </button>
+          {indiaSale && <button className="btn-ghost" onClick={() => setEwayOpen(true)} title="E-way bill JSON for the NIC portal">
+            <Truck size={15} /> E-way bill
+          </button>}
+          {indiaSale && <div className="w-52" title="GST invoices go in triplicate for goods, duplicate for services">
+            <SelectMenu ariaLabel="GST invoice copies" value={gstCopies} onChange={chooseCopies} options={[
+              { value: "1", label: "PDF: 1 copy" }, { value: "2", label: "PDF: 2 copies (services)" }, { value: "3", label: "PDF: 3 copies (goods)" },
+            ]} />
+          </div>}
           <button
             className="btn-ghost"
             onClick={downloadPdf}
@@ -2638,7 +2760,7 @@ function Editor({
                       );
                     })()}
                 </Field>
-                <Field label="Billing Address">
+                <Field label="Billing address">
                   <textarea
                     className="textarea"
                     rows={2}
@@ -2677,21 +2799,13 @@ function Editor({
                       value={form.buyer_city ?? ""}
                       onChange={(e) => set("buyer_city", e.target.value)}
                     />
-                    {(form.buyer_country_code || form.tax_country_code) === "AE" ? <SelectMenu
-                      ariaLabel={`${partyLabel} Emirate`}
-                      value={form.buyer_country_subdivision ?? ""}
+                    <SubdivisionField
+                      country={form.buyer_country_code || form.tax_country_code}
+                      ariaLabel={(form.buyer_country_code || form.tax_country_code) === "AE" ? `${partyLabel} Emirate` : `${partyLabel} ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)}`}
+                      placeholder={(form.buyer_country_code || form.tax_country_code) === "AE" ? "Emirate…" : subdivisionLabel(form.buyer_country_code || form.tax_country_code)}
+                      value={form.buyer_country_subdivision}
                       onChange={(v) => set("buyer_country_subdivision", v)}
-                      options={[
-                        { value: "", label: "Emirate…" },
-                        ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
-                      ]}
-                    /> : <input
-                      aria-label={`${partyLabel} ${subdivisionLabel(form.buyer_country_code || form.tax_country_code)}`}
-                      className="input"
-                      placeholder={subdivisionLabel(form.buyer_country_code || form.tax_country_code)}
-                      value={form.buyer_country_subdivision ?? ""}
-                      onChange={e => set("buyer_country_subdivision", e.target.value)}
-                    />}
+                    />
                     <input aria-label={`${partyLabel} country code`}
                       className="input"
                       placeholder="Country code"
@@ -2748,7 +2862,7 @@ function Editor({
                   )}
               </div>
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,144px),1fr))] gap-3 content-start">
-                <Field label="Invoice Number" hint={provisionalNumber ? "Provisional — a unique number is assigned when you save or export." : undefined}>
+                <Field label="Invoice number" hint={provisionalNumber ? "Provisional — a unique number is assigned when you save or export." : undefined}>
                   <div className="flex gap-2">
                     <input aria-label="Invoice number"
                       className="input"
@@ -2758,7 +2872,7 @@ function Editor({
 
                   </div>
                 </Field>
-                <Field label="Invoice Date">
+                <Field label="Invoice date">
                   <DateField
                     value={form.issue_date ?? ""}
                     onChange={(v) => set("issue_date", v)}
@@ -2779,7 +2893,7 @@ function Editor({
                     }))}
                   />
                 </Field>
-                <Field label="Payment Terms">
+                <Field label="Payment terms">
                   <SelectMenu
                     value={form.payment_terms || ""}
                     onChange={(v) => {
@@ -2829,7 +2943,7 @@ function Editor({
             <details className="group mt-3 border-t border-border pt-2" open={isUaeRegime(form.currency, form.tax_country_code)}>
               <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">{isUaeRegime(form.currency, form.tax_country_code) ? "E-invoice details" : "Additional details"}<ChevronDown size={15} className="shrink-0 group-open:rotate-180" /></summary>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
-                <Field label="Document Title">
+                <Field label="Document title">
                   <input aria-label="Document title"
                     className="input"
                     placeholder="INVOICE"
@@ -2894,7 +3008,7 @@ function Editor({
                         onChange={(e) => set("original_invoice_number", e.target.value)}
                       />
                     </Field>
-                    <Field label="Original Invoice Date">
+                    <Field label="Original invoice date">
                       <DateField aria-label="Original invoice date"
                         value={form.original_invoice_date || ""}
                         onChange={(value) => set("original_invoice_date", value)}
@@ -3397,6 +3511,8 @@ function Editor({
             )}
             <div className="flex flex-wrap gap-2 mt-3">
               <button className="btn-ghost" onClick={() => addItem("Delivery or service charge")}><Plus size={14} /> Add charge</button>
+              {indiaSale && !form.items.some(isTcsLine) && <button className="btn-ghost" onClick={() => { void addTcs(); }} title="Tax collected at source: a line outside GST, at its rate of the invoice total">
+                <Plus size={14} /> Add TCS</button>}
               <button data-einvoice-field="items" className="btn-ghost" onClick={() => addItem()}>
                 <Plus size={14} /> Add item
               </button>
@@ -3842,9 +3958,11 @@ function Editor({
           form={form as never}
           companyStampSig={companyStampSig}
           bank={bank}
+          copies={copyLabels}
         />
       </div>
 
+      {ewayOpen && <EwayBillDialog open onClose={() => setEwayOpen(false)} form={form as unknown as Parameters<typeof EwayBillDialog>[0]["form"]} />}
       <Modal open={viewOpen} onClose={() => setViewOpen(false)} title={form.number || "Invoice preview"} size="document">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">Page {viewPage} of {viewPageCount}</span>
@@ -3955,7 +4073,7 @@ function CustomerModal({
         Enter the {supplierMode ? "supplier's" : "customer's"} legal name and country. Tax ID formats depend on the registration country.
       </p>
       <fieldset disabled={saving} className="space-y-3">
-        <Field label="Company / Legal Name">
+        <Field label="Company / legal name">
           <input aria-label="Company name"
             className="input"
             placeholder="Gulf Line Trading LLC"
@@ -3964,7 +4082,7 @@ function CustomerModal({
           />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Contact Name">
+          <Field label="Contact name">
             <input aria-label="Contact name"
               className="input"
               value={f.name}
@@ -3979,7 +4097,7 @@ function CustomerModal({
             />
           </Field>
         </div>
-        <Field label="Billing Address">
+        <Field label="Billing address">
           <textarea
             className="textarea"
             rows={2}

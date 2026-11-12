@@ -16,7 +16,7 @@ const GROUPS = [
   { id: "seller", title: "Seller", description: "Your business address, tax identity and legal registration." },
   { id: "buyer", title: "Buyer", description: "Customer billing details and electronic delivery identity." },
   { id: "items", title: "Items", description: "Descriptions, quantities, units, prices and classifications." },
-  { id: "tax", title: "Tax & Payment", description: "VAT categories, totals, exchange rate and payment details." },
+  { id: "tax", title: "Tax & payment", description: "VAT categories, totals, exchange rate and payment details." },
 ] as const;
 type GroupId = typeof GROUPS[number]["id"];
 

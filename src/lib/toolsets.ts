@@ -57,7 +57,7 @@ export const CORE_TOOLS = [
 export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
   letters: {
     about: "Office work: Word, Sheets, PDF, Slides, Designs, letters",
-    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
+    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "office_image", "get_letter_context", "get_letter", "create_letter_draft", "revise_letter_draft", "list_letters", "export_letter_pdf"],
   },
   cards: {
     about: "Cards, charts, tables, KPIs in chat",
@@ -92,6 +92,8 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "set_quote_status",
       "convert_quote_to_invoice",
       "record_invoice_payment",
+      "counter_sell",
+      "check_upi_payments",
       "list_invoice_payments",
       "record_advance",
       "list_advances",
@@ -126,8 +128,9 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: ["find_links", "link_records"],
   },
   inventory: {
-    about: "Products, stock levels, adjustments",
-    tools: ["create_product", "update_product", "adjust_stock", "stock_history", "reorder_low_stock"],
+    about: "Products, stock, batches",
+    tools: ["create_product", "update_product", "adjust_stock", "stock_history", "reorder_low_stock",
+      "expiry_report", "receive_batch", "write_off_batch"],
   },
   logistics: {
     about: "Delivery challans, GRNs, returns, packing lists",
@@ -150,6 +153,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
       "receivables_aging",
       "payables_aging",
       "vat_return",
+      "profit_report",
     ],
   },
   crm: {
@@ -204,7 +208,7 @@ export const TOOLSETS: Record<string, { about: string; tools: string[] }> = {
     tools: [
       "send_gmail",
       "send_whatsapp",
-      "send_whatsapp_file",
+      "send_whatsapp_file", "email_owner",
       "send_invoice_whatsapp",
       "prepare_invoice_whatsapp",
       "list_whatsapp_messages",

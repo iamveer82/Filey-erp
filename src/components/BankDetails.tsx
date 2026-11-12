@@ -24,6 +24,8 @@ export interface BankInfo {
   /** ABA / transit / BSB / NZ bank code. */
   routing_code: string;
   swift: string;
+  /** UPI ID — India. Indian rupee invoices also print it as a Scan-to-pay QR. */
+  upi_id: string;
 }
 
 export const EMPTY_BANK: BankInfo = {
@@ -35,6 +37,7 @@ export const EMPTY_BANK: BankInfo = {
   ifsc: "",
   routing_code: "",
   swift: "",
+  upi_id: "",
 };
 
 const SETTING_KEY = "company_bank";

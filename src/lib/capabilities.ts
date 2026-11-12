@@ -26,7 +26,7 @@ export const CAPABILITIES: Capability[] = [
     id: "computer",
     name: "Computer use",
     description:
-      "Use the built-in browser and Windows apps during Filey AI tasks",
+      "Use the whole Windows desktop and the built-in browser during Filey AI tasks. On by default; Auto and Accept edits run it without a per-action card, and the Filey cursor shows where it is working.",
     tools: ["computer_use", "workspace_browser"],
   },
   {
@@ -64,6 +64,8 @@ export const CAPABILITIES: Capability[] = [
       "set_quote_status",
       "convert_quote_to_invoice",
       "record_invoice_payment",
+      "counter_sell",
+      "check_upi_payments",
       "record_advance",
       "apply_advance_to_invoice",
       "cancel_recurring",
@@ -73,7 +75,7 @@ export const CAPABILITIES: Capability[] = [
     id: "letters",
     name: "Office work",
     description: "Write and format Word documents, build spreadsheets in Sheets, edit PDFs, create and revise letter drafts, read saved letters and export files. Review and issue letters in Office work.",
-    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
+    tools: ["word", "sheet", "pdf", "slides", "design", "fig", "vector", "office_image", "get_letter_context", "list_letters", "get_letter", "create_letter_draft", "revise_letter_draft", "export_letter_pdf"],
     readOnlyTools: ["get_letter_context", "list_letters", "get_letter"],
   },
   {
@@ -112,7 +114,7 @@ export const CAPABILITIES: Capability[] = [
     id: "inventory",
     name: "Inventory",
     description: "Add products, adjust stock levels",
-    tools: ["create_product", "update_product", "adjust_stock"],
+    tools: ["create_product", "update_product", "adjust_stock", "receive_batch", "write_off_batch"],
   },
   {
     id: "expenses",
@@ -152,8 +154,8 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "email",
     name: "Email",
-    description: "Email invoices to customers through Resend",
-    tools: ["email_invoice"],
+    description: "Email invoices to customers through Resend, and email saved files to the owner",
+    tools: ["email_invoice", "email_owner"],
   },
   {
     id: "channels",

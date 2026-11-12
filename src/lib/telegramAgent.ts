@@ -307,3 +307,34 @@ export function startTelegramAgent() {
   // Explicit reconnect after sign-in or changing workspace avoids silently
   // handing an old owner chat control of a different live workspace.
 }
+
+const AUTO_KEY = "filey.telegram_agent_autostart";
+/** Auto-connect is an explicit per-account opt-in; a saved pairing alone never
+ *  reconnects by itself, and an unpaired setup stays manual. */
+export function telegramAutoStart(): boolean {
+  const account = agentStorageScope();
+  return desktop() && !!account && localStorage.getItem(`${AUTO_KEY}:${account}`) === "1";
+}
+export function setTelegramAutoStart(on: boolean): boolean {
+  const account = agentStorageScope();
+  if (!desktop() || !account) throw new Error("Sign in to Filey before changing Telegram preferences.");
+  localStorage.setItem(`${AUTO_KEY}:${account}`, on ? "1" : "0");
+  return telegramAutoStart();
+}
+let autoWatch = false;
+/** Filey start: reconnect the paired bot when its owner asked for it. Only a
+ *  bot that was connected (enabled) with a paired owner comes back up. */
+export async function autoStartTelegram(): Promise<void> {
+  if (!desktop()) return;
+  if (!autoWatch) {
+    autoWatch = true;
+    window.addEventListener(AGENT_STORAGE_EVENT, () => void autoStartTelegram());
+    window.addEventListener("storage", () => void autoStartTelegram());
+  }
+  if (state.state === "connected" || state.state === "connecting" || state.state === "pairing") return;
+  const account = agentStorageScope();
+  if (!account || localStorage.getItem(`${AUTO_KEY}:${account}`) !== "1") return;
+  const c = config();
+  if (!c?.enabled || !c.ownerId || !hasCredential(TOKEN)) return;
+  await connectTelegram().catch(() => {});
+}

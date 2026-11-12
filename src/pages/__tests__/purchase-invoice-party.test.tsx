@@ -114,7 +114,8 @@ describe("purchase invoice parties", () => {
     expect(await view.findByLabelText("Currency")).toHaveTextContent("INR");
     expect(view.getByText("Supplier Contact / GSTIN", {selector: "label"})).toBeVisible();
     expect(view.getByLabelText("Supplier phone")).toHaveValue("");
-    expect(view.getByLabelText("Supplier State / Union territory").tagName).toBe("INPUT");
+    // Indian states come from the GST state list (a picker), not free text.
+    expect(view.getByRole("button", { name: "Supplier State / Union territory" })).toHaveTextContent("State / Union territory");
     expect(view.queryByLabelText("Supplier Emirate")).toBeNull();
     view.unmount();
     const existing = await openPurchase();

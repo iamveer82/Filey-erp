@@ -271,38 +271,21 @@ describe("connected work discovery and permissions", () => {
     expect(await runTool("computer_use", args, () => true, true)).toMatchObject({ error: expect.stringMatching(/no desktop session/) });
     expect(runComputerUse).not.toHaveBeenCalled();
   });
-  it("counts only computer inputs per turn, so reads stay free", async () => {
+  it("leaves desktop control unbudgeted: many inputs and a long task keep working", async () => {
     const session = vi.fn(async () => 42);
-    const run = (action: string, turnId = "input-turn") =>
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const run = (action: string, turnId = "long-turn") =>
       runTool("computer_use", { action }, () => true, true, turnId, undefined, session);
     try {
       for (let i = 0; i < 20; i++) expect(await run("list_windows")).toEqual({ windows: [] });
-      for (let i = 0; i < 10; i++) expect(await run("app_click")).toEqual({ windows: [] });
-      expect(await run("app_click")).toMatchObject({ error: expect.stringMatching(/computer-input limit/) });
+      for (let i = 0; i < 40; i++) expect(await run("app_click")).toEqual({ windows: [] });
+      // A slow sign-in or a long form is not cut off after 90 seconds.
+      now.mockReturnValue(1_600_000);
+      expect(await run("app_click")).toEqual({ windows: [] });
       expect(await run("list_windows")).toEqual({ windows: [] });
-      expect(await run("app_click", "fresh-turn")).toEqual({ windows: [] });
-    } finally {
-      endTurn("input-turn");
-      endTurn("fresh-turn");
-    }
-    expect(await run("app_click")).toEqual({ windows: [] });
-  });
-  it("ends the computer window after 90 seconds, even for reads", async () => {
-    const session = vi.fn(async () => 42);
-    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
-    const run = (turnId = "clock-turn") =>
-      runTool("computer_use", { action: "list_windows" }, () => true, true, turnId, undefined, session);
-    try {
-      expect(await run()).toEqual({ windows: [] });
-      now.mockReturnValue(1_090_001);
-      expect(await run()).toMatchObject({ error: expect.stringMatching(/90-second computer window/) });
-      expect(await run("new-clock-turn")).toEqual({ windows: [] });
-      endTurn("clock-turn");
-      expect(await run()).toEqual({ windows: [] });
     } finally {
       now.mockRestore();
-      endTurn("clock-turn");
-      endTurn("new-clock-turn");
+      endTurn("long-turn");
     }
   });
   it("caps browser steps per turn, and a new turn starts fresh", async () => {

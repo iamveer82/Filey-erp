@@ -54,7 +54,7 @@ describe("packaging documents", () => {
   it("totals explicit package counts and per-item weights without combining quantity units", () => {
     const item = form().items[0];
     const totals = packagingTotals([item, { ...item, qty: 4, unit: "kg", package_count: null, net_weight: null, gross_weight: null }, { ...item, qty: 3, unit: "pcs", package_count: 2, net_weight: 1, gross_weight: 1.5 }]);
-    expect(totals).toEqual({ packages: 3, net: 9, gross: 11.5, quantities: { pcs: 5, kg: 4 } });
+    expect(totals).toEqual({ packages: 3, net: 9, gross: 11.5, volume: 0, quantities: { pcs: 5, kg: 4 } });
     expect(packagingTotals([{ ...item, unit: "__proto__" }]).quantities.__proto__).toBe(2);
   });
 

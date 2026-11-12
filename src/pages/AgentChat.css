@@ -7,8 +7,13 @@
 
 .workspace-agent main { display: flex; overflow: hidden; background: hsl(var(--background)); }
 .workspace-agent main > div { width: 100%; height: 100%; min-height: 0; }
-.workspace-agent .workspace-content { height: 100%; padding: 0; animation: none; }
+.workspace-agent .workspace-content { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; padding: 0; animation: none; }
 .workspace-agent .workspace-header { border-bottom-color: transparent; }
+/* The persistent agent slot is a flex column so the chat receives a definite
+ * height. Without it the slot grows with the conversation and the composer
+ * travels down the page instead of staying pinned above the keyboard. */
+.filey-agent-view { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.filey-agent-view[hidden] { display: none; }
 .filey-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .filey-chat-header { flex-shrink: 0; padding: 16px 20px 8px; border-bottom: 0; }
 .filey-chat-presence { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 999px; background: hsl(var(--muted)); }
@@ -56,6 +61,8 @@
   padding: 3px;
   border-radius: 999px;
   background: hsl(var(--muted));
+  align-self: flex-start;
+  flex-shrink: 0;
 }
 .filey-agent-views button {
   padding: 5px 14px;

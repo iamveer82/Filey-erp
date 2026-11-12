@@ -44,10 +44,8 @@ import { serviceError } from "./serviceError";
  *  extra headroom is only paid by tasks that actually use it. */
 export const MAX_TOOL_ROUNDS = 32;
 
-/** A browser/login task (Instagram etc.) should not burn the whole round budget
- *  on screenshots and clicks. Cap computer actions per task; the user takes over
- *  from there. One image per round × ~10 rounds stays in RAM; 32+ does not. */
-export const MAX_COMPUTER_USE_ROUNDS = 10;
+/* Desktop control is not capped per task: the owner gets the whole desktop for the
+ * whole task, and Esc on the overlay is the stop. */
 
 /** Discovery tools the harness owns rather than aiTools: they change what the
  *  model can see next round, so they are answered here without touching the
@@ -295,7 +293,9 @@ export type AgentEvent =
   | { type: "plan"; steps: AgentPlanStep[] }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; name: string; result: unknown }
-  | { type: "done"; text: string; reason: AgentDoneReason };
+  | { type: "done"; text: string; reason: AgentDoneReason }
+  /** What this turn cost: prompt tokens in (cachedPct of them from the provider's cache), tokens out, model calls. */
+  | { type: "usage"; input: number; output: number; calls: number; cachedPct?: number };
 
 export interface AgentToolDef {
   name: string;
@@ -932,7 +932,6 @@ export async function* runAgentStream(
   let browserNav = false;
   let browserAct = false;
   let browserNudges = 0;
-  let computerUseRounds = 0;
   const toolArc = new Map<string, "failed" | "helped" | "ok">();
   const seenObs = new Set<string>();
   let staleRounds = 0;
@@ -1000,7 +999,7 @@ export async function* runAgentStream(
     for (const text of incoming)
       wire.convo.push({
         role: "user",
-        content: `The user added this while you were working. Treat it as a change to the current task and keep going:\n${text}`,
+        content: `The user added this while you were working. Treat it as a change to the current task and keep going. If it corrects a value you already used in an action, redo that action with the new value.\n${text}`,
       });
     return incoming.length > 0;
   };
@@ -1324,18 +1323,6 @@ export async function* runAgentStream(
       if (TOOLS.some(t => t.name === call.name)) discovered.add(call.name);
       // A loaded skill may say "run hookscore.py"; its runner comes with it.
       if (call.name === "use_skill") discovered.add("run_skill_script");
-
-      // Cap browser-action rounds so a login task (Instagram etc.) cannot burn
-      // the whole budget on screenshots and clicks until the laptop OOMs.
-      if ((call.name === "computer_use" || call.name === "agent_computer") && computerUseRounds >= MAX_COMPUTER_USE_ROUNDS) {
-        const result = { error: `This task reached its computer-action limit (${MAX_COMPUTER_USE_ROUNDS} rounds). Take over the browser from here — finish login or any remaining steps yourself, then tell me what changed.` };
-        yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
-        yield { type: "tool_result", id: call.id, name: call.name, result };
-        outcomes.push({ id: call.id, name: call.name, content: JSON.stringify(result) });
-        continue;
-      }
-
-      if (call.name === "computer_use" || call.name === "agent_computer") computerUseRounds++;
 
       let raw: unknown;
       try {

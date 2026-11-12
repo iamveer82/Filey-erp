@@ -64,6 +64,8 @@ let queue: Promise<void> = Promise.resolve();
 let queued = 0;
 let generation = 0;
 let activeRun: AbortController | null = null;
+/** Bridge session of the request being answered right now (null when idle). */
+let activeBridgeSession: string | null = null;
 
 /** A run that never finishes used to wedge the queue forever: the message that
  *  hung was never answered, and every message after it — hours of them — was
@@ -151,9 +153,24 @@ export function startWaAgent(): void {
   });
   let lastBridgeSession: string | null | undefined;
   onBridgeState((state) => {
-    const replaced = !!lastBridgeSession && state.sessionId !== lastBridgeSession;
-    lastBridgeSession = state.sessionId;
-    if (state.state === "connected" && !replaced) return;
+    const session = state.sessionId ?? null;
+    // Before the first status event the only session we know is the one the
+    // message in flight arrived on. Comparing against it means a bridge that
+    // restarted between the send and the answer is still caught.
+    const known = lastBridgeSession ?? activeBridgeSession;
+    const replaced = !!known && session !== known;
+    lastBridgeSession = session;
+    // A reconnect inside the same bridge session is not a new conversation.
+    // Aborting there silently dropped the answer to a message already in
+    // flight and threw away an approval the owner was about to confirm — the
+    // phone showed "Connected" while the task died unanswered. Only a new
+    // session (or a connection that ended) invalidates outstanding work.
+    const ended =
+      session === null ||
+      state.state === "logged_out" ||
+      state.state === "error" ||
+      state.state === "stopped";
+    if (!replaced && !ended) return;
     generation++;
     activeRun?.abort();
     clearRemoteAgentTurns(undefined, "whatsapp");
@@ -214,7 +231,7 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
       if (scope) clearAgentProgress(`whatsapp:${m.from}`, scope);
       waLogAdd({ dir: "in", from: m.from, text: "/new", sessionStart: true }, scope);
     }
-    const text = command === "/new" ? "New conversation started. Your saved preferences and skills are kept."
+    const text = command === "/new" ? "New conversation started. I still have a short recap of our last chat, plus your saved preferences and skills."
       : command === "/stop" ? "WhatsApp tasks stopped and pending approvals cleared. An action already submitted may have completed; check before repeating it."
       : command === "/status" ? `Filey is connected. AI ${aiReady() ? "is ready" : "needs setup in Settings"}. ${queued} request(s) active or queued.`
       : "Send a task, question or voice note. /status checks readiness, /stop cancels WhatsApp tasks, /new starts fresh context. /memory, /persona and /skills show what the agent keeps. Reply YES only to an exact action proposal you want to approve.";
@@ -229,6 +246,9 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
   queue = queue
     .then(async () => {
       if (scope !== agentStorageScope() || epoch !== generation) {
+        // Visible evidence: without this the card showed "Received" and then
+        // silence, which is indistinguishable from a broken connection.
+        waLogAdd({ dir: "out", from: m.from, text: "Not run — the WhatsApp session changed after this message arrived." }, scope ?? undefined);
         await replyWa(m.id, "", m.bridgeSession);
         return;
       }
@@ -238,8 +258,12 @@ async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> 
       }
       const controller = new AbortController();
       activeRun = controller;
+      activeBridgeSession = m.bridgeSession;
       try { await run(deadline, controller.signal); }
-      finally { if (activeRun === controller) activeRun = null; }
+      finally {
+        if (activeRun === controller) activeRun = null;
+        activeBridgeSession = null;
+      }
     })
     .catch((e) => log.warn("whatsapp", "owner request failed", e))
     .finally(() => { queued--; });
@@ -484,6 +508,7 @@ async function handle(m: WaMessage, opts: { voice?: boolean; deadline?: number; 
     }
   } catch (e) {
     if (scope !== agentStorageScope() || epoch !== generation) {
+      waLogAdd({ dir: "out", from: m.from, text: "Stopped before answering — the WhatsApp session changed or the task was cancelled." }, scope ?? undefined);
       await replyWa(m.id, "", m.bridgeSession).catch(() => {});
       return;
     }

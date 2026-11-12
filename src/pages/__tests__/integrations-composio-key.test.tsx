@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import Integrations from "../Integrations";
@@ -111,8 +111,7 @@ it("shows separate save and validation states, then refreshes apps after a succe
   expect(state.save).toHaveBeenCalledWith("ak_synthetic_valid");
   expect(state.list).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("button", { name: "Manage Composio key" })).toBeInTheDocument();
-  const apps = within(screen.getByRole("region", { name: "More apps" }));
-  expect(apps.getByRole("button", { name: "Connect" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: /^Gmail\./ })).toBeEnabled();
   expect(screen.queryByLabelText("Composio API key")).not.toBeInTheDocument();
 });
 
@@ -273,10 +272,9 @@ it("reports metadata errors safely without claiming the connection is checked", 
   expect(screen.queryByText("Verified")).not.toBeInTheDocument();
 });
 
-it("opens key setup from an app's Set up action without another settings page", async () => {
+it("opens key setup from an app tile without another settings page", async () => {
   show();
-  const apps = within(await screen.findByRole("region", { name: "More apps" }));
-  fireEvent.click(apps.getByRole("button", { name: "Set up" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Gmail\./ }));
   expect(await screen.findByLabelText("Composio API key")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Use your own Composio key" })).toHaveAttribute("aria-expanded", "true");
 });
@@ -286,11 +284,11 @@ it("does not open a failed or incomplete app connection and hides raw provider e
   const opened = vi.spyOn(window, "open").mockReturnValue(null);
   state.connect.mockRejectedValueOnce(new Error("ak_synthetic_start_failure"));
   show();
-  fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Gmail\./ }));
   expect(await screen.findByRole("status")).toHaveTextContent("Could not connect this app");
   expect(screen.getByRole("status")).not.toHaveTextContent("ak_synthetic_start_failure");
   state.connect.mockResolvedValueOnce({ redirect_url: "https://auth.composio.dev/synthetic" });
-  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Gmail\./ }));
   await waitFor(() => expect(state.connect).toHaveBeenCalledTimes(2));
   expect(opened).not.toHaveBeenCalled();
   expect(state.status).not.toHaveBeenCalled();
@@ -302,7 +300,7 @@ it("keeps a direct authorization link when popups are blocked and confirms the a
   state.connect.mockResolvedValue({ redirect_url: "https://auth.composio.dev/synthetic", connected_account_id: "ca_synthetic" });
   state.status.mockResolvedValue({ status: "ACTIVE" });
   show();
-  const connect = await screen.findByRole("button", { name: "Connect" });
+  const connect = await screen.findByRole("button", { name: /^Gmail\./ });
   vi.useFakeTimers();
   fireEvent.click(connect);
   await act(async () => { await Promise.resolve(); });
@@ -321,7 +319,7 @@ it("does not open another account's authorization link after a delayed connect r
   const pending = deferred<{ redirect_url: string; connected_account_id: string }>();
   state.connect.mockImplementationOnce(() => pending.promise);
   show();
-  fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Gmail\./ }));
   changeWorkspace("cloud:org:b:user:b");
   await act(async () => { pending.resolve({ redirect_url: "https://auth.composio.dev/synthetic", connected_account_id: "ca_synthetic" }); });
   expect(opened).not.toHaveBeenCalled();
@@ -334,7 +332,7 @@ it("discards search results and errors when the workspace changes", async () => 
   const pending = deferred<[]>();
   state.search.mockImplementationOnce(() => pending.promise);
   show();
-  await screen.findByRole("button", { name: "Connect" });
+  await screen.findByRole("button", { name: /^Gmail\./ });
   fireEvent.change(screen.getByRole("textbox", { name: "Search integrations" }), { target: { value: "private customer search" } });
   fireEvent.click(screen.getByRole("button", { name: "Search" }));
   changeWorkspace("cloud:org:b:user:b");

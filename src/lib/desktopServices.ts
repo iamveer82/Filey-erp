@@ -1,7 +1,7 @@
 import { autoStartBridge } from "./waBridge";
 import { startWaAgent } from "./waAgent";
 import { startProactiveAgent } from "./proactiveAgent";
-import { startTelegramAgent } from "./telegramAgent";
+import { autoStartTelegram, startTelegramAgent } from "./telegramAgent";
 import { runPendingAgentTask } from "./agentProcessorRunner";
 import { fileyAgentEnabled, startFileyAgent } from "./fileyAgent";
 import { startAlwaysOn } from "./alwaysOn";
@@ -18,6 +18,7 @@ export function startDesktopServices(): void {
   startTelegramAgent();
   startProactiveAgent();
   void autoStartBridge().catch(() => console.warn("WhatsApp could not start; open Integrations to retry."));
+  void autoStartTelegram().catch(() => console.warn("Telegram could not start; open Integrations to retry."));
   void (async () => {
     while (true) {
       const did = await runPendingAgentTask("desktop-worker", ["assistant_turn"]).catch(() => false);

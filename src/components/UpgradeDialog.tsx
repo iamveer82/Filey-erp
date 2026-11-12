@@ -1,8 +1,8 @@
 import PaymentReview from "./PaymentReview";
 import { useEffect, useState } from "react";
-import { Check, Cloud, HardDrive } from "lucide-react";
+import { Check, HardDrive } from "lucide-react";
 import { Modal } from "./ui";
-import { PLANS, startCheckout, awaitCloudPlan, type PlanCard } from "../lib/subscription";
+import { PLANS, type PlanCard } from "../lib/subscription";
 import { startFreedomCheckout, claimPurchasedLicense, FREE_LIMITS } from "../lib/license";
 import { useUI } from "../lib/ui";
 
@@ -75,27 +75,13 @@ export default function UpgradeDialog() {
           title={`Get Filey ${selected.name}`}
           lines={[
             { label: `Filey ${selected.name}`, value: selected.price },
-            {
-              label: "Billing",
-              value:
-                selected.id === "cloud" ? "Monthly subscription" : "One-time purchase",
-            },
+            { label: "Billing", value: "One-time purchase" },
           ]}
           total={selected.price}
-          terms={
-            selected.id === "cloud"
-              ? "Renews every month. Cancel any time in Billing."
-              : "Pay once for Freedom. Your account unlocks after payment is confirmed."
-          }
+          terms="Pay once for Freedom. Your account unlocks after payment is confirmed."
           onBack={() => setSelected(null)}
-          onPay={() =>
-            selected.id === "cloud" ? startCheckout("cloud") : startFreedomCheckout()
-          }
-          onVerify={async () =>
-            selected.id === "cloud"
-              ? !!(await awaitCloudPlan(1, 0))
-              : !!(await claimPurchasedLicense(1, 0))?.valid
-          }
+          onPay={() => startFreedomCheckout()}
+          onVerify={async () => !!(await claimPurchasedLicense(1, 0))?.valid}
         />
       ) : (
         <>
@@ -103,7 +89,7 @@ export default function UpgradeDialog() {
             <p className="text-sm text-muted-foreground">
               {reason === "trial"
                 ? "Thanks for trying Filey. Get Freedom to keep creating and editing: pay once and use Filey for life, with every app, updates and support. Everything you made is still here to view, print and export."
-                : "Pay once and use Filey for life, or keep your workspace in the cloud with Pro."}
+                : "Pay once and use Filey for life, with every app, updates and support."}
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -115,9 +101,9 @@ export default function UpgradeDialog() {
             </p>
           )}
 
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            {/* Freedom first: it is what most people want after trying Filey. */}
-            {PLANS.filter((p) => p.id === "lite" || p.id === "cloud").sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended)).map((p) => (
+          <div className="mt-5 grid gap-4 sm:max-w-sm">
+            {/* Freedom is the only plan on sale while Pro is off the menu. */}
+            {PLANS.filter((p) => p.id === "lite").map((p) => (
               <div
                 key={p.id}
                 className={
@@ -126,11 +112,7 @@ export default function UpgradeDialog() {
                 }
               >
                 <div className="flex items-center gap-2">
-                  {p.id === "cloud" ? (
-                    <Cloud size={16} className="text-muted-foreground" />
-                  ) : (
-                    <HardDrive size={16} className="text-muted-foreground" />
-                  )}
+                  <HardDrive size={16} className="text-muted-foreground" />
                   <p className="text-sm font-semibold text-foreground">{p.name}</p>
                 </div>
                 <p className="mt-2 font-pixel text-2xl text-foreground">
@@ -154,7 +136,7 @@ export default function UpgradeDialog() {
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              Billed by Dodo Payments. Freedom is a one-time payment; cancel Pro any time from Settings → Billing.
+              Billed by Dodo Payments. Freedom is a one-time payment; manage it any time from Settings → Billing.
             </p>
             <button className="btn-ghost" onClick={() => setOpen(false)}>
               {reason === "trial" ? "View my data" : "Back to my workspace"}

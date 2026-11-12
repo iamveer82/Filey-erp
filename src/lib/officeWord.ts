@@ -244,6 +244,148 @@ export async function printPdf(pdf: Uint8Array): Promise<void> {
   await invoke("print_page");
 }
 
+/** One page/slide image the user can mark, and the page points it maps to. */
+export interface OfficeMarkImage {
+  dataUrl: string;
+  width: number;
+  height: number;
+  kind: "page" | "slide" | "sheet" | "frame";
+  page?: number;
+  /** Page/slide size in app points. Defaults to the image's pixel size. */
+  pageWidth?: number;
+  pageHeight?: number;
+}
+
+/** The area the user circled, in app points (not screenshot pixels). */
+export interface OfficeMarkTarget {
+  page?: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  pageWidth: number;
+  pageHeight: number;
+}
+
+let markHandler: ((image: OfficeMarkImage) => Promise<OfficeMarkTarget | null>) | null = null;
+
+/** Office work registers the modal that draws on a page/slide image. */
+export function registerOfficeMarker(handler: (image: OfficeMarkImage) => Promise<OfficeMarkTarget | null>): () => void {
+  markHandler = handler;
+  return () => { if (markHandler === handler) markHandler = null; };
+}
+
+/** Ask the person to circle where an image belongs. Null when they cancel. */
+export async function openOfficeMarker(image: OfficeMarkImage): Promise<OfficeMarkTarget | null> {
+  if (!markHandler) throw new Error("Open Office work to mark a placement.");
+  return markHandler(image);
+}
+
+function base64Of(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function pngFromReply(reply: OfficeReply): string | undefined {
+  const result = reply.result as Record<string, unknown> | undefined;
+  const value = result?.png ?? result?.image ?? result?.dataUrl ?? result?.data;
+  if (typeof value !== "string") return undefined;
+  return value.startsWith("data:image/") ? value.split(",", 2)[1] : value;
+}
+
+/** Export the page/slide/frame the person is looking at, for the marking modal.
+ *  Word and Slides give exact coordinates; Sheets is cell-based (no pixel map). */
+export async function captureOfficeMarkImage(win: OfficeWindow, app: OfficeApp, pageNo?: number): Promise<OfficeMarkImage> {
+  const { readOfficeLayout } = await import("./officePlacement");
+  const control = (method: string, params: unknown = {}) => officeControl(win, method, params);
+  const layoutApp = app === "word" || app === "slides" || app === "fig" || app === "vector" ? app : undefined;
+  const layout = layoutApp ? await readOfficeLayout(layoutApp, control).catch(() => undefined) : undefined;
+  const page = layout?.page;
+  if (app === "word") {
+    const { outputDir } = await import("./agentFiles");
+    const target = await outputDir();
+    if (!target) throw new Error("Choose an export folder in Settings first.");
+    const name = `filey-mark-${crypto.randomUUID()}.png`;
+    const path = `${target.dir.replace(/[\\/]+$/, "")}/${name}`;
+    const selection = await control("engine.execute", { command: "document.selection", params: {} }).catch(() => undefined);
+    const selected = (selection?.result as Record<string, unknown> | undefined) ?? {};
+    const currentPage = Number(selected.page ?? (selected.selection as Record<string, unknown> | undefined)?.page) || 1;
+    const pageIndex = pageNo !== undefined && Number.isInteger(pageNo) && pageNo > 0 ? pageNo : currentPage;
+    const exp = await control("engine.execute", { command: "file.exportPng", params: { path, page: pageIndex, scale: 1 } });
+    if (!exp.ok) throw new Error(exp.error || "The page could not be exported.");
+    const { invoke } = await import("@tauri-apps/api/core");
+    const raw = await invoke<ArrayBuffer | number[]>("read_user_document", { path });
+    const bytes = raw instanceof ArrayBuffer ? new Uint8Array(raw) : Uint8Array.from(raw);
+    const base64 = base64Of(bytes);
+    const size = await imagePixelSize(base64);
+    return {
+      dataUrl: `data:image/png;base64,${base64}`,
+      width: size.width,
+      height: size.height,
+      page: pageIndex,
+      pageWidth: page?.width ?? size.width,
+      pageHeight: page?.height ?? size.height,
+      kind: "page",
+    };
+  }
+  if (app === "slides") {
+    const shot = await control("engine.execute", { command: "file.render", params: {} });
+    const png = pngFromReply(shot);
+    if (!png) throw new Error(shot.error || "The current slide could not be rendered.");
+    const size = await imagePixelSize(png);
+    const raw = layout?.raw as { slide?: Record<string, unknown>; inspect?: Record<string, unknown> } | undefined;
+    const selected = (raw?.inspect?.selection as Record<string, unknown> | undefined) ?? {};
+    const current = Number(raw?.slide?.index ?? selected.slide ?? selected.index ?? 0);
+    return {
+      dataUrl: `data:image/png;base64,${png}`,
+      width: size.width,
+      height: size.height,
+      page: Number.isFinite(current) ? current + 1 : 1,
+      pageWidth: page?.width,
+      pageHeight: page?.height,
+      kind: "slide",
+    };
+  }
+  if (app === "pdf") {
+    if (pageNo !== undefined && Number.isInteger(pageNo) && pageNo > 0) await control("ui.set", { key: "page", value: String(pageNo) }).catch(() => undefined);
+    const shot = await control("ui.screenshot", {});
+    const png = pngFromReply(shot);
+    if (!png) throw new Error(shot.error || "The PDF page could not be captured.");
+    const size = await imagePixelSize(png);
+    return { dataUrl: `data:image/png;base64,${png}`, width: size.width, height: size.height, page: pageNo, pageWidth: page?.width, pageHeight: page?.height, kind: "page" };
+  }
+  if (app === "fig") {
+    const shot = await control("ui.render", {});
+    const png = pngFromReply(shot);
+    if (!png) throw new Error(shot.error || "The design could not be rendered.");
+    const size = await imagePixelSize(png);
+    return { dataUrl: `data:image/png;base64,${png}`, width: size.width, height: size.height, pageWidth: page?.width, pageHeight: page?.height, kind: "frame" };
+  }
+  if (app === "vector") {
+    const shot = await control("engine.execute", { command: "clipboard.exportPng", params: {} });
+    const png = pngFromReply(shot);
+    if (!png) throw new Error(shot.error || "The drawing could not be captured.");
+    const size = await imagePixelSize(png);
+    return { dataUrl: `data:image/png;base64,${png}`, width: size.width, height: size.height, pageWidth: page?.width, pageHeight: page?.height, kind: "frame" };
+  }
+  if (app === "sheet") {
+    throw new Error("Sheets placement is cell-based: give place_image a cell (e.g. H1) or an object id from layout. A circled screenshot cannot be mapped to a cell exactly.");
+  }
+  throw new Error(`${OFFICE_APPS[app].label} does not expose a page image for marking. Use a cell or x/y target instead.`);
+}
+
+async function imagePixelSize(base64: string): Promise<{ width: number; height: number }> {
+  if (typeof Image === "undefined") return { width: 0, height: 0 };
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => resolve({ width: 0, height: 0 });
+    img.src = `data:image/png;base64,${base64}`;
+  });
+}
+
 /** One control request in the app's protocol (WordCraft/GridCraft docs/control-protocol.md,
  *  PdfCraft crates/ui-egui/src/control.rs). */
 export async function officeControl(win: Window, method: string, params: unknown = {}, ms = 30_000): Promise<OfficeReply> {

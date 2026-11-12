@@ -10,10 +10,11 @@ import { useAuth } from "../lib/auth";
 import { useUI } from "../lib/ui";
 import { hasTauri } from "../lib/localPaths";
 import { errMsg } from "../lib/format";
-import { bridgeDesktop, OFFICE_APPS, printPdf, registerOffice, registerOfficeFrame, type OfficeApp } from "../lib/officeWord";
+import { bridgeDesktop, OFFICE_APPS, printPdf, registerOffice, registerOfficeFrame, registerOfficeMarker, type OfficeApp, type OfficeMarkImage, type OfficeMarkTarget } from "../lib/officeWord";
 import { Card, Modal, PageHeader } from "../components/ui";
 import ErrorBoundary from "../components/ErrorBoundary";
 import FileyLoader from "../components/FileyLoader";
+import OfficeMarkDialog from "../components/OfficeMarkDialog";
 
 const Letter = lazy(() => import("./Letter"));
 const MyFiles = lazy(() => import("./MyFiles"));
@@ -60,6 +61,13 @@ function OfficeWork() {
   const counts = useRef<Record<string, number>>({});
   const selected = useRef(current);
   selected.current = current;
+  const [mark, setMark] = useState<{ image: OfficeMarkImage; resolve: (target: OfficeMarkTarget | null) => void } | null>(null);
+  const markRef = useRef(mark);
+  markRef.current = mark;
+  useEffect(() => {
+    const stop = registerOfficeMarker(image => new Promise<OfficeMarkTarget | null>(resolve => setMark({ image, resolve })));
+    return () => { stop(); markRef.current?.resolve(null); };
+  }, []);
 
   const openApp = useCallback((app: OfficeApp, title?: string) => {
     const n = counts.current[app] = (counts.current[app] ?? 0) + 1, id = `${app}-${n}`;
@@ -122,7 +130,7 @@ function OfficeWork() {
       {/* Inert behind the print dialog: an app's canvas would take focus and close it. */}
       <div className="relative min-h-0 flex-1" inert={!!printing}>
         <section hidden={current !== "home"} className="h-full overflow-y-auto">
-          <PageHeader title="Office work" subtitle="Word, Sheets, PDF, Slides, Designs, Fig and Vector open in their own tabs, so you can keep several files open." />
+          <PageHeader title="Office work" subtitle="Word, Sheets, PDF, Slides, Designs, Fig and Vector open in their own tabs, so you can keep several files open" />
           <div className="flex flex-wrap gap-4">
             {APPS.map(({ app, name, icon: Icon, note }) => (
               <button key={name} type="button" disabled={!app} onClick={app ? () => open(app) : undefined}
@@ -152,6 +160,24 @@ function OfficeWork() {
         ))}
       </div>
       {printing && <PrintDialog pdf={printing} onClose={() => setPrinting(null)} />}
+      {mark && (
+        <OfficeMarkDialog
+          image={mark.image}
+          onCancel={() => { mark.resolve(null); setMark(null); }}
+          onConfirm={rect => {
+            mark.resolve({
+              page: mark.image.page,
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              pageWidth: mark.image.pageWidth ?? mark.image.width,
+              pageHeight: mark.image.pageHeight ?? mark.image.height,
+            });
+            setMark(null);
+          }}
+        />
+      )}
     </div>
   );
 }

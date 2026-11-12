@@ -244,7 +244,8 @@ export function MetricCard({
   formatValue?: (n: number) => string;
   /** Optional change string like "+12% vs last month" */
   change?: string;
-  /** Tone for a measured change; descriptive metadata stays neutral */
+  /** Only problems get colour: "down" red, "warn" amber. "up" is kept for
+   *  older callers but renders muted, so descriptions never read as good news. */
   changeTone?: "up" | "down" | "warn" | "neutral";
 }) {
   const display = rawValue !== undefined && formatValue ? formatValue(rawValue) : value;
@@ -254,9 +255,7 @@ export function MetricCard({
       ? "text-danger"
       : changeTone === "warn"
         ? "text-warning"
-        : changeTone === "up"
-          ? "text-success"
-          : "text-muted-foreground";
+        : "text-muted-foreground";
   // No border-color transition: the base colour is a theme custom property, and
   // animating it leaves the previous theme's colour painted on a flip.
   return (
@@ -277,12 +276,12 @@ export function MetricCard({
       <p
         ref={numRef}
         title={display}
-        className="text-[26px] leading-tight font-semibold text-foreground mt-2 tabular-nums tracking-tight whitespace-nowrap [overflow-wrap:anywhere]"
+        className="text-[26px] leading-tight font-semibold text-foreground mt-2 tabular-nums whitespace-nowrap [overflow-wrap:anywhere]"
       >
         {display}
       </p>
       {change && (
-        <p className={cn("text-[12px] mt-1.5 leading-4", toneClass)}>
+        <p className={cn("text-xs mt-1.5 leading-4", toneClass)}>
           {change}
         </p>
       )}
@@ -472,7 +471,8 @@ export function DataTable<T>({
     if (!el || typeof ResizeObserver === "undefined") return;
     const check = () => {
       if (el.firstElementChild?.tagName === "TABLE") tableWidth.current = el.scrollWidth;
-      setCompact(el.clientWidth > 0 && el.clientWidth + 1 < Math.max(600, columns.length * 124, tableWidth.current));
+      // ponytail: 96px per column is only a first guess; the measured table width decides after the first paint.
+      setCompact(el.clientWidth > 0 && el.clientWidth + 1 < Math.max(600, columns.length * 96, tableWidth.current));
     };
     check();
     const ro = new ResizeObserver(check);

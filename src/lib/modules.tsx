@@ -7,6 +7,7 @@ import { useLiveSync } from "./realtime";
 
 import { canUseModule, loadModuleAccess, type ModuleAccess } from "./moduleAccess";
 import { isTransientConnectionError } from "./connectionError";
+import { pharmaModeFrom, savePharmaMode } from "./pharmaMode";
 
 const KEY = "modules.disabled";
 
@@ -22,6 +23,11 @@ interface ModulesValue {
   toggle: (id: string) => void;
   /** Re-enable every non-core module at once (clears the disabled list). */
   enableAll: () => void;
+  /** Workspace owner or administrator: may change modules and Pharma mode. */
+  admin: boolean;
+  /** Pharma mode shows the pharmacy counter and batches; off by default. */
+  pharmaMode: boolean;
+  setPharmaMode: (on: boolean) => Promise<void>;
 }
 
 const Ctx = createContext<ModulesValue | null>(null);
@@ -29,6 +35,7 @@ const Ctx = createContext<ModulesValue | null>(null);
 export function ModulesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [disabled, setDisabled] = useState<string[]>([]);
+  const [pharma, setPharma] = useState(false);
   const [access, setAccess] = useState<ModuleAccess | null>(null);
   const [accessWorkspace, setAccessWorkspace] = useState("");
   const [error, setError] = useState("");
@@ -84,7 +91,7 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
       if (!Array.isArray(parsed)) throw new Error("Module settings could not be read.");
       if (active && workspace === workspaceKey()) {
         verifiedWorkspace.current = workspace;
-        setAccess(permissions); setAccessWorkspace(workspace); setDisabled(parsed.map(String));
+        setAccess(permissions); setAccessWorkspace(workspace); setDisabled(parsed.map(String)); setPharma(pharmaModeFrom(rows));
       }
     })().catch(error => {
       if (active) {
@@ -130,16 +137,31 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
 
   const enableAll = () => persist(disabled, []);
 
+  const setPharmaMode = async (on: boolean) => {
+    if (!access?.admin) throw new Error("Only an administrator can change Pharma mode.");
+    const prev = pharma;
+    setPharma(on);
+    try { await savePharmaMode(on); } catch (e) { setPharma(prev); throw e; }
+  };
+
+  // Pharma mode turns the sales counter into the pharmacy counter: same page, pharmacy name.
+  const shown = pharma ? MODULES.map((m) => m.id === "counter"
+    ? { ...m, label: "Pharmacy", short: "Pharmacy", icon: "pharmacy" as AppModule["icon"], desc: "Pharmacy counter: bill from the batch that expires first, with prescription details" }
+    : m) : MODULES;
+
   const value: ModulesValue = {
     loading,
     error,
     refreshError,
     retry: () => retry(n => n+1),
-    modules: MODULES,
+    modules: shown,
     isEnabled,
-    enabledModules: () => MODULES.filter((m) => isEnabled(m.id)),
+    enabledModules: () => shown.filter((m) => isEnabled(m.id)),
     toggle,
     enableAll,
+    admin: !!access?.admin,
+    pharmaMode: pharma,
+    setPharmaMode,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -155,6 +177,9 @@ const defaultValue: ModulesValue = {
   enabledModules: () => [],
   toggle: () => {},
   enableAll: () => {},
+  admin: false,
+  pharmaMode: false,
+  setPharmaMode: async () => {},
 };
 
 export function useModules(): ModulesValue {

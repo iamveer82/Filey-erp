@@ -150,7 +150,7 @@ export default function Team() {
     <div className="mx-auto max-w-[1320px]">
       <PageHeader
         title="Team"
-        subtitle="Private conversations and shared channels, together."
+        subtitle="Private conversations and shared channels, together"
       />
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">

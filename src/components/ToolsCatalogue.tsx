@@ -60,7 +60,7 @@ export default function ToolsCatalogue({ category, query, onFilter, onOpen }: {
   const groups = grouped ? categories.map(cat => ({ key: cat, tools: filtered.filter(tool => tool.cat === cat) })) : [{ key: selected, tools: filtered }];
 
   return <div className="tools-page">
-    <PageHeader title="Tools" subtitle="Everything you need to work with your files."
+    <PageHeader title="Tools" subtitle="Everything you need to work with your files"
       action={<Link to="/files" className="btn-ghost"><FolderOpen size={16} /> My Files</Link>} />
     <section className="tools-intro" aria-label="Local file tools">
       <div>

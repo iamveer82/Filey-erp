@@ -2,7 +2,9 @@ import { Section, Info, KpiCell } from "../components/PartyDetailLayout";
 import CustomerOpeningBalanceFields from "../components/CustomerOpeningBalanceFields";
 import EInvoicePartyFields from "../components/EInvoicePartyFields";
 import { SelectMenu } from "../components/ui-menu";
-import { EMIRATES, normalizeEmirate, readEInvoiceParty } from "../lib/einvoice";
+import SubdivisionField from "../components/SubdivisionField";
+import { fillStateFromGstin, gstinError } from "../lib/gst";
+import { normalizeEmirate, readEInvoiceParty } from "../lib/einvoice";
 import { customerOpeningBalanceInputs, readCustomerOpeningBalance } from "../lib/customerOpeningBalance";
 import { COUNTRY_OPTIONS, taxRegimeFor } from "../lib/taxRegimes";
 import { companyCountry, companyPhoneHint, customerPhoneE164, subdivisionLabel } from "../lib/companyCountry";
@@ -716,7 +718,7 @@ export default function CustomerDetail() {
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <Link
           to="/customers"
-          aria-label="Back to Customers"
+          aria-label="Back to customers"
           className="btn-ghost w-10 !px-0 shrink-0"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -877,7 +879,7 @@ export default function CustomerDetail() {
             >
               {aed(Math.abs(opening))}
               <span className="text-[11px] text-muted-foreground ml-2 font-normal">
-                {opening > 0 ? "Credit / Receivable" : opening < 0 ? "Debit / Payable" : ""}
+                {opening > 0 ? "Credit / receivable" : opening < 0 ? "Debit / payable" : ""}
               </span>
             </div>
           </div>
@@ -1647,11 +1649,11 @@ function EditCustomerModal({
             onChange={(e) => setF({ ...f, phone: e.target.value })}
           />
         </Field>
-        <Field label={f.country_code ? taxRegimeFor(undefined, f.country_code).trnLabel : taxIdLabel}>
+        <Field label={f.country_code ? taxRegimeFor(undefined, f.country_code).trnLabel : taxIdLabel} hint={f.country_code === "IN" ? gstinError(f.trn) || undefined : undefined}>
           <input
             className="input"
             value={f.trn}
-            onChange={(e) => setF({ ...f, trn: e.target.value })}
+            onChange={(e) => setF(fillStateFromGstin({ ...f, trn: e.target.value }))}
           />
         </Field>
         <Field label="Segment">
@@ -1674,11 +1676,8 @@ function EditCustomerModal({
           <Field label="City (optional)"><input className="input" value={f.city}
             onChange={event => setF({ ...f, city: event.target.value })} /></Field>
           <Field label={`${subdivisionLabel(f.country_code)} (optional)`}>
-            {f.country_code === "AE" ? <SelectMenu ariaLabel={subdivisionLabel(f.country_code)}
-              value={f.country_subdivision} onChange={country_subdivision => setF({ ...f, country_subdivision })}
-              options={[{ value: "", label: "Select…" }, ...EMIRATES.map(entry => ({ value: entry.code, label: entry.label }))]} />
-              : <input className="input" value={f.country_subdivision}
-                onChange={event => setF({ ...f, country_subdivision: event.target.value })} />}
+            <SubdivisionField country={f.country_code} value={f.country_subdivision}
+              onChange={country_subdivision => setF({ ...f, country_subdivision })} />
           </Field>
           <Field label="Country (optional)"><SelectMenu ariaLabel="Country" value={f.country_code}
             onChange={country_code => setF({ ...f, country_code, country_subdivision: "" })}

@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { HardDrive, Cloud, Check, ArrowRight } from "lucide-react";
 import { setDataMode } from "../lib/dataMode";
 import { cloudConfigured } from "../lib/supabase";
@@ -10,10 +10,6 @@ function choose(mode: "local" | "cloud") {
 }
 
 export default function SetupNotice() {
-  // Cloud setup steps are hidden by default — an offline-first desktop user
-  // should see one obvious path, not a wall of config (Apple: show the common
-  // path first, advanced one level deeper).
-  const [showCloudSetup, setShowCloudSetup] = useState(false);
   const chooseLocal = () => choose("local");
 
   return (
@@ -29,7 +25,7 @@ export default function SetupNotice() {
           <Logo size={48} />
           <h1 className="mt-4 text-[32px] font-semibold tracking-tight leading-none text-foreground">Filey</h1>
           <p className="mt-3 text-sm text-brand-500">
-            Choose how your business data is stored.
+            Your business data stays on this computer.
           </p>
         </div>
 
@@ -86,32 +82,26 @@ export default function SetupNotice() {
               <span className="h-px flex-1 bg-brand-200 dark:bg-white/10" />
             </div>
 
-            {/* Cloud is the Pro plan. */}
-            <button
-              onClick={() => choose("cloud")}
-              className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
-                         bg-transparent p-4 transition-colors duration-200
-                         hover:bg-brand-50 dark:hover:bg-white/5 active:scale-[0.99] cursor-pointer
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
-            >
+            {/* Cloud mode is being rebuilt: say so, and keep the one path that
+                works today. */}
+            <div className="w-full rounded-xl border border-dashed border-brand-200 dark:border-white/10 p-4">
               <div className="flex items-center gap-3">
                 <div className="shrink-0 grid place-items-center h-9 w-9 rounded-xl bg-brand-100 dark:bg-white/10 text-ink">
                   <Cloud size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-ink">Use Filey Cloud</h2>
+                    <h2 className="text-sm font-semibold text-ink">Filey Cloud</h2>
                     <span className="rounded-full bg-brand-100 dark:bg-white/10 px-2 py-0.5 text-[11px] font-medium text-brand-500">
-                      Pro · 36 AED / month
+                      Coming soon
                     </span>
                   </div>
                   <p className="text-[13px] text-brand-500">
-                    Keep your workspace in the cloud: Filey on the web, sync across your devices and your team.
+                    Cloud mode is coming soon. Until then your records stay on this computer.
                   </p>
                 </div>
-                <ArrowRight size={16} className="shrink-0 text-brand-300" />
               </div>
-            </button>
+            </div>
           </>
         )}
         {!cloudConfigured && (
@@ -119,7 +109,7 @@ export default function SetupNotice() {
             {/* No cloud in this build - offline is the only working path. */}
             <button
               onClick={() => void chooseLocal()}
-              className="mb-4 w-full text-left rounded-xl border border-brand-200 dark:border-white/10
+              className="w-full text-left rounded-xl border border-brand-200 dark:border-white/10
                          bg-white p-4 shadow-sm transition-colors duration-200
                          hover:border-brand-300 dark:hover:border-white/20 active:scale-[0.99] cursor-pointer
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-2"
@@ -137,67 +127,14 @@ export default function SetupNotice() {
                 <ArrowRight size={16} className="shrink-0 text-brand-300" />
               </div>
             </button>
-          <div className="rounded-xl border border-brand-200 dark:border-white/10 p-4">
-            <button
-              onClick={() => setShowCloudSetup((v) => !v)}
-              className="flex w-full items-center gap-3 text-left cursor-pointer"
-            >
-              <div className="shrink-0 grid place-items-center h-9 w-9 rounded-xl bg-brand-100 dark:bg-white/10 text-ink">
-                <Cloud size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h2 className="text-sm font-semibold text-ink">Connect Supabase</h2>
-                <p className="text-[13px] text-brand-500">For online sync across devices</p>
-              </div>
-              <ArrowRight
-                size={16}
-                className={`shrink-0 text-brand-300 transition-transform duration-200 ${showCloudSetup ? "rotate-90" : ""}`}
-              />
-            </button>
-            {showCloudSetup && (
-              <ol className="mt-4 space-y-3 border-t border-brand-100 dark:border-white/8 pt-4 text-[13px] text-brand-500 list-decimal pl-5">
-                <li>
-                  Create a free project at{" "}
-                  <span className="font-medium text-ink">supabase.com</span>.
-                </li>
-                <li>
-                  In the dashboard open <span className="font-medium text-ink">SQL Editor</span> and
-                  run{" "}
-                  <code className="bg-brand-100 dark:bg-white/12 px-1.5 py-0.5 rounded text-xs">
-                    supabase/schema.sql
-                  </code>
-                  .
-                </li>
-                <li>
-                  Copy the <em>Project URL</em> and <em>anon public</em> key from{" "}
-                  <span className="font-medium text-ink">Settings → API</span>.
-                </li>
-                <li>
-                  Paste them into{" "}
-                  <code className="bg-brand-100 dark:bg-white/12 px-1.5 py-0.5 rounded text-xs">
-                    .env
-                  </code>
-                  :
-                  <pre className="mt-2 bg-foreground text-background text-xs rounded-xl p-3 overflow-x-auto">
-                    {`VITE_SUPABASE_URL=https://xxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOi...`}
-                  </pre>
-                </li>
-                <li>
-                  Restart{" "}
-                  <code className="bg-brand-100 dark:bg-white/12 px-1.5 py-0.5 rounded text-xs">
-                    npm run tauri dev
-                  </code>
-                  .
-                </li>
-              </ol>
-            )}
-          </div>
+            <p className="mt-4 rounded-xl border border-dashed border-brand-200 dark:border-white/10 p-4 text-[13px] text-brand-500">
+              Cloud mode is coming soon.
+            </p>
           </>
         )}
 
         <p className="mt-6 text-center text-xs text-brand-400">
-          You can change this later in Settings.
+          You can move your data folder later in Settings.
         </p>
       </div>
     </div>

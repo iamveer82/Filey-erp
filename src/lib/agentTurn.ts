@@ -1,16 +1,16 @@
 /* One Filey AI chat turn on THIS device's engine. The in-app chat runs it, and so
  * does a desktop answering a linked phone (linkedAgent.ts): the same prompt, the
  * same tools, the same approvals on both paths. */
-import { aiAgentStream, aiAutonomousStream, buildSystemPrompt, getPersona, type AiImage, type AiMessage } from "./ai";
+import { aiAgentStream, aiAutonomousStream, aiChat, buildSystemPrompt, getPersona, type AiImage, type AiMessage } from "./ai";
 import { AGENT_HABITS, memoryDigest } from "./aiMemory";
 import { skillsIndex } from "./agentSkills";
 import { buildAiContext } from "./aiContext";
-import { fileyAgentEnabled, fileyAgentTurn } from "./fileyAgent";
+import { chatRecap, fileyAgentEnabled, fileyAgentTurn, refreshIdleFileyAgentSession } from "./fileyAgent";
 import { agentPersonaPrompt } from "./agentPersona";
 import { agentSystemBase, memoryNudge } from "./agentPrompt";
 import { stackHint } from "./agentStack";
 import { isToolAllowed } from "./capabilities";
-import { gateFor } from "./agentMode";
+import { engineModeNote, gateFor } from "./agentMode";
 import type { AgentEvent } from "./agentHarness";
 import type { ConfirmFn } from "./aiTools";
 import type { AiEffort } from "./aiEndpoint";
@@ -25,6 +25,27 @@ export const canLearnSkills = (): boolean => isToolAllowed("learn_skill") && gat
  *  ERP tools are offered by the harness and mapped by appMapPrompt; the brief says who the
  *  agent is and how it works, not which 150 tools exist. */
 export const agentSystem = () => agentSystemBase("app", { canLearnSkills: canLearnSkills() });
+
+/** A bare greeting, thanks or goodbye. Not "ok", "yes" or "go ahead": those may answer a
+ *  question the agent asked, so they always reach the full agent. */
+const SMALL_TALK = /^(h+i+|h+e+y+|h+y+|hello+|hiya|salam|salaam|as+alam(u|o)?\s?alaikum|marhaba|good\s(morning|afternoon|evening)|thanks?(\s(you|u))?(\s(a\slot|so\smuch|very\smuch))?|thx|bye|see\s(you|ya))[\s!.,?\p{Extended_Pictographic}️]*$/iu;
+
+export function isSmallTalk(text: string): boolean {
+  const message = text.trim();
+  return message.length <= 40 && SMALL_TALK.test(message);
+}
+
+const SMALL_TALK_SYSTEM = "You are Filey AI, the assistant in the owner's Filey ERP app. Answer this short message in one or two friendly sentences, in the owner's language, and offer help with their business, documents or computer tasks. No lists.";
+
+/** Small talk needs no tools, engine session or ~15K-token tool setup: one short model call on
+ *  the same model and billing writes the reply (nothing is canned). */
+function smallTalkTurn(input: AgentTurnInput, options: AgentTurnOptions): AsyncGenerator<AgentEvent, string> {
+  // eslint-disable-next-line require-yield -- one short answer, no tool events
+  return (async function* (): AsyncGenerator<AgentEvent, string> {
+    return aiChat([{ role: "system", text: SMALL_TALK_SYSTEM }, ...input.history.slice(-2), { role: "user", text: input.goalText }],
+      { signal: options.signal, maxTokens: 120 });
+  })();
+}
 
 export interface AgentTurnInput {
   chatId: string;
@@ -83,11 +104,17 @@ export function runAgentTurn(input: AgentTurnInput, options: AgentTurnOptions): 
   // Filey Agent (Hermes) is the agent: it keeps its own session history, memory and persona;
   // business actions come back here through runTool. Attachments reach its tools through this
   // turn's slot. No backup brain: when the engine is down the turn says why.
-  if (fileyAgentEnabled())
-    return fileyAgentTurn(input.chatId, input.goalText, {
+  // The mode rides each in-app turn (one line), so the model acts instead of asking
+  // permission in chat; the app shows an approval card when one is really needed.
+  // A chat idle for hours restarts its engine session small; a short recap keeps the thread.
+  if (fileyAgentEnabled()) {
+    if (!input.images?.length && isSmallTalk(input.goalText)) return smallTalkTurn(input, options);
+    const recap = refreshIdleFileyAgentSession(input.chatId) ? chatRecap(input.history) : "";
+    return fileyAgentTurn(input.chatId, [engineModeNote(), recap, input.goalText].filter(Boolean).join("\n\n"), {
       confirm: options.confirm, isOwner: options.isOwner, turnId: options.turnId, signal: options.signal, agentId: options.agentId,
       drainSteer: options.drainSteer, returnSteer: options.returnSteer,
-    }, input.images);
+    }, input.images, input.goalText);
+  }
   // Web and phone: the agent lives on the owner's computer. AgentChat sends the turn there
   // over Filey Link first; this is what answers when no computer is open.
   // eslint-disable-next-line require-yield -- a turn that fails before its first event

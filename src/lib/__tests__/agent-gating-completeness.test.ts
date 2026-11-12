@@ -23,6 +23,8 @@ const READ_ONLY: Record<string, string> = {
   show_ui: "draws a card in the chat; its code runs sandboxed on its own origin with no network or app access",
   show_openui: "draws an OpenUI card in the chat from the given program; a card cannot run tools",
   financial_summary: "read-only balances",
+  expiry_report: "computed expiry and low-stock report",
+  profit_report: "computed report",
   vat_return: "computed report",
   financial_statements: "computed report",
   receivables_aging: "computed report",

@@ -270,6 +270,8 @@ export default function ModernOverview() {
     {
       label: "Outstanding",
       value: aed(receivable.total),
+      // Filey's highlighter marks the one figure that needs attention: money still owed.
+      mark: receivable.total > 0,
       delta: null as number | null,
       hint: `${receivable.overdue} overdue`,
       to: "/invoicing",
@@ -295,14 +297,13 @@ export default function ModernOverview() {
     ).catch((error) => toast.error(error instanceof Error ? error.message : "Could not export CSV."));
   };
 
-  const firstName =
-    (profile?.name || "").trim().split(" ")[0] || companyName || "your business";
+  const period = new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
   return (
     <div className="max-w-[1320px] mx-auto pb-4">
       <PageHeader
-        title={<><AnnotatedText variant="highlight">Welcome back</AnnotatedText>, {firstName}</>}
-        subtitle="Live view of your business, driven by real data in your workspace."
+        title={(companyName !== "My Company" && companyName) || profile?.company || "Overview"}
+        subtitle={period}
         action={
           <>
             <button onClick={onExport} className="btn-ghost" disabled={loading || !!error}>
@@ -337,15 +338,15 @@ export default function ModernOverview() {
                 i % 2 === 0 && "sm:border-r lg:border-r"
               )}
             >
-              <div className="text-[12px] text-muted-foreground">{k.label}</div>
+              <div className="text-xs text-muted-foreground">{k.label}</div>
               {loading ? (
                 <Skeleton className="mt-3 h-8 w-28" />
               ) : (
-                <div className="mt-3 text-[22px] font-semibold text-foreground leading-tight tracking-tight tabular-nums">
-                  {error ? "—" : k.value}
+                <div className="mt-3 text-[22px] font-semibold text-foreground leading-tight tabular-nums">
+                  {error ? "—" : "mark" in k && k.mark ? <AnnotatedText variant="highlight">{k.value}</AnnotatedText> : k.value}
                 </div>
               )}
-              <div className="mt-2 flex items-center gap-2 text-[11.5px]">
+              <div className="mt-2 flex items-center gap-2 text-xs">
                 {!loading && !error && k.delta != null && (
                   <span
                     title="vs previous 30 days"
@@ -356,7 +357,7 @@ export default function ModernOverview() {
                   >
                     <Icon className="h-3.5 w-3.5" />
                     {k.delta >= 0 ? "+" : ""}
-                    {k.delta.toFixed(1)}%
+                    {k.delta.toFixed(1)}% vs prior 30d
                   </span>
                 )}
                 <span className="text-muted-foreground">{loading ? "Loading workspace…" : error ? "Data unavailable" : k.hint}</span>

@@ -2617,6 +2617,27 @@ export const fin = {
         (client, payload) => localJournalWorkflow("post", payload, client))).id;
     });
   },
+  /** India TDS: a payment row saved for the kept-back amount settles the invoice but
+   *  posts it to Cash & Bank, where no money moved. This journal moves it out: into
+   *  "TDS Credit (Form 26AS)" for a sale (claimed against income tax), or into
+   *  "TDS Deducted (to deposit)" for a purchase (owed to the government). Account names
+   *  avoid "receivable"/"payable" so the AR and AP lookups never pick them. `reverse`
+   *  undoes the move when that payment row is removed. */
+  moveTds: (amount: number, purchase: boolean, date: string, note: string, reverse = false) =>
+    online(async () => {
+      if (!Number.isFinite(amount) || amount <= 0 || amount !== r2(amount)) throw new Error("Enter a positive TDS amount with at most two decimals.");
+      // The payment workflow posts to the first Cash & Bank account by id; move it from the same one.
+      const accounts = await sList<any>("accounts", [{ col: "id", asc: true }]);
+      const cash = accounts.find((a) => a.account_type === "asset" && /cash|bank/i.test(a.name) && (!isLocalMode() || localRowOwnedByActor(a)));
+      if (!cash) throw new Error("No Cash & Bank account to move the TDS out of.");
+      const tdsId = await (purchase
+        ? findOrCreateAccount("liability", "2160", "TDS Deducted (to deposit)", /tds deducted|tds to deposit/i)
+        : findOrCreateAccount("asset", "1260", "TDS Credit (Form 26AS)", /tds credit|26as/i));
+      // Sale: the cash never arrived (credit Cash). Purchase: it never left (debit Cash).
+      const cashSide = purchase !== reverse ? "debit" : "credit";
+      await fin.postTransaction(cash.id, cashSide, amount, `${note}: TDS ${reverse ? "move reversed" : "kept back, not cash"}`, date);
+      await fin.postTransaction(tdsId, cashSide === "debit" ? "credit" : "debit", amount, note, date);
+    }),
   updateTransaction: (
     id: number,
     patch: Partial<Pick<Txn, "description" | "txn_date">>

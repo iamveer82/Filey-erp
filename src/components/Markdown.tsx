@@ -8,8 +8,8 @@
 // therefore of other people's data. Building React nodes means a reply can
 // never inject markup, no sanitiser to keep correct.
 //
-// ponytail: no tables, no images, no nested lists. Add them when a reply
-// actually needs one — every rule here is one the agent's replies hit daily.
+// ponytail: no images, no nested lists, no column alignment. Add them when a
+// reply actually needs one — every rule here is one the agent's replies hit daily.
 import { Fragment, type ReactNode } from "react";
 
 /** `**bold**`, `*italic*`, `` `code` ``, [text](url) — applied in one pass so
@@ -79,12 +79,16 @@ function inline(text: string, keyBase: string): ReactNode[] {
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const NUMBERED = /^\s*(\d+)[.)]\s+(.*)$/;
 const HEADING = /^(#{1,4})\s+(.*)$/;
+const TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+const cells = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
 
 export default function Markdown({ text }: { text: string }) {
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
   let key = 0;
+  // A table is a `|` header row followed by a `|---|---|` rule.
+  const tableAt = (at: number) => lines[at]?.includes("|") && TABLE_RULE.test(lines[at + 1] ?? "");
 
   while (i < lines.length) {
     const line = lines[i];
@@ -179,11 +183,46 @@ export default function Markdown({ text }: { text: string }) {
       continue;
     }
 
+    if (tableAt(i)) {
+      const head = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) {
+        rows.push(cells(lines[i]));
+        i++;
+      }
+      const t = key++;
+      blocks.push(
+        <div key={t} className="my-2 overflow-x-auto rounded-lg border border-border">
+          <table className="w-full border-collapse text-left text-[13px]">
+            <thead className="bg-muted">
+              <tr>
+                {head.map((c, n) => (
+                  <th key={n} className="px-3 py-1.5 font-semibold text-foreground">{inline(c, `t${t}-h${n}`)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, r) => (
+                <tr key={r} className="border-t border-border">
+                  {head.map((_, n) => (
+                    <td key={n} className="px-3 py-1.5 align-top">{inline(row[n] ?? "", `t${t}-${r}-${n}`)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
     // Paragraph: consecutive plain lines, single newlines preserved as breaks.
     const para: string[] = [];
     while (
       i < lines.length &&
       lines[i].trim() &&
+      !tableAt(i) &&
       !lines[i].trimStart().startsWith("```") &&
       !lines[i].trimStart().startsWith(">") &&
       !HEADING.test(lines[i]) &&

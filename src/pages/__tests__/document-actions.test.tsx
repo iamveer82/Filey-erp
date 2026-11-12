@@ -506,7 +506,7 @@ describe("invoice editor actions", () => {
     setCacheOrg("document-test-org", "document-test-user");
     fireEvent.click(view.getByRole("button", { name: "More actions" }));
     fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-    const number = await view.findByLabelText("Invoice Number");
+    const number = await view.findByRole("textbox", { name: "Invoice number" });
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
     await waitFor(() => expect(billing.saveDoc).toHaveBeenCalledOnce());
     expect(number).toBeDisabled();
@@ -589,7 +589,7 @@ describe("invoice editor actions", () => {
     fireEvent.change(review.getByRole("textbox", { name: "Legal registration number" }), { target: { value: "TL-DEMO" } });
     fireEvent.mouseDown(review.getByRole("tab", { name: /^Buyer/ }), { button: 0, ctrlKey: false });
     fireEvent.change(review.getByRole("textbox", { name: "Buyer identifier" }), { target: { value: "BUYER-DEMO" } });
-    fireEvent.mouseDown(review.getByRole("tab", { name: /^Tax & Payment/ }), { button: 0, ctrlKey: false });
+    fireEvent.mouseDown(review.getByRole("tab", { name: /^Tax & payment/ }), { button: 0, ctrlKey: false });
     fireEvent.change(review.getByRole("textbox", { name: "Bank account / IBAN" }), { target: { value: "AE-DEMO-ACCOUNT" } });
     expect(review.getByRole("button", { name: "Save & export XML" })).toBeDisabled();
     fireEvent.click(view.getByTitle("Save without sending (Ctrl+S)"));
@@ -891,7 +891,7 @@ describe("receipt actions", () => {
     fireEvent.click(await view.findByText("RCPT-AUDIT"));
     fireEvent.change(await view.findByDisplayValue("120"), { target: { value: "175" } });
     expect(view.getByRole("heading", { level: 1, name: "Edit Receipt" })).toBeTruthy();
-    expect(view.queryByRole("heading", { level: 1, name: "Payment Receipts" })).toBeNull();
+    expect(view.queryByRole("heading", { level: 1, name: "Payment receipts" })).toBeNull();
     fireEvent.click(view.getByRole("button", { name: "Mark paid" }));
     await waitFor(() => expect(status).toHaveBeenCalledWith(7, "paid"));
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: 7, amount: 175, currency: "USD" }));
@@ -954,7 +954,7 @@ it("keeps purchase-order dashboard amounts in their own currencies", async () =>
   const aed = view.getByText("Total value (AED)");
   expect(usd.parentElement?.parentElement).toHaveTextContent(/120/);
   expect(aed.parentElement?.parentElement).toHaveTextContent(/50/);
-  expect(view.queryByText("Total Value")).toBeNull();
+  expect(view.queryByText("Total value")).toBeNull();
 });
 
 it("locks purchase-order editing while its saved snapshot is pending", async () => {
@@ -967,7 +967,7 @@ it("locks purchase-order editing while its saved snapshot is pending", async () 
   await view.findByText("PO-SAVE");
   fireEvent.click(view.getByRole("button", { name: "More actions" }));
   fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-  const supplier = await view.findByLabelText("Supplier Name");
+  const supplier = await view.findByLabelText("Supplier name");
   fireEvent.click(view.getAllByRole("button", { name: "Save" })[0]);
   await waitFor(() => expect(pos.save).toHaveBeenCalledOnce());
   expect(supplier).toBeDisabled();
@@ -985,7 +985,7 @@ it("does not silently drop a priced purchase-order line with an empty descriptio
   await view.findByText("PO-LINES");
   fireEvent.click(view.getByRole("button", { name: "More actions" }));
   fireEvent.click(await view.findByRole("menuitem", { name: "Edit" }));
-  await view.findByLabelText("Supplier Name");
+  await view.findByLabelText("Supplier name");
   fireEvent.click(view.getAllByRole("button", { name: "Save" })[0]);
   expect(await view.findByText("Add a description to every priced item before saving.")).toBeTruthy();
   expect(pos.save).not.toHaveBeenCalled();
@@ -1056,6 +1056,22 @@ it("exports the recorded payslip amounts after the employee's salary changes", a
   fireEvent.change(page.getByLabelText("Month"), { target: { value: "" } });
   expect(page.getByRole("button", { name: "Download PDF" })).toBeDisabled();
   expect(page.getByRole("button", { name: "Save payslip" })).toBeDisabled();
+});
+
+it("records a basic salary typed for one month without changing the monthly salary", async () => {
+  vi.spyOn(hr, "employees").mockResolvedValue([{ id: 1, name: "Test employee", salary: 6000 } as Employee]);
+  vi.spyOn(hr, "payroll").mockResolvedValue([]);
+  const post = vi.spyOn(hr, "runPayroll").mockResolvedValue(1);
+  const page = render(<MemoryRouter initialEntries={["/people/1/payslip"]}><UIProvider><Routes><Route path="/people/:id/payslip" element={<PayslipPage />} /></Routes></UIProvider></MemoryRouter>);
+  fireEvent.change(await page.findByLabelText("Month"), { target: { value: "2026-07" } });
+  const basic = page.getByLabelText(/Basic Salary/);
+  expect(basic).toHaveValue(6000);
+  expect(basic).not.toBeDisabled();
+  fireEvent.change(basic, { target: { value: "4500" } });
+  expect(page.getByText(/This month only/)).toBeTruthy();
+  fireEvent.click(page.getByRole("button", { name: "Save payslip" }));
+  fireEvent.click(await page.findByRole("button", { name: "Record payslip" }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith(1, "2026-07", 4500, 0, 0));
 });
 
 describe("quotation actions", () => {
@@ -1153,7 +1169,7 @@ it("preserves delivery edits when the company profile loads slowly", async () =>
   await waitFor(() => expect(create).toBeEnabled());
   setCacheOrg("document-test-org", "document-test-user");
   fireEvent.click(create);
-  const party = await view.findByLabelText("Party Name");
+  const party = await view.findByLabelText("Party name");
   fireEvent.change(party, { target: { value: "Unsaved recipient" } });
   await act(async () => { finish(company); });
   expect(party).toHaveValue("Unsaved recipient");

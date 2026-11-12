@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, Copy, Download, Eye, Image as ImageIcon, Mail, MessageCircle, Package, PenTool, Plus, Save, Stamp, Trash2 } from "lucide-react";
 import { billing, crm, type CompanyProfile, type CrmCustomer, type InvoiceDocSummary } from "../lib/api";
 import { AGENT_STORAGE_EVENT, agentStorageScope, requireAgentStorageScope } from "../lib/agentStorage";
@@ -11,7 +11,7 @@ import { bytesToBase64, emailShell, esc, sendEmail } from "../lib/email";
 import { autoSaveDocument, safeName } from "../lib/files";
 import { downloadFile } from "../lib/pdfTools";
 import { reactToPdfBytes } from "../lib/reactPdf";
-import { blankPackagingForm, deletePackagingList, loadPackagingLists, packagingTotals, savePackagingList, validatePackagingForm, type PackagingForm, type PackagingItem, type PackagingRecord, type PackagingStatus } from "../lib/packagingLists";
+import { blankPackagingForm, deletePackagingList, loadPackagingLists, packagingTotals, savePackagingList, validatePackagingForm, withInvoiceItems, EXPORT_FIELDS, itemVolume, type PackagingForm, type PackagingItem, type PackagingRecord, type PackagingStatus } from "../lib/packagingLists";
 import { Badge, Card, DataTable, ErrorBanner, Field, FilterChip, Modal, PageHeader, SearchInput, ToggleTile } from "../components/ui";
 import { DateField } from "../components/DatePicker";
 import { SelectMenu } from "../components/ui-menu";
@@ -188,7 +188,7 @@ export default function PackagingList() {
   return <>
     {messageDialog && <DocumentMessageDialog {...messageDialog} onClose={() => setMessageDialog(null)} />}
     {form ? <PackagingEditor form={form} setForm={setForm} customers={customers} invoices={invoices} companyStampSig={stampSig} busy={busy} lookupError={lookupError} lookupsLoading={lookupsLoading} onRetryLookups={() => { void loadLookups(); }} onBack={() => { void back(); }} onSave={() => { void run(async () => { await save(); }); }} onDownload={() => { void download(form); }} onPreview={() => setPreview(form)} onShare={shareEditor} /> : <>
-      <PageHeader title="Packaging List" subtitle="Prepare shipment contents, packages and weights" action={<button type="button" className="btn-primary" disabled={loading || creationLoading || !!loadError || busy} onClick={create}><Plus size={16} /> New packaging list</button>} />
+      <PageHeader title="Packaging list" subtitle="Prepare shipment contents, packages and weights" action={<button type="button" className="btn-primary" disabled={loading || creationLoading || !!loadError || busy} onClick={create}><Plus size={16} /> New packaging list</button>} />
       {creationLoading && <p role="status" className="mb-4 text-sm text-muted-foreground">Loading company and document settings…</p>}
       {loadError && <div className="mb-4 space-y-2"><ErrorBanner message={loadError} /><button type="button" className="btn-ghost" onClick={() => { setLoading(true); void refresh(); }}>Retry</button></div>}
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -237,7 +237,31 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
 }) {
   const [browseTemplates, setBrowseTemplates] = useState(false);
   const [templatePreview, setTemplatePreview] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
+  const { toast } = useUI();
   const set = <K extends keyof PackagingForm>(key: K, value: PackagingForm[K]) => setForm({ ...form, [key]: value });
+  // The linked invoice's lines become shipment contents; the recipient fills in when still empty.
+  const copyInvoiceItems = async () => {
+    if (form.invoice_id == null) return;
+    setCopying(true);
+    try {
+      const invoice = await billing.getDoc(form.invoice_id);
+      const added = (invoice.items ?? []).filter((line) => line.description?.trim()).length;
+      if (!added) { toast.error(`${invoice.number} has no lines to copy.`); return; }
+      const next = withInvoiceItems(form, invoice.items ?? []);
+      setForm({
+        ...next,
+        recipient_name: form.recipient_name || invoice.customer_name || "",
+        recipient_address: form.recipient_address || invoice.customer_address || "",
+        recipient_email: form.recipient_email || invoice.customer_email || "",
+      });
+      toast.success(`Copied ${added} line${added === 1 ? "" : "s"} from ${invoice.number}. Add the weights and packages.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "The invoice could not be read.");
+    } finally {
+      setCopying(false);
+    }
+  };
   const setItem = (id: string, patch: Partial<PackagingItem>) => set("items", form.items.map((item) => item.id === id ? { ...item, ...patch } : item));
   const duplicateItem = (index: number) => {
     if (form.items.length >= 500) return;
@@ -260,7 +284,7 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
     ...(key === "show_stamp" && event.target.checked && stamp ? { stamp: { ...stamp, opacity: 100 } } : {}), ...(key === "show_signature" && event.target.checked && signature ? { signature: { ...signature, opacity: 100 } } : {}) })} />{label}</label>;
 
   return <>
-    <PageHeader title={form.number || "New packaging list"} subtitle="Add the shipment details and review every page before sharing." action={<div className="flex flex-wrap gap-2">
+    <PageHeader title={form.number || "New packaging list"} subtitle="Add the shipment details and review every page before sharing" action={<div className="flex flex-wrap gap-2">
       <button type="button" className="btn-ghost" onClick={onBack} disabled={busy}><ArrowLeft size={15} /> Back</button>
       <button type="button" className="btn-ghost" onClick={onPreview} disabled={busy}><Eye size={15} /> Preview</button>
       <button type="button" className="btn-ghost" onClick={onDownload} disabled={busy}><Download size={15} /> PDF</button>
@@ -289,11 +313,17 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
               </section>
               <section className="space-y-3"><h2 className="text-sm font-semibold">Shipment & references</h2>
                 <Field label="Link an invoice (optional)" hint="A reference only. Edit the reference below to use your own."><SelectMenu value={form.invoice_id == null ? "" : String(form.invoice_id)} disabled={lookupsLoading || busy} onChange={(value) => { if (!value) { set("invoice_id", null); return; } const invoice = invoices.find((entry) => String(entry.id) === value); if (invoice) setForm({ ...form, invoice_id: invoice.id, invoice_reference: invoice.number }); }} options={[{ value: "", label: "No linked invoice" }, ...(form.invoice_id != null && !invoices.some((invoice) => invoice.id === form.invoice_id) ? [{ value: String(form.invoice_id), label: form.invoice_reference || "Saved invoice reference" }] : []), ...invoices.map((invoice) => ({ value: String(invoice.id), label: `${invoice.number} · ${invoice.customer_name}` }))]} ariaLabel="Optional invoice reference" searchPlaceholder="Search invoices…" /></Field>
+                {form.invoice_id != null && <button type="button" className="btn-ghost" disabled={busy || copying} onClick={() => { void copyInvoiceItems(); }}><Copy size={15} /> {copying ? "Copying…" : "Copy items from this invoice"}</button>}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {textField("invoice_reference", "Invoice reference (optional)")}{textField("order_reference", "Order / LPO reference")}
                   <Field label="Dispatch date"><DateField value={form.dispatch_date} onChange={(value) => set("dispatch_date", value)} /></Field>
                   {textField("carrier", "Carrier")}{textField("tracking_number", "Tracking / shipment number")}
                 </div>
+                <details className="rounded-xl border border-border p-3" open={EXPORT_FIELDS.some(([key]) => !!form[key])}>
+                  <summary className="cursor-pointer text-sm font-medium">Export details (optional)</summary>
+                  <p className="mt-1 text-xs text-muted-foreground">Printed in the header for customs and the shipping line.</p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">{EXPORT_FIELDS.map(([key, label]) => <Fragment key={key}>{textField(key, label)}</Fragment>)}</div>
+                </details>
               </section>
               <section className="space-y-3"><h2 className="text-sm font-semibold">Sender</h2><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{textField("company_name", "Company name")}{textField("company_trn", "Company registration / tax number")}{textField("company_email", "Company email", "email")}{textField("company_phone", "Company phone", "tel")}</div><Field label="Company address"><textarea className="input min-h-20 w-full resize-y" maxLength={400} value={form.company_address} onChange={(event) => set("company_address", event.target.value)} /></Field></section>
               <Field label="Notes"><textarea className="input min-h-28 w-full resize-y" maxLength={10000} value={form.notes} onChange={(event) => set("notes", event.target.value)} /></Field>
@@ -331,8 +361,13 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
                   </Field>
                   <Field label="Package type"><input className="input w-full" maxLength={60} value={item.package_type} placeholder="Box, pallet…" onChange={(event) => setItem(item.id, { package_type: event.target.value })} /></Field>
                   {(["package_count", "net_weight", "gross_weight"] as const).map((key) => <Field key={key} label={key === "package_count" ? "Packages" : `${key === "net_weight" ? "Net" : "Gross"} / unit (${form.weight_unit})`}><input className="input w-full" type="number" min="0" step={key === "package_count" ? "1" : "any"} value={item[key] ?? ""} placeholder="Optional" onChange={(event) => setItem(item.id, { [key]: event.target.value === "" ? null : Number(event.target.value) })} /></Field>)}
+                  <Field label="HS code"><input className="input w-full" maxLength={20} value={item.hs_code ?? ""} placeholder="Optional" onChange={(event) => setItem(item.id, { hs_code: event.target.value })} /></Field>
+                  <Field label="Package size L × W × H (cm)">
+                    <div className="grid grid-cols-3 gap-1">{(["length_cm", "width_cm", "height_cm"] as const).map((key) => <input key={key} aria-label={`Package ${key.replace("_cm", "")} (cm)`} className="input w-full" type="number" min="0" step="any" value={item[key] ?? ""} placeholder={key[0].toUpperCase()}
+                      onChange={(event) => setItem(item.id, { [key]: event.target.value === "" ? null : Number(event.target.value) })} />)}</div>
+                  </Field>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>Net: {item.net_weight == null ? "—" : amount(item.qty * item.net_weight)} {form.weight_unit}</span><span>Gross: {item.gross_weight == null ? "—" : amount(item.qty * item.gross_weight)} {form.weight_unit}</span></div>
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>Net: {item.net_weight == null ? "—" : amount(item.qty * item.net_weight)} {form.weight_unit}</span><span>Gross: {item.gross_weight == null ? "—" : amount(item.qty * item.gross_weight)} {form.weight_unit}</span>{itemVolume(item) > 0 && <span>Volume: {amount(Math.round(itemVolume(item) * 1000) / 1000)} m³</span>}</div>
               </section>)}</div>
               <button type="button" className="btn-ghost min-h-11" disabled={form.items.length >= 500} onClick={() => set("items", [...form.items, { id: crypto.randomUUID(), description: "", qty: 1, unit: "pcs", package_type: "", package_count: null, net_weight: null, gross_weight: null }])}><Plus size={15} /> Add item</button>
               <section aria-label="Shipment totals" className="space-y-2 border-t border-border pt-4 text-sm"><p className="flex items-center gap-2 font-medium"><Package size={16} /> Shipment totals</p><div className="flex flex-wrap gap-x-5 gap-y-2 text-muted-foreground">{Object.entries(totals.quantities).map(([unit, quantity]) => <span key={unit}>{amount(quantity)} {unit || "units"}</span>)}<span>{form.items.some((item) => item.package_count != null) ? amount(totals.packages) : "—"} packages</span><span>Net {form.items.some((item) => item.net_weight != null) ? amount(totals.net) : "—"} {form.weight_unit}</span><span>Gross {form.items.some((item) => item.gross_weight != null) ? amount(totals.gross) : "—"} {form.weight_unit}</span></div>{(["package_count", "net_weight", "gross_weight"] as const).some((key) => form.items.some((item) => item[key] != null) && form.items.some((item) => item[key] == null)) && <p className="text-xs text-muted-foreground">Totals include entered values. Some items have no package count or weight.</p>}</section>
@@ -397,7 +432,7 @@ function PackagingEditor({ form, setForm, customers, invoices, companyStampSig, 
     <Modal open={browseTemplates} onClose={() => setBrowseTemplates(false)} title="Choose a packaging list template" size="3xl">
       <p className="mb-5 text-sm text-muted-foreground">Each layout shows your shipment details. Preview a template before choosing it.</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">{PACKAGING_TEMPLATES.map((template) => <div key={template.id} className={`min-w-0 overflow-hidden rounded-xl border bg-card ${form.template === template.id ? "border-foreground ring-1 ring-foreground" : "border-border"}`}>
-        <button type="button" className="block w-full p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`Use ${template.name} template`} aria-pressed={form.template === template.id} onClick={() => { set("template", template.id); setBrowseTemplates(false); }}><div className="pointer-events-none relative mx-auto h-[190px] w-[134px] overflow-hidden bg-white text-neutral-900" aria-hidden="true"><div style={{ width: 794, transform: "scale(0.1688)", transformOrigin: "top left" }}><PackagingListDocument form={{ ...form, template: template.id, show_stamp: false, show_signature: false }} pageIndex={0} /></div></div><span className="mt-3 block text-sm font-medium">{template.name}</span></button>
+        <button type="button" className="block w-full p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`Use ${template.name} template`} aria-pressed={form.template === template.id} onClick={() => { set("template", template.id); setBrowseTemplates(false); }}><div className="pointer-events-none relative mx-auto h-[192px] w-[136px] overflow-hidden bg-white text-neutral-900" aria-hidden="true"><div style={{ width: 794, transform: "scale(0.1688)", transformOrigin: "top left" }}><PackagingListDocument form={{ ...form, template: template.id, show_stamp: false, show_signature: false }} pageIndex={0} /></div></div><span className="mt-3 block text-sm font-medium">{template.name}</span></button>
         <button type="button" className="btn-ghost w-full border-t border-border text-xs" onClick={() => setTemplatePreview(template.id)}><Eye size={14} /> Preview template</button>
       </div>)}</div>
     </Modal>

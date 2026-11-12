@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react";
 import { toast } from "../../components/Toaster";
 import { useSearchParams } from "react-router-dom";
-import { LayoutDashboard, TrendingUp, Boxes, Wallet, Users, Truck, Download, ChartNoAxesCombined, RefreshCw } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Boxes, Wallet, Users, Truck, Download, ChartNoAxesCombined, RefreshCw, Landmark, PiggyBank } from "lucide-react";
+import { billing, type CompanyProfile } from "../../lib/api";
+import { companyCountry } from "../../lib/companyCountry";
+import GstTab from "./GstTab";
+import ProfitTab from "./ProfitTab";
 import { PageHeader, Spinner, ErrorBanner } from "../../components/ui";
 import { downloadCsv } from "../../lib/csv";
 import { cn, todayYmd } from "../../lib/format";
@@ -22,12 +27,15 @@ const TABS = [
   { id: "financial", label: "Financial", icon: Wallet },
   { id: "customers", label: "Customers", icon: Users },
   { id: "suppliers", label: "Suppliers", icon: Truck },
+  { id: "profit", label: "Profit", icon: PiggyBank },
   { id: "insights", label: "Insights", icon: ChartNoAxesCombined },
+  // Shown only when the business country is India.
+  { id: "gst", label: "GST returns", icon: Landmark },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
-function FinancialReports({ tab }: { tab: Exclude<TabId, "insights"> }) {
+function FinancialReports({ tab }: { tab: Exclude<TabId, "insights" | "gst" | "profit"> }) {
   const data = useReportsData();
   const { currency } = useDisplayCurrency();
   const rows = reportExportRows(tab,data,todayYmd());
@@ -56,11 +64,15 @@ function FinancialReports({ tab }: { tab: Exclude<TabId, "insights"> }) {
 
 export default function Reports() {
   const [params, setParams] = useSearchParams();
-  const tab: TabId = TABS.find(item => item.id === params.get("tab"))?.id || "dashboard";
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  useEffect(() => { billing.getCompany().then(setCompany).catch(() => setCompany(null)); }, []);
+  const india = !!company && companyCountry(company) === "IN";
+  const tabs = TABS.filter(item => item.id !== "gst" || india);
+  const tab: TabId = tabs.find(item => item.id === params.get("tab"))?.id || "dashboard";
   return <div>
-    <PageHeader title="Reports" subtitle="Business reports and section insights, connected to your active workspace." />
+    <PageHeader title="Reports" subtitle="Business reports and section insights, connected to your active workspace" />
     <nav aria-label="Report sections" className="mb-5 flex flex-wrap gap-2">
-      {TABS.map(item => {
+      {tabs.map(item => {
         const Icon = item.icon;
         return <button key={item.id} aria-pressed={tab === item.id} className={cn("chip", tab === item.id && "chip-active")} onClick={() => {
           const next = new URLSearchParams(params);
@@ -70,6 +82,6 @@ export default function Reports() {
         }}><Icon size={14} /> {item.label}</button>;
       })}
     </nav>
-    {tab === "insights" ? <InsightsTab /> : <FinancialReports tab={tab} />}
+    {tab === "insights" ? <InsightsTab /> : tab === "profit" ? <ProfitTab /> : tab === "gst" && company ? <GstTab company={company} /> : tab !== "gst" && <FinancialReports tab={tab} />}
   </div>;
 }

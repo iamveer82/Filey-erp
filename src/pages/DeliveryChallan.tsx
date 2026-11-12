@@ -325,7 +325,7 @@ export default function DeliveryChallan() {
           changeTone="up"
         />
         <MetricCard
-          label="In Transit"
+          label="In transit"
           value={String(inTransit)}
           change={inTransit > 0 ? "Out for delivery" : "None"}
           changeTone={inTransit > 0 ? "warn" : "up"}
@@ -760,7 +760,7 @@ function DcEditor({
           {/* Template */}
           <Step
             n={1}
-            title="Choose Template"
+            title="Choose template"
             action={
               <div className="flex items-center gap-2">
                 <button
@@ -853,10 +853,10 @@ function DcEditor({
           </Step>
 
           {/* Details */}
-          <Step n={2} title="Challan Details">
+          <Step n={2} title="Challan details">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
-                <Field label="Challan Type">
+                <Field label="Challan type">
                   <SelectMenu
                     ariaLabel="Challan Type"
                     value={form.dc_type}
@@ -867,7 +867,7 @@ function DcEditor({
                     }))}
                   />
                 </Field>
-                <Field label="Party Name">
+                <Field label="Party name">
                   <input
                     className="input"
                     placeholder="Customer / Supplier name"
@@ -875,7 +875,7 @@ function DcEditor({
                     onChange={(e) => set("party_name", e.target.value)}
                   />
                 </Field>
-                <Field label="Party Address">
+                <Field label="Party address">
                   <textarea
                     className="textarea"
                     rows={2}
@@ -885,7 +885,7 @@ function DcEditor({
                 </Field>
               </div>
               <div className="space-y-3">
-                <Field label="Challan Number">
+                <Field label="Challan number">
                   <input
                     className="input"
                     value={form.number}
@@ -907,7 +907,7 @@ function DcEditor({
                     onChange={(e) => set("ref_number", e.target.value)}
                   />
                 </Field>
-                <Field label="Vehicle Number">
+                <Field label="Vehicle number">
                   <input
                     className="input"
                     placeholder="Optional"
@@ -915,7 +915,7 @@ function DcEditor({
                     onChange={(e) => set("vehicle_number", e.target.value)}
                   />
                 </Field>
-                <Field label="Driver Name">
+                <Field label="Driver name">
                   <input
                     className="input"
                     placeholder="Optional"
@@ -1012,7 +1012,7 @@ function DcEditor({
           </Step>
 
           {/* Stamp / Signature */}
-          <Step n={4} title="Stamp & Signature">
+          <Step n={4} title="Stamp & signature">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <label className="flex items-center justify-between card !p-3 cursor-pointer">
                 <span className="text-sm font-medium text-ink">Show stamp</span>
@@ -1043,7 +1043,7 @@ function DcEditor({
 
           {/* Notes */}
           <Step n={5} title="Notes">
-            <Field label="Notes / Remarks">
+            <Field label="Notes / remarks">
               <textarea
                 className="textarea"
                 rows={3}

@@ -23,6 +23,7 @@ import { ProfileAvatarImage } from "./ProfileAvatarImage";
 import CoinMark from "./CoinMark";
 import ErrorBoundary from "./ErrorBoundary";
 import GuideLauncher from "./GuideLauncher";
+import PaymentWatcher from "./PaymentWatcher";
 import BrowserPanel from "./BrowserPanel";
 import { PageContextProvider } from "../lib/pageContext";
 import { cn, todayYmd, CURRENCIES } from "../lib/format";
@@ -61,7 +62,7 @@ const COMMANDS: { label: string; to: string; keywords: string }[] = [
     to: "/purchase?new=1",
     keywords: "create purchase expense spend",
   },
-  { label: "Go to Reports", to: "/reports", keywords: "reports analytics" },
+  { label: "Go to reports", to: "/reports", keywords: "reports analytics" },
   { label: "Open PDF editor", to: "/office?tab=pdf", keywords: "pdf tools edit sign annotate merge" },
   { label: "Open Sheets", to: "/office?tab=sheet", keywords: "excel spreadsheet workbook xlsx" },
   { label: "Settings", to: "/settings", keywords: "settings company account" },
@@ -792,6 +793,7 @@ export default function Layout({ children, persistentContent }: { children: Reac
             </div>
           </main>
           <BrowserPanel />
+          <PaymentWatcher />
           </div>
         </div>
       </div>

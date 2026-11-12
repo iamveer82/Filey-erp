@@ -18,7 +18,7 @@ export default function BarcodeScanner({
   open,
   onClose,
   onScan,
-  title = "Scan Barcode",
+  title = "Scan barcode",
 }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);

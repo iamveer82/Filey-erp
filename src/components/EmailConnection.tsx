@@ -111,7 +111,9 @@ function HostedEmailConnection() {
   return (
     <section className="card mb-5">
       <div className="flex items-start gap-3">
-        <Mail size={20} className="mt-1" />
+        <div className="h-10 w-10 rounded-[8px] bg-muted text-foreground grid place-items-center shrink-0">
+          <Mail size={20} />
+        </div>
         <div className="flex-1">
           <h2 className="text-base font-semibold">Email delivery</h2>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">

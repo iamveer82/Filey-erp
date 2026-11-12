@@ -453,7 +453,7 @@ export default function PurchaseOrders() {
   return (
     <div>
       <PageHeader
-        title="Purchase Orders"
+        title="Purchase orders"
         subtitle="Manage POs end-to-end"
         action={
           <div className="flex gap-2">
@@ -474,7 +474,7 @@ export default function PurchaseOrders() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
-          label="Purchase Orders"
+          label="Purchase orders"
           value={num(rows.length)}
           change={
             draftCount > 0 ? `${num(draftCount)} in draft` : "None waiting"
@@ -498,7 +498,6 @@ export default function PurchaseOrders() {
           label="Received"
           value={num(receivedCount)}
           change={receivedCount > 0 ? "Goods checked in" : "None yet"}
-          changeTone={receivedCount > 0 ? "up" : "warn"}
         />
       </div>
 
@@ -1486,7 +1485,7 @@ function Editor({
         left={
           <div className="no-print space-y-4">
             {/* 1 · Template */}
-            <Step n={1} title="Choose Template" subtitle="Select a template for your purchase order" action={
+            <Step n={1} title="Choose template" subtitle="Select a template for your purchase order" action={
               <div className="flex flex-wrap items-center gap-2">
                 <button className="btn-ghost text-xs" onClick={() => setViewAll((value) => !value)}>
                   {viewAll ? "Show less" : "View all templates"}
@@ -1513,7 +1512,7 @@ function Editor({
             </Step>
 
             {/* 2 · PO Details */}
-            <Step n={2} title="Purchase Order Details">
+            <Step n={2} title="Purchase order details">
               <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,320px),1fr))] items-start gap-4">
                 <div className="space-y-3">
                   <Field label="Supplier">
@@ -1543,7 +1542,7 @@ function Editor({
                       </button>
                     </div>
                   </Field>
-                  <Field label="Supplier Name">
+                  <Field label="Supplier name">
                     <input
                       className="input"
                       placeholder="Supplier company name"
@@ -1551,7 +1550,7 @@ function Editor({
                       onChange={(e) => set("supplier_name", e.target.value)}
                     />
                   </Field>
-                  <Field label="Supplier Address">
+                  <Field label="Supplier address">
                     <textarea
                       className="textarea"
                       rows={3}
@@ -1578,7 +1577,7 @@ function Editor({
                   </Field>
                 </div>
                 <div className="space-y-3">
-                  <Field label="Document Title">
+                  <Field label="Document title">
                     <input
                       className="input"
                       placeholder="Purchase Order"
@@ -1586,14 +1585,14 @@ function Editor({
                       onChange={(e) => set("doc_title", e.target.value)}
                     />
                   </Field>
-                  <Field label="PO Number">
+                  <Field label="PO number">
                     <input
                       className="input"
                       value={form.po_number}
                       onChange={(e) => set("po_number", e.target.value)}
                     />
                   </Field>
-                  <Field label="Order Date">
+                  <Field label="Order date">
                     <DateField
                       value={form.order_date ?? ""}
                       onChange={(v) => set("order_date", v)}
@@ -1993,7 +1992,7 @@ function Editor({
             </Step>
 
             {/* 4 · Notes, terms & logo */}
-            <Step n={4} title="Notes & Attachments">
+            <Step n={4} title="Notes & attachments">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -2016,7 +2015,7 @@ function Editor({
                       onChange={(e) => set("notes", e.target.value)}
                     />
                   </Field>
-                  <Field label="Terms & Conditions">
+                  <Field label="Terms & conditions">
                     <textarea
                       className="textarea"
                       rows={3}
@@ -2328,7 +2327,7 @@ function InventoryImportModal({
       p.sku.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal open={open} onClose={onClose} title="Add from Inventory">
+    <Modal open={open} onClose={onClose} title="Add from inventory">
       <SearchInput
         value={q}
         onChange={setQ}
@@ -2413,7 +2412,7 @@ function SupplierQuickAdd({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Quick Add Supplier" size="md">
+    <Modal open={open} onClose={onClose} title="Quick add supplier" size="md">
       <div className="space-y-3">
         <Field label="Supplier Name *">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Company name" />

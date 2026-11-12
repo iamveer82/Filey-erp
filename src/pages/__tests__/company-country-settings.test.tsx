@@ -34,21 +34,21 @@ async function chooseCountry(name: string) {
 it("switches the real company form to India and preserves registration and bank details across save/reopen", async () => {
   const view = render(<CompanyDetails />);
   await screen.findByLabelText("IBAN");
-  expect(screen.getByLabelText("Phone Number")).toHaveAttribute("placeholder", "+971 50 123 4567");
+  expect(screen.getByLabelText("Phone number")).toHaveAttribute("placeholder", "+971 50 123 4567");
   await chooseCountry("India");
   expect(screen.queryByLabelText("IBAN")).toBeNull();
   expect(screen.getByLabelText("IFSC Code")).toHaveValue("HDFC0001234");
   expect(screen.getByLabelText("GSTIN")).toBeInTheDocument();
-  expect(screen.getByLabelText("Phone Number")).toHaveAttribute("placeholder", "+91 98765 43210");
-  expect(screen.getByLabelText("Phone Number")).toHaveAttribute("type", "tel");
-  expect(screen.getByLabelText("Phone Number")).toHaveValue("+971501234567"); // never rewrite customer values
+  expect(screen.getByLabelText("Phone number")).toHaveAttribute("placeholder", "+91 98765 43210");
+  expect(screen.getByLabelText("Phone number")).toHaveAttribute("type", "tel");
+  expect(screen.getByLabelText("Phone number")).toHaveValue("+971501234567"); // never rewrite customer values
   expect(screen.getByLabelText("PIN code")).toHaveAttribute("inputmode", "numeric");
   expect(screen.getByText("PIN code", {selector: "label"})).toBeVisible();
   expect(screen.getByText("GST settings")).toBeVisible();
   expect(screen.getByText("Default GST rate (%)", {selector: "label"})).toBeVisible();
   expect(screen.getByText("State / Union territory", {selector: "label"})).toBeVisible();
   expect(screen.queryByLabelText("MOHRE establishment ID")).toBeNull();
-  expect(screen.queryByLabelText("Legal Registration ID")).toBeNull();
+  expect(screen.queryByLabelText("Legal registration ID")).toBeNull();
   fireEvent.change(screen.getByLabelText("PAN"), { target: {value: "abcde1234f"} });
   fireEvent.change(screen.getByLabelText("Aadhaar reference (last 4 digits)"), { target: {value: "1234"} });
   fireEvent.click(screen.getByRole("button", {name: "Save Changes"}));
@@ -118,12 +118,12 @@ it("preserves legacy nested registration when company-modal TIN is edited", asyn
 it("shows legacy registration in settings and allows explicitly clearing both stored representations", async () => {
   company.einvoice = { legal_id: "LEGACY-LICENCE", legal_id_type: "TL", tin: "1001234567" };
   render(<CompanyDetails />);
-  expect(await screen.findByLabelText("Legal Registration ID")).toHaveValue("LEGACY-LICENCE");
-  fireEvent.change(screen.getByLabelText("Legal Registration ID"), { target: { value: "" } });
+  expect(await screen.findByLabelText("Legal registration ID")).toHaveValue("LEGACY-LICENCE");
+  fireEvent.change(screen.getByLabelText("Legal registration ID"), { target: { value: "" } });
   fireEvent.change(screen.getByLabelText("Electronic invoicing TIN"), { target: { value: "1007774567" } });
   fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
   await waitFor(() => expect(company).toMatchObject({ legal_id: "", einvoice: { legal_id: "", tin: "1007774567" } }));
-  expect(screen.getByLabelText("Legal Registration ID")).toHaveValue("");
+  expect(screen.getByLabelText("Legal registration ID")).toHaveValue("");
 });
 
 it("prints only the bank identifiers belonging to the invoice's saved country", () => {

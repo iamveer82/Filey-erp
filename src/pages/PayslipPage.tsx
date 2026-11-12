@@ -5,10 +5,16 @@ import { ArrowLeft, Download, Save, Check } from "lucide-react";
 import {
   hr,
   billing,
+  tools,
   type Employee,
   type CompanyProfile,
   type Payroll,
 } from "../lib/api";
+import { companyCountry } from "../lib/companyCountry";
+import {
+  DEFAULT_INDIA_PAYROLL, INDIA_PAYROLL_KEY, PAYROLL_BREAKDOWN_KEY, breakdownKey, deductionLines, parseBreakdowns,
+  parseIndiaPayroll, saveBreakdowns, statutoryDeductions, type DeductionBreakdown, type IndiaPayrollSettings,
+} from "../lib/indiaPayroll";
 import { aed, numInput, getDisplayCurrency, todayYmd } from "../lib/format";
 import { downloadElementAsPdf } from "../lib/pdfTools";
 import { PageHeader, ErrorBanner } from "../components/ui";
@@ -22,8 +28,14 @@ export default function PayslipPage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [company, setCompany] = useState<CompanyProfile | null>(null);
   const [month, setMonth] = useState(() => todayYmd().slice(0, 7));
+  /** This month's basic, when it differs from the saved monthly salary (unpaid leave, a raise, part month). */
+  const [draftBasic, setBasic] = useState<number | null>(null);
   const [draftAllowances, setAllowances] = useState(0);
   const [draftDeductions, setDeductions] = useState(0);
+  /** India: this month's PF / ESI / PT when typed by hand; unset = from the payroll settings. */
+  const [draftStat, setDraftStat] = useState<{ pf?: number; esi?: number; pt?: number }>({});
+  const [statSettings, setStatSettings] = useState<IndiaPayrollSettings>(DEFAULT_INDIA_PAYROLL);
+  const [splits, setSplits] = useState<Record<string, DeductionBreakdown>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [payrollError, setPayrollError] = useState("");
@@ -56,13 +68,20 @@ export default function PayslipPage() {
     setPayroll([]);
     setLoadError("");
     setPayrollError("");
+    setBasic(null);
     setAllowances(0);
     setDeductions(0);
+    setDraftStat({});
     Promise.all([
       hr.employees().then((list) => {
         if (current()) setEmployee(list.find((e) => e.id === Number(id)) ?? null);
       }),
       billing.getCompany().then((profile) => { if (current()) setCompany(profile); }).catch(() => {}),
+      tools.settings().then((rows) => {
+        if (!current()) return;
+        setStatSettings(parseIndiaPayroll(rows.find((r) => r.key === INDIA_PAYROLL_KEY)?.value));
+        setSplits(parseBreakdowns(rows.find((r) => r.key === PAYROLL_BREAKDOWN_KEY)?.value));
+      }).catch(() => {}),
       loadPayroll(),
     ]).catch(() => { if (current()) setLoadError("Could not load this employee. Please reopen the payslip."); }).finally(() => { if (current()) setLoading(false); });
     return () => { if (current()) ++loadVersion.current; };
@@ -74,10 +93,19 @@ export default function PayslipPage() {
 
   const recorded = payroll.find((p) => Number(p.employee_id) === employee.id && p.period === month);
   // A recorded period is a financial snapshot, independent of later salary edits.
-  const basic = recorded?.basic ?? employee.salary ?? 0;
+  const basic = recorded?.basic ?? draftBasic ?? employee.salary ?? 0;
   const allowances = recorded?.allowances ?? draftAllowances;
-  const deductions = recorded?.deductions ?? draftDeductions;
+  const india = !!company && companyCountry(company) === "IN";
+  const auto = statutoryDeductions({ employeeId: employee.id, basic, gross: basic + allowances, month, settings: statSettings });
+  const stat = india ? { pf: draftStat.pf ?? auto.pf, esi: draftStat.esi ?? auto.esi, pt: draftStat.pt ?? auto.pt } : { pf: 0, esi: 0, pt: 0 };
+  const deductions = recorded?.deductions ?? Math.round((draftDeductions + stat.pf + stat.esi + stat.pt) * 100) / 100;
   const net = recorded?.net_pay ?? basic + allowances - deductions;
+  const split: DeductionBreakdown | null = recorded ? splits[breakdownKey(employee.id, month)] ?? null
+    : india && stat.pf + stat.esi + stat.pt > 0 ? { ...stat, other: draftDeductions } : null;
+  const record = async () => {
+    await hr.runPayroll(employee.id, month, basic, allowances, deductions);
+    if (split) await saveBreakdowns({ [breakdownKey(employee.id, month)]: split }).then(() => setSplits((s) => ({ ...s, [breakdownKey(employee.id, month)]: split }))).catch(() => {});
+  };
   const validPeriod = /^\d{4}-(0[1-9]|1[0-2])$/.test(month);
   const periodLabel = validPeriod ? new Date(month + "-01T12:00:00").toLocaleDateString("en", {
     month: "long",
@@ -125,7 +153,7 @@ export default function PayslipPage() {
       // never be posted twice.
       if (saved && !recorded) {
         try {
-          await hr.runPayroll(employee.id, month, basic, allowances, deductions);
+          await record();
           await loadPayroll();
           toast.success(`Payslip recorded for ${periodLabel}.`);
         } catch (e) {
@@ -159,7 +187,7 @@ export default function PayslipPage() {
         confirmLabel: "Record payslip",
       });
       if (!ok) return;
-      await hr.runPayroll(employee.id, month, basic, allowances, deductions);
+      await record();
       await loadPayroll();
       toast.success(`Payslip recorded for ${periodLabel}.`);
     } catch (e) {
@@ -215,7 +243,7 @@ export default function PayslipPage() {
                 className="input"
                 disabled={saving}
                 value={month}
-                onChange={(e) => { setMonth(e.target.value); setAllowances(0); setDeductions(0); }}
+                onChange={(e) => { setMonth(e.target.value); setBasic(null); setAllowances(0); setDeductions(0); setDraftStat({}); }}
               />
             </div>
             <div>
@@ -223,10 +251,19 @@ export default function PayslipPage() {
               <input
                 id="payslip-basic"
                 type="number"
+                min="0"
+                step="any"
                 className="input"
-                value={basic || ""}
-                readOnly
+                value={draftBasic === null ? basic || "" : draftBasic || ""}
+                disabled={saving || !!recorded}
+                onChange={(e) => setBasic(numInput(e.target.value))}
               />
+              {!recorded && draftBasic !== null && draftBasic !== (employee.salary ?? 0) && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This month only. The monthly salary stays {aed(employee.salary ?? 0)}.{" "}
+                  <button type="button" className="underline" onClick={() => setBasic(null)}>Use monthly salary</button>
+                </p>
+              )}
             </div>
             <div>
               <label htmlFor="payslip-allowances" className="label">Allowances ({getDisplayCurrency()})</label>
@@ -240,16 +277,28 @@ export default function PayslipPage() {
               />
             </div>
             <div>
-              <label htmlFor="payslip-deductions" className="label">Deductions ({getDisplayCurrency()})</label>
+              <label htmlFor="payslip-deductions" className="label">{india ? "Other deductions" : "Deductions"} ({getDisplayCurrency()})</label>
               <input
                 id="payslip-deductions"
                 type="number"
                 className="input"
-                value={deductions || ""}
+                value={(recorded ? split ? split.other ?? 0 : deductions : draftDeductions) || ""}
                 disabled={saving || !!recorded}
                 onChange={(e) => setDeductions(numInput(e.target.value))}
               />
             </div>
+            {india && !recorded && (
+              <div className="grid grid-cols-3 gap-2">
+                {([["pf", "EPF"], ["esi", "ESI"], ["pt", "Professional tax"]] as const).map(([k, label]) => (
+                  <div key={k}>
+                    <label htmlFor={`payslip-${k}`} className="label">{label}</label>
+                    <input id={`payslip-${k}`} type="number" min="0" className="input" value={stat[k] || ""} disabled={saving}
+                      onChange={(e) => setDraftStat({ ...draftStat, [k]: numInput(e.target.value) })} />
+                  </div>
+                ))}
+                <p className="col-span-3 text-xs text-muted-foreground">Worked out from the PF, ESI and PT settings under People → Run payroll. Change any amount for this month.</p>
+              </div>
+            )}
             <div className="border-t border-border pt-3 flex items-center justify-between">
               <span className="text-sm font-medium text-muted-foreground">Net Pay</span>
               <span className="text-lg font-semibold text-foreground tabular-nums">{aed(net)}</span>
@@ -297,10 +346,12 @@ export default function PayslipPage() {
                     <td className="py-1.5">Allowances</td>
                     <td className="py-1.5 text-right tabular-nums">{aed(allowances)}</td>
                   </tr>
-                  <tr className="border-b border-gray-100">
-                    <td className="py-1.5">Deductions</td>
-                    <td className="py-1.5 text-right tabular-nums">{aed(-deductions)}</td>
-                  </tr>
+                  {deductionLines(deductions, split).map(([label, value]) => (
+                    <tr key={label} className="border-b border-gray-100">
+                      <td className="py-1.5">{label}</td>
+                      <td className="py-1.5 text-right tabular-nums">{aed(-value)}</td>
+                    </tr>
+                  ))}
                 </tbody>
                 <tfoot>
                   <tr className="font-semibold">

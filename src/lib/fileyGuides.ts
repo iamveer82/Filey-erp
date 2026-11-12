@@ -194,14 +194,13 @@ export const GUIDES: readonly FileyGuide[] = [
   {
     "id": "local-editions",
     "category": "Getting started",
-    "title": "Free trial, Freedom and Pro",
+    "title": "Free trial and Freedom",
     "to": "/settings?section=billing",
-    "summary": "Try Filey free for 14 days, then keep it for life with Freedom or move to the cloud with Pro.",
+    "summary": "Try Filey free for 14 days, then keep it for life with Freedom.",
     "steps": [
       "Basic is a 14-day free trial. Create your Filey account online once and use every app on this computer: invoicing, CRM, inventory, accounting, Word, Sheets, PDF, Slides and design apps. Your data stays on this computer. New accounts also get $1 of Filey AI to try the agent. The trial is counted per account and per computer.",
       "Freedom is a one-time payment of 1499 AED: Filey on your computer for life, with every app, regular updates and support, on 2 computers. Your data stays on your computer, and you can move Freedom to a new PC from Devices.",
-      "Pro is 36 AED a month: your workspace in the cloud, Filey on the web, sync across your devices, team members and backups. Cancel any time in Billing.",
-      "When the trial ends without a plan, everything you made stays here to view, print and export; creating and editing need Freedom or Pro. Buying unlocks the app straight away, with nothing to reinstall.",
+      "When the trial ends without a plan, everything you made stays here to view, print and export; creating and editing need Freedom. Buying unlocks the app straight away, with nothing to reinstall.",
       "Filey AI is separate: buy Coin and use it on any plan, or use your own AI key.",
       "In the desktop app, open Data & Storage to create a full database-and-files backup. The separate summary export is not a complete restorable backup."
     ],
@@ -214,7 +213,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "to": "/settings?section=company",
     "summary": "Choose storage, save your company identity and prepare a first draft without sending it.",
     "steps": [
-      "Confirm the storage badge before entering business records. Local keeps records on this device; cloud uses your signed-in workspace. Change storage only through Settings → Data & Storage and review its transfer confirmation.",
+      "Confirm the storage badge before entering business records. Records are saved on this device and work offline. Cloud mode is coming soon.",
       "In Company Details, save your company name, address, contact details and Business country. Add your own applicable tax and legal registration identifiers; the country and display currency are separate choices.",
       "Review the new-document currency, tax rate, template and numbering defaults. Add only company logo, letterhead, signature and stamp assets you are authorized to use. Defaults do not rewrite previously saved documents.",
       "Add a customer in Customers and, if needed, a supplier and products. Review the legal name, address, tax identifier and opening balance labels before saving a contact.",
@@ -250,7 +249,7 @@ export const GUIDES: readonly FileyGuide[] = [
       "New passwords need at least eight characters. Sign-in accepts older passwords without applying the new-account strength policy.",
       "Choose Forgot password? on the sign-in screen and request a reset link. Filey sends it through Resend. Open the link, enter your new password twice, and submit. Your old password is not required.",
       "If you enabled two-step verification, enter your authenticator code to finish. After the password is saved, return to sign in. Reset links expire and can be used once; request a fresh link when needed.",
-      "Password recovery needs an internet connection in both local and cloud modes. It preserves your business records and refreshes the offline password only for the matching remembered account on this device.",
+      "Password recovery needs an internet connection. It preserves your business records and refreshes the offline password only for the matching remembered account on this device.",
       "An offline desktop device must first be linked online. A device claimed only by OTP needs one successful online password sign-in before password-based offline access works."
     ],
     "moduleId": "settings"
@@ -314,7 +313,7 @@ export const GUIDES: readonly FileyGuide[] = [
       "Use Share PDF on a supported device and select a messaging app and recipient. Otherwise download the PDF, open the WhatsApp draft and attach the file yourself.",
       "For direct PDF sending in the desktop app, pair WhatsApp under Integrations. Send PDF via paired WhatsApp queues the document; check WhatsApp itself for delivery.",
       "SMS opens your device's messaging app with text and an optional invoice link. SMS does not attach PDFs and carrier charges may apply. A compatible messaging app must be installed.",
-      "A hosted cloud app can offer Add invoice link. Anyone with that link can view the invoice. Local mode shares the PDF; localhost links would not work for recipients."
+      "If an invoice offers Add invoice link, anyone with that link can view the invoice. Today Filey shares the PDF; localhost links would not work for recipients."
     ],
     "moduleId": "invoicing"
   },
@@ -361,6 +360,22 @@ export const GUIDES: readonly FileyGuide[] = [
       "Use low-stock replenishment to prepare purchase-order drafts, then review their quantities before ordering."
     ],
     "moduleId": "inventory"
+  },
+  {
+    "id": "counter",
+    "category": "Sales",
+    "title": "Counter sales, receipts, batches and expiry",
+    "to": "/counter",
+    "summary": "Sell at the till and print the receipt in one click.",
+    "steps": [
+      "Open Counter. Scan a barcode or type a name, SKU or batch and press Enter to add it to the bill.",
+      "Pick a saved customer or leave it blank for a walk-in, choose how they paid (UPI appears for Indian businesses) and enter the cash given to see the change.",
+      "Charge the bill. It is saved as a paid receipt, the stock goes down, and Print receipt prints it on an 80 mm or 58 mm till roll or A4 (choose under Receipt printer).",
+      "Hold a bill to serve someone else, then pick it up again from the chips above the bill. Sales history lists past receipts by date, payment method and cashier, with reprint.",
+      "For stock with batches, open a product's Batches in Inventory and receive each batch with its number, expiry (MM/YY is fine), quantity and MRP. The counter sells the batch that expires first and refuses expired stock; Expiring soon lists what to sell or write off.",
+      "Pharmacies: turn on Pharma mode in Settings → Apps. The Counter becomes the Pharmacy counter, with patient and doctor details on the receipt."
+    ],
+    "moduleId": "counter"
   },
   {
     "id": "accounting",
@@ -562,16 +577,15 @@ export const GUIDES: readonly FileyGuide[] = [
   {
     "id": "storage",
     "category": "Documents & data",
-    "title": "Cloud, offline mode and backups",
+    "title": "Storage, offline mode and backups",
     "to": "/settings?section=datamode",
     "summary": "Know where the active workspace is stored.",
     "steps": [
-      "Cloud mode uses your signed-in account and workspace permissions. Local mode stores business records on the device.",
-      "In Settings → Data & Storage, turn Store in my Filey account on to upload this device's pending changes before continuing in Filey Cloud. If an edited record differs in both places, this switch keeps the device's edited version; cloud-only records remain.",
-      "Turn the switch off to save the latest cloud records and files on this device before working locally. Switching needs a connection to finish the transfer. The destination opens only after the transfer succeeds.",
-      "Cloud saves require connectivity. Local saves stay on your device even while online. A verified account stores your login identity; turning on cloud storage explicitly uploads your workspace after confirmation. Sending email or using an AI provider is a separate action that sends the content you select.",
-      "The storage badge identifies the active store. If a transfer cannot finish, Filey keeps the current store open and offers Try again. Your account stays signed in; other open tabs pause until reloaded.",
-      "Export a backup before moving devices or making a large import. Keep backup files in a location you control. When reporting a problem, include the section, action, error message and whether it happened in cloud or local mode. Do not include passwords or API keys."
+      "Your business records are stored on this device and work offline. Cloud mode is coming soon; until then there is no cloud workspace to switch to.",
+      "The storage badge shows this device as the active store. Keep working locally: nothing is uploaded, and Filey on another computer shows that computer's own records.",
+      "Records are saved on this device even while online. A verified account stores your login identity. Sending email or using an AI provider is a separate action that sends the content you select.",
+      "If a save fails, Filey keeps the record safe and shows the reason. Sign in again if the session expired; your account and data stay on this device.",
+      "Export a backup before moving devices or making a large import. Keep backup files in a location you control. When reporting a problem, include the section, action and error message. Do not include passwords or API keys."
     ],
     "moduleId": "settings"
   },
@@ -713,9 +727,9 @@ export const GUIDES: readonly FileyGuide[] = [
     "category": "Team & communication",
     "title": "Chat with your team",
     "to": "/team",
-    "summary": "Find a teammate or choose a channel in the right cloud workspace.",
+    "summary": "Find a teammate or choose a channel in a cloud workspace.",
     "steps": [
-      "Open the cloud workspace you intend to use. Direct teammate messages require cloud mode; local mode shows the availability message instead of pretending those messages are shared.",
+      "Direct teammate messages need cloud mode, which is coming soon. Local mode shows the availability message instead of pretending those messages are shared.",
       "In Chats, search for and select the teammate. If none appear, review invitations and accepted members in Settings → Teams.",
       "In Channels, select a channel or use New channel to name one. Check the channel name or recipient in the conversation header before composing.",
       "Write the message and use the chat’s explicit send action. Check for a saved message or an error; typing a draft does not send it.",
@@ -744,7 +758,7 @@ export const GUIDES: readonly FileyGuide[] = [
     "to": "/settings?section=credits",
     "summary": "Use an optional account wallet for Filey AI without confusing it with a subscription.",
     "steps": [
-      "Open Coin wallet and refresh your available balance and Activity. Coin belongs to the signed-in account and is separate from the Basic, Pro or Freedom plan.",
+      "Open Coin wallet and refresh your available balance and Activity. Coin belongs to the signed-in account and is separate from the Basic or Freedom plan.",
       "Choose Quick recharge, a listed amount or an available custom amount. Review the Coin amount, service fee, any eligible discount and total before continuing to secure payment.",
       "Complete checkout only when the reviewed amount is correct, then return to Filey for payment verification. A redirect or a payment screen alone is not credited balance; confirm the successful top-up in the wallet and Activity.",
       "Choose Filey AI as the AI payment method. Requests deduct Coin for work performed; if credit is insufficient, add Coin before starting another paid request. No automatic recharge or subscription is created by a top-up.",

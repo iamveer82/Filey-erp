@@ -20,7 +20,7 @@ import { letterRichDocument, letterRichDocumentToLegacy, letterRichText, letterS
 
 const LAYOUTS = ["letter-standard", "letter-modern", "letter-formal"] as const;
 const TEXT_FIELDS = ["title", "issue_date", "recipient_name", "recipient_address", "salutation", "body", "closing", "signatory_name", "signatory_title", "accent"] as const;
-const FLAGS = ["use_letterhead", "show_company_header", "show_logo", "show_reference"] as const;
+const FLAGS = ["use_letterhead", "show_company_header", "show_logo", "show_reference", "show_signature", "show_stamp"] as const;
 const PATCH_KEYS = [...TEXT_FIELDS, ...FLAGS, "template", "text_style", "title_style", "blocks"];
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const argumentErrors = new WeakSet<object>();
@@ -59,7 +59,9 @@ export const letterEditableProperties: Record<string, unknown> = {
   text_style: { ...textStyleSchema, description: "Update the supplied body formatting properties while preserving unspecified saved properties." },
   title_style: { ...textStyleSchema, description: "Update the supplied title formatting properties while preserving unspecified saved properties." },
   use_letterhead: { type: "boolean" }, show_company_header: { type: "boolean" }, show_logo: { type: "boolean" }, show_reference: { type: "boolean" },
-  blocks: { type: "array", maxItems: 100, description: "Ordered letter content. Supplying blocks replaces the ENTIRE saved block list; first read get_letter and preserve unchanged blocks. Internal IDs are generated. Signature/stamp blocks create blank sign-off areas, never apply company images.", items: { type: "object", additionalProperties: false, required: ["type"], properties: {
+  show_signature: { type: "boolean", description: "Apply the company signature saved in Company Details in the sign-off area. Off unless the owner wants the letter signed." },
+  show_stamp: { type: "boolean", description: "Apply the company stamp saved in Company Details in the sign-off area. Off unless the owner wants it stamped." },
+  blocks: { type: "array", maxItems: 100, description: "Ordered letter content. Supplying blocks replaces the ENTIRE saved block list; first read get_letter and preserve unchanged blocks. Internal IDs are generated. Signature/stamp blocks create the sign-off areas; the saved company images appear there only when show_signature/show_stamp are on.", items: { type: "object", additionalProperties: false, required: ["type"], properties: {
     type: { type: "string", enum: ["text", "field", "date", "signature", "stamp"] }, text: { type: "string", maxLength: 20_000, description: "Required only for a text paragraph." },
     label: { type: "string", maxLength: 200, description: "Required for field/date/signature/stamp blocks." },
     value: { type: "string", maxLength: 10_000, description: "Required for field/date blocks; unknown facts may be an empty string. Date values use YYYY-MM-DD." }, align: alignmentSchema,
@@ -168,7 +170,17 @@ async function companyContext(check: () => void) {
   };
   const formats: DocFormats = {}, format = setting(formatKey("letter"));
   if (format) formats.letter = format;
+  const [{ loadCompanyStampSig }, { normStampSig, STAMP_DEFAULT, SIGN_DEFAULT }] = await Promise.all([
+    import("../components/StampSignatureSettings"), import("../components/StampSignature"),
+  ]);
+  check();
+  const companyMarks = await loadCompanyStampSig();
+  check();
   return { company, background, formats,
+    marks: {
+      stamp: companyMarks.stamp ? normStampSig(companyMarks.stamp, STAMP_DEFAULT) : undefined,
+      signature: companyMarks.signature ? normStampSig(companyMarks.signature, SIGN_DEFAULT) : undefined,
+    },
     assets: { letterhead: !!background, logo: !!company.logo, signature: available("company_signature"), stamp: available("company_stamp") } };
 }
 
@@ -285,6 +297,8 @@ export async function getAgentLetter(
 function assertImages(form: LetterForm): void {
   if (form.use_letterhead && !form.letterhead?.background) throw argumentError("Add company letterhead in Company Details before enabling it.");
   if (form.show_logo && !form.company_logo) throw argumentError("Add the company logo in Company Details before enabling it.");
+  if (form.show_signature && !form.signature?.data) throw argumentError("Add the company signature in Company Details before enabling it.");
+  if (form.show_stamp && !form.stamp?.data) throw argumentError("Add the company stamp in Company Details before enabling it.");
 }
 
 function applyPatch(form: LetterForm, changes: Partial<LetterForm>): LetterForm {
@@ -361,6 +375,10 @@ export async function createAgentLetterDraft(args: Record<string, unknown>, sign
     company_email: context.company.email || "", company_phone: context.company.phone || "", company_trn: context.company.trn || "",
     company_logo: context.company.logo || "", show_logo: !!context.company.logo && !context.background, letterhead: { background: context.background },
     use_letterhead: !!context.background, show_company_header: !context.background, status: "draft", show_signature: false, show_stamp: false }, changes);
+  // Only a draft the owner asked to sign or stamp carries the company images;
+  // every other draft stays unsigned and lean.
+  if (form.show_signature && !form.signature?.data) form.signature = context.marks.signature;
+  if (form.show_stamp && !form.stamp?.data) form.stamp = context.marks.stamp;
   assertImages(form);
   validateInput(() => validateLetterForm(form));
   check();
@@ -382,6 +400,12 @@ export async function reviseAgentLetterDraft(args: Record<string, unknown>, sign
   if (record.form.status !== "draft") throw argumentError("Issued letters cannot be edited. Create a new draft instead.");
   if (record.revision !== args.expected_revision) throw argumentError("This letter changed. Read its latest revision before saving.");
   const form = applyPatch(letterDisplayForm(record), changes);
+  if ((form.show_signature && !form.signature?.data) || (form.show_stamp && !form.stamp?.data)) {
+    const context = await companyContext(check);
+    check();
+    if (form.show_signature && !form.signature?.data) form.signature = context.marks.signature;
+    if (form.show_stamp && !form.stamp?.data) form.stamp = context.marks.stamp;
+  }
   assertImages(form);
   validateInput(() => validateLetterForm(form));
   check();
@@ -398,12 +422,14 @@ export async function exportAgentLetterDraft(args: Record<string, unknown>, sign
   object(args, ["letter_id"]);
   const check = await execution(signal), record = await recordById(args, check), form = letterDisplayForm(record);
   validateLetterForm(form);
-  const [{ default: LetterDocument }, { reactToPdfBytes }, { deliverFile }] = await Promise.all([
-    import("../components/LetterDocument"), import("./reactPdf"), import("./agentFiles"),
+  const [{ default: LetterDocument }, { reactToPdfBytes }, { deliverFile }, { loadCompanyStampSig }] = await Promise.all([
+    import("../components/LetterDocument"), import("./reactPdf"), import("./agentFiles"), import("../components/StampSignatureSettings"),
   ]);
   check();
+  const companyStampSig = await loadCompanyStampSig();
+  check();
   const name = `${form.number}-${form.title || "letter"}`.replace(/[^\p{L}\p{N}_ .()-]/gu, "-").replace(/^\.+|[. ]+$/g, "").slice(0, 100) || "letter";
-  const pdf = await reactToPdfBytes(createElement(LetterDocument, { form }), name);
+  const pdf = await reactToPdfBytes(createElement(LetterDocument, { form, companyStampSig }), name);
   check();
   if (!ArrayBuffer.isView(pdf.bytes) || ![37, 80, 68, 70, 45].every((byte, index) => pdf.bytes[index] === byte))
     throw new Error("The letter PDF could not be generated. Open its preview before trying again.");

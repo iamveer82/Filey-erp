@@ -8,7 +8,7 @@ import BloubBot, { useBotSkin } from "./BloubBot";
 const GROUPS = [
   { title: "Assistant", ids: ["agent"] },
   { title: "Business", ids: ["overview", "reports"] },
-  { title: "Sales", ids: ["orders", "invoicing", "packaging-list", "quoting", "crm", "customers", "follow-ups", "marketing"] },
+  { title: "Sales", ids: ["counter", "orders", "invoicing", "packaging-list", "quoting", "crm", "customers", "follow-ups", "marketing"] },
   { title: "Purchases", ids: ["suppliers", "purchase", "purchase-orders", "purchase-invoices"] },
   { title: "Inventory", ids: ["inventory"] },
   { title: "Accounting", ids: ["people", "accounting", "bank-accounts", "cheques", "payment-receipts", "declaration"] },

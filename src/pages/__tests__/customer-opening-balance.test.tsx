@@ -45,12 +45,12 @@ async function newCustomer() {
 }
 
 it.each([
-  { label: "Debit / Payable", value: "125.75", expected: -125.75 },
-  { label: "Credit / Receivable", value: "125.75", expected: 125.75 },
+  { label: "Debit / payable", value: "125.75", expected: -125.75 },
+  { label: "Credit / receivable", value: "125.75", expected: 125.75 },
 ])("creates a signed customer opening balance from $label and keeps credit limit independent", async ({ label, value, expected }) => {
   const dialog = await newCustomer();
-  expect(dialog.getByLabelText("Debit / Payable")).toHaveClass("border-danger");
-  expect(dialog.getByLabelText("Credit / Receivable")).toHaveClass("border-success");
+  expect(dialog.getByLabelText("Debit / payable")).toHaveClass("border-danger");
+  expect(dialog.getByLabelText("Credit / receivable")).toHaveClass("border-success");
   expect(dialog.getByLabelText(label)).toHaveAttribute("inputmode", "decimal");
   fireEvent.change(dialog.getByLabelText(label), { target: { value } });
   fireEvent.change(dialog.getByLabelText("Credit limit (AED)"), { target: { value: "500" } });
@@ -60,36 +60,36 @@ it.each([
 
 it("does not silently net two nonzero opening amounts and lets the user correct the choice", async () => {
   const dialog = await newCustomer();
-  fireEvent.change(dialog.getByLabelText("Debit / Payable"), { target: { value: "50" } });
-  fireEvent.change(dialog.getByLabelText("Credit / Receivable"), { target: { value: "100" } });
+  fireEvent.change(dialog.getByLabelText("Debit / payable"), { target: { value: "50" } });
+  fireEvent.change(dialog.getByLabelText("Credit / receivable"), { target: { value: "100" } });
   fireEvent.click(dialog.getByRole("button", { name: "Create customer" }));
   expect(dialog.getByRole("alert")).toHaveTextContent("Enter either payable or receivable");
-  expect(dialog.getByLabelText("Credit / Receivable")).toHaveAccessibleDescription(/Clear one amount/);
+  expect(dialog.getByLabelText("Credit / receivable")).toHaveAccessibleDescription(/Clear one amount/);
   expect(crm.createCustomer).not.toHaveBeenCalled();
-  fireEvent.change(dialog.getByLabelText("Debit / Payable"), { target: { value: "" } });
+  fireEvent.change(dialog.getByLabelText("Debit / payable"), { target: { value: "" } });
   fireEvent.click(dialog.getByRole("button", { name: "Create customer" }));
   await waitFor(() => expect(crm.createCustomer).toHaveBeenCalledWith(expect.objectContaining({ opening_balance: 100 })));
 });
 
 it.each(["-10", "1.234", "Infinity", "NaN", "1e9", "1,000", "100000000000000000000", "90071992547409.90"])("blocks invalid amount %s before creating a customer", async value => {
   const dialog = await newCustomer();
-  fireEvent.change(dialog.getByLabelText("Credit / Receivable"), { target: { value } });
+  fireEvent.change(dialog.getByLabelText("Credit / receivable"), { target: { value } });
   fireEvent.click(dialog.getByRole("button", { name: "Create customer" }));
   expect(dialog.getByRole("alert")).toBeInTheDocument();
-  expect(dialog.getByLabelText("Credit / Receivable")).toHaveAttribute("aria-invalid", "true");
+  expect(dialog.getByLabelText("Credit / receivable")).toHaveAttribute("aria-invalid", "true");
   expect(crm.createCustomer).not.toHaveBeenCalled();
 });
 
 it.each([125.75, -125.75])("opens the full customer editor on the correct side and saves %s unchanged", async opening_balance => {
   vi.mocked(crm.customers).mockResolvedValue([{ ...customer, opening_balance }]);
   render(<MemoryRouter initialEntries={["/customers/17"]}><Routes><Route path="/customers/:id" element={<CustomerDetail />} /></Routes></MemoryRouter>);
-  const direction = await screen.findByText(opening_balance > 0 ? "Credit / Receivable" : "Debit / Payable");
+  const direction = await screen.findByText(opening_balance > 0 ? "Credit / receivable" : "Debit / payable");
   expect(direction.parentElement).toHaveClass(opening_balance > 0 ? "text-success" : "text-danger");
   expect(direction.parentElement).not.toHaveTextContent("-125.75");
   fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
   const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
-  expect(dialog.getByLabelText("Debit / Payable")).toHaveValue(opening_balance < 0 ? "125.75" : "");
-  expect(dialog.getByLabelText("Credit / Receivable")).toHaveValue(opening_balance > 0 ? "125.75" : "");
+  expect(dialog.getByLabelText("Debit / payable")).toHaveValue(opening_balance < 0 ? "125.75" : "");
+  expect(dialog.getByLabelText("Credit / receivable")).toHaveValue(opening_balance > 0 ? "125.75" : "");
   fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({ opening_balance, credit_limit: 750 })));
 });
@@ -129,8 +129,11 @@ it("edits a customer detail preset, resets the previous region on country change
   expect(dialog.getByRole("combobox", { name: "Emirate" })).toHaveTextContent("Dubai");
   fireEvent.keyDown(dialog.getByRole("combobox", { name: "Country" }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("option", { name: "India" }));
-  expect(dialog.getByLabelText("State / Union territory (optional)")).toHaveValue("");
-  fireEvent.change(dialog.getByLabelText("State / Union territory (optional)"), { target: { value: "Maharashtra" } });
+  // India picks from the GST state list, so tax splits use the exact state.
+  const state = dialog.getByRole("button", { name: "State / Union territory" });
+  expect(state).toHaveTextContent("Select…");
+  fireEvent.click(state);
+  fireEvent.click(await screen.findByText("Maharashtra (27)"));
   fireEvent.change(dialog.getByLabelText("City (optional)"), { target: { value: "Mumbai" } });
   fireEvent.change(dialog.getByLabelText("Phone"), { target: { value: "9876543210" } });
   fireEvent.click(dialog.getByText("Electronic invoicing (optional)"));
@@ -253,9 +256,9 @@ it("clears a previously saved balance explicitly to zero through the directory e
   fireEvent.click(await screen.findByRole("button", { name: "More actions" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
   const dialog = within(await screen.findByRole("dialog", { name: "Edit customer" }));
-  expect(dialog.getByLabelText("Debit / Payable")).toHaveValue("50");
+  expect(dialog.getByLabelText("Debit / payable")).toHaveValue("50");
   await waitFor(() => expect(dialog.getByRole("button", { name: "Save changes" })).toBeEnabled());
-  fireEvent.change(dialog.getByLabelText("Debit / Payable"), { target: { value: "" } });
+  fireEvent.change(dialog.getByLabelText("Debit / payable"), { target: { value: "" } });
   fireEvent.click(dialog.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(crm.updateCustomer).toHaveBeenCalledWith(17, expect.objectContaining({ opening_balance: 0 })));
 });

@@ -284,7 +284,7 @@ export default function Accounting() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
-          label="Net Profit"
+          label="Net profit"
           value={aed(report?.net_profit ?? 0)}
           change={(report?.net_profit ?? 0) >= 0 ? "Revenue minus expenses" : "Loss this period"}
           changeTone={(report?.net_profit ?? 0) >= 0 ? "up" : "down"}
@@ -302,7 +302,7 @@ export default function Accounting() {
           changeTone={(report?.total_expenses ?? 0) > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Cash Position"
+          label="Cash position"
           value={aed(report?.cash_position ?? 0)}
           change="Across bank accounts"
           changeTone="up"

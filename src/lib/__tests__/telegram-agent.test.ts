@@ -18,7 +18,7 @@ vi.mock("../remoteAgentTurn", () => ({ runRemoteAgentTurn: mocks.run, clearRemot
 vi.mock("../agentComputer", () => ({ stopAgentComputer: mocks.stopComputer }));
 vi.mock("../ai", () => ({ aiReady: mocks.ready }));
 
-import { connectTelegram, disconnectTelegram, telegramState, startTelegramAgent } from "../telegramAgent";
+import { autoStartTelegram, connectTelegram, disconnectTelegram, setTelegramAutoStart, telegramState, startTelegramAgent } from "../telegramAgent";
 const token = "123456789:synthetic-token-not-a-live-key";
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 const message = (id: number, text: string, owner = 42, type = "private") => ({ update_id: id, message: { message_id: id, date: Math.floor(Date.now() / 1000), text, from: { id: owner }, chat: { id: owner, type } } });
@@ -111,6 +111,32 @@ it("does not resend an accepted output retained for a later approval", async () 
   await feed([message(12, "YES")]);
   expect(mocks.native.mock.calls.filter(([, args]) => args.method === "sendDocument")).toHaveLength(1);
   expect(mocks.delivered).toHaveBeenLastCalledWith("Email accepted");
+});
+
+it("guards the auto-start preference behind a signed-in account", () => {
+  env.scope = null;
+  expect(() => setTelegramAutoStart(true)).toThrow(/Sign in/);
+});
+
+it("reconnects a paired bot on startup only when its owner opted in", async () => {
+  await pair();
+  expect(setTelegramAutoStart(true)).toBe(true);
+  await disconnectTelegram();
+  // Simulate an app restart that lost the live runtime while the saved state
+  // still says enabled: auto-start bridges the gap for the paired bot.
+  const saved = localStorage.getItem("filey.telegram_agent:local:org:user:owner")!;
+  localStorage.setItem("filey.telegram_agent:local:org:user:owner", JSON.stringify({ ...JSON.parse(saved), enabled: true }));
+  await autoStartTelegram();
+  await flush();
+  expect(telegramState().state).toBe("connected");
+  // Opting out keeps the start manual even with a saved, paired bot.
+  setTelegramAutoStart(false);
+  await disconnectTelegram();
+  const saved2 = localStorage.getItem("filey.telegram_agent:local:org:user:owner")!;
+  localStorage.setItem("filey.telegram_agent:local:org:user:owner", JSON.stringify({ ...JSON.parse(saved2), enabled: true }));
+  await autoStartTelegram();
+  await flush();
+  expect(telegramState().state).toBe("disconnected");
 });
 
 it("keeps Telegram output receipts scoped to the recipient", async () => {

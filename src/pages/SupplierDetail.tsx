@@ -516,7 +516,7 @@ export default function SupplierDetail() {
       <div className="flex items-center gap-3 mb-5 flex-wrap">
         <Link
           to="/suppliers"
-          aria-label="Back to Suppliers"
+          aria-label="Back to suppliers"
           className="btn-ghost w-10 !px-0 shrink-0"
         >
           <ArrowLeft className="h-4 w-4" />

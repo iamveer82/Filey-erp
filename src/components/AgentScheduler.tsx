@@ -2,10 +2,11 @@ import { useEffect, useRef } from "react";
 import { loadTasks, isDue, updateTask, type AgentTask } from "../lib/agentTasks";
 import { useUI } from "../lib/ui";
 import { AGENT_STORAGE_EVENT, agentStorageScope } from "../lib/agentStorage";
-import { alwaysOnPaused, HEARTBEAT_EVENT, notifyOwner, takeBackgroundRun, DAILY_RUN_LIMIT } from "../lib/alwaysOn";
+import { alwaysOnPaused, HEARTBEAT_EVENT, keepAwake, notifyOwner, takeBackgroundRun, DAILY_RUN_LIMIT } from "../lib/alwaysOn";
 import { eventsFor, goalWithEvents, scanBusinessEvents, watchedKinds, watchScanDue, type BusinessEvent } from "../lib/agentWatches";
 import { parkForApproval } from "../lib/agentApprovals";
 import { fileyAgentReply, fileyAgentStatus } from "../lib/fileyAgent";
+import { afterFailure, afterTurn, isLongTask, runLongTaskTurn } from "../lib/longTask";
 
 const INTERRUPTED =
   "Filey closed while this was running. Check what it already did, then press Retry.";
@@ -19,7 +20,11 @@ const INTERRUPTED =
  * are never run from here, whatever the agent mode says. They are parked in
  * the review queue (lib/agentApprovals) with their exact arguments, and run
  * only when a person presses Approve. A run cut off by Filey closing is marked
- * interrupted and waits for Retry instead of silently starting over. */
+ * interrupted and waits for Retry instead of silently starting over.
+ *
+ * Long tasks (lib/longTask) are the exception to waiting: they run turn after
+ * turn until finished, retry by themselves after any failure, and pick
+ * themselves up after Filey was closed. */
 export default function AgentScheduler() {
   const ui = useUI();
   // toast is recreated each render — capture via ref so the effect deps stay []
@@ -37,8 +42,11 @@ export default function AgentScheduler() {
     let controller: AbortController | undefined;
     let runScope: string | null = null;
     let toldLimit = "";
+    // Long-task turns run beside everything else, each with its own stop switch.
+    const longRuns = new Map<string, { scope: string; controller: AbortController }>();
     const stopChangedWorkspace = () => {
       if (runScope !== agentStorageScope()) controller?.abort();
+      for (const run of longRuns.values()) if (run.scope !== agentStorageScope()) run.controller.abort();
     };
     window.addEventListener(AGENT_STORAGE_EVENT, stopChangedWorkspace);
     window.addEventListener("filey:workspace-changed", stopChangedWorkspace);
@@ -49,7 +57,10 @@ export default function AgentScheduler() {
       checkedInterrupted.current = scope;
       for (const task of loadTasks())
         if (task.runningSince && !running.current.has(task.id))
-          updateTask(task.id, { runningSince: undefined, interrupted: true, lastError: INTERRUPTED }, scope);
+          updateTask(task.id, isLongTask(task)
+            // A long task carries on by itself; its next turn checks what the cut-off one did.
+            ? { runningSince: undefined, cutOff: "Filey was closed" }
+            : { runningSince: undefined, interrupted: true, lastError: INTERRUPTED }, scope);
     };
 
     const tick = async () => {
@@ -58,8 +69,15 @@ export default function AgentScheduler() {
       ticking.current = true;
       try {
         markInterrupted(scope);
-        if (alwaysOnPaused()) return;
         let tasks = loadTasks();
+        // A long task that was paused or deleted stops mid-turn; one still to finish keeps the computer awake.
+        for (const [id, run] of longRuns) {
+          const task = tasks.find(t => t.id === id);
+          if (!task || !task.enabled) run.controller.abort("paused");
+        }
+        const paused = alwaysOnPaused();
+        void keepAwake(!paused && tasks.some(t => isLongTask(t) && t.enabled && !t.done && !t.blocked));
+        if (paused) return;
         const kinds = watchedKinds(tasks);
         if (kinds.size && watchScanDue()) {
           await scanBusinessEvents(kinds).catch(() => []);
@@ -73,11 +91,18 @@ export default function AgentScheduler() {
         if (!work.length) return;
         // Filey Agent runs every automation. While it starts or restarts, wait for the next
         // heartbeat rather than spending the day's allowance on runs that cannot happen.
-        if (fileyAgentStatus().state !== "ready") return;
+        const engine = fileyAgentStatus().state;
         for (const { task } of work) {
           if (!alive || scope !== agentStorageScope() || alwaysOnPaused()) return;
           const latest = loadTasks().find(t => t.id === task.id);
           if (!latest || running.current.has(task.id)) continue;
+          if (isLongTask(latest)) {
+            // An engine that gave up is started again by asking it for a turn, so a long task
+            // goes ahead then too; its own back-off spaces the tries.
+            if (isDue(latest) && (engine === "ready" || engine === "unavailable" || engine === "off")) void runLongTask(latest, scope);
+            continue;
+          }
+          if (engine !== "ready") continue;
           const events = eventsFor(latest);
           if (!isDue(latest) && !events.length) continue;
           if (!takeBackgroundRun()) {
@@ -129,6 +154,40 @@ export default function AgentScheduler() {
       }
     };
 
+    const runLongTask = async (t: AgentTask, scope: string) => {
+      running.current.add(t.id);
+      const run = { scope, controller: new AbortController() };
+      longRuns.set(t.id, run);
+      updateTask(t.id, { runningSince: Date.now() }, scope);
+      const current = () => loadTasks().find(task => task.id === t.id) ?? t;
+      const settle = ({ patch, tell }: ReturnType<typeof afterTurn>) => {
+        updateTask(t.id, patch, scope);
+        if (!tell) return;
+        void notifyOwner(tell.title, tell.body);
+        // The owner of a days-long job is rarely at the computer: also their own WhatsApp chat,
+        // when they have switched WhatsApp reports on.
+        void import("../lib/proactiveAgent").then(m => m.tellOwnerOnWhatsApp(`*${tell.title.toUpperCase()}*\n${tell.body}`)).catch(() => {});
+      };
+      try {
+        const result = await runLongTaskTurn(t, run.controller.signal);
+        if (!alive || run.controller.signal.aborted || scope !== agentStorageScope()) return;
+        settle(afterTurn(current(), result));
+      } catch (e) {
+        if (!alive || scope !== agentStorageScope()) return;
+        if (run.controller.signal.aborted) {
+          // Paused or deleted mid-turn: when it is switched back on, the next turn checks first.
+          if (run.controller.signal.reason === "paused") updateTask(t.id, { runningSince: undefined, cutOff: "it was paused" }, scope);
+          return;
+        }
+        settle(afterFailure(current(), e instanceof Error ? e.message : String(e)));
+      } finally {
+        running.current.delete(t.id);
+        longRuns.delete(t.id);
+        // The next turn starts now, not on the next heartbeat.
+        if (alive) setTimeout(() => void tick(), 0);
+      }
+    };
+
     const onHeartbeat = () => void tick();
     window.addEventListener(HEARTBEAT_EVENT, onHeartbeat);
     const first = setTimeout(tick, 8000); // shortly after launch
@@ -136,6 +195,7 @@ export default function AgentScheduler() {
     return () => {
       alive = false;
       controller?.abort();
+      for (const run of longRuns.values()) run.controller.abort();
       window.removeEventListener(AGENT_STORAGE_EVENT, stopChangedWorkspace);
       window.removeEventListener("filey:workspace-changed", stopChangedWorkspace);
       window.removeEventListener(HEARTBEAT_EVENT, onHeartbeat);

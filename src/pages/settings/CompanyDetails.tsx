@@ -12,6 +12,7 @@ import { compactLogo } from "../../lib/imageCompact";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../components/ui";
 import { SelectMenu } from "../../components/ui-menu";
+import SubdivisionField from "../../components/SubdivisionField";
 import { Building2, Upload, X, Check } from "lucide-react";
 import { DocPresetsPanel } from "../../components/DocPresetBar";
 import {
@@ -21,7 +22,7 @@ import {
   type DocFormats,
 } from "../../lib/numberFormat";
 import { renderPattern, hasCounter } from "../../lib/docNumber";
-import { LEGAL_ID_TYPES, EMIRATES, normalizeEmirate } from "../../lib/einvoice";
+import { LEGAL_ID_TYPES, normalizeEmirate } from "../../lib/einvoice";
 import {
   loadBankInfo,
   saveBankInfo,
@@ -134,7 +135,7 @@ export default function CompanyDetails() {
     return (
       <SettingsPanel>
         <SettingsSection
-          title="Company Details"
+          title="Company details"
           description="Loading your company settings."
         >
           <div className="h-10 animate-pulse rounded-[8px] bg-muted" />
@@ -295,10 +296,10 @@ export default function CompanyDetails() {
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Company Details"
+        title="Company details"
         description="Business information used across your workspace and documents."
       >
-        <FormField label="Company Name" error={fieldErrors.name} required>
+        <FormField label="Company name" error={fieldErrors.name} required>
           <input
             data-guide="company-identity"
             className="input"
@@ -310,7 +311,7 @@ export default function CompanyDetails() {
           />
         </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Business Type">
+          <FormField label="Business type">
             <SelectMenu
               value={c.business_type ?? ""}
               onChange={(v) => set("business_type", v)}
@@ -376,7 +377,7 @@ export default function CompanyDetails() {
           </>
         </FormField>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField label="Phone Number" hint={phoneHint}>
+          <FormField label="Phone number" hint={phoneHint}>
             <input
               className="input"
               type="tel"
@@ -387,7 +388,7 @@ export default function CompanyDetails() {
             />
           </FormField>
           <FormField
-            label="Email Address"
+            label="Email address"
             error={fieldErrors.email}
             hint="hello@company.com"
           >
@@ -469,7 +470,7 @@ export default function CompanyDetails() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {!india && <>
           <FormField
-            label="Legal Registration ID"
+            label="Legal registration ID"
             hint={
               uae ? "Trade license / EID / passport no." : "Company registration number"
             }
@@ -482,7 +483,7 @@ export default function CompanyDetails() {
             />
           </FormField>
           {uae && (
-            <FormField label="ID Type" hint="UAE e-invoice">
+            <FormField label="ID type" hint="UAE e-invoice">
               <SelectMenu
                 value={seller.seller_legal_id_type ?? ""}
                 onChange={(v) => { setC({ ...c, legal_id_type: v, einvoice: { ...c.einvoice, legal_id_type: v } }); setSaved(false); }}
@@ -495,22 +496,7 @@ export default function CompanyDetails() {
           )}
           </>}
           <FormField label={subdivisionLabel(country)}>
-            {uae ? (
-              <SelectMenu
-                value={c.country_subdivision ?? ""}
-                onChange={(v) => set("country_subdivision", v)}
-                options={[
-                  { value: "", label: "Select…" },
-                  ...EMIRATES.map((em) => ({ value: em.code, label: em.label })),
-                ]}
-              />
-            ) : (
-              <input
-                className="input"
-                value={c.country_subdivision || ""}
-                onChange={(e) => set("country_subdivision", e.target.value)}
-              />
-            )}
+            <SubdivisionField country={country} value={c.country_subdivision} onChange={(v) => set("country_subdivision", v)} />
           </FormField>
         </div>
         {uae && <div className="border-t border-border pt-4">
@@ -548,7 +534,7 @@ export default function CompanyDetails() {
         )}
       </SettingsSection>
       <SettingsSection
-        title="Document Presets"
+        title="Document presets"
         description="Choose the starting template for each document type. Preset changes save immediately."
       >
         <DocPresetsPanel />
@@ -557,7 +543,7 @@ export default function CompanyDetails() {
         <CompanyDocuments country={country} />
       </SettingsSection>
       <SettingsSection
-        title="Stamp & Signature"
+        title="Stamp & signature"
         description="Upload once, then turn on the stamp or signature in any document."
       >
         <StampSignatureSettings
@@ -569,7 +555,7 @@ export default function CompanyDetails() {
         />
       </SettingsSection>
       <SettingsSection
-        title="Bank Details"
+        title="Bank details"
         description="Payment details you can include on invoices and other documents."
       >
         <div data-guide="company-bank" className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -605,7 +591,7 @@ export default function CompanyDetails() {
         />
       </SettingsSection>
       <SettingsSection
-        title="Document Numbering"
+        title="Document numbering"
         description="Use {001} for a counter and {YY} or {YYYY} for the year. Leave a format empty to use its default."
       >
         <div className="space-y-3">

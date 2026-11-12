@@ -32,6 +32,31 @@ export async function outputDir(): Promise<{ dir: string; source: "settings" | "
   }
 }
 
+/** The last files handed to the owner, kept in memory so a later turn can reopen its own
+ *  output ("now sign the PDF you made") by name or by the path it reported. Without it the
+ *  agent retried the reported path again and again and every open failed.
+ *  ponytail: in-memory, newest 12 / 60 MB; files from before an app restart come from My Files. */
+const recent: { name: string; path?: string; bytes: Uint8Array }[] = [];
+const RECENT_FILES = 12;
+const RECENT_BYTES = 60 * 1024 * 1024;
+
+function remember(name: string, bytes: Uint8Array): { path?: string } {
+  const entry: { name: string; path?: string; bytes: Uint8Array } = { name, bytes };
+  recent.push(entry);
+  while (recent.length > RECENT_FILES || recent.reduce((n, f) => n + f.bytes.length, 0) > RECENT_BYTES) recent.shift();
+  return entry;
+}
+
+/** A file Filey delivered earlier in this app session, by exact path, exact name or part of the name. */
+export function recentDelivery(want: string): { name: string; bytes: Uint8Array } | undefined {
+  const key = want.toLowerCase().trim();
+  const base = key.split(/[\\/]/).pop() || key;
+  const newest = [...recent].reverse();
+  const hit = newest.find(f => f.path?.toLowerCase().replace(/\\/g, "/") === key.replace(/\\/g, "/"))
+    ?? newest.find(f => f.name.toLowerCase() === base) ?? newest.find(f => f.name.toLowerCase().includes(base));
+  return hit && { name: hit.name, bytes: hit.bytes.slice() };
+}
+
 /** Write one produced file where the user will find it. Never throws — a
  *  failed save is reported as a file with no path, so the agent can say so
  *  rather than claiming success. */
@@ -42,6 +67,14 @@ export async function deliverFile(f: {
   // A fresh buffer: the caller's view may be a slice of a larger allocation,
   // which Rust and Blob both mis-read.
   const bytes = f.bytes.slice();
+  const entry = remember(f.name, bytes);
+  const delivered = await deliverBytes(f.name, bytes);
+  entry.path = delivered.path;
+  return delivered;
+}
+
+async function deliverBytes(name: string, bytes: Uint8Array): Promise<DeliveredFile> {
+  const f = { name };
   if (isNativeApp()) {
     try {
       const path = await saveNativeBytes(f.name, bytes, false);

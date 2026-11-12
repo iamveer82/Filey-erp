@@ -3,11 +3,15 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   scope: "org:user:alice" as string | null,
   connected: (_value: { state: string }) => {},
-  bridge: vi.fn(), send: vi.fn(), warn: vi.fn(),
+  bridge: vi.fn(), send: vi.fn(), warn: vi.fn(), reply: vi.fn(),
 }));
 vi.mock("../api", () => ({ getCacheScope: () => state.scope }));
 vi.mock("../ai", () => ({ aiReady: () => false, aiAutonomous: vi.fn(), DENY_SENSITIVE: vi.fn() }));
-vi.mock("../aiCredits", () => ({ creditChoice: () => ({ funding: "credits" }) }));
+vi.mock("../aiCredits", () => ({ creditChoice: () => ({ funding: "byok" }) }));
+vi.mock("../fileyAgent", () => ({
+  fileyAgentReply: state.reply,
+  fileyAgentStatus: () => ({ state: "ready" }),
+}));
 vi.mock("../log", () => ({ log: { warn: state.warn } }));
 vi.mock("../waAgent", () => ({ waFormat: (text: string) => text }));
 vi.mock("../waBridge", () => ({
@@ -22,6 +26,7 @@ beforeEach(() => {
   state.scope = "org:user:alice";
   state.bridge.mockReset().mockResolvedValue({ me: "alice@s.whatsapp.net" });
   state.send.mockReset().mockResolvedValue("receipt"); state.warn.mockReset();
+  state.reply.mockReset().mockResolvedValue("*DAILY SUMMARY*\nNothing due.");
 });
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
@@ -65,4 +70,17 @@ it.each(["owner", "send"])("does not send or persist Alice's reminders in Bob's 
   expect(reminders.loadReminders().map(r => r.text)).toEqual(["Bob reminder"]);
   state.scope = "org:user:alice";
   expect(reminders.loadReminders().map(r => r.text)).toEqual(["Alice private reminder"]);
+});
+
+it("keeps scheduled WhatsApp reports off until the owner opts in", async () => {
+  await setup();
+  state.connected({ state: "connected" });
+  await Promise.resolve();
+  expect(state.reply).not.toHaveBeenCalled();
+  expect(state.send).not.toHaveBeenCalled();
+
+  (await import("../proactiveAgent")).setProactiveWhatsAppEnabled(true);
+  state.connected({ state: "connected" });
+  await vi.waitFor(() => expect(state.send).toHaveBeenCalledTimes(2));
+  expect(state.reply.mock.calls.map(c => c[0]).sort()).toEqual(["proactive:alerts", "proactive:daily"]);
 });

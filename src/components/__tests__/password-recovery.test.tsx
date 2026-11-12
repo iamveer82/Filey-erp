@@ -244,11 +244,11 @@ it("does not report MFA as off after a failed settings check and can retry", asy
   render(<SecurityPanel onChangePassword={() => {}} />);
   await screen.findByRole("alert");
   expect(screen.queryByText(/^Off —/)).toBeNull();
-  expect(screen.getByRole("button", { name: /Two-Factor Authentication/ })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /Two-factor authentication/ })).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText(/^On —/);
   expect(screen.queryByRole("alert")).toBeNull();
   expect(auth.mfa.listFactors).toHaveBeenCalledTimes(2);
-  fireEvent.click(screen.getByRole("button", { name: /Two-Factor Authentication/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Two-factor authentication/ }));
   await screen.findByText(/My authenticator is set up/);
 });

@@ -124,7 +124,7 @@ describe("validated letter writes and output ownership", () => {
   });
   it("rejects status, private asset URLs and supplied block IDs before saving", async () => {
     const write = vi.spyOn(letters, "saveLetter");
-    for (const extra of [{ status: "issued" }, { signature: { data: "private-image" } }, { show_stamp: true },
+    for (const extra of [{ status: "issued" }, { signature: { data: "private-image" } }, { stamp: { data: "private-image" } },
       { company_logo: "https://untrusted.test/logo.png" }, { blocks: [{ type: "text", text: "Text", id: "model-id" }] }])
       expect(await call("create_letter_draft", { ...input(), ...extra })).toMatchObject({ code: "invalid_arguments", retry_safe: true });
     expect(write).not.toHaveBeenCalled();

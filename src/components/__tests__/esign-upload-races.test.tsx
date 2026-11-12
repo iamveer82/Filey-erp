@@ -69,7 +69,7 @@ it("does not restore a pending signature after changing modes", async () => {
   fireEvent.change(await signatureInput(view), { target: { files: [new File(["old"], "old.png")] } });
   const old = PendingReader.reads[0];
   const queuedOldCallback = old.onload!;
-  fireEvent.click(view.getByRole("button", { name: /Make a Sign/ }));
+  fireEvent.click(view.getByRole("button", { name: /Make a sign/ }));
   openUploadMode(view);
   await signatureInput(view);
   act(() => { old.result = "data:image/png;base64,T0xE"; queuedOldCallback(); });

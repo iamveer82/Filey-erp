@@ -24,6 +24,8 @@ export interface ChatTurn {
       detail?: string;
     }[];
     outcome?: string;
+    /** Tokens and model calls this reply took (Filey Agent), shown under it. */
+    usage?: { input: number; output: number; calls: number; cachedPct?: number };
   };
 }
 export interface Chat {

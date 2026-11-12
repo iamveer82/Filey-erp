@@ -239,7 +239,7 @@ export default function Orders() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 joined-kpis mb-4">
         <MetricCard
-          label="Total Orders"
+          label="Total orders"
           value={num(orders.length)}
           change={`${stats.returns} cancelled`}
           changeTone={stats.returns > 0 ? "warn" : "up"}
@@ -251,13 +251,13 @@ export default function Orders() {
           changeTone="up"
         />
         <MetricCard
-          label="In Progress"
+          label="In progress"
           value={num(stats.progress)}
           change={stats.progress > 0 ? "Active" : "All done"}
           changeTone={stats.progress > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Order Value"
+          label="Order value"
           value={aed(stats.value)}
           change="Total booked"
           changeTone="up"
@@ -302,7 +302,7 @@ export default function Orders() {
         >
           Cancelled
         </FilterChip>
-        <span className="ml-auto text-[11px] font-medium text-brand-400 tracking-tight">
+        <span className="ml-auto text-xs text-muted-foreground tabular-nums">
           {filteredOrders.length} of {orders.length}
         </span>
       </div>
@@ -988,7 +988,7 @@ function OrderModal({
     <Modal open={open} onClose={() => { if (!saving) onClose(); }} title="New sales order">
       <fieldset disabled={saving} className="min-w-0" aria-busy={saving}>
       <div className="space-y-3">
-        <Field label="Order Number">
+        <Field label="Order number">
           <input
             className="input"
             value={f.order_number}

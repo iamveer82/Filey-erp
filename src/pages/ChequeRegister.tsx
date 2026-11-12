@@ -207,7 +207,7 @@ export default function ChequeRegister() {
   return (
     <div className="">
       <PageHeader
-        title="Cheque Register"
+        title="Cheque register"
         subtitle="Track issued & received cheques"
         action={
           <button
@@ -223,13 +223,13 @@ export default function ChequeRegister() {
       />
       <div className="grid grid-cols-1 sm:grid-cols-3 joined-kpis mb-6">
         <MetricCard
-          label="Pending Issued"
+          label="Pending issued"
           value={aed(totals.issued)}
           change={totals.issued > 0 ? "Not yet cleared" : "None outstanding"}
           changeTone={totals.issued > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Pending Received"
+          label="Pending received"
           value={aed(totals.received)}
           change={totals.received > 0 ? "Awaiting deposit" : "None outstanding"}
           changeTone={totals.received > 0 ? "warn" : "up"}
@@ -314,7 +314,7 @@ export default function ChequeRegister() {
           },
           {
             key: "due",
-            label: "Due Date",
+            label: "Due date",
             sortValue: (c) => c.due_date,
             render: (c) => {
               const overdue =
@@ -513,14 +513,14 @@ function ChequeModal({
             ]}
           />
         </Field>
-        <Field label="Issue Date">
+        <Field label="Issue date">
           <DateField
             value={f.issue_date}
             onChange={(v) => setF({ ...f, issue_date: v })}
             clearable={false}
           />
         </Field>
-        <Field label="Due Date">
+        <Field label="Due date">
           <DateField
             value={f.due_date}
             onChange={(v) => setF({ ...f, due_date: v })}

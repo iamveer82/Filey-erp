@@ -53,9 +53,9 @@ export default function SalesTab({ data }: { data: ReportsData }) {
   const periodTotal = monthlySales.reduce((sum, month) => sum + month.paid + month.open, 0);
 
   const kpis = [
-    { label: "Total Invoiced", value: aed(totalInvoiced) },
+    { label: "Total invoiced", value: aed(totalInvoiced) },
     { label: "Outstanding", value: aed(outstanding) },
-    { label: "Paid Amount", value: aed(paidAmount) },
+    { label: "Paid amount", value: aed(paidAmount) },
     { label: "Overdue", value: num(overdueCount) },
   ];
 

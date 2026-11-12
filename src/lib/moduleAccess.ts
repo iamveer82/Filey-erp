@@ -54,10 +54,11 @@ export async function requireModuleAccess(id: string, admin = false): Promise<vo
 const toolModules: Record<string,string> = {
   find_customers:"customers",create_customer:"customers",find_products:"inventory",create_product:"inventory",
   find_suppliers:"suppliers",create_supplier:"suppliers",financial_summary:"accounting",
+  expiry_report:"inventory",receive_batch:"inventory",write_off_batch:"inventory",profit_report:"reports",counter_sell:"counter",check_upi_payments:"invoicing",
   list_invoices:"invoicing",get_invoice:"invoicing",list_pending_invoice_saves:"invoicing",create_invoice_draft:"invoicing",revise_invoice:"invoicing",retry_invoice_save:"invoicing",
   create_quote:"quoting",list_templates:"invoicing",create_order:"orders",
   set_invoice_preset:"invoicing",list_packing_lists:"packaging-list",create_packing_list:"packaging-list",list_declaration_letters:"declaration",create_declaration_letter:"declaration",list_quotes:"quoting",list_orders:"orders",
-  word:"letters",sheet:"letters",pdf:"letters",slides:"letters",design:"letters",fig:"letters",vector:"letters",get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
+  word:"letters",sheet:"letters",pdf:"letters",slides:"letters",design:"letters",fig:"letters",vector:"letters",office_image:"letters",get_letter_context:"letters",list_letters:"letters",get_letter:"letters",create_letter_draft:"letters",revise_letter_draft:"letters",export_letter_pdf:"letters",
   create_payment_receipt:"payment-receipts",list_payment_receipts:"payment-receipts",
   create_purchase_order:"purchase-orders",create_purchase_invoice_draft:"purchase-invoices",list_purchase_invoices:"purchase-invoices",
   list_bank_accounts:"bank-accounts",list_cheques:"cheques",record_cheque:"cheques",

@@ -55,12 +55,12 @@ export interface CustomTemplate {
 
 /** Sections the user can drag around on a file template */
 export const DRAGGABLE_SECTIONS = [
-  { key: "seller", label: "Company Info", w: 180, h: 72 },
-  { key: "header", label: "Document Header", w: 160, h: 64 },
-  { key: "customer", label: "Customer Info", w: 170, h: 64 },
-  { key: "items", label: "Items Table", w: 340, h: 120 },
+  { key: "seller", label: "Company info", w: 180, h: 72 },
+  { key: "header", label: "Document header", w: 160, h: 64 },
+  { key: "customer", label: "Customer info", w: 170, h: 64 },
+  { key: "items", label: "Items table", w: 340, h: 120 },
   { key: "totals", label: "Totals", w: 150, h: 70 },
-  { key: "footer", label: "Notes / Terms", w: 280, h: 40 },
+  { key: "footer", label: "Notes / terms", w: 280, h: 40 },
 ];
 
 function defaultPositions(): Record<string, { x: number; y: number }> {

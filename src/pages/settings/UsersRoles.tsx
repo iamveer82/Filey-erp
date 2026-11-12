@@ -377,7 +377,7 @@ export default function UsersRoles() {
 
       {/* Members & Roles - team management */}
       <SettingsSection
-        title="Members & Roles"
+        title="Members & roles"
         stacked
         description={
           <>
@@ -429,7 +429,7 @@ export default function UsersRoles() {
                     {editable ? (
                       <SelectMenu
                         ariaLabel={`Role for ${m.name || m.email}`}
-                        className="w-[118px]"
+                        className="w-[120px]"
                         value={m.role}
                         onChange={async (v) => {
                           try {

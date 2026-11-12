@@ -632,7 +632,7 @@ export default function PaymentReceipt() {
       })),
       [
         { key: "number", label: "Number" },
-        { key: "customer_name", label: "Received From" },
+        { key: "customer_name", label: "Received from" },
         { key: "date", label: "Date" },
         { key: "amount", label: "Amount" },
         { key: "currency", label: "Currency" },
@@ -724,7 +724,7 @@ export default function PaymentReceipt() {
     <div>
       {templateError && <p role="alert" className="mb-3 text-sm text-danger">Could not load saved templates: {templateError}</p>}
       {view === "list" && <PageHeader
-        title="Payment Receipts"
+        title="Payment receipts"
         subtitle="Payments received against invoices"
         action={
           <div className="flex gap-2 flex-wrap">
@@ -760,7 +760,6 @@ export default function PaymentReceipt() {
               label="Paid"
               value={String(stats.paid)}
               change={stats.paid > 0 ? "Confirmed payments" : "None yet"}
-              changeTone={stats.paid > 0 ? "up" : "warn"}
             />
           </div>
 
@@ -795,7 +794,7 @@ export default function PaymentReceipt() {
               pageSize={10}
               columns={[
                 { summary: true, key: "number", label: "Number", render: (d) => <span className="font-medium text-ink">{d.number}</span> },
-                { summary: true, truncate: true, key: "customer_name", label: "Received From", render: (d) => d.customer_name || "—" },
+                { summary: true, truncate: true, key: "customer_name", label: "Received from", render: (d) => d.customer_name || "—" },
                 { key: "payment_date", label: "Date", render: (d) => fmtDate(d.payment_date) },
                 { key: "payment_method", label: "Method", render: (d) => d.payment_method || "—" },
                 { summary: true,

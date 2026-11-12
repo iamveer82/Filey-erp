@@ -53,7 +53,9 @@ export async function enableComputerUse(durationSeconds: number | null = null, w
   publish({ enabled: false, expiresAt: null, busy: true });
   try {
     await stopping;
-    await requireModuleAccess("browser", true);
+    // Desktop control is the app's own feature, not the browser module: require the
+    // workspace-admin check that computer_use needs, but not a paid browser section.
+    await requireModuleAccess("agent", true);
     if (version !== generation || scope !== agentStorageScope()) throw new Error("Workspace changed before computer access started.");
     const mascot = await cursorMascot();
     const result = await invoke<{ sessionToken: string; expiresAt: number | null }>("computer_start", { durationSeconds, mascot, ...(windowId ? { windowId } : {}), ...(browserTab ? { browserTab } : {}) });
@@ -126,7 +128,7 @@ function validate(args: Record<string, unknown>): Record<string, unknown> {
   if (typeof action === "string" && action.startsWith("app_")) {
     if (typeof args.app !== "string" || !args.app.trim() || args.app.length > 200) throw new Error("Name the app (or its pid) from apps.");
     const request: Record<string, unknown> = { action, app: args.app };
-    for (const key of ["element_index", "x", "y", "to_x", "to_y", "button", "double_click", "text", "keys", "value", "direction", "pages", "name", "text_limit", "max_tree_nodes", "max_tree_depth"])
+    for (const key of ["element_index", "x", "y", "to_x", "to_y", "button", "double_click", "text", "keys", "value", "direction", "pages", "name", "text_limit", "max_tree_nodes", "max_tree_depth", "include_screenshot", "steps"])
       if (args[key] !== undefined) request[key] = args[key];
     return request;
   }
@@ -188,7 +190,7 @@ export async function runComputerUse(args: Record<string, unknown>, signal?: Abo
   signal?.addEventListener("abort", abort, { once: true });
   publish({ ...current, busy: true });
   try {
-    try { await requireModuleAccess("browser", true); }
+    try { await requireModuleAccess("agent", true); }
     catch (error) { await disableComputerUse(version); throw error; }
     if (signal?.aborted || generation !== version || permission.scope !== agentStorageScope()) throw new DOMException("Computer action canceled", "AbortError");
     const result = await invoke<Record<string, unknown>>("computer_command", { sessionToken: permission.sessionToken, request });

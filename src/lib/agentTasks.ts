@@ -14,7 +14,10 @@ export type Schedule =
   | { type: "daily"; time: string } // "HH:MM" 24h, local
   | { type: "weekly"; day: number; time: string } // day 0=Sun…6=Sat
   /** No clock: runs only when a watched business event happens. */
-  | { type: "events" };
+  | { type: "events" }
+  /** A long task (lib/longTask): starts now, and is run again as soon as each turn ends until
+   *  the agent reports it finished or needs the owner. */
+  | { type: "until_done" };
 
 /** Business events a task can watch. Found by lib/agentWatches every 15 min. */
 export type WatchEvent = "invoice_overdue" | "invoice_paid" | "stock_low" | "follow_up_due";
@@ -45,6 +48,25 @@ export interface AgentTask {
   interrupted?: boolean;
   /** Newest watched event already handed to this task. */
   lastEventAt?: number;
+
+  // Long tasks only (schedule "until_done"); see lib/longTask.
+  /** Finished: it runs no more. */
+  done?: boolean;
+  /** Why it stopped for the owner (their answer, an approval, no progress). Resume clears it. */
+  blocked?: string;
+  /** The owner's reply to that, given on Resume; handed to the next turn, then cleared. */
+  answer?: string;
+  /** Agent turns taken so far. */
+  turns?: number;
+  /** Where it got to, in the agent's own words. Opens the next turn. */
+  note?: string;
+  /** Failed turns in a row, and the earliest time of the next try. */
+  failures?: number;
+  retryAt?: number;
+  /** Turns in a row that used no tool: a few of those means it is going round in circles. */
+  idleTurns?: number;
+  /** The last turn did not end by itself (Filey closed, the engine died): the next one checks first. */
+  cutOff?: string;
 }
 
 const KEY = "filey.agent.tasks";
@@ -104,6 +126,7 @@ export function isDue(task: AgentTask, now = Date.now()): boolean {
   if (!task.enabled || task.interrupted) return false;
   const s = task.schedule;
   if (s.type === "events") return false;
+  if (s.type === "until_done") return !task.done && !task.blocked && now >= (task.retryAt ?? 0);
   if (s.type === "interval") {
     const base = task.lastRun ?? task.createdAt;
     return now - base >= Math.max(1, s.minutes) * 60_000;
@@ -124,6 +147,7 @@ export function isDue(task: AgentTask, now = Date.now()): boolean {
 /** Human-readable schedule, e.g. "Every 30 min" / "Daily 09:00" / "Mon 08:30". */
 export function describeSchedule(s: Schedule): string {
   if (s.type === "events") return "When something happens";
+  if (s.type === "until_done") return "Until it's done";
   if (s.type === "interval") {
     const m = s.minutes;
     if (m % 60 === 0) return `Every ${m / 60} h`;

@@ -1285,7 +1285,7 @@ export default function Quoting() {
                           </button>
                         </div>
                       </Field>
-                      <Field label="Customer / Company Name">
+                      <Field label="Customer / company name">
                         <input aria-label="Customer name"
                           className="input"
                           placeholder="Gulf Line Trading LLC"
@@ -1293,7 +1293,7 @@ export default function Quoting() {
                           onChange={(e) => set("customer_name", e.target.value)}
                         />
                       </Field>
-                      <Field label="Billing Address">
+                      <Field label="Billing address">
                         <textarea
                           className="textarea"
                           rows={4}
@@ -1320,7 +1320,7 @@ export default function Quoting() {
                       </Field>
                     </div>
                     <div className="space-y-3">
-                      <Field label="Document Title">
+                      <Field label="Document title">
                         <input aria-label="Document title"
                           className="input"
                           placeholder="Quotation"
@@ -1335,21 +1335,21 @@ export default function Quoting() {
                           <option value="Proposal" />
                         </datalist>
                       </Field>
-                      <Field label="Quotation Number">
+                      <Field label="Quotation number">
                         <input aria-label="Quotation number"
                           className="input"
                           value={form.number}
                           onChange={(e) => set("number", e.target.value)}
                         />
                       </Field>
-                      <Field label="Quote Date">
+                      <Field label="Quote date">
                         <DateField
                           value={form.quote_date ?? ""}
                           onChange={(v) => set("quote_date", v)}
                           clearable={false}
                         />
                       </Field>
-                      <Field label="Valid Until">
+                      <Field label="Valid until">
                         <DateField
                           value={form.valid_until ?? ""}
                           onChange={(v) => set("valid_until", v)}
@@ -1370,7 +1370,7 @@ export default function Quoting() {
                             }))}
                           />
                         </Field>
-                        <Field label="Sales Person">
+                        <Field label="Sales person">
                           <input aria-label="Salesperson"
                             className="input"
                             placeholder="Name"
@@ -2309,7 +2309,7 @@ export default function Quoting() {
           changeTone={draftCount > 0 ? "warn" : "up"}
         />
         <MetricCard
-          label="Total Value"
+          label="Total value"
           value={aed(totalValue)}
           change="Quoted across all customers"
           changeTone="up"
@@ -2324,7 +2324,6 @@ export default function Quoting() {
           label="Accepted"
           value={num(acceptedCount)}
           change={acceptedCount > 0 ? "Converted to invoices" : "None yet"}
-          changeTone={acceptedCount > 0 ? "up" : "warn"}
         />
       </div>
 
@@ -2458,13 +2457,13 @@ export default function Quoting() {
           },
           {
             key: "quote_date",
-            label: "Quote Date",
+            label: "Quote date",
             sortValue: (d) => d.quote_date || "",
             render: (d) => fmtDate(d.quote_date),
           },
           {
             key: "valid_until",
-            label: "Valid Until",
+            label: "Valid until",
             sortValue: (d) => d.valid_until || "",
             render: (d) => fmtDate(d.valid_until),
           },
@@ -2645,9 +2644,9 @@ function CustomerModal({
       });
   }, [open]);
   return (
-    <Modal open={open} onClose={onClose} title="Add Customer">
+    <Modal open={open} onClose={onClose} title="Add customer">
       <div className="space-y-3">
-        <Field label="Company / Legal Name">
+        <Field label="Company / legal name">
           <input aria-label="Company name"
             className="input"
             placeholder="Gulf Line Trading LLC"
@@ -2656,7 +2655,7 @@ function CustomerModal({
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Contact Name">
+          <Field label="Contact name">
             <input aria-label="Contact name"
               className="input"
               value={f.name}
@@ -2671,7 +2670,7 @@ function CustomerModal({
             />
           </Field>
         </div>
-        <Field label="Billing Address">
+        <Field label="Billing address">
           <textarea
             className="textarea"
             rows={2}
@@ -2756,7 +2755,7 @@ function InventoryImportModal({
       p.sku.toLowerCase().includes(q.toLowerCase())
   );
   return (
-    <Modal open={open} onClose={onClose} title="Import from Inventory">
+    <Modal open={open} onClose={onClose} title="Import from inventory">
       <SearchInput
         value={q}
         onChange={setQ}

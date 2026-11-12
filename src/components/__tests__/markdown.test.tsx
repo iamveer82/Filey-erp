@@ -57,6 +57,17 @@ describe("Markdown", () => {
     expect(container.textContent).toContain("Injected");
   });
 
+  it("renders a pipe table as a table, cells and all", () => {
+    const { container } = render(
+      <Markdown text={"**October:** 2 invoices\n| Invoice | Total |\n|---|---:|\n| INV-31 | **1,923.60** |\n| INV-30 | 252.00 |\nBoth unpaid."} />
+    );
+    expect([...container.querySelectorAll("th")].map(th => th.textContent)).toEqual(["Invoice", "Total"]);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(container.querySelector("td strong")?.textContent).toBe("1,923.60");
+    expect(container.textContent).not.toContain("|");
+    expect(container.textContent).toContain("Both unpaid.");
+  });
+
   it("survives an unterminated code fence mid-stream", () => {
     const { container } = render(<Markdown text={"Working:\n```\nhalf a line"} />);
     expect(container.querySelector("pre")?.textContent).toBe("half a line");

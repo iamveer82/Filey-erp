@@ -93,6 +93,16 @@ export async function notifyOwner(title: string, body: string): Promise<void> {
   }
 }
 
+let awake = false;
+/** Keep the computer from going to sleep on idle while a long task works. The screen may
+ *  still turn off; the request ends when it is switched off here or Filey quits. */
+export async function keepAwake(on: boolean): Promise<void> {
+  if (!hasTauri || on === awake) return;
+  awake = on;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("always_on_keep_awake", { on }).catch(() => { awake = !on; });
+}
+
 export async function showFiley(): Promise<void> {
   if (!hasTauri) return;
   const { invoke } = await import("@tauri-apps/api/core");

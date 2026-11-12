@@ -106,14 +106,14 @@ export default function SecurityPanel({
         <div className="-my-4 divide-y divide-border">
           <ManageRow
             icon={<Lock size={16} />}
-            title="Change Password"
+            title="Change password"
             desc="Verify with your password or a fresh email code"
             onClick={onChangePassword}
           />
           <div>
             <ManageRow
               icon={<KeyRound size={16} />}
-              title="Two-Factor Authentication"
+              title="Two-factor authentication"
               desc={twoFaDesc}
               right={
                 cloud && loaded && !loadError && factor ? (
@@ -142,7 +142,7 @@ export default function SecurityPanel({
           </div>
           <ManageRow
             icon={<Monitor size={16} />}
-            title="Active Sessions"
+            title="Active sessions"
             desc="Not available yet — planned for a future release"
           />
         </div>
@@ -242,7 +242,7 @@ function TwoFactorModal({
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Two-Factor Authentication">
+    <Modal open={open} onClose={onClose} title="Two-factor authentication">
       {factor ? (
         <div className="space-y-3">
           <p className="break-words text-sm text-muted-foreground">
@@ -471,7 +471,7 @@ export function ChangePasswordModal({
   };
 
   return (
-    <Modal open={open} onClose={close} title="Change Password">
+    <Modal open={open} onClose={close} title="Change password">
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
           <button
@@ -526,7 +526,7 @@ export function ChangePasswordModal({
             )}
           </div>
         ) : (
-          <Field label="Current Password">
+          <Field label="Current password">
             <input
               type="password"
               className="input"
@@ -536,7 +536,7 @@ export function ChangePasswordModal({
             />
           </Field>
         )}
-        <Field label="New Password">
+        <Field label="New password">
           <input
             type="password"
             className="input"
@@ -545,7 +545,7 @@ export function ChangePasswordModal({
             autoComplete="new-password"
           />
         </Field>
-        <Field label="Confirm New Password">
+        <Field label="Confirm new password">
           <input
             type="password"
             className="input"

@@ -46,6 +46,7 @@ const GROUP_BY_ID: Record<string, string> = {
   "purchase-orders": "Purchases",
   "purchase-invoices": "Purchases",
   inventory: "Inventory",
+  counter: "Sales",
   people: "Accounting",
   accounting: "Accounting",
   "payment-receipts": "Accounting",
@@ -60,7 +61,7 @@ const GROUP_BY_ID: Record<string, string> = {
 
 export default function AppsManager() {
   const { toast } = useUI();
-  const { modules, isEnabled, toggle, enableAll } = useModules();
+  const { modules, isEnabled, toggle, enableAll, admin, pharmaMode, setPharmaMode } = useModules();
 
   const groups = useMemo(() => {
     const byGroup = new Map<string, typeof modules>();
@@ -96,6 +97,31 @@ export default function AppsManager() {
           >
             Enable all
           </button>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Pharma mode" description="For pharmacies and medical stores. Off by default.">
+        <div className="flex min-w-0 items-start gap-3">
+          <AppIcon name="pharmacy" className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Pharma mode</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-muted-foreground">
+              <li>The Counter becomes the Pharmacy counter, with patient and doctor details for prescription medicines</li>
+              <li>Filey AI gets its pharmacy tools: find medicines, receive batches, expiry report, write off expired stock</li>
+              <li>Everyone already has the Counter, barcodes, batches with expiry, expiring-soon alerts and receipts; Pharma mode adds only the pharmacy parts</li>
+            </ul>
+            {!admin && <p className="mt-1 text-xs text-muted-foreground">Only a workspace administrator can change this.</p>}
+          </div>
+          <Toggle
+            label="Turn Pharma mode on or off"
+            on={pharmaMode}
+            disabled={!admin}
+            onChange={() => {
+              const next = !pharmaMode;
+              setPharmaMode(next)
+                .then(() => toast.success(next ? "Pharma mode is on. The Counter is now the Pharmacy counter." : "Pharma mode is off."))
+                .catch((e) => toast.error(e instanceof Error ? e.message : String(e)));
+            }}
+          />
         </div>
       </SettingsSection>
       {groups.map(([group, items]) => (

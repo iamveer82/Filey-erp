@@ -400,7 +400,7 @@ export default function ESignStudio({
       {/* Mode selector */}
       <div className="flex flex-wrap gap-2">
         {[
-          { id: "draw-only" as Mode, label: "Make a Sign", desc: "Draw your signature" },
+          { id: "draw-only" as Mode, label: "Make a sign", desc: "Draw your signature" },
           {
             id: "upload-both" as Mode,
             label: "Use a signature image",

@@ -81,10 +81,61 @@ export const ALWAYS_ASK_TOOLS: ReadonlySet<string> = new Set([
   "send_invoice", "send_invoice_whatsapp", "email_invoice", "share_document_link", "send_whatsapp_file",
 ]);
 
+/** Shell commands that can wreck the machine or its data still ask in Full access: the
+ *  "really important" short list. Matched against the command the engine wants to run. */
+const CATASTROPHIC = [
+  /\bformat(\.com)?\s+[a-z]:/i, /\bdiskpart\b/i, /\bbcdedit\b/i, /\bcipher\s+\/w\b/i,
+  /\brm\s+-[a-z]*r[a-z]*f?[a-z]*\s+(\/|~|\*|[a-z]:)/i, /\brm\s+-[a-z]*f[a-z]*r[a-z]*\s+(\/|~|\*|[a-z]:)/i,
+  /\b(del|erase)\s+(\/[a-z]\s+)*\/s\b/i, /\b(rd|rmdir)\s+(\/[a-z]\s+)*\/s\b/i,
+  /\bremove-item\b[^|;\n]*-recurse[^|;\n]*\s([a-z]:\\?|~|\$env:)/i,
+  /\breg(\.exe)?\s+delete\b/i, /\bremove-itemproperty\b[^|;\n]*hklm/i,
+  /\b(shutdown|stop-computer|restart-computer)\b/i, /\bgit\s+push\b[^\n]*(--force|-f\b)/i,
+  /\bdrop\s+(database|table|schema)\b/i, /\btruncate\s+table\b/i,
+];
+
+export function catastrophicCommand(text: unknown): boolean {
+  const command = typeof text === "string" ? text : "";
+  return CATASTROPHIC.some((pattern) => pattern.test(command));
+}
+
 /** Full access is the in-app owner's pre-approval. WhatsApp and scheduled jobs
- *  keep their own confirm callback and do not use this. */
-export function fullAccessPreapproved(mode: AgentMode = getAgentMode(), toolName?: string): boolean {
-  return mode === "auto" && !(toolName && ALWAYS_ASK_TOOLS.has(toolName));
+ *  keep their own confirm callback and do not use this. `args` lets an engine
+ *  command approval through only when it is not on the catastrophic list. */
+export function fullAccessPreapproved(mode: AgentMode = getAgentMode(), toolName?: string, args?: Record<string, unknown>): boolean {
+  if (mode !== "auto" || (toolName && ALWAYS_ASK_TOOLS.has(toolName))) return false;
+  return !catastrophicCommand(args?.action ?? args?.command);
+}
+
+/** The owner granting Full access in their own words: "you have full permissions",
+ *  "do it without asking", "don't ask me for permission". Only the owner's own typed
+ *  chat message is checked — never page text, tool output or a remote channel — so
+ *  nothing else can switch the mode. */
+export function grantsFullAccess(text: string): boolean {
+  return /\b(you\s+(have|got|now\s+have)|i\s+(give|grant)\s+you|you'?ve\s+got|with|take|granted?|giving\s+you)\s+(full|all|complete|every)\s+(permissions?|access|control|rights)\b/i.test(text)
+    || /\b(do\s+it|do\s+everything|go\s+ahead|proceed|continue|work|finish\s+it)\s+without\s+(asking|permission|approvals?|my\s+approval)\b/i.test(text)
+    || /\b(don'?t|do\s+not|no\s+need\s+to)\s+ask\s+(me\s+)?(for\s+)?(any\s+)?(permissions?|approvals?)\b/i.test(text);
+}
+
+/** One line for the engine at the top of each in-app turn, so the model works with the
+ *  mode instead of asking permission in chat: the app shows a card when one is needed. */
+export function engineModeNote(mode: AgentMode = getAgentMode()): string {
+  switch (mode) {
+    case "auto":
+      return "[Filey mode: Full access. Act and finish the task without asking for permission. Only sending a document or invoice out, or a command that could wipe data, shows the owner an approval card; just make the call.]";
+    case "accept_edits":
+      return "[Filey mode: Accept edits. Act on your own and finish the task. Sending, paying and other outbound steps show the owner an approval card by themselves, so call them directly; never ask for permission in chat.]";
+    case "manual":
+      return "[Filey mode: Manual. Every change shows the owner an approval card; call the tools directly instead of asking in chat first.]";
+    case "plan":
+      return "[Filey mode: Plan. Changes are blocked. Investigate, then reply with a short numbered plan and tell the owner to switch modes to run it.]";
+  }
+}
+
+/** Desktop control is the desktop app's own feature: starting a task in Filey
+ *  is the permission, so Auto and Accept edits run it without a card for every
+ *  click. Manual still asks, and Plan still blocks, like every other action. */
+export function computerControlPreapproved(mode: AgentMode = getAgentMode()): boolean {
+  return mode === "auto" || mode === "accept_edits";
 }
 
 /** Desktop dev session: Full access, every action group on, except the optional

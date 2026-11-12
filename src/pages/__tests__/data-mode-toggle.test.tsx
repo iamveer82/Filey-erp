@@ -2,29 +2,18 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import DataModePanel from "../settings/DataModePanel";
 import { setImplicitDataMode } from "../../lib/dataMode";
-import { WorkspaceTransferError } from "../../lib/switchWorkspace";
+
+// Cloud mode is off sale and no longer offered from local mode. The only
+// switch left is the off-switch for people already working in the cloud: it
+// brings the workspace back to this device without uploading anything.
 
 const cloud = vi.hoisted(() => ({
   session: "owner@example.test" as string | null,
   switchWorkspace: vi.fn(async () => {}),
-  migrateLocalToCloud: vi.fn(async () => [] as { table: string; rows: number; error?: string }[]),
-  hasLocalData: vi.fn(async () => true),
   pendingWrites: vi.fn(async () => [] as { id: number; op: string }[]),
   flushOutbox: vi.fn(async () => {}),
   reload: false,
   authEvents: false,
-}));
-const copy = vi.hoisted(() => ({ allowed: false, owner: null as string | null, set: vi.fn() }));
-vi.mock("../../lib/cloudCopy", () => ({
-  CLOUD_COPY_EVENT: "filey:cloud-copy",
-  cloudCopyAllowed: async () => copy.allowed,
-  cloudCopyOwner: () => copy.owner,
-  setCloudCopy: copy.set,
-  runCloudCopy: vi.fn(async () => true),
-  resolveCloudCopyConflicts: vi.fn(async () => true),
-  DEVICE_COPY_EVENT: "filey:device-copy",
-  deviceCopyAt: () => null,
-  deviceCopyInFlight: () => undefined,
 }));
 
 // vi.mock factories are hoisted, so the mode fixture has to be too.
@@ -37,10 +26,9 @@ vi.mock("../../lib/dataMode", async (importOriginal) => ({
   isLocalMode: () => mode.value === "local",
 }));
 
-// The panel asks Supabase directly whether a cloud account exists — in local
-// mode the app user is the DEVICE account, so only this can answer.
 vi.mock("../../lib/supabase", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/supabase")>()),
+  cloudConfigured: true,
   supabase: {
     auth: {
       getSession: async () => ({ data: { session: cloud.session ? { user: { email: cloud.session } } : null }, error: null }),
@@ -57,27 +45,20 @@ vi.mock("../../lib/switchWorkspace", async (importOriginal) => ({
   switchWorkspace: cloud.switchWorkspace,
 }));
 vi.mock("../../lib/migrate", () => ({
-  migrateLocalToCloud: cloud.migrateLocalToCloud,
   migrateCloudToLocal: vi.fn(async () => []),
   normalizeLocalEmirates: vi.fn(async () => 0),
 }));
-vi.mock("../../lib/license", () => ({ hasLocalData: cloud.hasLocalData }));
 vi.mock("../../lib/sync", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/sync")>()),
-  autoSyncEnabled: () => false,
-  setAutoSyncEnabled: vi.fn(),
-  getSyncStatus: () => ({ state: "idle" as const, at: null }),
-  syncNow: vi.fn(async () => true),
-  syncCycle: vi.fn(async () => true),
-  markAllForSync: vi.fn(async () => {}),
-  cloudSignIn: vi.fn(),
-  cloudSignUp: vi.fn(),
-  cloudSignOut: vi.fn(),
   setMigrating: vi.fn(),
   isMigrating: () => false,
-  type: {},
 }));
 vi.mock("../../lib/api", () => ({ pendingCloudWrites: cloud.pendingWrites, flushOutbox: cloud.flushOutbox }));
+vi.mock("../../lib/cloudCopy", () => ({
+  DEVICE_COPY_EVENT: "filey:device-copy",
+  deviceCopyAt: () => null,
+  deviceCopyInFlight: () => undefined,
+}));
 vi.mock("../../lib/localPaths", () => ({
   hasTauri: false,
   getExportDir: () => "",
@@ -121,25 +102,34 @@ beforeEach(() => {
   setImplicitDataMode(null);
   cloud.session = "owner@example.test";
   cloud.switchWorkspace.mockReset().mockResolvedValue();
-  cloud.migrateLocalToCloud.mockClear().mockResolvedValue([]);
-  cloud.hasLocalData.mockClear().mockResolvedValue(true);
   cloud.pendingWrites.mockReset().mockResolvedValue([]);
   cloud.flushOutbox.mockReset().mockResolvedValue();
   confirm.mockClear().mockResolvedValue(true);
   cloud.reload = false;
   cloud.authEvents = false;
-  copy.allowed = false;
-  copy.owner = null;
-  copy.set.mockClear();
   vi.stubGlobal("location", { ...window.location, reload: () => { cloud.reload = true; } });
 });
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it("shows the store as off while the records are on this device", async () => {
+it("keeps records on this device and says cloud mode is coming soon", async () => {
   render(<DataModePanel />);
-  expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "false");
-  expect(screen.getByText(/records saved on this device, available offline/i)).toBeInTheDocument();
+  expect(await screen.findByText("Filey Cloud")).toBeInTheDocument();
+  expect(screen.getByText("Coming soon")).toBeInTheDocument();
+  expect(screen.getByText(/Cloud mode is coming soon\. Until then your records stay on this computer/)).toBeInTheDocument();
+  expect(screen.getByText(/Your records stay on this computer\. Cloud mode is coming soon\./)).toBeInTheDocument();
+  expect(screen.queryByRole("switch")).toBeNull();
+});
+
+it("never offers a way to put local records in the cloud", async () => {
+  render(<DataModePanel />);
+  await screen.findByText("Filey Cloud");
+  expect(screen.queryByRole("button", { name: /cloud/i })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Push local data to cloud" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Upload all local data" })).toBeNull();
+  expect(screen.queryByText("Sync changes automatically")).toBeNull();
+  expect(confirm).not.toHaveBeenCalled();
+  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
 });
 
 it("shows the store as on and names the account holding the records", async () => {
@@ -147,6 +137,30 @@ it("shows the store as on and names the account holding the records", async () =
   render(<DataModePanel />);
   expect(await screen.findByRole("switch")).toHaveAttribute("aria-checked", "true");
   expect(screen.getByText(/owner@example\.test/)).toBeInTheDocument();
+  expect(screen.queryByText("Coming soon")).toBeNull();
+});
+
+it("turning the store off never uploads and never asks", async () => {
+  mode.value = "cloud";
+  render(<DataModePanel />);
+  await flip();
+
+  expect(confirm).not.toHaveBeenCalled();
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("local", expect.any(Function)));
+  expect(cloud.reload).toBe(true);
+});
+
+it("keeps the current store open and explains when the switch back fails", async () => {
+  mode.value = "cloud";
+  cloud.switchWorkspace.mockRejectedValue(new Error("invoice_docs: permission denied; SQLSTATE 42501"));
+  render(<DataModePanel />);
+  await flip();
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(/your saved data is safe/i);
+  expect(screen.queryByText(/invoice_docs|SQLSTATE|permission denied/i)).toBeNull();
+  expect(cloud.reload).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledTimes(2));
 });
 
 it("shows retained queue counts and retries without exposing or deleting their data", async () => {
@@ -201,122 +215,8 @@ it("does not replay legacy cloud saves while the user is in local mode", async (
   expect(cloud.flushOutbox).not.toHaveBeenCalled();
 });
 
-it("requires explicit upload confirmation before switching to cloud", async () => {
-  render(<DataModePanel />);
-  await flip();
-
-  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: "Upload and use cloud", message: expect.stringContaining("uploaded and stored") }));
-  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled(); // helper owns transfer and locking
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", expect.any(Function)));
-  expect(cloud.reload).toBe(true);
-});
-
-it("stays put and explains when the upload only partly succeeded", async () => {
-  cloud.switchWorkspace.mockRejectedValue(new Error("Couldn't finish saving to Filey Cloud. Your device data is safe."));
-  render(<DataModePanel />);
-  await flip();
-
-  expect(await screen.findByRole("alert")).toHaveTextContent(/your saved data is safe/i);
-  expect(cloud.reload).toBe(false);
-});
-
-it.each(["permission", "schema"] as const)("shows safe %s guidance without exposing the failed row or SQL", async kind => {
-  cloud.switchWorkspace.mockRejectedValue(new WorkspaceTransferError({ state: "error", error: "private SQL details", failures: [
-    { table: "invoice_docs", recordId: 47, kind, message: "private SQL details" },
-  ] }));
-  render(<DataModePanel />);
-  await flip();
-  expect(await screen.findByRole("alert")).toHaveTextContent(kind === "schema" ? "needs a sync update" : "aren't accessible");
-  expect(screen.queryByText(/invoice_docs|private SQL/i)).toBeNull();
-  expect(cloud.reload).toBe(false);
-});
-
-it.each(["local", "cloud"] as const)("retries the failed %s workspace switch without exposing its internal error", async (source) => {
-  mode.value = source;
-  cloud.switchWorkspace.mockRejectedValueOnce(new Error("invoice_docs: permission denied; SQLSTATE 42501"));
-  render(<DataModePanel />);
-  await flip();
-  expect(screen.queryByText(/invoice_docs|SQLSTATE|permission denied/i)).toBeNull();
-  expect(cloud.reload).toBe(false);
-  fireEvent.click(screen.getByRole("button", {name: "Try again"}));
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledTimes(2));
-  expect(cloud.switchWorkspace).toHaveBeenLastCalledWith(source === "local" ? "cloud" : "local", expect.any(Function));
-  await waitFor(() => expect(cloud.reload).toBe(true));
-});
-
-it("never offers legacy local upload or automatic sync controls", async () => {
-  render(<DataModePanel />);
-  await screen.findByRole("switch");
-  expect(screen.queryByRole("button", { name: "Push local data to cloud" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Upload all local data" })).toBeNull();
-  expect(screen.queryByText("Sync changes automatically")).toBeNull();
-  expect(screen.getByText(/local records and files stay on this device/i)).toBeInTheDocument();
-});
-
-it("turning the store off never uploads and never asks", async () => {
+it("keeps the switch still while the transfer back is running", async () => {
   mode.value = "cloud";
-  render(<DataModePanel />);
-  await flip();
-
-  expect(confirm).not.toHaveBeenCalled();
-  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("local", expect.any(Function)));
-});
-
-it("does not upload after declining and cannot submit twice while approval is pending", async () => {
-  let answer!: (accepted: boolean) => void;
-  confirm.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
-  render(<DataModePanel />);
-  await waitFor(() => expect(switcher()).toBeEnabled());
-  fireEvent.click(switcher());
-  fireEvent.click(switcher());
-  expect(confirm).toHaveBeenCalledTimes(1);
-  expect(switcher()).toBeDisabled();
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
-  await act(async () => { answer(false); });
-  expect(switcher()).toBeEnabled();
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
-});
-
-it("sends the user to connect an account rather than opening an empty store", async () => {
-  cloud.session = null;
-  render(<DataModePanel />);
-  await flip();
-
-  expect(await screen.findByRole("alert")).toHaveTextContent(/connect your filey account/i);
-  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
-});
-
-it("requires cloud storage consent even when the device has no current records", async () => {
-  cloud.hasLocalData.mockResolvedValue(false);
-  render(<DataModePanel />);
-  await flip();
-
-  expect(confirm).toHaveBeenCalledTimes(1);
-  expect(cloud.migrateLocalToCloud).not.toHaveBeenCalled();
-  await waitFor(() => expect(cloud.switchWorkspace).toHaveBeenCalledWith("cloud", expect.any(Function)));
-});
-
-it("shows the plan gate instead of the cloud copy switch on Basic", async () => {
-  render(<DataModePanel />);
-  expect(await screen.findByText(/Available on Pro and Freedom/)).toBeInTheDocument();
-  expect(screen.queryByRole("switch", { name: /keep a copy/i })).toBeNull();
-});
-
-it("asks before the first cloud copy upload and stores consent for that account only", async () => {
-  copy.allowed = true;
-  cloud.authEvents = true;
-  render(<DataModePanel />);
-  const keep = await screen.findByRole("switch", { name: /keep a copy/i });
-  await waitFor(() => expect(keep).toBeEnabled());
-  await act(async () => { fireEvent.click(keep); });
-  expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ confirmLabel: "Upload and keep in sync" }));
-  expect(copy.set).toHaveBeenCalledWith("owner-id");
-  expect(cloud.switchWorkspace).not.toHaveBeenCalled();
-});
-
-it("keeps the switch still while a transfer is running", async () => {
   let release!: () => void;
   cloud.switchWorkspace.mockImplementation(() => new Promise((resolve) => {
     release = () => resolve();

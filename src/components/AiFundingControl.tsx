@@ -190,7 +190,7 @@ export default function AiFundingControl({
           </p>
         )}
         <p className="px-2 py-2 text-xs leading-relaxed text-muted-foreground">
-          1 Coin = $1. Available on Basic, Pro and Freedom.
+          1 Coin = $1. Available on every Filey plan.
           Changes apply to new tasks; selecting Filey AI
           does not charge you.
         </p>

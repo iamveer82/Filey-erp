@@ -41,6 +41,8 @@ import {
   Wallet,
   Wrench,
   XCircle,
+  Pill,
+  ScanBarcode,
   type LucideIcon,
 } from "lucide-react";
 
@@ -59,6 +61,8 @@ const iconMap: Record<string, LucideIcon> = {
   purchase: Wallet,
   lpo: ClipboardList,
   inventory: PackageOpen,
+  pharmacy: Pill,
+  counter: ScanBarcode,
   packing: PackageOpen,
   stock: PackageOpen,
   product: PackageOpen,

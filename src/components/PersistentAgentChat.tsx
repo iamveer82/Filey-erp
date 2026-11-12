@@ -134,7 +134,7 @@ function AgentSession() {
             <button type="button" aria-pressed={view === "terminal"} onClick={() => chooseView("terminal")}>Terminal</button>
           </div>
         )}
-        <div hidden={view === "terminal" && terminalAvailable}>
+        <div hidden={view === "terminal" && terminalAvailable} className="filey-agent-view">
           <ErrorBoundary>
             <Suspense fallback={<FileyLoader />}>
               <AgentChat active={active && (view === "chat" || !terminalAvailable)} onStatusChange={setStatus} />
@@ -142,11 +142,13 @@ function AgentSession() {
           </ErrorBoundary>
         </div>
         {terminalAvailable && view === "terminal" && (
-          <ErrorBoundary>
-            <Suspense fallback={<FileyLoader />}>
-              <AgentTerminal active={active} />
-            </Suspense>
-          </ErrorBoundary>
+          <div className="filey-agent-view">
+            <ErrorBoundary>
+              <Suspense fallback={<FileyLoader />}>
+                <AgentTerminal active={active} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
         )}
       </div>
     </>

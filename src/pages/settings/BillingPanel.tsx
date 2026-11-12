@@ -2,7 +2,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useUI } from "../../lib/ui";
 import {
   getSubscription,
-  startCheckout,
   openBillingPortal,
   awaitCloudPlan,
   planCardFor,
@@ -219,7 +218,7 @@ export default function BillingPanel() {
   const pctUsed = Math.min(100, Math.round(((invoicesUsed ?? 0) / cap) * 100));
 
   const purchase = PLANS.find(
-    (p) => p.id === params.get("purchase") && (p.id === "cloud" || p.id === "lite")
+    (p) => p.id === params.get("purchase") && p.id === "lite"
   );
   if (purchase && !subLoading && !ownershipLoading && !owned(purchase)) {
     return (
@@ -228,37 +227,20 @@ export default function BillingPanel() {
         title={`Get Filey ${purchase.name}`}
         lines={[
           { label: `Filey ${purchase.name}`, value: purchase.price },
-          {
-            label: "Billing",
-            value: purchase.id === "cloud" ? "Monthly subscription" : "One-time purchase",
-          },
+          { label: "Billing", value: "One-time purchase" },
         ]}
-        total={`${purchase.price} USD`}
-        terms={
-          purchase.id === "cloud"
-            ? "Renews every month. Cancel any time in Billing."
-            : "Pay once for Freedom. Your account unlocks automatically after payment is confirmed."
-        }
+        total={purchase.price}
+        terms="Pay once for Freedom. Your account unlocks automatically after payment is confirmed."
         onBack={() => {
           const next = new URLSearchParams(params);
           next.delete("purchase");
           setParams(next);
         }}
-        onPay={() =>
-          purchase.id === "cloud" ? startCheckout("cloud") : startFreedomCheckout()
-        }
+        onPay={() => startFreedomCheckout()}
         onVerify={async () => {
-          if (purchase.id === "lite") {
-            const state = await claimPurchasedLicense(1, 0);
-            if (state?.valid) setOwnsUltra(true);
-            return !!state?.valid;
-          }
-          const state = await awaitCloudPlan(1, 0);
-          if (state) {
-            setSub(state);
-            window.dispatchEvent(new Event("filey:entitlement"));
-          }
-          return !!state;
+          const state = await claimPurchasedLicense(1, 0);
+          if (state?.valid) setOwnsUltra(true);
+          return !!state?.valid;
         }}
       />
     );
@@ -269,7 +251,7 @@ export default function BillingPanel() {
       <SettingsPanel>
         <SettingsSection
           title="Current plan"
-          description="Try Filey free for 14 days. Freedom keeps it on your computer for life; Pro keeps your workspace in the cloud. Plans activate after payment is confirmed."
+          description="Try Filey free for 14 days. Freedom keeps it on your computer for life. Plans activate after payment is confirmed."
         >
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
@@ -376,7 +358,7 @@ export default function BillingPanel() {
 
         <SettingsSection
           title="Available plans"
-          description="Start free with a verified account. Upgrade only if you want paid cloud benefits."
+          description="Start free with a verified account. Upgrade to Freedom when you're ready."
           stacked
         >
           <div className="grid gap-4 md:grid-cols-2 items-stretch">

@@ -62,7 +62,7 @@ it("explains self-chat when the configured owner is the paired phone itself", as
 
 it("opens built-in pairing from the directory and connects without visiting CRM", async () => {
   show();
-  fireEvent.click(screen.getByRole("link", { name: "Set up WhatsApp" }));
+  fireEvent.click(screen.getByRole("link", { name: /WhatsApp \(QR\)/ }));
   const card = within(screen.getByRole("region", { name: "WhatsApp connection" }));
   await waitFor(() => expect(bridge.bridgeState).toHaveBeenCalledOnce());
   expect(screen.getByText("/integrations?tab=free")).toBeInTheDocument();
@@ -149,10 +149,19 @@ it("only changes the allowed owner number after an explicit save", async () => {
   await waitFor(() => expect(bridge.setBridgeConfig).toHaveBeenCalledWith({ ownerNumber: "+971500000002" }));
 });
 
+it("toggles automatic startup from the connection row", async () => {
+  show("free");
+  const toggle = screen.getByRole("switch", { name: "Start with Filey" });
+  expect(toggle).toHaveAttribute("aria-checked", "false");
+  fireEvent.click(toggle);
+  expect(bridge.setBridgeConfig).toHaveBeenCalledWith({ autoStart: true });
+  expect(screen.getByRole("switch", { name: "Start with Filey" })).toHaveAttribute("aria-checked", "true");
+});
+
 it("lets customers clear directory filters and find the built-in connection again", async () => {
   show();
   fireEvent.change(screen.getByRole("textbox", { name: "Search integrations" }), { target: { value: "no-such-filey-integration" } });
   expect(screen.getByText("No matching integrations")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-  expect(screen.getByRole("link", { name: "Set up WhatsApp" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /WhatsApp \(QR\)/ })).toBeInTheDocument();
 });

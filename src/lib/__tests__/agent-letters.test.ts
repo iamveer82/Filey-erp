@@ -144,7 +144,7 @@ describe("draft boundaries and optimistic revisions", () => {
   it("rejects privileged fields, supplied IDs, malformed content and unknown formatting before reserving a number", async () => {
     for (const args of [
       { title: "Letter", status: "issued" }, { title: "Letter", number: "MY-NUMBER" }, { title: "Letter", company_logo: "https://example.test/logo.png" },
-      { title: "Letter", signature: { data: "private" } }, { title: "Letter", show_signature: true },
+      { title: "Letter", signature: { data: "private" } },
       { title: "Letter", blocks: [{ type: "text", text: "Text", id: "model-id" }] },
       { title: "Letter", blocks: [{ type: "field", label: "Contact" }] },
       { title: "Letter", blocks: [{ type: "stamp", label: "Stamp", value: "https://example.test/image" }] },
@@ -162,6 +162,24 @@ describe("draft boundaries and optimistic revisions", () => {
     await expect(createAgentLetterDraft({ title: "Letter", use_letterhead: true })).rejects.toThrow("Add company letterhead");
     expect(records()).toEqual([]);
     expect(allocateDocumentNumber).not.toHaveBeenCalled();
+  });
+
+  it("applies the saved company signature and stamp when the owner asks", async () => {
+    const saved = await createAgentLetterDraft({ title: "Signed letter", show_signature: true, show_stamp: true });
+    expect(saved).toMatchObject({ ok: true, status: "draft" });
+    expect(records()[0].form).toMatchObject({
+      show_signature: true, show_stamp: true,
+      signature: expect.objectContaining({ data: "letters-user/company/private-signature.png" }),
+      stamp: expect.objectContaining({ data: "letters-user/company/private-stamp.png" }),
+    });
+    expect(vi.mocked(allocateDocumentNumber)).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to enable a company image that is not saved", async () => {
+    vi.mocked(tools.settings).mockResolvedValue([]);
+    await expect(createAgentLetterDraft({ title: "Letter", show_signature: true })).rejects.toThrow("Add the company signature");
+    await expect(createAgentLetterDraft({ title: "Letter", show_stamp: true })).rejects.toThrow("Add the company stamp");
+    expect(records()).toEqual([]);
   });
 
   it("does not claim a successful write without a valid saved acknowledgement", async () => {
@@ -263,6 +281,8 @@ describe("letter PDF outputs", () => {
       output: { documentKey: `letter:${saved.id}`, path: "C:/Exports/LTR-0001-Authorization letter.pdf" } });
     const [node] = vi.mocked(reactToPdfBytes).mock.calls[0];
     expect((node as ReactElement<{ form: letters.LetterForm }>).props.form).toEqual(records()[0].form);
+    expect((node as ReactElement<{ companyStampSig: { signature?: { data: string } } }>).props.companyStampSig.signature?.data)
+      .toBe("letters-user/company/private-signature.png");
     expect(JSON.stringify(records())).toBe(before);
   });
 

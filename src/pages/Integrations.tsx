@@ -10,7 +10,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Calculator,
-  Check,
   ChevronDown,
   Cloud,
   CreditCard,
@@ -471,7 +470,7 @@ export default function Integrations() {
     <div className="mx-auto max-w-6xl pb-10">
       <PageHeader
         title="Integrations"
-        subtitle="Your apps, connected to your workspace."
+        subtitle="Your apps, connected to your workspace"
         action={
           <div className="flex flex-wrap gap-2">
             <Link className="btn-ghost" to="/docs?article=integrations">Setup guide</Link>
@@ -613,87 +612,75 @@ export default function Integrations() {
               </div>
             )}
           </section>
-          {[
-            { title: "In Filey", items: filtered.filter(i => !i.slug) },
-            { title: "Connected apps", items: filtered.filter(i => i.slug && i.connected) },
-            { title: "More apps", items: filtered.filter(i => i.slug && !i.connected) },
-          ].filter(group => group.items.length).map(group => (
-          <section key={group.title} aria-label={group.title} className="mb-6">
-            <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-sm font-semibold">{group.title}</h2>
-              {group.title === "Connected apps" && <span className="text-xs text-muted-foreground">{group.items.length}</span>}
-            </div>
-            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
-            {group.items.map((i) => (
-              <div
-                key={i.key}
-                className="grid grid-cols-[40px_minmax(0,1fr)] gap-x-3 gap-y-3 p-4 sm:grid-cols-[40px_minmax(0,1fr)_auto] sm:items-center"
-              >
-                  <div className="h-10 w-10 rounded-[8px] bg-muted text-foreground grid place-items-center shrink-0 overflow-hidden">
+          {/* Minimal app grid: one tile per integration, status on the tile,
+              the whole tile performs the connect/open action. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {filtered.map((i) => {
+              const tile = "relative flex min-h-[108px] flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card p-3 text-center transition-colors hover:border-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+              const face = (
+                <>
+                  <div className="h-10 w-10 grid place-items-center rounded-[10px] bg-muted text-foreground overflow-hidden">
                     {i.slug ? <AppLogo slug={i.slug} logo={i.logo} /> : i.icon}
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="text-[14px] font-semibold text-foreground">
-                        {i.name}
-                      </div>
-                      {i.soon ? (
-                        <Badge tone="neutral">Coming soon</Badge>
-                      ) : i.connected ? (
-                        <Badge tone="success">
-                          <Check size={11} /> Connected
-                        </Badge>
-                      ) : i.available ? (
-                        <Badge tone="neutral">Available</Badge>
-                      ) : i.builtin ? (
-                        <Badge tone="neutral">Built in</Badge>
-                      ) : null}
-                    </div>
-                    <p className="mt-1 max-w-[65ch] text-[13px] leading-relaxed text-muted-foreground">{i.desc}</p>
-                    {i.note && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{i.note}</p>}
+                  <div className="w-full break-words line-clamp-2 px-1 text-[13px] font-medium leading-tight text-foreground">{i.name}</div>
+                  <div className={cn("text-[11px] leading-none", i.connected ? "text-success" : "text-muted-foreground")}>
+                    {i.soon
+                      ? "Coming soon"
+                      : i.connected
+                        ? "Connected"
+                        : i.slug
+                          ? "Not connected"
+                          : i.to
+                            ? i.action ?? "Configure"
+                            : i.builtin
+                              ? "Built in"
+                              : i.available
+                                ? "Available"
+                                : "Built in"}
                   </div>
-                <div className="col-start-2 flex items-center gap-2 sm:col-start-3 sm:justify-end">
-                  {i.soon ? (
-                    <button
-                      className="btn-secondary"
-                      onClick={() =>
-                        void notice({
-                          message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.`,
-                        })
-                      }
-                    >
-                      Not available yet
-                    </button>
-                  ) : i.slug ? (
-                    <>
-                      {source === "none" ? <button className="btn-ghost" onClick={() => setKeySetupOpen(true)}>Set up</button> : <button
-                        className="btn-ghost"
-                        onClick={() => connect(i.slug!)}
-                        disabled={connecting === i.slug}
-                      >
-                        {connecting === i.slug ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <ExternalLink size={14} />
-                        )}
-                        {i.connected ? "Reconnect" : "Connect"}
-                      </button>}
-                    </>
-                  ) : (
-                    <>
-                      {i.to && (
-                        <Link to={i.to} className={i.key === "whatsapp-qr" ? "btn-primary" : "btn-ghost"}>
-                          {i.connected ? "Manage" : (i.action ?? "Configure")}
-                        </Link>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-            </div>
-          </section>
-          ))}
+                </>
+              );
+              const tileProps = { title: `${i.name} — ${i.desc}` };
+              if (i.soon) {
+                return (
+                  <button
+                    key={i.key}
+                    type="button"
+                    className={cn(tile, "cursor-not-allowed opacity-80")}
+                    {...tileProps}
+                    aria-label={`${i.name}. ${i.desc}`}
+                    onClick={() => void notice({ message: `${i.name} isn't available yet. Sorry for the inconvenience - we're working to improve your experience.` })}
+                  >
+                    {face}
+                  </button>
+                );
+              }
+              if (i.slug) {
+                return (
+                  <button
+                    key={i.key}
+                    type="button"
+                    className={tile}
+                    {...tileProps}
+                    aria-label={`${i.name}. ${i.desc}`}
+                    disabled={connecting === i.slug}
+                    onClick={() => (source === "none" ? setKeySetupOpen(true) : connect(i.slug!))}
+                  >
+                    {face}
+                    {connecting === i.slug && <Loader2 size={14} className="absolute end-2 top-2 animate-spin" />}
+                  </button>
+                );
+              }
+              if (i.to) {
+                return (
+                  <Link key={i.key} to={i.to} className={tile} {...tileProps}>
+                    {face}
+                  </Link>
+                );
+              }
+              return <div key={i.key} className={tile} {...tileProps}>{face}</div>;
+            })}
+          </div>
           {filtered.length === 0 && (
             <div className="rounded-xl border border-border bg-card p-8 text-center">
               <p className="text-sm font-medium">No matching integrations</p>

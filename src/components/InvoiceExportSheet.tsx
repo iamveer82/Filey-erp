@@ -32,20 +32,25 @@ export default function InvoiceExportSheet({
   form,
   companyStampSig = EMPTY_STAMP_SIG,
   bank,
+  copies,
 }: {
   form: InvoiceExportForm;
   companyStampSig?: CompanyStampSig;
   bank: BankInfo;
+  /** One full set of pages per label, the label printed at the top right of each page. */
+  copies?: string[];
 }) {
   const pages = paginateItems(form.items);
+  const sets = copies?.length ? copies : [""];
   return (
     <>
-      {pages.map((group, gi) => {
+      {sets.flatMap((copy, si) => pages.map((group, gi) => {
         const startIdx = pages.slice(0, gi).reduce((n, g) => n + g.length, 0);
         const isLast = gi === pages.length - 1;
         return (
           <div
-            key={gi}
+            key={`${si}-${gi}`}
+            data-invoice-copy={copy || undefined}
             className="invoice-print"
             style={{
               width: A4_W,
@@ -57,6 +62,7 @@ export default function InvoiceExportSheet({
               boxSizing: "border-box",
             }}
           >
+            {copy && <p style={{ position: "absolute", top: 16, right: 48, margin: 0, fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#444" }}>{copy}</p>}
             <div
               data-invoice-content="1027"
               style={{
@@ -97,7 +103,7 @@ export default function InvoiceExportSheet({
             </div>
           </div>
         );
-      })}
+      }))}
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useReducer, type CSSProperties, type RefObject } from "react";
 import { fmtDate } from "../lib/format";
-import { packagingTotals, type PackagingForm, type PackagingItem } from "../lib/packagingLists";
+import { exportDetails, itemDetail, packagingTotals, type PackagingForm, type PackagingItem } from "../lib/packagingLists";
 import { CompanyAssetImage } from "./CompanyAssetImage";
 import { A4_H, A4_W } from "./InvoiceExportSheet";
 import { StampSignatureLayer } from "./StampSignature";
@@ -82,7 +82,7 @@ function conservativeHeaderHeight(form: PackagingForm, compact = false, continua
       .filter(Boolean).reduce((count, value) => count + textLines(value, partyChars).length, 0) + 2;
   const shippingLines = textLines(form.shipping_address || form.recipient_address, partyChars).length + 2;
   const partyHeight = compact && !continuation ? (recipientLines + shippingLines) * 14 + 24 : Math.max(recipientLines, shippingLines) * (compact ? 14 : 17);
-  const metadata = [form.number || "—", form.issue_date, ...(continuation ? [] : [form.invoice_reference, form.order_reference, form.dispatch_date, form.carrier, form.tracking_number])].filter(Boolean);
+  const metadata = [form.number || "—", form.issue_date, ...(continuation ? [] : [form.invoice_reference, form.order_reference, form.dispatch_date, form.carrier, form.tracking_number, ...exportDetails(form).map(([, v]) => v)])].filter(Boolean);
   let metadataHeight = 0;
   for (let i = 0; i < metadata.length; i += 4) metadataHeight += Math.max(...metadata.slice(i, i + 4).map(value => textLines(value, compact ? 17 : 13).length)) * (compact ? 13 : 17) + (compact ? 24 : 28);
   return (compact ? 58 : trade ? 108 : 72) + brandHeight + metadataHeight + partyHeight;
@@ -105,7 +105,7 @@ function headerHeight(form: PackagingForm, compact: boolean, continuation = fals
     measuredLines(form.company_name || "Your company", brandTextWidth, form.font, nameSize, 750) * nameSize * 1.3 + 7
     + [form.company_address, form.company_trn ? `TRN: ${form.company_trn}` : "", [form.company_phone, form.company_email].filter(Boolean).join(" · ")]
       .filter(Boolean).reduce((height, value) => height + measuredLines(value, brandTextWidth, form.font, 11) * 16.5, 0));
-  const metadata = [form.number || "—", fmtDate(form.issue_date), form.invoice_reference, form.order_reference, form.dispatch_date ? fmtDate(form.dispatch_date) : "", form.carrier, form.tracking_number].filter(Boolean);
+  const metadata = [form.number || "—", fmtDate(form.issue_date), form.invoice_reference, form.order_reference, form.dispatch_date ? fmtDate(form.dispatch_date) : "", form.carrier, form.tracking_number, ...exportDetails(form).map(([, v]) => v)].filter(Boolean);
   let metadataHeight = 0;
   for (let i = 0; i < metadata.length; i += 4) {
     metadataHeight += 16.5 + Math.max(...metadata.slice(i, i + 4).map(value => measuredLines(value, (contentWidth - 60) / 4, form.font, warehouse ? 10 : 11, 600))) * (warehouse ? 15 : 16.5) + (i ? 12 : 0);
@@ -148,7 +148,7 @@ export function paginatePackagingItems(form: PackagingForm): PackagingPage[] {
   const continuedAvailable = compact ? Math.max(150, 1027 - headerHeight(form, true, true) - 88) : available;
   const totals = packagingTotals(form.items);
   const quantities = Object.entries(totals.quantities);
-  const totalFields = Number(form.show_packages) + Number(form.show_net_weight) + Number(form.show_gross_weight);
+  const totalFields = Number(form.show_packages) + Number(form.show_net_weight) + Number(form.show_gross_weight) + Number(totals.volume > 0);
   const summaryRowHeight = quantities.some(([unit, qty]) => columnLines("Quantity · " + unit, 30, form.font) > 1 || displayNumber(qty).length > 18)
     || form.show_packages && displayNumber(totals.packages).length > 18
     || form.show_net_weight && displayNumber(totals.net).length > 17
@@ -162,7 +162,9 @@ export function paginatePackagingItems(form: PackagingForm): PackagingPage[] {
   const rowLineLimit = Math.max(1, Math.floor((continuedAvailable - 30) / 16));
 
   form.items.forEach((item, sourceIndex) => {
-    const lines = textLines(item.description, chars);
+    // The HS code / package size line prints under the description on the first row.
+    const descriptionLines = textLines(item.description, chars);
+    const lines = [...descriptionLines, ...(itemDetail(item) ? textLines(itemDetail(item), chars) : [])];
     for (let start = 0; start < lines.length; start += rowLineLimit) {
       const part = lines.slice(start, start + rowLineLimit);
       const numericLines = [item.qty, ...(form.show_packages ? [item.package_count] : []),
@@ -172,7 +174,7 @@ export function paginatePackagingItems(form: PackagingForm): PackagingPage[] {
       const otherLines = start ? 1 : Math.max(...numericLines, columnLines(item.unit, 7, form.font), form.show_packages ? columnLines(item.package_type, 9, form.font) : 1);
       const height = Math.max(part.length, otherLines) * 16 + (start ? 30 : 20);
       if ((used || pages.length === 1) && used + height > available) newPage();
-      pages[pages.length - 1].items.push({ ...item, description: part.join(""), sourceIndex, continuation: start > 0 });
+      pages[pages.length - 1].items.push({ ...item, description: descriptionLines.slice(start, start + rowLineLimit).join(""), sourceIndex, continuation: start > 0 });
       used += height;
     }
   });
@@ -226,6 +228,7 @@ export default function PackagingListDocument({
     ...(form.dispatch_date ? [["Dispatch date", fmtDate(form.dispatch_date)]] : []),
     ...(form.carrier ? [["Carrier", form.carrier]] : []),
     ...(form.tracking_number ? [["Tracking number", form.tracking_number]] : []),
+    ...exportDetails(form),
   ];
   const stamp = form.show_stamp ? form.stamp || companyStampSig?.stamp : undefined;
   const signature = form.show_signature ? form.signature || companyStampSig?.signature : undefined;
@@ -235,6 +238,7 @@ export default function PackagingListDocument({
     ...(form.show_packages ? [["Total packages", form.items.some(item => item.package_count != null) ? displayNumber(totals.packages) : "—"]] : []),
     ...(form.show_net_weight ? [["Total net weight", hasNet ? `${displayNumber(totals.net)} ${form.weight_unit}` : "—"]] : []),
     ...(form.show_gross_weight ? [["Total gross weight", hasGross ? `${displayNumber(totals.gross)} ${form.weight_unit}` : "—"]] : []),
+    ...(totals.volume > 0 ? [["Total volume", `${displayNumber(Math.round(totals.volume * 1000) / 1000)} m³`]] : []),
   ];
   const sheets = <>{selected.map(({ page, index }) => {
     const isLast = index === pages.length - 1;
@@ -276,7 +280,7 @@ export default function PackagingListDocument({
             {form.show_gross_weight && <><th scope="col" className="packing-numeric">Gross / unit<br />({form.weight_unit})</th><th scope="col" className="packing-numeric">Gross total<br />({form.weight_unit})</th></>}
           </tr></thead>
           <tbody>{page.items.map((item, i) => <tr key={`${item.id}-${i}`} data-packing-item={item.id} data-packing-continuation={item.continuation || undefined}>
-            <td>{item.sourceIndex + 1}</td><td className="packing-description" dir="auto">{item.continuation && <small>Continued</small>}{item.description || "—"}</td>
+            <td>{item.sourceIndex + 1}</td><td className="packing-description" dir="auto">{item.continuation && <small>Continued</small>}{item.description || "—"}{!item.continuation && itemDetail(item) && <span className="packing-item-detail" style={{ display: "block", fontSize: "0.85em", opacity: 0.7 }}>{itemDetail(item)}</span>}</td>
             <td className="packing-numeric">{item.continuation ? "—" : displayNumber(item.qty)}</td><td>{item.continuation ? "—" : item.unit || "—"}</td>
             {form.show_packages && <><td>{item.continuation ? "—" : item.package_type || "—"}</td><td className="packing-numeric">{item.continuation ? "—" : displayNumber(item.package_count)}</td></>}
             {form.show_net_weight && <><td className="packing-numeric">{item.continuation ? "—" : displayNumber(item.net_weight)}</td><td className="packing-numeric">{item.continuation || item.net_weight == null ? "—" : displayNumber(item.qty * item.net_weight)}</td></>}
