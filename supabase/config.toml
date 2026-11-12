@@ -1,4 +1,4 @@
-﻿project_id = "filey-erp"
+project_id = "filey-erp"
 
 
 [auth.email.template.recovery]
@@ -54,3 +54,12 @@ verify_jwt = false
 # Keep the existing gateway JWT check; the handler also validates auth.getUser.
 [functions.run-tool]
 verify_jwt = true
+# Instagram automation: these check the caller themselves (instagram) or are called by Meta / the public.
+[functions.instagram]
+verify_jwt = false
+[functions.instagram-auth]
+verify_jwt = false
+[functions.instagram-webhook]
+verify_jwt = false
+[functions.ig-track]
+verify_jwt = false

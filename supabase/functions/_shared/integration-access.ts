@@ -1,7 +1,14 @@
+const PROVIDER_MODULE: Record<string, string> = {
+  composio: "integrations",
+  zernio: "marketing",
+  instagram: "marketing",
+};
+
 export function integrationAllowed(member: { role?: string; modules?: unknown } | null, provider: string): boolean {
   if (!member) return false;
+  const module = PROVIDER_MODULE[provider] ?? "integrations";
   return ["owner","admin"].includes(member.role ?? "") || member.modules === null ||
-    Array.isArray(member.modules) && member.modules.includes(provider === "zernio" ? "marketing" : "integrations");
+    Array.isArray(member.modules) && member.modules.includes(module);
 }
 
 export async function integrationEntity(orgId: string, userId: string): Promise<string> {

@@ -17,6 +17,7 @@ import { effectiveDataMode } from "../lib/dataMode";
 import { downloadCsv } from "../lib/csv";
 import CampaignsPanel from "../components/CampaignsPanel";
 import OptOutsPanel from "../components/OptOutsPanel";
+import InstagramDmPanel from "../components/InstagramDmPanel";
 import { enrichFromWebsite, type CompanyDetails } from "../lib/scout";
 import { reachReady } from "../lib/reach";
 import { useUI } from "../lib/ui";
@@ -48,7 +49,7 @@ export default function Marketing() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "hot" | "incomplete">("all");
   const [enrichFor, setEnrichFor] = useState<Lead | null>(null);
-  const [tab, setTab] = useState<"leads" | "campaigns" | "optouts">("leads");
+  const [tab, setTab] = useState<"leads" | "campaigns" | "instagram" | "optouts">("leads");
 
   const load = useCallback(async () => {
     const version = ++request.current;
@@ -116,6 +117,7 @@ export default function Marketing() {
           [
             ["leads", `Leads (${stats.total})`],
             ["campaigns", "Campaigns"],
+            ["instagram", "Instagram DMs"],
             ["optouts", "Opt-outs"],
           ] as const
         ).map(([id, label]) => (
@@ -133,6 +135,7 @@ export default function Marketing() {
 
       {tab === "campaigns" && <CampaignsPanel leads={leads} />}
       {tab === "optouts" && <OptOutsPanel />}
+      {tab === "instagram" && <InstagramDmPanel />}
 
       {tab === "leads" && (
         <>
@@ -160,7 +163,6 @@ export default function Marketing() {
               label={`Hot (${HOT_SCORE}+)`}
               value={String(stats.hot)}
               change={stats.hot > 0 ? "Ready to contact" : "None yet"}
-              changeTone={stats.hot > 0 ? "up" : "warn"}
             />
             <MetricCard
               label="Missing contact"
