@@ -220,7 +220,7 @@ export default function ProductPage() {
         <Step n={2} title="What it is">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Name *" error={touched ? check.name : undefined} className="sm:col-span-2">
-              <input ref={nameRef} aria-label="Name" className={cn("input h-12 text-base", touched && check.name && "border-danger")} placeholder="e.g. Paracetamol 500mg, 10 tablets"
+              <input ref={nameRef} aria-label="Name" className={cn("input h-12 text-base", touched && check.name && "border-danger")} placeholder="e.g. Cotton T-shirt, blue, size M"
                 value={f.name} onChange={(e) => set("name", e.target.value)} />
             </Field>
             <Field label="SKU *" error={touched ? check.sku : undefined}>
