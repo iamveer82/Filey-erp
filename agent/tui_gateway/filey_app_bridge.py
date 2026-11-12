@@ -16,8 +16,10 @@ import json
 
 # The client answers ``catalog`` from memory; anything slower than this is not a Filey app.
 _PROBE_TIMEOUT_S = 15
-# A run may sit behind an approval card the user has to read.
-_RUN_TIMEOUT_S = 600
+# A run may sit behind an approval card the user has to read, or be a long job (OCR of a big PDF,
+# a computer task). This is the only deadline on it (the engine's generic tool deadline skips app
+# tools); at it the request is cancelled, and the app then refuses to run it after a late approval.
+_RUN_TIMEOUT_S = 1800
 _CATALOG_TIMEOUT_S = 30
 
 UNAVAILABLE = json.dumps({

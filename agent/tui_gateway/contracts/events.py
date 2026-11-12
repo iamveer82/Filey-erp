@@ -208,6 +208,10 @@ class MessageCompletePayload(Payload):
     error_surface: ErrorSurface | None = None
     partial: bool | None = None
     persisted_turn: PersistedTurn | None = None
+    #: A follow-up turn is already queued (a late steer, a message typed while the turn was
+    #: busy, a goal continuation): the client should keep this session's stream open and render
+    #: the next ``message.start``/``message.complete`` instead of ending the chat turn here.
+    continuing: bool | None = None
 
 
 event("message.complete", MessageCompletePayload, doc="The turn ended: final text, usage and outcome.")

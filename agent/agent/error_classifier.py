@@ -263,6 +263,9 @@ _CONTEXT_OVERFLOW_PATTERNS = (
     # Together/Fireworks-style: "Input length 131393 exceeds the maximum allowed input length of 131040
     # tokens."  No other pattern in this list matches that wording. (port of anomalyco/opencode#37848)
     "maximum allowed input length",
+    # Filey AI (Coins): "This conversation is too large for the selected model. Start a new chat or
+    # choose a larger-context model." Read as malformed, it wedged every later turn until /new.
+    "conversation is too large", "larger-context model",
 )
 
 # Last entry: OpenRouter 404 when no endpoint supports tool calling —

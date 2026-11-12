@@ -337,7 +337,12 @@ def _apply_active_turn_redirect(agent: Any, messages: list[dict[str, Any]], text
     elif visible:
         checkpoint_parts += ["Visible response before the interruption:", visible]
     checkpoint = "\n\n".join(checkpoint_parts)
-    correction = f"[Context from the interrupted assistant response]\n{checkpoint}\n\n{text}"
+    correction = (
+        f"[Context from the interrupted assistant response]\n{checkpoint}\n\n"
+        "[The user corrected the turn while you were working. If this changes a value you already used "
+        "in an action, redo that action with the new value and keep the rest of the work.]\n"
+        f"{text}"
+    )
 
     # The live tail is normally user or tool, so an assistant placeholder + correction
     # keeps strict alternation; if the tail is already assistant, the checkpoint is folded

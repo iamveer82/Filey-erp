@@ -435,6 +435,18 @@ def _dispatch_followup_turn(rid, sid: str, session: dict, prompt: Any, what: str
             session["running"] = False
 
 
+def _turn_continues(session: dict, result: Any) -> bool:
+    """Whether ``_run_post_turn_followups`` has a turn waiting after this one.
+
+    A leftover ``/steer`` (it missed the last tool batch) or a prompt queued while the
+    turn ran starts as the next turn once ``running`` is released. ``message.complete``
+    says so, so the client keeps the session's stream open and renders that answer too.
+    """
+    return bool(
+        (isinstance(result, dict) and str(result.get("pending_steer") or "").strip())
+        or session.get("queued_prompt") or session.get("queued_prompts"))
+
+
 def _run_post_turn_followups(
     rid, sid: str, session: dict, result: Any, goal_followup: str | None) -> None:
     """Chain whatever should run after ``running`` was released.  Order: a mid-turn user
@@ -1188,6 +1200,11 @@ def _run_prompt_submit(
             status_note = _absorb_turn_result(
                 sid, session, st, text, display_kind, display_metadata)
             payload, raw, status = _complete_turn_payload(session, st, status_note, cols)
+            if status == "complete" and _turn_continues(session, st.result):
+                # A steer that missed the last tool batch, or a message queued while the turn
+                # ran, is started as the next turn below (_run_post_turn_followups). Tell the
+                # client so it keeps this session's stream open and renders that answer too.
+                payload["continuing"] = True
             if status == "complete":
                 # Before message.complete: the desktop re-reads the sign-in offer on that event.
                 from tui_gateway.free_tier_task_done import note_task_done

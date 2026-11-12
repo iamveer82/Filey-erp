@@ -702,6 +702,26 @@ def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
             "  ✓ Removed security.tirith_* — the tirith scanner is no longer bundled with Filey.")
 
 
+def _migrate_to_51(results: dict[str, Any], quiet: bool) -> None:
+    # 50 → 51: Harness² is a bundled, first-party self-improvement plugin and is on by
+    # default. Existing homes already have a plugins.enabled allow-list from v21, so the
+    # new DEFAULT_CONFIG entry alone never reaches them; append it once.
+    config = read_raw_config()
+    plugins_cfg = _dict_at(config, "plugins")
+    enabled = plugins_cfg.get("enabled")
+    if not isinstance(enabled, list):
+        enabled = []
+    if "harness2" in enabled:
+        return
+    enabled.append("harness2")
+    plugins_cfg["enabled"] = enabled
+    config["plugins"] = plugins_cfg
+    _commit(
+        config, results, quiet, "plugins.enabled += harness2",
+        "  ✓ Enabled Harness² self-improvement (remove with `filey plugins disable harness2`).",
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (12, _migrate_to_12),
     (13, _migrate_to_13),
@@ -835,6 +855,8 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (49, _migrate_to_49),
     # 49 → 50: security.tirith_* dropped; the bundled scanner is gone (see _migrate_to_50).
     (50, _migrate_to_50),
+    # 50 → 51: Harness² joined the bundled default-on plugins (see _migrate_to_51).
+    (51, _migrate_to_51),
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or

@@ -1,0 +1,13 @@
+name: harness2
+version: "0.1.0"
+description: "Harness² recursive self-improvement for Filey: a domain-scoped, evidence-graded lesson library. Propose–Probe–Compose on the turn's trajectory, a persistent improvement harness after it. Learns only from an isolated failure→success contrast; a guess, a secret or a two-change rollout writes nothing. Based on google-research/harness2 (Apache-2.0)."
+author: "Google Research (Harness² concept, Apache-2.0) / Filey adaptation"
+kind: standalone
+provides_tools:
+  - harness_lessons
+provides_hooks:
+  - pre_llm_call
+  - post_tool_call
+  - transform_tool_result
+  - post_llm_call
+  - on_session_end

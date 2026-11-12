@@ -19093,6 +19093,18 @@
               }
             ],
             "default": null
+          },
+          "continuing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Continuing"
           }
         },
         "title": "MessageCompletePayload",

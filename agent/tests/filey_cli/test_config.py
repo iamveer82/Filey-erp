@@ -945,7 +945,7 @@ class TestConfigSupportFloor:
         # v25 lowered the old 24h default to 1h; v40 drops that 1h default so
         # the shipped ttl_minutes (20) applies.
         "model_catalog": {},
-        "plugins": {"enabled": []},
+        "plugins": {"enabled": ["harness2"]},
         "stt": {"provider": "local"},
     }
 
@@ -964,7 +964,7 @@ class TestConfigSupportFloor:
         # section goes with it (it survived only as the phantom `agent: {}`).
         "model": {"default": "anthropic/claude-fable-5", "provider": "nous"},
         "model_catalog": {},
-        "plugins": {"disabled": ["foo"], "enabled": []},
+        "plugins": {"disabled": ["foo"], "enabled": ["harness2"]},
     }
 
     _ENV_FIXTURE = (

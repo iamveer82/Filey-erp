@@ -1853,6 +1853,16 @@ class TestThrottleVsOverflowDisambiguation:
 class TestExpandedOverflowPatterns:
     """New provider overflow wordings route into compression recovery."""
 
+    def test_filey_ai_conversation_too_large_is_overflow(self):
+        # Filey AI's Coin route refuses an oversized conversation with a 400. As format_error it
+        # was non-retryable and every later turn failed until /new; it must compress instead.
+        detail = ("This conversation is too large for the selected model. Start a new chat "
+                  "or choose a larger-context model.")
+        e = MockAPIError(f"Error code: 400 - {{'error': '{detail}'}}", status_code=400, body={"error": detail})
+        result = classify_api_error(e, provider="custom", model="filey-ai")
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
     def test_maximum_allowed_input_length_is_overflow(self):
         # Together/Fireworks-style wording — matched no pattern before.
         e = Exception(

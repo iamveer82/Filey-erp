@@ -1711,6 +1711,10 @@ DEFAULT_CONFIG = {
     # Plugin system. `enabled`/`disabled` lists are written by `filey plugins enable|disable` and
     # deliberately omitted here so an empty default never clobbers a user allow-list.
     "plugins": {
+        # First-party plugins that should be live without a per-home setup step. Harness²
+        # learns only from real failure→success contrasts and stores its lessons in the
+        # profile's harness/library.json; `filey plugins disable harness2` turns it off.
+        "enabled": ["harness2"],
         # Deadline (seconds) for one plugin Git clone, fetch or checkout. Slow repositories may
         # need more time; each network operation is capped at one hour.
         "clone_timeout_seconds": 300,
@@ -2718,7 +2722,7 @@ DEFAULT_CONFIG = {
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
     },
-    "_config_version": 50,  # Config schema version - bump this when adding new required fields
+    "_config_version": 51,  # Config schema version - bump this when adding new required fields
 }
 
 
