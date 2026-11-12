@@ -81,19 +81,61 @@ fn seed_config(home: &Path) -> Result<(), String> {
         return Ok(());
     }
     let (model, providers) = credits_blocks();
-    let config = format!("{model}{providers}{COMPRESSION_BLOCK}{AGENT_BLOCK}{TOOLS_BLOCK}");
+    let config = format!("{model}{providers}{}{AGENT_BLOCK}{}{TOOLS_BLOCK}", compression_block(false), aux_block(false));
     std::fs::write(&path, config).map_err(|e| format!("could not write Filey Agent config: {e}"))
 }
 
-/// Above the base prompt (system + visible tools, ~12K tokens) with room for a real
+/// Above the base prompt (system + visible tools, ~15K tokens) with room for a real
 /// conversation. At 12000 the engine tried to compress before every single turn, and each
-/// mid-session compression is an extra model call over the whole transcript.
-const COMPRESSION_BLOCK: &str = "compression:\n  threshold_tokens: 40000\n";
+/// mid-session compression is an extra model call over the whole transcript. Before that,
+/// past 24K the engine trims old tool results over 4000 characters (page reads, app trees,
+/// terminal logs) without a model call; the recent tail is kept whole.
+const COMPRESSION_BLOCK: &str = "compression:\n  threshold_tokens: 40000\n  proactive_prune_tokens: 24000\n  proactive_prune_min_result_chars: 4000\n";
+
+/// Filey AI on Coins sizes a request at two tokens per byte against its 262K window, while the
+/// engine estimates a quarter token per byte: the route refuses a conversation the engine reads as
+/// ~31K tokens. Compressing at 40K meant a long letter wedged the chat on "conversation is too
+/// large"; here it compresses first. Own providers keep the larger block.
+const CREDITS_COMPRESSION_BLOCK: &str = "compression:\n  threshold_tokens: 26000\n  proactive_prune_tokens: 18000\n  proactive_prune_min_result_chars: 4000\n";
+
+fn compression_block(own: bool) -> &'static str {
+    if own { COMPRESSION_BLOCK } else { CREDITS_COMPRESSION_BLOCK }
+}
 
 /// The engine's own cron scheduler only runs in Hermes' messaging gateway, which Filey never
 /// starts, so jobs made with its `cronjob` tool would never fire. Filey's automations
 /// (create_automation, run by the app's scheduler on this engine) take that role.
 const AGENT_BLOCK: &str = "agent:\n  disabled_toolsets:\n    - cronjob\n";
+
+/// The ponytail rules as a skill the owner loads by name (`/ponytail lite|full|ultra`); their
+/// short form is always in the prompt. Bundled engine skills are not copied into this home, so
+/// this one is placed there, and refreshed when a release changes it.
+const PONYTAIL_SKILL: &str = include_str!("../../../agent/skills/software-development/ponytail/SKILL.md");
+
+fn seed_skills(home: &Path) {
+    let path = home.join("skills").join("filey").join("ponytail").join("SKILL.md");
+    if std::fs::read_to_string(&path).ok().as_deref() == Some(PONYTAIL_SKILL) {
+        return;
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, PONYTAIL_SKILL);
+}
+
+/// Filey titles its own chats, so the engine's per-session title call (one model request
+/// for every new conversation) is skipped; its instant derived title still applies.
+const AUX_BLOCK: &str = "auxiliary:\n  title_generation:\n    model_upgrade_enabled: false\n";
+
+/// Filey AI on Coins gives a request that names no max_tokens 2048 output tokens, and the engine's
+/// chat summary (at least 2000 tokens, a fifth of what it replaces) asks for none: every summary
+/// came back cut off, nothing shrank, and the chat wedged on "grown too long". 8192 is the route's
+/// own ceiling.
+const CREDITS_AUX_BLOCK: &str = "auxiliary:\n  title_generation:\n    model_upgrade_enabled: false\n  compression:\n    extra_body:\n      max_tokens: 8192\n";
+
+fn aux_block(own: bool) -> &'static str {
+    if own { AUX_BLOCK } else { CREDITS_AUX_BLOCK }
+}
 
 /// Desktop sessions carry Hermes' whole local kit; these schemas load on demand through its
 /// tool-search bridge instead of riding every request (Hermes' own defaults, plus the browser,
@@ -101,7 +143,7 @@ const AGENT_BLOCK: &str = "agent:\n  disabled_toolsets:\n    - cronjob\n";
 /// schemas alone were ~11K tokens a request). Always visible: pdf, word, sheet,
 /// filey_computer, workspace_browser, list_my_files, read_attached_document, filey_tools and filey_run.
 const TOOLS_BLOCK: &str = "tools:\n  tool_search:\n    listing_max_tokens: 1500\n    defer:\n\
-\x20     - slides\n      - design\n      - fig\n      - vector\n      - agent_computer\n\
+\x20     - slides\n      - design\n      - fig\n      - vector\n      - office_image\n      - agent_computer\n\
 \x20     - open_page\n      - show_ui\n      - use_saved_file\n\
 \x20     - list_file_tools\n      - run_file_tool\n      - get_stats\n      - financial_summary\n\
 \x20     - find_customers\n      - find_products\n      - list_invoices\n      - get_invoice\n\
@@ -211,6 +253,7 @@ pub fn filey_agent_model(window: Webview, app: AppHandle, own: Option<OwnModel>)
     super::computer_use::check_window(&window)?;
     let home = agent_home(&app)?;
     seed_config(&home)?;
+    seed_skills(&home);
     let key_file = home.join("own-model-key.txt");
     let (model, providers) = match &own {
         None => {
@@ -236,11 +279,12 @@ pub fn filey_agent_model(window: Webview, app: AppHandle, own: Option<OwnModel>)
     };
     let path = home.join("config.yaml");
     let current = std::fs::read_to_string(&path).unwrap_or_default();
-    // compression and tools are Filey's to tune (request size), so they follow each release.
+    // compression, auxiliary and tools are Filey's to tune (request size), so they follow each release.
     let mut next = replace_top_level(&current, &[
         ("model", model),
         ("providers", providers),
-        ("compression", COMPRESSION_BLOCK.into()),
+        ("compression", compression_block(own.is_some()).into()),
+        ("auxiliary", aux_block(own.is_some()).into()),
         ("tools", TOOLS_BLOCK.into()),
     ]);
     // Older configs predate this block; an `agent:` block the engine or person wrote is left alone.
@@ -284,6 +328,36 @@ mod tests {
         assert!(next.contains("threshold_tokens: 40000") && !next.contains("12000"));
         assert!(next.contains("    listing_max_tokens: 1500\n") && next.contains("      - create_letter_draft\n"));
         assert!(next.contains("      - kanban_attachments\n") && next.contains("onboarding:\n  seen: {}\n"));
+    }
+
+    #[test]
+    fn filey_ai_compresses_before_the_coin_route_refuses() {
+        assert!(compression_block(false).contains("threshold_tokens: 26000"));
+        assert!(compression_block(true).contains("threshold_tokens: 40000"));
+        let old = "compression:\n  threshold_tokens: 40000\n  proactive_prune_tokens: 24000\n";
+        let next = replace_top_level(old, &[("compression", compression_block(false).into())]);
+        assert!(next.contains("threshold_tokens: 26000") && !next.contains("40000"));
+    }
+
+    #[test]
+    fn filey_ai_summaries_get_room_to_finish() {
+        assert!(aux_block(false).contains("  compression:\n    extra_body:\n      max_tokens: 8192\n"));
+        assert!(!aux_block(true).contains("max_tokens"));
+        let old = "auxiliary:\n  title_generation:\n    model_upgrade_enabled: false\ntools: {}\n";
+        let next = replace_top_level(old, &[("auxiliary", aux_block(false).into())]);
+        assert!(next.contains("max_tokens: 8192") && next.contains("tools: {}"));
+    }
+
+    #[test]
+    fn places_the_ponytail_skill_once_and_refreshes_it() {
+        let home = std::env::temp_dir().join(format!("filey-skill-{}", uuid::Uuid::new_v4()));
+        let path = home.join("skills").join("filey").join("ponytail").join("SKILL.md");
+        seed_skills(&home);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), PONYTAIL_SKILL);
+        std::fs::write(&path, "old").unwrap();
+        seed_skills(&home);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), PONYTAIL_SKILL);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

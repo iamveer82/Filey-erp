@@ -1411,7 +1411,15 @@ try {
         }
 
         Start-Sleep -Milliseconds 120
-        $response = [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app) }
+        # Filey: the fresh state after an action honours include_screenshot too, so a text-only
+        # model is not sent a capture it cannot see after every click.
+        if ($operation.skip_snapshot -eq $true) {
+            # Filey batch: a step before the last one only acts; the last step reads the app back.
+            $response = [pscustomobject]@{ ok = $true }
+        } else {
+            $after = Resolve-ObservationOptions $operation
+            $response = [pscustomobject]@{ ok = $true; snapshot = (Build-Snapshot $operation.app -IncludeScreenshot $after.include_screenshot) }
+        }
     }
 } catch {
     $message = $_.Exception.Message

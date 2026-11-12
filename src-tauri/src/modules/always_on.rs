@@ -142,3 +142,45 @@ pub fn always_on_notify(app: AppHandle, title: String, body: String) -> Result<(
 pub fn always_on_show(app: AppHandle) {
     show_main(&app);
 }
+
+/// Held while a long task works: dropping the sender ends the thread that keeps Windows awake.
+static KEEP_AWAKE: Mutex<Option<std::sync::mpsc::Sender<()>>> = Mutex::new(None);
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetThreadExecutionState(flags: u32) -> u32;
+}
+
+/// Stop Windows going to sleep on idle while a long task works (the screen may still turn
+/// off). The request belongs to the thread that makes it, so one thread holds it until told
+/// to stop; it also ends by itself when Filey quits.
+#[tauri::command]
+pub fn always_on_keep_awake(on: bool) {
+    let Ok(mut slot) = KEEP_AWAKE.lock() else { return };
+    if on == slot.is_some() {
+        return;
+    }
+    if !on {
+        *slot = None;
+        return;
+    }
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let spawned = std::thread::Builder::new().name("filey-keep-awake".into()).spawn(move || {
+        const ES_CONTINUOUS: u32 = 0x8000_0000;
+        const ES_SYSTEM_REQUIRED: u32 = 0x0000_0001;
+        #[cfg(windows)]
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+        }
+        let _ = stopped.recv(); // returns once the sender is dropped
+        #[cfg(windows)]
+        unsafe {
+            SetThreadExecutionState(ES_CONTINUOUS);
+        }
+        let _ = (ES_CONTINUOUS, ES_SYSTEM_REQUIRED);
+    });
+    if spawned.is_ok() {
+        *slot = Some(stop);
+    }
+}

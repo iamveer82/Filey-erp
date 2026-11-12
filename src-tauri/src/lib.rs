@@ -148,6 +148,7 @@ pub fn run() {
                 modules::always_on::always_on_configure,
                 modules::always_on::always_on_notify,
                 modules::always_on::always_on_show,
+                modules::always_on::always_on_keep_awake,
             ];
             handler(invoke)
         })

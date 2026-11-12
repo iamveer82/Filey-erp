@@ -314,17 +314,11 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                         }
                     }
                     Some(kind @ ("message" | "voice_note")) => {
-                        // Skip echo of messages we sent ourselves (fromMe) — otherwise
-                        // every agent reply via wa_bridge_reply is re-emitted as an
-                        // incoming wa-message, starting a new agent turn and echo loop.
-                        let from_me = v
-                            .get("key")
-                            .and_then(|k| k.get("fromMe"))
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if from_me {
-                            continue;
-                        }
+                        // No fromMe filter here: the sidecar already drops its
+                        // own sends by message id (sentIds) and the "Filey
+                        // Agent" marker, and the payload carries no key. Tasks
+                        // typed in the owner's own chat arrive as ordinary
+                        // messages, so filtering them would blind the agent.
                         let session_id = BRIDGE.lock().unwrap().as_ref()
                             .filter(|sup| sup.pid == pid && sup.state.state == "connected")
                             .and_then(|sup| sup.state.session_id.clone());

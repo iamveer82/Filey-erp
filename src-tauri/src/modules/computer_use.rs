@@ -30,13 +30,28 @@ $fileyHelper = [scriptblock]::Create((FileyDecode ([Console]::In.ReadLine())))
 $fileyOcu = [scriptblock]::Create((FileyDecode ([Console]::In.ReadLine())))
 while ($null -ne ($fileyLine = [Console]::In.ReadLine())) {
   $fileyParts = $fileyLine.Split("`t", 2)
-  $fileyJson = FileyDecode $fileyParts[1]
   try {
+    # Decoded inside the guard: a bad line answers with an error instead of ending the host.
+    if ($fileyParts[0] -ne 'ocu-batch') { $fileyJson = FileyDecode $fileyParts[1] }
     if ($fileyParts[0] -eq 'ocu') {
       $fileyOp = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGuid() + ".json")
       [IO.File]::WriteAllText($fileyOp, $fileyJson, $fileyUtf8)
       try { $fileyOut = (& { . $fileyOcu -OperationPath $fileyOp }) -join "`n" }
       finally { Remove-Item -LiteralPath $fileyOp -ErrorAction SilentlyContinue }
+    } elseif ($fileyParts[0] -eq 'ocu-batch') {
+      # Steps arrive as base64 JSON, comma separated; run in order, stop at the first failure.
+      $fileySteps = @($fileyParts[1].Split(','))
+      $fileyDone = 0
+      $fileyLast = '{"ok":false,"error":"empty batch"}'
+      foreach ($fileyStep in $fileySteps) {
+        $fileyOp = Join-Path ([IO.Path]::GetTempPath()) ("filey-ocu-" + [guid]::NewGuid() + ".json")
+        [IO.File]::WriteAllText($fileyOp, (FileyDecode $fileyStep), $fileyUtf8)
+        try { $fileyLast = (& { . $fileyOcu -OperationPath $fileyOp }) -join "`n" }
+        finally { Remove-Item -LiteralPath $fileyOp -ErrorAction SilentlyContinue }
+        if (-not ($fileyLast | ConvertFrom-Json).ok) { break }
+        $fileyDone++
+      }
+      $fileyOut = '{"batch_done":' + $fileyDone + ',"batch_total":' + $fileySteps.Count + ',"last":' + $fileyLast + '}'
     } else {
       $FileyRequest = $fileyJson
       # Dot-sourced inside a fresh child scope: script semantics ([ref] locals work) and
@@ -495,8 +510,13 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
         return Ok(json!({"tool": "list_apps"}));
     }
     let app = text(request, "app", 200)?;
+    // false: skip the screenshot (a text-only model cannot see it); the tree is still read.
+    let screenshot = match request.get("include_screenshot") {
+        None => true,
+        Some(value) => value.as_bool().ok_or("include_screenshot must be true or false.")?,
+    };
     if action == "app_state" {
-        let mut op = json!({"tool": "get_app_state", "app": app});
+        let mut op = json!({"tool": "get_app_state", "app": app, "include_screenshot": screenshot});
         if let Some(limit) = request.get("text_limit") {
             let usable = limit == &json!("max")
                 || limit.as_u64().is_some_and(|n| (1..=100_000).contains(&n));
@@ -519,7 +539,38 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
     let snapshot = active.apps.get(&app.to_lowercase()).cloned()
         .ok_or("Read the app with app_state before acting in it.")?;
     let pid = snapshot["app"]["pid"].as_u64().ok_or("Read the app with app_state again.")?;
-    let mut op = json!({"app": pid.to_string(), "expected_pid": pid, "windowHandle": snapshot["windowHandle"], "windowBounds": snapshot["windowBounds"]});
+    let mut op = json!({"app": pid.to_string(), "expected_pid": pid, "windowHandle": snapshot["windowHandle"],
+        "windowBounds": snapshot["windowBounds"], "include_screenshot": screenshot});
+    if action == "app_batch" {
+        // Several steps against the same app_state, run back to back by the helper (HOST
+        // "ocu-batch"): one model round-trip for a whole form instead of one per field.
+        let steps = request["steps"].as_array().filter(|s| (1..=8).contains(&s.len()))
+            .ok_or("steps must list 1 to 8 app actions from the latest app_state.")?;
+        let mut ops = Vec::with_capacity(steps.len());
+        for (i, step) in steps.iter().enumerate() {
+            let kind = text(step, "action", 24).map_err(|e| format!("Step {}: {e}", i + 1))?;
+            if !matches!(kind, "app_click" | "app_type" | "app_key" | "app_set_value" | "app_scroll" | "app_action") {
+                return Err(format!("Step {}: a batch step is app_click, app_type, app_key, app_set_value, app_scroll or app_action.", i + 1));
+            }
+            let mut step_op = op.clone();
+            app_step(kind, step, &snapshot, &mut step_op).map_err(|e| format!("Step {}: {e}", i + 1))?;
+            // Only the last step reads the app back; the ones before it just act.
+            if i + 1 < steps.len() {
+                step_op["skip_snapshot"] = json!(true);
+            }
+            ops.push(step_op);
+        }
+        active.apps.retain(|_, s| s["app"]["pid"].as_u64() != Some(pid));
+        return Ok(json!({"tool": "batch", "steps": ops}));
+    }
+    app_step(action, request, &snapshot, &mut op)?;
+    // Consumed like a screenshot: indexes are only good for the state they were read from.
+    active.apps.retain(|_, s| s["app"]["pid"].as_u64() != Some(pid));
+    Ok(op)
+}
+
+/// One app action (click, type, key, set_value, scroll, drag or secondary action) as an OCU op.
+fn app_step(action: &str, request: &Value, snapshot: &Value, op: &mut Value) -> Result<(), String> {
     let element = |op: &mut Value| -> Result<(), String> {
         let index = request["element_index"].as_u64().ok_or("element_index must be an index from the latest app_state.")?;
         op["element"] = snapshot["elements"].as_array().and_then(|all| all.iter().find(|e| e["index"].as_u64() == Some(index))).cloned()
@@ -536,9 +587,9 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             op["tool"] = json!("click");
             op["click_method"] = json!("auto");
             if request.get("element_index").is_some() {
-                element(&mut op)?;
+                element(op)?;
             } else {
-                let (x, y) = image_point(&snapshot, request, "x", "y")?;
+                let (x, y) = image_point(snapshot, request, "x", "y")?;
                 op["x"] = json!(x);
                 op["y"] = json!(y);
             }
@@ -567,12 +618,12 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             op["key_method"] = json!("auto");
         }
         "app_set_value" => {
-            element(&mut op)?;
+            element(op)?;
             op["tool"] = json!("set_value");
             op["value"] = json!(typed("value")?);
         }
         "app_scroll" => {
-            element(&mut op)?;
+            element(op)?;
             let direction = text(request, "direction", 8)?;
             let pages = request["pages"].as_f64().unwrap_or(1.0);
             if !(matches!(direction, "up" | "down" | "left" | "right") && pages > 0.0 && pages <= 10.0) {
@@ -583,8 +634,8 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             op["pages"] = json!(pages);
         }
         "app_drag" => {
-            let (from_x, from_y) = image_point(&snapshot, request, "x", "y")?;
-            let (to_x, to_y) = image_point(&snapshot, request, "to_x", "to_y")?;
+            let (from_x, from_y) = image_point(snapshot, request, "x", "y")?;
+            let (to_x, to_y) = image_point(snapshot, request, "to_x", "to_y")?;
             op["tool"] = json!("drag");
             op["from_x"] = json!(from_x);
             op["from_y"] = json!(from_y);
@@ -592,7 +643,7 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
             op["to_y"] = json!(to_y);
         }
         "app_action" => {
-            element(&mut op)?;
+            element(op)?;
             let name = text(request, "name", 16)?;
             if !matches!(name, "invoke" | "toggle" | "select" | "expand" | "collapse" | "scrollintoview") {
                 return Err("name must be invoke, toggle, select, expand, collapse or scrollintoview.".into());
@@ -602,9 +653,7 @@ fn prepare_app(request: &Value, active: &mut Session) -> Result<Value, String> {
         }
         _ => return Err("Unsupported computer action.".into()),
     }
-    // Consumed like a screenshot: indexes are only good for the state they were read from.
-    active.apps.retain(|_, s| s["app"]["pid"].as_u64() != Some(pid));
-    Ok(op)
+    Ok(())
 }
 
 /// Same list as Test-ControllableProcess in computer_use.ps1: typing into a shell runs commands.
@@ -636,10 +685,14 @@ fn app_result(active: &mut Session, query: &str, mut snapshot: Value) -> Result<
         tree.truncate(cut);
         tree.push_str("\n… (tree cut; scroll or act on what is shown)");
     }
+    let hint = if image.is_some() {
+        "Act with element_index from this tree; indexes change after every action, which returns the new tree. x/y are pixels in this screenshot."
+    } else {
+        "Act with element_index from this tree; indexes change after every action, which returns the new tree."
+    };
     let mut out = json!({
         "app": name, "pid": pid, "window": snapshot["windowTitle"], "tree": tree,
-        "focused": snapshot["focusedSummary"], "selected_text": snapshot["selectedText"],
-        "hint": "Act with element_index from this tree; indexes change after every action, which returns the new tree. x/y are pixels in this screenshot.",
+        "focused": snapshot["focusedSummary"], "selected_text": snapshot["selectedText"], "hint": hint,
     });
     if let Some(data) = image.filter(|d| d.starts_with("iVBORw0KGgo") && d.len() <= 5_600_000) {
         out["image"] = json!({"mediaType": "image/png", "dataBase64": data});
@@ -690,7 +743,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
     }
     let action = request["action"].as_str().unwrap_or_default().to_owned();
     let ocu = action == "apps" || action.starts_with("app_");
-    let (id, child, replies) = {
+    let (id, child, replies, batch) = {
         let mut current = state()
             .lock()
             .map_err(|_| "Computer access is unavailable.")?;
@@ -720,16 +773,24 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
             current.host = None;
             current.host = Some(spawn_host()?);
         }
-        // Show the user where the agent is about to act: the pointer glides there first.
-        if let Some((x, y)) = glide_target(&prepared) {
+        // Show the user where the agent is about to act: the pointer glides there first,
+        // then the software cursor pulses where the click lands (a batch: its first step).
+        let batch = prepared["tool"] == "batch";
+        let lead = if batch { prepared["steps"][0].clone() } else { prepared.clone() };
+        if let Some((x, y)) = glide_target(&lead) {
             super::agent_overlay::glide_to(x, y);
+            let clicking = matches!(lead["action"].as_str(), Some("click" | "drag"))
+                || matches!(lead["tool"].as_str(), Some("click" | "drag"));
+            if clicking { super::agent_overlay::pulse_click(); }
         }
         use base64::Engine;
-        let line = format!(
-            "{}\t{}\n",
-            if ocu { "ocu" } else { "helper" },
-            base64::engine::general_purpose::STANDARD.encode(prepared.to_string())
-        );
+        let b64 = |value: &Value| base64::engine::general_purpose::STANDARD.encode(value.to_string());
+        let line = if batch {
+            let steps = prepared["steps"].as_array().map(|all| all.iter().map(b64).collect::<Vec<_>>().join(","));
+            format!("ocu-batch\t{}\n", steps.unwrap_or_default())
+        } else {
+            format!("{}\t{}\n", if ocu { "ocu" } else { "helper" }, b64(&prepared))
+        };
         let Some(host) = current.host.as_mut() else { return Err("Computer helper unavailable.".into()) };
         if let Err(error) = host.stdin.write_all(line.as_bytes()).and_then(|_| host.stdin.flush()) {
             current.host = None;
@@ -738,7 +799,7 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
         let (child, replies) = (host.child.clone(), host.replies.clone());
         let id = uuid::Uuid::new_v4().to_string();
         current.job = Some((id.clone(), child.clone()));
-        (id, child, replies)
+        (id, child, replies, batch)
     };
     let started = Instant::now();
     // A large app's UI tree can take the runtime longer to read than a screenshot.
@@ -810,9 +871,31 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
     }
     let mut result: Value =
         serde_json::from_slice(&output).map_err(|_| "Computer helper returned invalid output.")?;
+    // A batch reports how far it got, and the app as it is after its last step.
+    if batch {
+        let (done, total) = (result["batch_done"].as_u64().unwrap_or(0), result["batch_total"].as_u64().unwrap_or(0));
+        let mut last = result["last"].take();
+        if last["ok"] != json!(true) {
+            let error = last["error"].as_str().unwrap_or("unknown error").chars().take(1200).collect::<String>();
+            let error = if error.contains("appNotFound") {
+                "the app is not running under that name or id any more; call apps, then app_state".to_owned()
+            } else {
+                error
+            };
+            return Err(format!("Step {} of {total} failed: {error}. The steps before it ran; read the app again (app_state) before continuing.", done + 1));
+        }
+        let mut out = app_result(active, request["app"].as_str().unwrap_or_default(), last["snapshot"].take())?;
+        out["batch"] = json!({"done": done, "total": total});
+        return Ok(out);
+    }
     if ocu {
         if result["ok"] != json!(true) {
             let error = result["error"].as_str().unwrap_or("unknown error").chars().take(1200).collect::<String>();
+            // The commonest dead end: a stale pid (the app restarted) or a window id passed as `app`.
+            // Say what to do next so the agent does not retry the same id.
+            if error.contains("appNotFound") {
+                return Err("That app is not running under that name or id any more (it closed or restarted, or a window id was used). Call apps, then app_state with the app's name from that list.".into());
+            }
             return Err(format!("Computer action failed: {error}"));
         }
         if action == "apps" {
@@ -871,6 +954,32 @@ fn execute(app: tauri::AppHandle, token: String, request: Value) -> Result<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn batch_runs_several_steps_against_one_app_state() {
+        let mut s = active();
+        let shot = json!({"app":{"name":"Notepad","pid":42},"windowHandle":7,"windowBounds":{"x":0,"y":0,"width":800,"height":600},
+            "treeLines":["0 window Notepad","1 edit Text","2 button Save"],
+            "elements":[{"index":1,"name":"Text","runtimeId":[1]},{"index":2,"name":"Save","runtimeId":[2]}]});
+        app_result(&mut s, "notepad", shot.clone()).unwrap();
+        let too_many: Vec<Value> = (0..9).map(|_| json!({"action":"app_key","keys":"Return"})).collect();
+        assert!(prepare_app(&json!({"action":"app_batch","app":"notepad","steps":too_many}), &mut s).is_err());
+        let bad = prepare_app(&json!({"action":"app_batch","app":"notepad","steps":[{"action":"app_drag"}]}), &mut s).unwrap_err();
+        assert!(bad.starts_with("Step 1:"), "{bad}");
+        let batch = prepare_app(&json!({"action":"app_batch","app":"notepad","include_screenshot":false,"steps":[
+            {"action":"app_set_value","element_index":1,"value":"hello"},
+            {"action":"app_key","keys":"ctrl+s"},
+            {"action":"app_click","element_index":2}]}), &mut s).unwrap();
+        assert_eq!(batch["tool"], "batch");
+        let steps = batch["steps"].as_array().unwrap();
+        assert_eq!((steps[0]["tool"].as_str(), steps[1]["tool"].as_str(), steps[2]["tool"].as_str()), (Some("set_value"), Some("press_key"), Some("click")));
+        assert_eq!((steps[0]["skip_snapshot"].as_bool(), steps[1]["skip_snapshot"].as_bool()), (Some(true), Some(true)));
+        assert!(steps[2].get("skip_snapshot").is_none());
+        assert_eq!(steps[2]["element"]["name"], "Save");
+        assert_eq!(steps[2]["include_screenshot"], false);
+        // Like a single action, the batch used up that read.
+        assert!(prepare_app(&json!({"action":"app_click","app":"notepad","element_index":2}), &mut s).is_err());
+    }
+
     #[test]
     fn host_helper_never_exits_the_host() {
         let helper = host_helper();
