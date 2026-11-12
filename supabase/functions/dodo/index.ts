@@ -55,7 +55,6 @@ const productIds = (name: string) => (Deno.env.get(name) ?? "").split(",").map((
 const FREEDOM_IDS = productIds("DODO_PRODUCT_FREEDOM");
 const CLOUD_IDS = productIds("DODO_PRODUCT_CLOUD");
 const PRODUCT_FREEDOM = FREEDOM_IDS[0] ?? "";
-const PRODUCT_CLOUD = CLOUD_IDS[0] ?? "";
 const SITE_URL = Deno.env.get("SITE_URL") ?? "";
 /** The org plan value a live Cloud subscription sets. Any value other than
  *  "free" already lifts the server-side invoice cap and reads as paid in
@@ -195,7 +194,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       const already = await licenseStatus(supa, user.id);
       if (already.status !== 200) return reply(already);
       if (already.body.licensed)
-        return json({ error: "This account already owns Freedom." }, 409);
+        return json({ error: "You already own Freedom — there is nothing left to buy." }, 409);
 
       // SECURITY: the redirect target comes from SITE_URL, never the caller's
       // Origin header — otherwise the checkout doubles as an open redirect.
@@ -215,28 +214,14 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     if (action === "checkout_cloud") {
       if (!API_KEY) return json({ error: "Payments are not configured yet." }, 503);
-      if (!PRODUCT_CLOUD) return json({ error: "Cloud plan not configured" }, 503);
+      // Keep the workspace check first: a stale tab must get the same explicit
+      // answer as every other billing action before it learns anything about
+      // what is on sale.
       const org = await userOrg(supa, user.id, payload.expected_org_id);
       if (!org) return json({ error: "Only the workspace owner or an admin can manage billing." }, 403);
-      if (org.plan !== "free" && ["active", "trialing", "past_due"].includes(org.plan_status))
-        return json({ error: "This workspace already has a paid plan. Use Manage billing." }, 409);
-      const owned = await licenseStatus(supa, String(org.owner_id));
-      if (owned.status !== 200) return reply(owned);
-      if (owned.body.licensed)
-        return json({ error: "This workspace already includes cloud access through Freedom." }, 409);
-
-      const base = SITE_URL || "";
-      const session = await dodo.checkoutSessions.create({
-        product_cart: [{ product_id: PRODUCT_CLOUD, quantity: 1 }],
-        customer: { email: user.email ?? "" },
-        // org_id is how the webhook knows whose cloud to switch on; the
-        // subscription carries it forward to every renewal event.
-        metadata: { type: "cloud_subscription", org_id: String(org.id), user_id: user.id },
-        return_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", plan: "cloud", checkout: "success" }) : base ? `${base}/thanks?plan=cloud${fromApp}` : undefined,
-        cancel_url: payload.from === "app" ? appCheckoutReturn({ section: "billing", checkout: "cancel" }) : base ? `${base}/#pricing` : undefined,
-      });
-      if (!session.checkout_url) return json({ error: "Dodo returned no checkout URL" }, 502);
-      return json({ url: session.checkout_url, session_id: session.session_id });
+      // Pro is off sale for now. Existing subscriptions keep renewing and can
+      // still open the customer portal; only new checkouts are refused.
+      return json({ error: "The Pro plan is not available right now. Choose Freedom." }, 409);
     }
 
     // Cancelling, changing the card, downloading invoices — all Dodo's, since
@@ -319,7 +304,8 @@ async function publicCheckout(
   if (!EMAIL_RE.test(email) || email.length > 320)
     return json({ error: "Enter a valid email address." }, 400);
 
-  const product = plan === "cloud" ? PRODUCT_CLOUD : plan === "freedom" ? PRODUCT_FREEDOM : "";
+  // Pro is off sale for now, so only Freedom can start a website checkout.
+  const product = plan === "freedom" ? PRODUCT_FREEDOM : "";
   if (!product) return json({ error: "Choose an available plan." }, 400);
 
   // An address is caller-controlled. Rotating it must not bypass the provider

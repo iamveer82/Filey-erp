@@ -18,7 +18,7 @@ Deno.test("billing rejects malformed and oversized action/webhook requests befor
     SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
-    DODO_PRODUCT_CLOUD: "pdt_cloud",
+    DODO_PRODUCT_CLOUD: "pdt_cloud", DODO_PRODUCT_FREEDOM: "pdt_freedom",
     FILEY_AI_DEEPSEEK_KEY: "fixture-model-key",
     DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
   })[name];
@@ -86,7 +86,7 @@ Deno.test("billing redacts provider/database failures and binds credit checkout 
     SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
-    DODO_PRODUCT_CLOUD: "pdt_cloud",
+    DODO_PRODUCT_CLOUD: "pdt_cloud", DODO_PRODUCT_FREEDOM: "pdt_freedom",
     FILEY_AI_DEEPSEEK_KEY: "fixture-model-key",
     DODO_AI_CREDIT_PACKS: '[{"id":"pdt_fixture","cents":500}]',
   })[name];
@@ -175,7 +175,7 @@ Deno.test("workspace billing rejects stale or malformed workspace intent before 
     SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
     DODO_PAYMENTS_API_KEY: "fixture-payment-key",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
-    DODO_PRODUCT_CLOUD: "pdt_cloud",
+    DODO_PRODUCT_CLOUD: "pdt_cloud", DODO_PRODUCT_FREEDOM: "pdt_freedom",
   })[name];
   let profileReads = 0, externalCalls = 0;
   billingFetchFixture = (async (input: RequestInfo | URL) => {
@@ -279,7 +279,7 @@ Deno.test("billing's real SDK route saves and resumes one selected-customer prom
 
 Deno.test("rotating public checkout addresses cannot bypass a shared provider ceiling and per-address limits remain", async () => {
   const originalEnv = Deno.env.get, originalFetch = globalThis.fetch;
-  Deno.env.get = (name) => ({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key", DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==", DODO_PRODUCT_CLOUD: "pdt_cloud" })[name];
+  Deno.env.get = (name) => ({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key", DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==", DODO_PRODUCT_CLOUD: "pdt_cloud", DODO_PRODUCT_FREEDOM: "pdt_freedom" })[name];
   const counts = new Map<string, number>();
   let checkouts = 0, emailReservations = 0;
   billingFetchFixture = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -296,7 +296,7 @@ Deno.test("rotating public checkout addresses cannot bypass a shared provider ce
     }
     if (url.pathname.endsWith("/checkouts")) {
       const body = await request.json();
-      assert(body.metadata.type === "cloud_subscription" && body.product_cart[0].product_id === "pdt_cloud");
+      assert(body.metadata.type === "freedom_license" && body.product_cart[0].product_id === "pdt_freedom");
       checkouts++;
       return Response.json({ checkout_url: "https://checkout.dodopayments.com/fixture", session_id: "session_fixture" });
     }
@@ -305,7 +305,10 @@ Deno.test("rotating public checkout addresses cannot bypass a shared provider ce
   globalThis.fetch = (...args) => billingFetchFixture(...args);
   try {
     const { handleRequest } = await import("../dodo/index.ts");
-    const call = (email: string) => handleRequest(new Request("https://fixture/dodo", { method: "POST", body: JSON.stringify({ action: "public_checkout", plan: "cloud", email }) }));
+    const call = (email: string) => handleRequest(new Request("https://fixture/dodo", { method: "POST", body: JSON.stringify({ action: "public_checkout", plan: "freedom", email }) }));
+    // Pro is off sale: a website checkout for it is refused before any limiter or provider call.
+    const pro = await handleRequest(new Request("https://fixture/dodo", { method: "POST", body: JSON.stringify({ action: "public_checkout", plan: "cloud", email: "pro@example.test" }) }));
+    assert(pro.status === 400 && counts.size === 0);
     for (let n = 0; n < 6; n++) assert((await call("one@example.test")).status === (n < 5 ? 200 : 429));
     for (let n = 0; n < 94; n++) assert((await call(`rotated-${n}@example.test`)).status === 200);
     const before = emailReservations;
