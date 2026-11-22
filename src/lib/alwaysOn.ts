@@ -116,7 +116,12 @@ export async function startAlwaysOn(): Promise<void> {
   if (started || !hasTauri) return;
   started = true;
   const { listen } = await import("@tauri-apps/api/event");
-  await listen("filey://tick", () => window.dispatchEvent(new Event(HEARTBEAT_EVENT)));
+  const { invoke } = await import("@tauri-apps/api/core");
+  await listen("filey://tick", () => {
+    // Answer first: the host reloads a hidden page that stops answering ticks.
+    void invoke("always_on_alive").catch(() => undefined);
+    window.dispatchEvent(new Event(HEARTBEAT_EVENT));
+  });
   await listen<{ paused?: boolean }>("filey://always-on", event => {
     if (typeof event.payload?.paused === "boolean") void setAlwaysOn({ paused: event.payload.paused });
   });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTool, setToolConfirm, approvalArgs, redactArgs } from "../aiTools";
-import { isOwnerNumber } from "../waAgent";
+import { isOwnerNumber, waMessageExpired } from "../waAgent";
 import { setDataMode } from "../dataMode";
 
 /* The WhatsApp path routes sensitive-tool approval over chat instead of the
@@ -120,5 +120,26 @@ describe("runTool owner-only gate", () => {
     expect(r).not.toEqual({
       error: `"run_shell" is owner-only — only the business owner can run it.`,
     });
+  });
+});
+
+/* A page stuck behind a dialog gets its WhatsApp backlog all at once on waking.
+ * Old instructions must not run then: the bridge no longer accepts their reply. */
+describe("waMessageExpired", () => {
+  const NOW = 1_800_000_000_000;
+
+  it("keeps a message the bridge is still waiting on", () => {
+    expect(waMessageExpired(NOW - 5_000, NOW)).toBe(false);
+    expect(waMessageExpired(NOW - 5 * 60_000, NOW)).toBe(false);
+  });
+
+  it("drops a message older than the bridge accepts a reply for", () => {
+    expect(waMessageExpired(NOW - 7 * 60_000, NOW)).toBe(true);
+    expect(waMessageExpired(NOW - 5 * 3_600_000, NOW)).toBe(true);
+  });
+
+  it("treats a message with no stamp as fresh", () => {
+    expect(waMessageExpired(undefined, NOW)).toBe(false);
+    expect(waMessageExpired(0, NOW)).toBe(false);
   });
 });

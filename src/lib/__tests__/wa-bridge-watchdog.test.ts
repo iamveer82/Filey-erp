@@ -9,7 +9,7 @@ vi.mock("../agentStorage", () => ({ agentStorageScope: () => "local:org:1:user:1
 vi.mock("../moduleAccess", () => ({ requireModuleAccess: async () => {} }));
 vi.mock("../log", () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { checkBridgeAlive, restartDelay } from "../waBridge";
+import { checkBridgeAlive, disconnectNotice, restartDelay } from "../waBridge";
 
 beforeEach(() => {
   localStorage.setItem("filey.wa_bridge.account", "org:1:user:1");
@@ -34,4 +34,10 @@ it("does not count a disconnect or a replaced session as a freeze", async () => 
 
 it("backs off crash restarts up to a minute", () => {
   expect([0, 1, 2, 3, 10].map(restartDelay)).toEqual([3000, 6000, 12000, 24000, 60000]);
+});
+
+it("tells the owner only for the two states nothing restarts by itself", () => {
+  expect(disconnectNotice({ state: "logged_out" })?.body).toContain("pair WhatsApp again");
+  expect(disconnectNotice({ state: "error", error: "WhatsApp rejected this session." })?.body).toBe("WhatsApp rejected this session.");
+  for (const state of ["connected", "reconnecting", "connecting", "stopped", "starting"]) expect(disconnectNotice({ state })).toBeNull();
 });

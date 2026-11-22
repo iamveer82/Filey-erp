@@ -7,7 +7,7 @@
 //! sends `filey://tick` from a native thread so a hidden page still wakes on
 //! time (Chromium slows a hidden page's own timers). Quit from the tray ends it.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -17,6 +17,40 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
 const TICK: Duration = Duration::from_secs(30);
+
+/// Ticks the page has not answered. A page blocked behind a dialog (a print
+/// preview left open, then the window closed to the tray) runs no script at
+/// all: WhatsApp messages, schedules and watches queued behind it for hours
+/// while the tray still said "agent on". Counted in ticks, not clock time, so
+/// a laptop waking from sleep is not mistaken for a stalled page.
+static MISSED: AtomicI32 = AtomicI32::new(-BOOT_GRACE);
+/// Unanswered ticks before a hidden page is reloaded (2.5 minutes).
+const STALLED: i32 = 5;
+/// Extra ticks a page gets to load before it has to answer (5 minutes).
+const BOOT_GRACE: i32 = 10;
+
+/// True when this many unanswered ticks mean the page should be reloaded.
+/// Only a hidden window: with the window on screen the owner can see what is
+/// blocking it, and a reload there would throw away what they are doing.
+fn should_reload(missed: i32, window_visible: bool) -> bool {
+    missed >= STALLED && !window_visible
+}
+
+fn reload_if_stalled(app: &AppHandle, missed: i32) {
+    let Some(window) = app.get_webview_window("main") else { return };
+    // Unknown visibility counts as visible: never reload on a guess.
+    if !should_reload(missed, window.is_visible().unwrap_or(true)) {
+        return;
+    }
+    MISSED.store(-BOOT_GRACE, Ordering::SeqCst);
+    let _ = window.reload();
+}
+
+/// The page answers every tick with this; silence is how a stall is noticed.
+#[tauri::command]
+pub fn always_on_alive() {
+    MISSED.store(0, Ordering::SeqCst);
+}
 
 pub struct AlwaysOn {
     /// Close hides the window instead of quitting. On until the app says otherwise.
@@ -106,10 +140,25 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
         .name("filey-agent-tick".into())
         .spawn(move || loop {
             std::thread::sleep(TICK);
+            let missed = MISSED.fetch_add(1, Ordering::SeqCst) + 1;
             let _ = handle.emit_to("main", "filey://tick", ());
+            reload_if_stalled(&handle, missed);
         })
         .ok();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_hidden_page_that_stopped_answering_is_reloaded() {
+        assert!(!should_reload(STALLED - 1, false), "a slow moment is not a stall");
+        assert!(should_reload(STALLED, false));
+        assert!(!should_reload(STALLED * 100, true), "a visible window is the owner's to fix");
+        assert!(!should_reload(-BOOT_GRACE, false), "a page still loading gets its grace");
+    }
 }
 
 #[derive(Serialize)]

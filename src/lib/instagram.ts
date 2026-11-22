@@ -95,7 +95,11 @@ async function call<T>(action: string, payload: Record<string, unknown> = {}): P
       throw new InstagramError(typeof navigator !== "undefined" && navigator.onLine === false
         ? "You're offline. Instagram DMs needs the internet."
         : "Instagram DMs isn't available right now: Filey couldn't reach its Instagram service. Try again later.");
-    // A non-2xx carries the server's own wording in its body.
+    // 503 is Filey's side not being ready (the Meta app is not set up or approved yet). The
+    // server words that for its operator; a customer can do nothing with "set IG_APP_ID".
+    if ((error as { context?: { status?: number } }).context?.status === 503)
+      throw new InstagramError("Instagram DMs isn't switched on yet. Filey is finishing its setup with Instagram, so there is nothing you need to do. Try again after the next update.");
+    // Any other non-2xx carries the server's own wording in its body.
     let message = error instanceof Error ? error.message : String(error);
     try {
       const body = await (error as { context?: { json?: () => Promise<unknown> } }).context?.json?.() as { error?: string } | undefined;

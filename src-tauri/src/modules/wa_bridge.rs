@@ -326,6 +326,13 @@ fn wa_bridge_start_blocking(app: AppHandle, owner_number: Option<String>, reset:
                             let event = if kind == "message" { "wa-message" } else { "wa-voice" };
                             let mut message = v.clone();
                             message["bridgeSession"] = session_id.into();
+                            // A page that was stuck gets its backlog all at once;
+                            // the stamp lets it drop what is too old to answer.
+                            message["receivedAt"] = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0)
+                                .into();
                             let _ = app2.emit_to(tauri::EventTarget::webview("main"), event, message);
                         }
                     }

@@ -13,6 +13,7 @@ import { TOOLS, runTool, type ConfirmFn } from "./aiTools";
 import { taskComputerSession } from "./computerUse";
 import type { AgentEvent } from "./agentHarness";
 import { readAgentStorage, writeAgentStorage } from "./agentStorage";
+import { HEARTBEAT_EVENT } from "./alwaysOn";
 import { toolsForRequest } from "./appMap";
 import { APP_NAME_FOR } from "./fileyHermesTools";
 import type { AiImage } from "./ai";
@@ -378,6 +379,10 @@ function listenDesktop(): Promise<void> {
         : Promise.resolve();
       await pushSession((await supabase.auth.getSession()).data.session);
       supabase.auth.onAuthStateChange((_event, session) => { void pushSession(session); });
+      // Supabase stops its own refresh timer while the page is hidden. In the tray that left the
+      // engine holding an expired token an hour later; the native tick keeps asking, and
+      // getSession() renews a token that is about to expire (which fires the listener above).
+      window.addEventListener(HEARTBEAT_EVENT, () => { void supabase.auth.getSession().catch(() => undefined); });
     }
   })().catch(error => { desktopListening = undefined; throw error; });
   return desktopListening;

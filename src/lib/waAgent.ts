@@ -190,8 +190,26 @@ export function startWaAgent(): void {
   });
 }
 
+/** The bridge gives up on a message after 4 minutes and takes a late answer for
+ *  2 more. Past that the owner has been told it went unanswered and a reply has
+ *  nowhere to go. */
+const WA_MESSAGE_EXPIRES_MS = 6 * 60_000;
+
+/** A page that was stuck (a dialog left open behind a hidden window) receives
+ *  its whole backlog at once when it wakes. Running an hours-old instruction
+ *  then would act with nowhere to report it. No stamp means an older host:
+ *  treat it as fresh. */
+export function waMessageExpired(receivedAt: number | undefined, now = Date.now()): boolean {
+  return typeof receivedAt === "number" && receivedAt > 0 && now - receivedAt > WA_MESSAGE_EXPIRES_MS;
+}
+
 /** Clear non-owner requests before they can wait behind a long owner run. */
-async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession"> & { text?: string }, run: (deadline: number, signal: AbortSignal) => Promise<void>) {
+async function enqueueOwner(m: Pick<WaMessage, "id" | "from" | "bridgeSession" | "receivedAt"> & { text?: string }, run: (deadline: number, signal: AbortSignal) => Promise<void>) {
+  if (waMessageExpired(m.receivedAt)) {
+    log.warn("whatsapp", "skipped a message that waited too long for Filey to answer");
+    await replyWa(m.id, "", m.bridgeSession).catch(() => {});
+    return;
+  }
   const scope = agentStorageScope();
   const epoch = generation;
   const deadline = Date.now() + RUN_TIMEOUT_MS;

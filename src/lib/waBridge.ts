@@ -13,6 +13,7 @@ import { requireModuleAccess } from "./moduleAccess";
 import { listen } from "@tauri-apps/api/event";
 import { getCacheScope } from "./api";
 import { agentStorageScope, AGENT_STORAGE_EVENT } from "./agentStorage";
+import { notifyOwner } from "./alwaysOn";
 
 export const hasDesktop =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -161,6 +162,8 @@ export function onBridgeState(cb: (s: BridgeState) => void): () => void {
 export interface WaMessage {
   id: string;
   bridgeSession: string;
+  /** Epoch ms when the desktop host read it from the bridge. */
+  receivedAt?: number;
   from: string;
   text: string;
   fromName?: string;
@@ -179,6 +182,7 @@ export function onWaMessage(cb: (m: WaMessage) => void): () => void {
 export interface WaVoice {
   id: string;
   bridgeSession: string;
+  receivedAt?: number;
   from: string;
   text: string; // unused for voice (kept for shape parity)
   fromName?: string;
@@ -281,6 +285,16 @@ export async function checkBridgeAlive(ping = (sessionId: string) => invoke("wa_
   }
 }
 
+/** What to tell the owner when WhatsApp ends in a state only they can fix: the phone
+ *  unlinked Filey, or WhatsApp rejected the session. Null for every other state. */
+export function disconnectNotice(s: BridgeState): { title: string; body: string } | null {
+  if (s.state === "logged_out")
+    return { title: "WhatsApp is disconnected", body: "Your phone unlinked Filey. Open Integrations in Filey and pair WhatsApp again." };
+  if (s.state === "error")
+    return { title: "WhatsApp is disconnected", body: s.error || "Open Integrations in Filey and reconnect WhatsApp." };
+  return null;
+}
+
 function watchForCrash(): void {
   setInterval(() => {
     const account = accountScope();
@@ -292,8 +306,15 @@ function watchForCrash(): void {
       return invoke<BridgeState>("wa_bridge_start", { ownerNumber: getBridgeConfig().ownerNumber });
     }).catch((e) => log.warn("whatsapp", "bridge watchdog failed", e));
   }, 60_000);
+  let told = "";
   onBridgeState((s) => {
-    if (s.state === "connected") restarts = 0;
+    if (s.state === "connected") { restarts = 0; told = ""; }
+    // Nothing restarts these two by itself, and the tray keeps saying "agent on".
+    const notice = disconnectNotice(s);
+    if (notice && told !== s.state) {
+      told = s.state;
+      void notifyOwner(notice.title, notice.body);
+    }
     if (s.state !== "stopped" || restartTimer) return;
     const account = accountScope();
     if (!account || !getBridgeConfig().autoStart || localStorage.getItem(ACCOUNT_KEY) !== account) return;
