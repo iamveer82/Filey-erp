@@ -111,7 +111,7 @@ it("shows separate save and validation states, then refreshes apps after a succe
   expect(state.save).toHaveBeenCalledWith("ak_synthetic_valid");
   expect(state.list).toHaveBeenCalledTimes(2);
   expect(screen.getByRole("button", { name: "Manage Composio key" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /^Gmail\./ })).toBeEnabled();
+  expect(screen.getByRole("link", { name: /^Gmail\./ })).toHaveAttribute("href", "/integrations/app/gmail");
   expect(screen.queryByLabelText("Composio API key")).not.toBeInTheDocument();
 });
 
@@ -279,52 +279,15 @@ it("opens key setup from an app tile without another settings page", async () =>
   expect(screen.getByRole("button", { name: "Use your own Composio key" })).toHaveAttribute("aria-expanded", "true");
 });
 
-it("does not open a failed or incomplete app connection and hides raw provider errors", async () => {
+it("opens each app's own page instead of starting a sign-in from the tile", async () => {
   state.own = true; state.source = "own";
   const opened = vi.spyOn(window, "open").mockReturnValue(null);
-  state.connect.mockRejectedValueOnce(new Error("ak_synthetic_start_failure"));
   show();
-  fireEvent.click(await screen.findByRole("button", { name: /^Gmail\./ }));
-  expect(await screen.findByRole("status")).toHaveTextContent("Could not connect this app");
-  expect(screen.getByRole("status")).not.toHaveTextContent("ak_synthetic_start_failure");
-  state.connect.mockResolvedValueOnce({ redirect_url: "https://auth.composio.dev/synthetic" });
-  fireEvent.click(screen.getByRole("button", { name: /^Gmail\./ }));
-  await waitFor(() => expect(state.connect).toHaveBeenCalledTimes(2));
+  const tile = await screen.findByRole("link", { name: /^Gmail\..*Open its page$/ });
+  expect(tile).toHaveAttribute("href", "/integrations/app/gmail");
+  fireEvent.click(tile);
+  expect(state.connect).not.toHaveBeenCalled();
   expect(opened).not.toHaveBeenCalled();
-  expect(state.status).not.toHaveBeenCalled();
-});
-
-it("keeps a direct authorization link when popups are blocked and confirms the app only after ACTIVE", async () => {
-  state.own = true; state.source = "own";
-  const opened = vi.spyOn(window, "open").mockReturnValue(null);
-  state.connect.mockResolvedValue({ redirect_url: "https://auth.composio.dev/synthetic", connected_account_id: "ca_synthetic" });
-  state.status.mockResolvedValue({ status: "ACTIVE" });
-  show();
-  const connect = await screen.findByRole("button", { name: /^Gmail\./ });
-  vi.useFakeTimers();
-  fireEvent.click(connect);
-  await act(async () => { await Promise.resolve(); });
-  expect(screen.getByRole("link", { name: "authorize gmail here" })).toHaveAttribute("href", "https://auth.composio.dev/synthetic");
-  expect(opened).toHaveBeenCalledWith("https://auth.composio.dev/synthetic", "_blank", "noopener,noreferrer");
-  expect(screen.queryByText("Connected")).not.toBeInTheDocument();
-  await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
-  expect(screen.getByText("Connected")).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "authorize gmail here" })).not.toBeInTheDocument();
-  expect(state.status).toHaveBeenCalledWith("ca_synthetic");
-});
-
-it("does not open another account's authorization link after a delayed connect response", async () => {
-  state.own = true; state.source = "own";
-  const opened = vi.spyOn(window, "open").mockReturnValue(null);
-  const pending = deferred<{ redirect_url: string; connected_account_id: string }>();
-  state.connect.mockImplementationOnce(() => pending.promise);
-  show();
-  fireEvent.click(await screen.findByRole("button", { name: /^Gmail\./ }));
-  changeWorkspace("cloud:org:b:user:b");
-  await act(async () => { pending.resolve({ redirect_url: "https://auth.composio.dev/synthetic", connected_account_id: "ca_synthetic" }); });
-  expect(opened).not.toHaveBeenCalled();
-  expect(state.status).not.toHaveBeenCalled();
-  expect(screen.queryByRole("link", { name: "authorize gmail here" })).not.toBeInTheDocument();
 });
 
 it("discards search results and errors when the workspace changes", async () => {

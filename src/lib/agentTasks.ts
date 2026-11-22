@@ -20,12 +20,13 @@ export type Schedule =
   | { type: "until_done" };
 
 /** Business events a task can watch. Found by lib/agentWatches every 15 min. */
-export type WatchEvent = "invoice_overdue" | "invoice_paid" | "stock_low" | "follow_up_due";
+export type WatchEvent = "invoice_overdue" | "invoice_paid" | "stock_low" | "follow_up_due" | "app_event";
 export const WATCH_EVENTS: Record<WatchEvent, string> = {
   invoice_overdue: "an invoice becomes overdue",
   invoice_paid: "an invoice is paid",
   stock_low: "a product runs low",
   follow_up_due: "a follow-up comes due",
+  app_event: "a connected app sends an event",
 };
 export const isWatchEvent = (value: unknown): value is WatchEvent =>
   typeof value === "string" && value in WATCH_EVENTS;

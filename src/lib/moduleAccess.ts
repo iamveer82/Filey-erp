@@ -70,7 +70,7 @@ const toolModules: Record<string,string> = {
   update_customer:"customers",update_supplier:"suppliers",update_product:"inventory",update_order_status:"orders",
   update_cheque_status:"cheques",update_payment_receipt_status:"payment-receipts",
   create_employee:"people",update_employee:"people",mark_salary_paid:"people",list_attendance:"people",
-  create_account:"accounting",post_journal_entry:"accounting",
+  create_account:"accounting",post_journal_entry:"accounting",list_fixed_assets:"accounting",add_fixed_asset:"accounting",post_depreciation:"accounting",
   list_team_channels:"team",create_team_channel:"team",post_team_message:"team",
   list_comms_log:"comms",log_call:"comms",
   get_company_profile:"settings",

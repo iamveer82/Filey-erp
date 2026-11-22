@@ -28,8 +28,6 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { isNativeApp, openNativeExternal } from "../lib/nativePlatform";
 import { PageHeader, Badge, FilterChip } from "../components/ui";
 import BrandIcon from "../components/BrandIcon";
 import AppIcon from "../components/AppIcon";
@@ -39,8 +37,6 @@ import { cloudConfigured } from "../lib/supabase";
 import {
   hasDesktop,
   composioList,
-  composioConnect,
-  composioStatus,
   composioKeySource,
   composioSearchToolkits,
   hasOwnComposioKey,
@@ -134,8 +130,6 @@ export default function Integrations() {
   const [cat, setCat] = useState("All");
   const [active, setActive] = useState<Set<string>>(new Set());
   const [source, setSource] = useState<KeySource>("none");
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [authorization, setAuthorization] = useState<{ slug: string; url: string } | null>(null);
   const [msg, setMsg] = useState("");
   const [search, setSearch] = useState("");
   const [found, setFound] = useState<ToolkitInfo[]>([]);
@@ -148,11 +142,10 @@ export default function Integrations() {
 
   const requestGeneration = useRef(0);
   const searchGeneration = useRef(0);
-  const connectionGeneration = useRef(0);
   const current = (scope: string | null) => scope !== null && scope === agentStorageScope();
   const changeProviderSource = (next: KeySource) => {
-    ++requestGeneration.current; ++searchGeneration.current; ++connectionGeneration.current;
-    setSource(next); setActive(new Set()); setFound([]); setConnecting(null); setAuthorization(null);
+    ++requestGeneration.current; ++searchGeneration.current;
+    setSource(next); setActive(new Set()); setFound([]);
     setSearching(false); setRefreshing(false); setMsg("");
   };
   const refresh = useCallback(async () => {
@@ -193,9 +186,9 @@ export default function Integrations() {
     const changed = () => {
       if (scope === agentStorageScope()) return;
       scope = agentStorageScope();
-      ++searchGeneration.current; ++connectionGeneration.current;
+      ++searchGeneration.current;
       setWorkspace(scope); setKeySetupOpen(false); setMsg(""); setSearch("");
-      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setConnecting(null); setAuthorization(null); setSearching(false);
+      setActive(new Set()); setSocialOn(false); setSource("none"); setFound([]); setSearching(false);
       void refresh();
     };
     const events = [AGENT_STORAGE_EVENT, "filey:workspace-changed", "filey:workspace-transition", "storage"];
@@ -204,7 +197,7 @@ export default function Integrations() {
     // Intentionally invalidate the latest request counter on unmount; this is not a DOM ref.
     return () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      ++requestGeneration.current; ++searchGeneration.current; ++connectionGeneration.current;
+      ++requestGeneration.current; ++searchGeneration.current;
       for (const event of events) window.removeEventListener(event, changed);
     };
   }, [refresh]);
@@ -230,55 +223,6 @@ export default function Integrations() {
       if (valid()) setMsg("Could not search Composio apps. Check your connection and try again.");
     } finally {
       if (valid()) setSearching(false);
-    }
-  };
-
-  const connect = async (slug: string) => {
-    const scope = agentStorageScope();
-    const generation = ++connectionGeneration.current;
-    const valid = () => generation === connectionGeneration.current && current(scope);
-    setConnecting(slug);
-    setAuthorization(null);
-    setMsg("");
-    try {
-      const link = await composioConnect(slug);
-      if (!valid()) return;
-      if (link.error) throw new Error(link.error.message);
-      if (!link.redirect_url || !link.connected_account_id)
-        throw new Error("Composio did not return a connection link.");
-      setAuthorization({ slug, url: link.redirect_url });
-      // OAuth consent opens in the real browser on desktop; in a browser build
-      // there is no opener plugin, and a new tab is the same thing.
-      if (isNativeApp()) await openNativeExternal(link.redirect_url);
-      else if (hasDesktop) await openUrl(link.redirect_url);
-      else window.open(link.redirect_url, "_blank", "noopener,noreferrer");
-      if (!valid()) return;
-      setMsg(
-        `Authorize ${slug} in the browser window - this flips to Connected when you're done.`
-      );
-      const id = link.connected_account_id;
-      for (let i = 0; i < 40; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        if (!valid()) return;
-        const st = await composioStatus(id);
-        if (!valid()) return;
-        if ((st?.status ?? "").toUpperCase() === "ACTIVE") {
-          setActive((prev) => new Set(prev).add(slug));
-          setAuthorization(null);
-          setMsg(`${slug} connected ✓ - the Filey AI agent can now use it.`);
-          return;
-        }
-        if (["FAILED", "EXPIRED", "INACTIVE"].includes((st?.status ?? "").toUpperCase())) {
-          setMsg("The app authorization was not completed. Try connecting again.");
-          setAuthorization(null);
-          return;
-        }
-      }
-      if (valid()) setMsg("Authorization is still pending. Finish in the browser, then refresh connected apps.");
-    } catch {
-      if (valid()) setMsg("Could not connect this app. Check your Composio setup and try again.");
-    } finally {
-      if (valid()) setConnecting(null);
     }
   };
 
@@ -575,12 +519,6 @@ export default function Integrations() {
               {msg}
             </p>
           )}
-          {authorization && !hasDesktop && !isNativeApp() && (
-            <p className="mb-4 text-[13px] text-muted-foreground">
-              If the sign-in window did not open, {" "}
-              <a className="font-medium text-foreground underline underline-offset-4" href={authorization.url} target="_blank" rel="noopener noreferrer">authorize {authorization.slug} here</a>.
-            </p>
-          )}
 
           <div className="mb-5 flex items-center gap-1.5 overflow-x-auto pb-1 [&>button]:min-h-11 [&>button]:shrink-0 md:[&>button]:min-h-10" aria-label="Filter integrations">
             {categories.map((c) => (
@@ -656,19 +594,17 @@ export default function Integrations() {
                 );
               }
               if (i.slug) {
-                return (
-                  <button
-                    key={i.key}
-                    type="button"
-                    className={tile}
-                    {...tileProps}
-                    aria-label={`${i.name}. ${i.desc}`}
-                    disabled={connecting === i.slug}
-                    onClick={() => (source === "none" ? setKeySetupOpen(true) : connect(i.slug!))}
-                  >
+                // Every app opens its own Filey page: what it does, Connect, and the
+                // events it can send. Without a key, the tile opens key setup instead.
+                return source === "none" ? (
+                  <button key={i.key} type="button" className={tile} {...tileProps} aria-label={`${i.name}. ${i.desc}`} onClick={() => setKeySetupOpen(true)}>
                     {face}
-                    {connecting === i.slug && <Loader2 size={14} className="absolute end-2 top-2 animate-spin" />}
                   </button>
+                ) : (
+                  <Link key={i.key} to={`/integrations/app/${i.slug}`} state={{ name: i.name, desc: i.desc, logo: i.logo }} className={tile} {...tileProps}
+                    aria-label={`${i.name}. ${i.connected ? "Connected" : i.desc}. Open its page`}>
+                    {face}
+                  </Link>
                 );
               }
               if (i.to) {

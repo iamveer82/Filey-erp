@@ -2638,6 +2638,28 @@ export const fin = {
       await fin.postTransaction(cash.id, cashSide, amount, `${note}: TDS ${reverse ? "move reversed" : "kept back, not cash"}`, date);
       await fin.postTransaction(tdsId, cashSide === "debit" ? "credit" : "debit", amount, note, date);
     }),
+  /** Fixed assets. `depreciation` expenses a period's wear against "Accumulated
+   *  Depreciation", a contra-asset that carries a credit balance so the asset's cost
+   *  stays visible. `purchase` puts the cost on the books out of Cash & Bank. `only`
+   *  posts one side, to finish a pair that was cut off halfway. Names avoid the words
+   *  "expense", "cash" and "stock" so the general lookups never pick these accounts. */
+  postFixedAsset: (kind: "depreciation" | "purchase", amount: number, date: string, note: string, only?: "debit" | "credit") =>
+    online(async () => {
+      if (!Number.isFinite(amount) || amount <= 0 || amount !== r2(amount)) throw new Error("Enter a positive amount with at most two decimals.");
+      let debit: number, credit: number;
+      if (kind === "depreciation") {
+        debit = await findOrCreateAccount("expense", "5400", "Depreciation", /depreciation/i);
+        credit = await findOrCreateAccount("asset", "1590", "Accumulated Depreciation", /accumulated depreciation/i);
+      } else {
+        const accounts = await sList<any>("accounts", [{ col: "id", asc: true }]);
+        const cash = accounts.find((a) => a.account_type === "asset" && /cash|bank/i.test(a.name) && (!isLocalMode() || localRowOwnedByActor(a)));
+        if (!cash) throw new Error("No Cash & Bank account to pay for the asset from.");
+        debit = await findOrCreateAccount("asset", "1500", "Fixed Assets", /^fixed assets?$/i);
+        credit = cash.id;
+      }
+      if (only !== "credit") await fin.postTransaction(debit, "debit", amount, note, date);
+      if (only !== "debit") await fin.postTransaction(credit, "credit", amount, note, date);
+    }),
   updateTransaction: (
     id: number,
     patch: Partial<Pick<Txn, "description" | "txn_date">>

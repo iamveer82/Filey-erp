@@ -47,6 +47,7 @@ const json = (body: unknown, status = 200) =>
 const BILLABLE = new Set([
   "composio_execute",
   "composio_connect",
+  "composio_trigger_enable",
   "zernio_create_post",
   "zernio_delete_post",
 ]);
@@ -142,7 +143,9 @@ Deno.serve(async (req) => {
     }
 
     const result =
-      provider === "composio"
+      provider === "composio" && APP_EVENT_ACTIONS.has(action)
+        ? await appEvents(action, argumentsBody, { supa, userId, orgId: profile.org_id as string, entity, ownKey })
+        : provider === "composio"
         ? await composio(action, argumentsBody, entity, ownKey)
         : provider === "zernio"
           ? await zernio(action, argumentsBody, ownKey)
@@ -310,6 +313,130 @@ async function composio(
   }
 
   return { status: 400, body: { error: "Unknown Composio action" } };
+}
+
+// ---------------------------------------------------------------------------
+// Live app events (Composio triggers). Composio delivers each event to the
+// `composio-webhook` function; app_triggers records who turned which one on,
+// which is how that function knows whose event it is.
+// ---------------------------------------------------------------------------
+
+/** Triggers are documented on v3.1; v3 is frozen. The rest of this file still uses v3. */
+const COMPOSIO_TRIGGERS_BASE = "https://backend.composio.dev/api/v3.1";
+const APP_EVENT_ACTIONS = new Set(["trigger_types", "trigger_enable", "trigger_disable", "trigger_list", "events"]);
+/** Per person: enough for every app they use, not enough to flood the project. */
+const MAX_TRIGGERS_PER_USER = 25;
+
+interface AppEventContext {
+  // deno-lint-ignore no-explicit-any
+  supa: any;
+  userId: string;
+  orgId: string;
+  entity: string;
+  ownKey: string;
+}
+
+const triggerSlug = (value: unknown) =>
+  typeof value === "string" && /^[A-Za-z0-9_]{1,120}$/.test(value) ? value.toUpperCase() : "";
+
+async function appEvents(action: string, payload: Record<string, unknown>, ctx: AppEventContext): Promise<Result> {
+  const { supa, userId, orgId, entity } = ctx;
+
+  if (action === "trigger_list") {
+    const { data, error } = await supa.from("app_triggers")
+      .select("id,toolkit,trigger_slug,connected_account_id,config,created_at")
+      .eq("org_id", orgId).eq("user_id", userId).order("created_at", { ascending: false });
+    if (error) return { status: 503, body: { error: "Could not load your app events. Try again." } };
+    return { status: 200, body: { items: data ?? [] } };
+  }
+
+  if (action === "events") {
+    const since = Number(payload.since ?? 0);
+    const limit = Number(payload.limit ?? 50);
+    if (!Number.isSafeInteger(since) || since < 0 || !Number.isInteger(limit) || limit < 1 || limit > 100)
+      return { status: 400, body: { error: "Use a whole-number position and a limit from 1 to 100." } };
+    let query = supa.from("app_events").select("id,toolkit,trigger_slug,data,received_at")
+      .eq("org_id", orgId).eq("user_id", userId).gt("id", since);
+    if (typeof payload.toolkit === "string" && composioIdentifier(payload.toolkit)) query = query.eq("toolkit", payload.toolkit.toLowerCase());
+    const { data, error } = await query.order("id", { ascending: false }).limit(limit);
+    if (error) return { status: 503, body: { error: "Could not load app events. Try again." } };
+    return { status: 200, body: { items: data ?? [] } };
+  }
+
+  // Events are delivered to Filey's Composio project. A customer's own key is a
+  // different project, whose deliveries would never reach this webhook.
+  if (ctx.ownKey)
+    return { status: 409, body: { error: "Live app events run on Filey's Composio connection. Remove your own Composio key in Integrations to use them." } };
+  const key = Deno.env.get("COMPOSIO_API_KEY");
+  if (!key) return { status: 503, body: { error: "Integrations aren't configured yet." } };
+  const headers = { "x-api-key": key, "Content-Type": "application/json" };
+
+  if (action === "trigger_types") {
+    const toolkit = typeof payload.toolkit === "string" ? payload.toolkit.toLowerCase() : "";
+    if (!composioIdentifier(toolkit)) return { status: 400, body: { error: "Choose a valid app." } };
+    const url = `${COMPOSIO_TRIGGERS_BASE}/triggers_types?toolkit_slugs=${encodeURIComponent(toolkit)}&limit=50`;
+    const found = await cachedCatalog(url, key, () => callJson(url, { headers }, "Could not list this app's events"));
+    if (found.status >= 400) return found;
+    const items = ((found.body as { items?: Record<string, unknown>[] }).items ?? []).map((item) => ({
+      slug: item.slug, name: item.name, description: item.description, instructions: item.instructions, config: item.config ?? {},
+    }));
+    return { status: 200, body: { items } };
+  }
+
+  if (action === "trigger_enable") {
+    const slug = triggerSlug(payload.slug);
+    const accountId = String(payload.connected_account_id ?? "");
+    const config = payload.config ?? {};
+    if (!slug || !composioIdentifier(accountId)) return { status: 400, body: { error: "Choose an event and a connected app." } };
+    if (typeof config !== "object" || Array.isArray(config) || JSON.stringify(config).length > 8_000)
+      return { status: 400, body: { error: "The event settings are not valid." } };
+    // The connected account must be this person's, in this workspace, and signed in.
+    const account = await callJson(`${COMPOSIO_BASE}/connected_accounts/${encodeURIComponent(accountId)}`, { headers }, "Could not read that connection");
+    if (account.status >= 400) return account;
+    let summary: { status?: unknown; toolkit?: { slug?: string } };
+    try { summary = connectionSummary(account.body as Record<string, unknown>, entity); }
+    catch { return { status: 403, body: { error: "That connection belongs to a different workspace." } }; }
+    if (String(summary.status ?? "").toUpperCase() !== "ACTIVE") return { status: 409, body: { error: "Connect the app again before turning on its events." } };
+    const toolkit = String(summary.toolkit?.slug ?? "").toLowerCase();
+    if (!composioIdentifier(toolkit)) return { status: 502, body: { error: "Could not tell which app this connection is." } };
+    const { count, error: countError } = await supa.from("app_triggers").select("id", { count: "exact", head: true })
+      .eq("org_id", orgId).eq("user_id", userId);
+    if (countError) return { status: 503, body: { error: "Could not check your app events. Try again." } };
+    if ((count ?? 0) >= MAX_TRIGGERS_PER_USER) return { status: 409, body: { error: `You have ${MAX_TRIGGERS_PER_USER} app events on. Turn one off first.` } };
+
+    const made = await callJson(`${COMPOSIO_TRIGGERS_BASE}/trigger_instances/${encodeURIComponent(slug)}/upsert`, {
+      method: "POST", headers, body: JSON.stringify({ user_id: entity, connected_account_id: accountId, trigger_config: config }),
+    }, "The app did not accept that event. Check its settings.");
+    if (made.status >= 400) return made;
+    const triggerId = (made.body as { trigger_id?: unknown }).trigger_id;
+    if (typeof triggerId !== "string" || !composioIdentifier(triggerId)) return { status: 502, body: { error: "The app returned an invalid event id." } };
+    const { error } = await supa.from("app_triggers").upsert({
+      id: triggerId, org_id: orgId, user_id: userId, entity, toolkit, trigger_slug: slug, connected_account_id: accountId, config,
+    }, { onConflict: "id" });
+    if (error) {
+      // Unrecorded, its events could never be matched to an owner: take it back down.
+      await fetch(`${COMPOSIO_TRIGGERS_BASE}/trigger_instances/manage/${encodeURIComponent(triggerId)}`, { method: "DELETE", headers, redirect: "error" }).catch(() => {});
+      return { status: 503, body: { error: "Could not save the event. Nothing was turned on; try again." } };
+    }
+    return { status: 200, body: { trigger_id: triggerId, toolkit, slug } };
+  }
+
+  if (action === "trigger_disable") {
+    const triggerId = String(payload.trigger_id ?? "");
+    if (!composioIdentifier(triggerId)) return { status: 400, body: { error: "Choose an event to turn off." } };
+    const { data: row, error } = await supa.from("app_triggers").select("id").eq("id", triggerId)
+      .eq("org_id", orgId).eq("user_id", userId).maybeSingle();
+    if (error) return { status: 503, body: { error: "Could not check that event. Try again." } };
+    if (!row) return { status: 404, body: { error: "That event is not on." } };
+    const gone = await callJson(`${COMPOSIO_TRIGGERS_BASE}/trigger_instances/manage/${encodeURIComponent(triggerId)}`,
+      { method: "DELETE", headers }, "The app did not turn that event off. Try again.");
+    if (gone.status >= 400 && gone.status !== 404) return gone;
+    const { error: deleteError } = await supa.from("app_triggers").delete().eq("id", triggerId).eq("org_id", orgId).eq("user_id", userId);
+    if (deleteError) return { status: 503, body: { error: "The event is off, but Filey could not update its list. Refresh to check." } };
+    return { status: 200, body: { ok: true } };
+  }
+
+  return { status: 400, body: { error: "Unknown app event action" } };
 }
 
 /**

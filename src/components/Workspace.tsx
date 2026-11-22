@@ -26,6 +26,7 @@ const EmployeeDetail = lazy(() => import("../pages/EmployeeDetail"));
 const ModernOverview = lazy(() => import("../pages/ModernOverview"));
 const KnowledgeCenter = lazy(() => import("../pages/KnowledgeCenter"));
 const IntegrationConnect = lazy(() => import("../pages/IntegrationConnect"));
+const AppConnect = lazy(() => import("../pages/AppConnect"));
 const ExpenseEntry = lazy(() => import("../pages/ExpenseEntry"));
 const PersistentOfficeWork = lazy(() => import("../pages/OfficeWork"));
 
@@ -87,6 +88,7 @@ function AppRoutes() {
         <Route path="/purchase/:id" element={isEnabled("purchase") ? <ExpenseEntry key={location.pathname} /> : <ModuleDisabled name="Purchase" />} />
         {/* declared after the module routes so /integrations itself still
             resolves to the directory page */}
+        <Route path="/integrations/app/:toolkit" element={isEnabled("integrations") ? <AppConnect /> : <ModuleDisabled name="Integrations" />} />
         <Route path="/integrations/:app" element={isEnabled("integrations") ? <IntegrationConnect /> : <ModuleDisabled name="Integrations" />} />
         <Route path="/customers/:id" element={isEnabled("customers") ? <CustomerDetail /> : <ModuleDisabled name="Customers" />} />
         <Route path="/inventory/:id" element={isEnabled("inventory") ? <ProductPage key={location.pathname} /> : <ModuleDisabled name="Inventory" />} />

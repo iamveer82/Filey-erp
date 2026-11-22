@@ -30,6 +30,7 @@ import {
   type ShareKind,
 } from "../components/RowActions";
 import { downloadCsv } from "../lib/csv";
+import FixedAssetsPanel from "../components/FixedAssetsPanel";
 
 const ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"];
 
@@ -40,7 +41,7 @@ export default function Accounting() {
   const [acctOpen, setAcctOpen] = useState(false);
   const [jOpen, setJOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
-  const [tab, setTab] = useState<"journal" | "accounts">("journal");
+  const [tab, setTab] = useState<"journal" | "accounts" | "assets">("journal");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -233,14 +234,14 @@ export default function Accounting() {
         subtitle="Chart of accounts, journal entries & financial position"
         action={
           <div className="flex flex-wrap gap-2">
-            <button
+            {tab !== "assets" && <button
               className="btn-ghost"
               aria-label="Export CSV"
               title="Export the current view to CSV"
               onClick={exportCsv}
             >
               <Download size={15} /> Export
-            </button>
+            </button>}
             <button
               className="btn-ghost"
               aria-label="Scan receipt"
@@ -310,7 +311,7 @@ export default function Accounting() {
       </div>
 
       <div className="flex gap-2 mb-4">
-        {(["journal", "accounts"] as const).map((t) => (
+        {(["journal", "accounts", "assets"] as const).map((t) => (
           <button
             key={t}
             onClick={() => {
@@ -320,12 +321,12 @@ export default function Accounting() {
             aria-pressed={tab === t}
             className={`chip ${tab === t ? "chip-active" : ""} capitalize`}
           >
-            {t === "journal" ? "Journal" : "Chart of Accounts"}
+            {t === "journal" ? "Journal" : t === "accounts" ? "Chart of Accounts" : "Fixed assets"}
           </button>
         ))}
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      {tab !== "assets" && <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchInput
           value={search}
           onChange={setSearch}
@@ -385,9 +386,11 @@ export default function Accounting() {
             </>
           )}
         </div>
-      </div>
+      </div>}
 
-      {tab === "journal" ? (
+      {tab === "assets" ? (
+        <FixedAssetsPanel onPosted={load} />
+      ) : tab === "journal" ? (
         <DataTable<Txn>
           rowKey={(row) => row.id}
           pageSize={10}

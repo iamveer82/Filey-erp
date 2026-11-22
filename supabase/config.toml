@@ -63,3 +63,6 @@ verify_jwt = false
 verify_jwt = false
 [functions.ig-track]
 verify_jwt = false
+
+[functions.composio-webhook]
+verify_jwt = false

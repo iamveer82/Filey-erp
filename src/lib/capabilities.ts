@@ -164,6 +164,8 @@ export const CAPABILITIES: Capability[] = [
     tools: [
       "send_gmail",
       "composio_run",
+      "turn_on_app_event",
+      "turn_off_app_event",
       "share_document_link",
       "connect_whatsapp",
       "send_whatsapp",
@@ -212,8 +214,8 @@ export const CAPABILITIES: Capability[] = [
   {
     id: "accounting",
     name: "Accounting",
-    description: "Open accounts in the chart of accounts and post journal entries",
-    tools: ["create_account", "post_journal_entry"],
+    description: "Open accounts in the chart of accounts, post journal entries, add fixed assets and post depreciation",
+    tools: ["create_account", "post_journal_entry", "add_fixed_asset", "post_depreciation"],
   },
   {
     id: "banking",
