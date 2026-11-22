@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { resolveObjectURL } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createCanvas, DOMMatrix, Path2D, ImageData, Image } from "@napi-rs/canvas";
+import { createCanvas, DOMMatrix, Path2D, ImageData, Image, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument, PDFName, PDFDict, StandardFonts, rgb } from "pdf-lib";
 import JSZip from "jszip";
 import type { OutFile } from "../pdfTools";
@@ -412,7 +412,9 @@ it("runs the catalogue's PDF, Office and data actions through real engines and v
   scanContext.fillStyle = "#ffffff";
   scanContext.fillRect(0, 0, 500, 180);
   scanContext.fillStyle = "#111111";
-  scanContext.font = "36px sans-serif";
+  // Runner images change their system fonts; draw with a font that ships in node_modules.
+  GlobalFonts.registerFromPath(resolve("node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf"), "FileyScanSans");
+  scanContext.font = "36px FileyScanSans";
   scanContext.fillText("FILEY INVOICE 42", 30, 95);
   const scanPdf = asFile(await tools.imagesToPdf([
     new File([new Uint8Array(scan.toBuffer("image/png"))], "scan.png", { type: "image/png" }),
