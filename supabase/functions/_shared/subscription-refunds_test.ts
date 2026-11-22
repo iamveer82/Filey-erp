@@ -108,6 +108,10 @@ function setup() {
     payments: {
       retrieve: async () => structuredClone(payment),
       list: async () => ({ items: [payment] }),
+      retrieveLineItems: async (_id: string, opts: { query?: { currency?: string } }) => {
+        assert(opts.query?.currency === "USD", "Line items must be read in the customer's currency");
+        return { currency: "USD", items: [{ items_id: "pdt_pro", amount: 450, tax: 50, refundable_amount: 500 }] };
+      },
     },
     subscriptions: {
       retrieve: async () => ({
@@ -116,15 +120,17 @@ function setup() {
       }),
     },
     refunds: {
-      create: async (_body: unknown, opts: { maxRetries: number }) => {
+      create: async (body: { items?: unknown; currency?: string }, opts: { maxRetries: number }) => {
         creates++;
         assert(opts.maxRetries === 0, "Financial call must not retry");
+        assert(JSON.stringify(body.items) === JSON.stringify([{ item_id: "pdt_pro", amount: 450, tax_inclusive: true }]) &&
+          body.currency === "USD", "Approval refunds 90% in the customer's currency");
         if (uncertain) throw new Error("Transport timeout after submission");
         const refund = {
           refund_id: "ref_fixture",
           payment_id: payment.payment_id,
           status: "pending",
-          amount: 500,
+          amount: 450,
           currency: "USD",
         };
         payment.refunds.push(refund);
@@ -211,7 +217,7 @@ Deno.test(
     t.payment.refunds[0].status = "succeeded";
     await reconcileSubscriptionRefund(t.dodo, t.db, "pay_fixture");
     await reconcileSubscriptionRefund(t.dodo, t.db, "pay_fixture");
-    assert(String(t.rows[0].status) === "refunded" && t.rows[0].refunded_amount === 500);
+    assert(String(t.rows[0].status) === "refunded" && t.rows[0].refunded_amount === 450);
   }
 );
 Deno.test(

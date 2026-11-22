@@ -181,6 +181,35 @@ export async function trialActivate(
 
 /** Record a paid licence. Idempotent on the provider's payment id, because a
  *  webhook that is delivered twice must not hand out a second licence. */
+/** Take back the Freedom licence a payment bought, after Dodo returned the
+ *  money. A purchase still parked for first sign-in is voided so it can never
+ *  be claimed. Keyed by payment id, so licences granted without a payment
+ *  (migrations, manual sales) are never touched. */
+export async function revokeLicense(
+  supa: SupabaseClient,
+  paymentId: string,
+  reason: "refunded" | "charged_back"
+): Promise<"revoked" | "voided" | "none"> {
+  const at = new Date().toISOString();
+  const { data: licences, error } = await supa
+    .from("licenses")
+    .update({ status: "revoked", revoked_at: at, revoked_reason: reason })
+    .eq("dodo_payment_id", paymentId)
+    .eq("status", "active")
+    .select("id");
+  if (error) throw new Error("License revoke unavailable");
+  const { data: parked, error: parkError } = await supa
+    .from("pending_entitlements")
+    .update({ voided_at: at })
+    .eq("dodo_payment_id", paymentId)
+    .eq("kind", "freedom")
+    .is("claimed_at", null)
+    .is("voided_at", null)
+    .select("id");
+  if (parkError) throw new Error("Parked purchase update unavailable");
+  return licences?.length ? "revoked" : parked?.length ? "voided" : "none";
+}
+
 export async function grantLicense(
   supa: SupabaseClient,
   userId: string,

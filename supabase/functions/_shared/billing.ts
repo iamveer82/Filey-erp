@@ -93,3 +93,50 @@ export function buyerOf(
   const email = data.customer?.email || meta.email || undefined;
   return meta.type ? { userId: meta.user_id, orgId: meta.org_id, email } : { email };
 }
+
+/** Share of the price a refund under Filey's policy returns (gofiley.com/refunds).
+ *  The other 10% covers payment costs. */
+export const REFUND_SHARE = 0.9;
+
+/** Each line of a payment refunded at REFUND_SHARE, in Dodo's partial-refund shape. */
+export function policyRefundItems(items: { items_id: string; refundable_amount: number }[]) {
+  return items
+    .filter((i) => Number.isSafeInteger(i.refundable_amount) && i.refundable_amount > 0)
+    .map((i) => ({ item_id: i.items_id, amount: Math.floor(i.refundable_amount * REFUND_SHARE), tax_inclusive: true }));
+}
+
+/** The parts of a Dodo payment that say whether its money went back. */
+export interface DodoReversible {
+  currency?: string | null;
+  total_amount?: number | null;
+  settlement_amount?: number | null;
+  settlement_currency?: string | null;
+  refunds?: { status?: string | null; amount?: number | null; currency?: string | null; is_partial?: boolean | null }[] | null;
+  disputes?: { dispute_status?: string | null }[] | null;
+}
+
+/** Why a one-time purchase no longer stands, or null while it does.
+ *
+ *  Dodo takes its own entitlements back on a refund and on a dispute the
+ *  merchant lost or accepted; a Freedom licence follows the same rule. Filey's
+ *  refunds return 90% (REFUND_SHARE), so anything from half the price up counts
+ *  as a refund. A small goodwill refund keeps the licence, and an open or won
+ *  dispute changes nothing until it is decided.
+ *
+ *  A refund can be entered in the customer's currency or in the settlement
+ *  currency, so each one is measured against the total in its own currency. */
+export function licenceReversal(p: DodoReversible): "refunded" | "charged_back" | null {
+  if ((p.disputes ?? []).some((d) => d.dispute_status === "dispute_lost" || d.dispute_status === "dispute_accepted"))
+    return "charged_back";
+  const done = (p.refunds ?? []).filter((r) => r.status === "succeeded");
+  if (done.some((r) => r.is_partial === false)) return "refunded";
+  const base = (currency?: string | null) =>
+    currency && p.settlement_currency && currency === p.settlement_currency && currency !== p.currency
+      ? Number(p.settlement_amount ?? 0)
+      : Number(p.total_amount ?? 0);
+  const share = done.reduce((n, r) => {
+    const of = base(r.currency);
+    return of > 0 && Number.isFinite(r.amount) ? n + Number(r.amount) / of : n;
+  }, 0);
+  return share >= 0.5 ? "refunded" : null;
+}

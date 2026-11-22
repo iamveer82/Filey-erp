@@ -1,5 +1,6 @@
 import type DodoPayments from "npm:dodopayments@2.50.0";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { policyRefundItems } from "./billing.ts";
 
 const TABLE = "subscription_refund_requests";
 type Payment = Awaited<ReturnType<DodoPayments["payments"]["retrieve"]>>;
@@ -91,7 +92,9 @@ export async function reconcileSubscriptionRefund(
   const amount = succeeded.reduce((n, r) => n + r.amount!, 0);
   if (row.status === "refunded" || amount < row.refunded_amount) return true;
   let status: string | undefined;
-  if (amount >= row.amount) status = "refunded";
+  // The approved policy refund (90%) completes the request as much as a full one.
+  if (amount >= row.amount || succeeded.some((r) => r.refund_id === row.provider_refund_id))
+    status = "refunded";
   else if (refunds.some((r) => r.status === "pending" || r.status === "review"))
     status = "pending";
   else if (amount > 0) status = "partially_refunded";
@@ -227,6 +230,10 @@ export async function subscriptionRefundAction(
     throw new Error("Add a review note (5–1,000 characters).");
   if (row.status !== "requested")
     return { message: "This request has already been reviewed. Refresh its status." };
+  // Filey refunds 90% of a payment (gofiley.com/refunds), line by line and in
+  // the currency the customer paid; Dodo's default unit is the settlement currency.
+  let items: ReturnType<typeof policyRefundItems> = [];
+  let currency = String(row.currency);
   if (payload.decision === "approve") {
     const payment = await verifiedPayment(
       dodo,
@@ -236,6 +243,10 @@ export async function subscriptionRefundAction(
     );
     if (payment.total_amount !== row.amount || payment.currency !== row.currency)
       throw new Error("Payment details changed. Review this payment in Dodo Payments.");
+    const lines = await dodo.payments.retrieveLineItems(row.payment_id, { query: { currency: row.currency } });
+    items = policyRefundItems(lines.items);
+    currency = lines.currency;
+    if (!items.length) throw new Error("Payment details changed. Review this payment in Dodo Payments.");
   }
   // Conditional UPDATE is the atomic claim. Even concurrent admins can submit only once.
   const { data: claimed } = checked(
@@ -257,11 +268,14 @@ export async function subscriptionRefundAction(
     return { message: "Request declined. Your note is visible to the customer." };
   try {
     const refund = await dodo.refunds.create(
+      // `currency` is newer than this SDK's types; the API accepts it (Dodo v1.120.40).
       {
         payment_id: row.payment_id,
         reason: row.reason,
         metadata: { filey_refund_request: row.id },
-      },
+        items,
+        currency,
+      } as DodoPayments.RefundCreateParams,
       { maxRetries: 0 }
     );
     if (refund.payment_id !== row.payment_id)

@@ -39,9 +39,10 @@ import {
   licenseDeactivate,
   licenseStatus,
   grantLicense,
+  revokeLicense,
   type LicenseResult,
 } from "../_shared/license.ts";
-import { buyerOf, planPatchFor, type DodoPurchase } from "../_shared/billing.ts";
+import { buyerOf, licenceReversal, planPatchFor, type DodoPurchase, type DodoReversible } from "../_shared/billing.ts";
 import { createCreditCheckout, reconcileCreditPayment } from "../_shared/ai-credit-payments.ts";
 import { subscriptionRefundAction, reconcileSubscriptionRefund } from "../_shared/subscription-refunds.ts";
 import { BillingRequestError, readBillingBody } from "../_shared/billing-request.ts";
@@ -385,6 +386,53 @@ async function handleWebhook(req: Request): Promise<Response> {
     return json({ error: "Invalid webhook signature." }, 401);
   }
 
+  // Only these change anything here; the rest are Dodo's own records.
+  if (!/^(subscription|refund|dispute)\.|^payment\.succeeded$/.test(event.type))
+    return json({ received: true, ignored: event.type });
+
+  // Dodo retries and replays deliveries under the same webhook-id, and its
+  // docs ask every receiver to skip ids it already handled. Each handler is
+  // idempotent on its own too, so a failed lookup only costs a repeat.
+  const webhookId = (req.headers.get("webhook-id") ?? "").slice(0, 200);
+  const events = admin().from("dodo_webhook_events");
+  const { data: seen } = await events.select("webhook_id").eq("webhook_id", webhookId).maybeSingle();
+  if (seen) return json({ received: true, duplicate: true });
+
+  const res = await routeEvent(event);
+  // An "ignored" reply is not recorded, so replaying it after a fix (the
+  // storefront purchases of 2026-09-18) still reaches the new code.
+  const body = res.ok ? await res.clone().json().catch(() => ({})) : {};
+  if (res.ok && !("ignored" in body)) {
+    const { error } = await events.upsert(
+      { webhook_id: webhookId, event_type: event.type },
+      { onConflict: "webhook_id", ignoreDuplicates: true },
+    );
+    if (error) console.error("dodo_webhook_event_not_recorded", { type: event.type });
+    // ponytail: 1% of deliveries prune; a cron job if the table ever grows past that.
+    else if (Math.random() < 0.01)
+      await events.delete().lt("processed_at", new Date(Date.now() - 90 * 86_400_000).toISOString());
+  }
+  return res;
+}
+
+type DodoEvent = Awaited<ReturnType<typeof dodo.webhooks.unwrap>>;
+
+/** Take back a Freedom licence whose payment Dodo refunded in full or lost to a
+ *  dispute. Payments that never bought one are left alone. */
+async function reverseFreedom(paymentId: string): Promise<string | null> {
+  const db = admin();
+  const [licence, parked] = await Promise.all([
+    db.from("licenses").select("id").eq("dodo_payment_id", paymentId).maybeSingle(),
+    db.from("pending_entitlements").select("id").eq("dodo_payment_id", paymentId).eq("kind", "freedom").maybeSingle(),
+  ]);
+  if (licence.error || parked.error) throw new Error("Licence lookup unavailable");
+  if (!licence.data && !parked.data) return null;
+  // The provider's current record decides, not the event that woke us up.
+  const reason = licenceReversal(await dodo.payments.retrieve(paymentId));
+  return reason ? await revokeLicense(db, paymentId, reason) : "kept";
+}
+
+async function routeEvent(event: DodoEvent): Promise<Response> {
   // Subscriptions: every lifecycle event restates the status, so one handler
   // covers activation, renewal, a failed card and cancellation alike.
   if (event.type.startsWith("subscription.")) {
@@ -402,16 +450,24 @@ async function handleWebhook(req: Request): Promise<Response> {
         })) return json({ received: true, credits: true });
         if (event.type.startsWith("refund.") && await reconcileSubscriptionRefund(dodo, admin(), paymentId))
           return json({ received: true, subscription_refund: true });
+        if (event.type !== "payment.succeeded") {
+          const licence = await reverseFreedom(paymentId);
+          if (licence) return json({ received: true, licence });
+        }
       }
       catch { return json({ error: "Payment reconciliation failed. Delivery will be retried." }, 500); }
     }
   }
 
-  // Everything else (disputes, refunds) is recorded by Dodo; only a completed
-  // payment changes what this app lets someone do.
+  // Other refunds and disputes are Dodo's records; only a completed payment
+  // grants anything.
   if (event.type !== "payment.succeeded") return json({ received: true, ignored: event.type });
 
   const data = event.data;
+  // Dodo sends the payment's state at delivery time, so a retry that lands
+  // after a refund must not hand the licence out again.
+  if (licenceReversal(data as DodoReversible))
+    return json({ received: true, ignored: "payment was refunded or charged back" });
 
   // A subscription's first charge arrives here too; the subscription events
   // own that plan, so this path only handles the one-time licence. buyerOf

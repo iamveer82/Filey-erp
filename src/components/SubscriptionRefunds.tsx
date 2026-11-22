@@ -87,8 +87,9 @@ export default function SubscriptionRefunds() {
     if (
       decision === "approve" &&
       !(await confirm({
-        title: `Refund ${amount(row.amount, row.currency)}?`,
-        message: `Return the full payment ${row.payment_id} to its original payment method. This does not cancel the subscription.`,
+        // Mirrors REFUND_SHARE in supabase/functions/_shared/billing.ts (gofiley.com/refunds).
+        title: `Refund ${amount(Math.floor(row.amount * 0.9), row.currency)}?`,
+        message: `Return 90% of payment ${row.payment_id} (${amount(row.amount, row.currency)}) to its original payment method, as the refund policy says. This does not cancel the subscription.`,
         confirmLabel: "Issue refund",
         danger: true,
       }))

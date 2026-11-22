@@ -319,3 +319,63 @@ Deno.test("rotating public checkout addresses cannot bypass a shared provider ce
     globalThis.fetch = originalFetch;
   }
 });
+
+Deno.test("a refunded Freedom payment revokes its licence once, and a late success cannot regrant it", async () => {
+  const originalEnv = Deno.env.get, originalFetch = globalThis.fetch;
+  Deno.env.get = (name) => ({ SUPABASE_URL: "https://fixture.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key",
+    DODO_PAYMENTS_API_KEY: "fixture-payment-key", DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS13ZWJob29rLWtleQ==",
+    DODO_PRODUCT_CLOUD: "pdt_cloud", DODO_PRODUCT_FREEDOM: "pdt_freedom" })[name];
+  const refunded = { payment_id: "pay_freedom", total_amount: 157395, metadata: { type: "freedom_license", user_id: userId },
+    product_cart: [{ product_id: "pdt_freedom", quantity: 1 }], customer: { customer_id: "cus_fixture", email: "fixture@example.test" },
+    refunds: [{ refund_id: "ref_1", payment_id: "pay_freedom", status: "succeeded", amount: 157395, is_partial: false }], disputes: [] };
+  const recorded = new Set<string>();
+  const revokes: Record<string, unknown>[] = [];
+  let licenceInserts = 0;
+  billingFetchFixture = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+    const raw = init?.body ?? (input instanceof Request ? await input.clone().text() : undefined);
+    if (url.pathname === "/rest/v1/dodo_webhook_events") {
+      if (method === "GET") { const id = url.searchParams.get("webhook_id")?.slice(3) ?? "";
+        return Response.json(recorded.has(id) ? [{ webhook_id: id }] : []); }
+      if (method === "POST") { recorded.add(JSON.parse(String(raw)).webhook_id); return new Response(null, { status: 201 }); }
+      if (method === "DELETE") return new Response(null, { status: 204 });
+    }
+    if (url.pathname === "/payments/pay_freedom") return Response.json(refunded);
+    if (url.pathname === "/rest/v1/subscription_refund_requests") return Response.json([]);
+    if (url.pathname === "/rest/v1/pending_entitlements") return Response.json([]);
+    if (url.pathname === "/rest/v1/licenses") {
+      if (method === "GET") return Response.json([{ id: "lic_fixture" }]);
+      if (method === "PATCH") {
+        assert(url.searchParams.get("dodo_payment_id") === "eq.pay_freedom" && url.searchParams.get("status") === "eq.active");
+        revokes.push(JSON.parse(String(raw))); return Response.json([{ id: "lic_fixture" }]);
+      }
+      if (method === "POST") { licenceInserts++; return new Response(null, { status: 201 }); }
+    }
+    throw new Error(`Unexpected synthetic billing operation: ${method} ${url.href}`);
+  }) as typeof fetch;
+  globalThis.fetch = (...args) => billingFetchFixture(...args);
+  const deliver = async (id: string, type: string, data: unknown) => {
+    const raw = JSON.stringify({ business_id: "bus_fixture", type, timestamp: new Date().toISOString(), data });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("fixture-webhook-key"),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${id}.${timestamp}.${raw}`)));
+    const { handleRequest } = await import("../dodo/index.ts");
+    const res = await handleRequest(new Request("https://fixture/dodo", { method: "POST", body: raw, headers: {
+      "webhook-id": id, "webhook-timestamp": timestamp, "webhook-signature": `v1,${btoa(String.fromCharCode(...sig))}` } }));
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    const first = await deliver("msg_refund", "refund.succeeded", { payment_id: "pay_freedom", refund_id: "ref_1" });
+    assert(first.status === 200 && first.body.licence === "revoked", JSON.stringify(first));
+    assert(revokes.length === 1 && revokes[0].status === "revoked" && revokes[0].revoked_reason === "refunded");
+    assert(recorded.has("msg_refund"), "A handled delivery must be remembered by its webhook-id");
+    const again = await deliver("msg_refund", "refund.succeeded", { payment_id: "pay_freedom", refund_id: "ref_1" });
+    assert(again.body.duplicate === true && revokes.length === 1, "A replayed delivery must be skipped");
+    const late = await deliver("msg_paid", "payment.succeeded", refunded);
+    assert(late.body.ignored === "payment was refunded or charged back" && licenceInserts === 0,
+      "A success retried after a refund cannot hand the licence out again");
+    assert(!recorded.has("msg_paid"), "Ignored deliveries stay replayable");
+  } finally { Deno.env.get = originalEnv; globalThis.fetch = originalFetch; }
+});

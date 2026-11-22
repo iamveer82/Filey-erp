@@ -1,7 +1,7 @@
 // Runnable check for the subscription → plan mapping. These assertions are
 // the difference between "your card failed" and "your business is locked out".
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { buyerOf, grantsCloud, planPatchFor } from "./billing.ts";
+import { buyerOf, grantsCloud, licenceReversal, planPatchFor, policyRefundItems } from "./billing.ts";
 
 Deno.test("an active subscription puts the org on the paid plan", () => {
   const patch = planPatchFor("active", "2026-10-15T00:00:00Z");
@@ -57,4 +57,30 @@ Deno.test("checkout metadata must agree with the purchased product", () => {
   // An unset product id must never match a payload that also lacks one.
   assertEquals(buyerOf({ customer: { email: "a@b.co" } }, "", "freedom_license"), null);
   assertEquals(buyerOf({ customer: { email: "a@b.co" } }, [], "freedom_license"), null);
+});
+
+Deno.test("a licence stands until its payment is refunded under the policy or lost to a dispute", () => {
+  assertEquals(licenceReversal({ total_amount: 157395, refunds: [], disputes: [] }), null);
+  // A small goodwill refund keeps the licence; failed or pending refunds count for nothing.
+  assertEquals(licenceReversal({ total_amount: 157395, refunds: [{ status: "succeeded", amount: 10000, is_partial: true }] }), null);
+  assertEquals(licenceReversal({ total_amount: 157395, refunds: [{ status: "pending", amount: 157395, is_partial: false }] }), null);
+  assertEquals(licenceReversal({ total_amount: 157395, refunds: [{ status: "succeeded", amount: 157395, is_partial: false }] }), "refunded");
+  // The policy refund is 90%, which Dodo reports as partial.
+  assertEquals(licenceReversal({ total_amount: 157395, refunds: [{ status: "succeeded", amount: 141655, is_partial: true }] }), "refunded");
+  // Entered in the settlement currency: measured against the settled amount, not the AED price.
+  assertEquals(licenceReversal({ currency: "AED", total_amount: 157395, settlement_currency: "USD", settlement_amount: 41000,
+    refunds: [{ status: "succeeded", amount: 36900, currency: "USD", is_partial: true }] }), "refunded");
+  assertEquals(licenceReversal({ currency: "AED", total_amount: 157395, settlement_currency: "USD", settlement_amount: 41000,
+    refunds: [{ status: "succeeded", amount: 4100, currency: "USD", is_partial: true }] }), null);
+  assertEquals(licenceReversal({ total_amount: 100, disputes: [{ dispute_status: "dispute_opened" }] }), null);
+  assertEquals(licenceReversal({ total_amount: 100, disputes: [{ dispute_status: "dispute_won" }] }), null);
+  assertEquals(licenceReversal({ total_amount: 100, disputes: [{ dispute_status: "dispute_lost" }] }), "charged_back");
+  assertEquals(licenceReversal({ total_amount: 100, disputes: [{ dispute_status: "dispute_accepted" }] }), "charged_back");
+});
+
+Deno.test("a policy refund returns 90% of every line that can still be refunded", () => {
+  assertEquals(policyRefundItems([{ items_id: "pdt_pro", refundable_amount: 3780 }, { items_id: "add_x", refundable_amount: 0 }]),
+    [{ item_id: "pdt_pro", amount: 3402, tax_inclusive: true }]);
+  assertEquals(policyRefundItems([{ items_id: "pdt_freedom", refundable_amount: 157395 }]),
+    [{ item_id: "pdt_freedom", amount: 141655, tax_inclusive: true }]);
 });
